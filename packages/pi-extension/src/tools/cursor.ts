@@ -1,12 +1,20 @@
 import type { MacOSHostComputer } from "@macos-cua/core";
+import { Type } from "typebox";
 
-export interface CursorToolResult {
-	content: Array<{ type: "text"; text: string }>;
-}
+import { type ToolDefinition, defineTool } from "../pi/index.js";
+import { textResult } from "./result.js";
 
-export async function cursorPosition(computer: MacOSHostComputer): Promise<CursorToolResult> {
-	const pos = await computer.getCursorPosition();
-	return {
-		content: [{ type: "text", text: `Cursor position: ${pos.x},${pos.y}` }],
-	};
+export const CursorPositionParams = Type.Object({}, { additionalProperties: false });
+
+export function createCursorPositionTool(computer: MacOSHostComputer): ToolDefinition {
+	return defineTool({
+		name: "macos_cua_cursor_position",
+		label: "macOS CUA: cursor position",
+		description: "Return the current macOS cursor position.",
+		parameters: CursorPositionParams,
+		async execute(_toolCallId, _params) {
+			const position = await computer.getCursorPosition();
+			return textResult(`Cursor position: (${position.x}, ${position.y}).`, position);
+		},
+	});
 }

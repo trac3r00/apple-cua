@@ -1,12 +1,20 @@
 import type { MacOSHostComputer } from "@macos-cua/core";
+import { Type } from "typebox";
 
-export interface ScreenToolResult {
-	content: Array<{ type: "text"; text: string }>;
-}
+import { type ToolDefinition, defineTool } from "../pi/index.js";
+import { textResult } from "./result.js";
 
-export async function screenSize(computer: MacOSHostComputer): Promise<ScreenToolResult> {
-	const size = await computer.getScreenSize();
-	return {
-		content: [{ type: "text", text: `Screen size: ${size.width}x${size.height}` }],
-	};
+export const ScreenSizeParams = Type.Object({}, { additionalProperties: false });
+
+export function createScreenSizeTool(computer: MacOSHostComputer): ToolDefinition {
+	return defineTool({
+		name: "macos_cua_screen_size",
+		label: "macOS CUA: screen size",
+		description: "Return the current macOS screen size.",
+		parameters: ScreenSizeParams,
+		async execute(_toolCallId, _params) {
+			const size = await computer.getScreenSize();
+			return textResult(`Screen size: ${size.width}x${size.height}.`, size);
+		},
+	});
 }

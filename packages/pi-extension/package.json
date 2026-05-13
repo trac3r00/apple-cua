@@ -3,8 +3,12 @@
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Pi coding agent extension for macOS computer control",
+	"keywords": ["pi-extension", "pi-mono", "macos", "computer-use"],
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
+	"pi": {
+		"extensions": ["./src/index.ts"]
+	},
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
@@ -17,7 +21,8 @@
 		"test": "vitest --run"
 	},
 	"dependencies": {
-		"@macos-cua/core": "workspace:*"
+		"@macos-cua/core": "workspace:*",
+		"typebox": "1.1.38"
 	},
 	"devDependencies": {
 		"typescript": "^5.7.0",

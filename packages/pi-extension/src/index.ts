@@ -1,33 +1,36 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { MacOSHostComputer } from "@macos-cua/core";
-import { type ToolDefinition, type ToolResult, createTools } from "./tools/index.js";
 
-export interface ExtensionContext {
-	registerTool: (tool: ToolDefinition) => void;
-	log: (message: string) => void;
+import type { ExtensionAPI } from "./pi/index.js";
+import { registerAllTools } from "./tools/index.js";
+
+interface ExtensionState {
+	readonly computer: MacOSHostComputer;
 }
 
-export interface ExtensionConfig {
-	display?: number;
+const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
+const packageRoot = path.resolve(sourceDirectory, "..");
+const skillPath = path.resolve(packageRoot, "../../skills/macos-cua/SKILL.md");
+
+let state: ExtensionState | undefined;
+
+export default function macosCuaExtension(pi: ExtensionAPI): void {
+	pi.on("resources_discover", async () => {
+		return { skillPaths: [skillPath] };
+	});
+
+	pi.on("session_start", async () => {
+		const computer = new MacOSHostComputer();
+		state = { computer };
+		registerAllTools(pi, { computer });
+	});
+
+	pi.on("session_shutdown", async () => {
+		if (state === undefined) return;
+		const { computer } = state;
+		state = undefined;
+		await computer.close();
+	});
 }
-
-let computer: MacOSHostComputer | null = null;
-
-export function activate(context: ExtensionContext, config?: ExtensionConfig): void {
-	computer = new MacOSHostComputer(config?.display !== undefined ? { display: config.display } : undefined);
-	const tools = createTools(computer);
-
-	for (const tool of tools) {
-		context.registerTool(tool);
-	}
-
-	context.log("macos-cua extension activated");
-}
-
-export function deactivate(): void {
-	if (computer) {
-		computer.close();
-		computer = null;
-	}
-}
-
-export { createTools, type ToolDefinition, type ToolResult };

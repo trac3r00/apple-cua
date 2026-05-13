@@ -1,0 +1,31 @@
+{
+	"name": "@macos-cua/pi-extension",
+	"version": "0.1.0",
+	"type": "module",
+	"description": "Pi coding agent extension for macOS computer control",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"scripts": {
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest --run"
+	},
+	"dependencies": {
+		"@macos-cua/core": "workspace:*"
+	},
+	"devDependencies": {
+		"typescript": "^5.7.0",
+
+		"vitest": "^2.1.0",
+		"@types/node": "^20.0.0"
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-coding-agent": "^0.73.1"
+	}
+}

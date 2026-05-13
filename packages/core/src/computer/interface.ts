@@ -1,0 +1,30 @@
+import type {
+	ComputerCapabilities,
+	DragOptions,
+	KeyOptions,
+	Point,
+	ScreenshotOptions,
+	ScrollOptions,
+} from "../types/index.js";
+
+export interface ScreenshotResult {
+	data: Buffer;
+	mimeType: "image/png" | "image/jpeg";
+	width: number;
+	height: number;
+}
+
+export interface ComputerInterface {
+	readonly capabilities: ComputerCapabilities;
+
+	screenshot(options?: ScreenshotOptions): Promise<ScreenshotResult>;
+	click(position: Point): Promise<void>;
+	doubleClick(position: Point): Promise<void>;
+	type(text: string): Promise<void>;
+	key(key: string, options?: KeyOptions): Promise<void>;
+	scroll(options: ScrollOptions): Promise<void>;
+	drag(options: DragOptions): Promise<void>;
+	getCursorPosition(): Promise<Point>;
+	getScreenSize(): Promise<{ width: number; height: number }>;
+	close(): Promise<void>;
+}

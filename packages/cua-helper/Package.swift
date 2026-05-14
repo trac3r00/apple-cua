@@ -10,6 +10,12 @@ let package = Package(
 		.executable(name: "cua-helper", targets: ["CuaHelper"]),
 	],
 	targets: [
-		.executableTarget(name: "CuaHelper"),
+		.executableTarget(
+			name: "CuaHelper",
+			linkerSettings: [
+				.linkedFramework("ScreenCaptureKit"),
+				.linkedFramework("CoreImage"),
+			]
+		),
 	]
 )

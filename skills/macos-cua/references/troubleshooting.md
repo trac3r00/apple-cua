@@ -68,11 +68,25 @@ pnpm macos-cua-mcp --version
 
 **Fix:** move the target window to the primary display before automating it. Future versions may add `--display` selection.
 
-## Per-PID input doesn't move the mouse in Safari/Chrome
+## Per-PID command says the helper binary is missing
 
-**Cause:** for v1 we use the public `CGEventPostToPid` API, which is filtered by WebKit/Chromium for mouse events. Keyboard events work fine.
+**Cause:** `--target-pid` mouse/scroll/text/key routes use `packages/core/dist/bin/cua-helper`, but the core package has not been built or Swift was unavailable when the build hook ran.
 
-**Fix:** if you need to send a mouse click to a backgrounded WebKit/Chromium window, omit `--target-pid` so the global HID tap is used. This will move the real cursor and may steal focus briefly. For keyboard-driven flows (URL bar, form fields, shortcuts), per-PID targeting works as expected.
+**Fix:**
+
+```bash
+pnpm --filter @macos-cua/core build
+# or directly:
+bash packages/cua-helper/build.sh
+```
+
+Then grant Accessibility to `packages/core/dist/bin/cua-helper`. Do not work around this by omitting `--target-pid` unless focus stealing and real cursor movement are acceptable.
+
+## Per-PID click/scroll does nothing in Safari/Chrome
+
+**Cause:** the Swift helper is built, but macOS has not granted Accessibility to the helper binary itself. Permission is per-binary; granting your terminal or Node is not enough.
+
+**Fix:** run `packages/core/dist/bin/cua-helper` once, stop it with Ctrl-C, then add that exact binary in **System Settings → Privacy & Security → Accessibility**. Restart the terminal/agent afterwards.
 
 ## Still stuck
 

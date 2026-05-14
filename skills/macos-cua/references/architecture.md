@@ -9,7 +9,7 @@ macos-cua is designed for the same OpenAI computer-use action vocabulary that Co
 The key trade-off:
 
 - **Sandbox path** (trycua/cua style): strong isolation via Docker/QEMU/Lume, but pays for VM boot, guest services, HTTP/JSON transport, PIL screenshot encoding, base64 serialization, and a default 500 ms post-action delay.
-- **Host-native path** (macos-cua style): no VM boundary, no transport hops, no repeated base64 cycles. Screenshots go straight from `screencapture` (and eventually ScreenCaptureKit) to disk. Input goes straight from `koffi`-bound CoreGraphics CGEvent (`CGEventPost` for global; `CGEventPostToPid` for per-PID) to the OS event stream.
+- **Host-native path** (macos-cua style): no VM boundary, no transport hops, no repeated base64 cycles. Screenshots go straight from `screencapture` (and eventually ScreenCaptureKit) to disk. Global input goes through `koffi`-bound CoreGraphics CGEvent, while background per-PID input goes through a persistent Swift SkyLight helper.
 
 The result is lower latency and real-app fidelity. The cost is weaker environmental isolation, so the agent must never auto-drive destructive UI without user confirmation.
 
@@ -29,8 +29,9 @@ The result is lower latency and real-app fidelity. The cost is weaker environmen
 │  Platform implementations                                │
 │  MacOSHostComputer (implemented)                         │
 │    screencapture → PNG buffer                            │
-│    koffi/CGEvent → mouse/keyboard (global or per-PID)    │
-│    osascript → screen bounds                             │
+│    koffi/CGEvent → global mouse/keyboard/scroll          │
+│    Swift cua-helper → per-PID SkyLight mouse/keyboard    │
+│    system_profiler → screen bounds                       │
 │  VMComputer (interface only)                             │
 │  CloudComputer (interface only)                            │
 └─────────────────────────────────────────────────────────┘
@@ -41,7 +42,8 @@ The result is lower latency and real-app fidelity. The cost is weaker environmen
 `MacOSHostComputer` lives in `packages/core/src/platform/macos.ts`. It implements the full `ComputerInterface` contract using macOS-native APIs:
 
 - **Screenshots**: `screencapture -x -` (captures to stdout as PNG bytes). Region capture is supported via `-R x,y,w,h`.
-- **Input**: `koffi`-bound CoreGraphics CGEvent for click, double-click, type, key chords, scroll, and drag. Events are posted globally via `CGEventPost` by default, or targeted to a specific PID via `CGEventPostToPid` when per-PID targeting is enabled.
+- **Global input**: `koffi`-bound CoreGraphics CGEvent for click, double-click, type, key chords, scroll, and drag. Events are posted globally via `CGEventPost` by default, preserving the original behavior.
+- **Per-PID input**: `packages/cua-helper` is a Swift executable managed by `MacOSCuaHelper`. It speaks line-delimited JSON over stdio and posts mouse/key/text events to a target PID through SkyLight `SLEventPostToPid`.
 - **Queries**: `system_profiler SPDisplaysDataType` reports the screen size (chosen specifically because it does not require Apple Events permission and won't hang) and `CGEventGetLocation(CGEventCreate(NULL))` reports the current cursor position.
 
 ## Reserved interfaces
@@ -55,7 +57,7 @@ These are placeholders for future expansion. The `ComputerInterface` contract is
 
 ## Per-PID mouse / scroll / keyboard (Implemented)
 
-Per-PID input goes through `packages/cua-helper`, a 167 KB Swift binary that talks JSON over stdin/stdout. The TypeScript wrapper (`MacOSCuaHelper`) lazily spawns it on first use, matches replies on uuid id, and auto-restarts on subprocess crash. Recipes:
+Per-PID input goes through `packages/cua-helper`, a Swift binary that talks JSON over stdin/stdout. The TypeScript wrapper (`MacOSCuaHelper`) lazily spawns it on first use, matches replies on uuid id, and auto-restarts on subprocess crash. Recipes:
 
 - **Mouse left-click**: `FocusWithoutRaise.activateWithoutRaise` (yabai-style 248-byte PSN defocus + focus event records via `SLPSPostEventRecordTo`) → 50 ms settle → `mouseMoved` at target → 15 ms → off-screen `(-1, -1)` primer down/up (opens Chromium's user-activation gate) → 100 ms → target down/up pair. Each event is built via `NSEvent.mouseEvent(...).cgEvent` (raw `CGEventCreateMouseEvent` is filtered by Chromium), stamped with `mouseEventSubtype = 3`, `mouseEventClickState`, target window IDs, `CGEventSetWindowLocation` for window-local coords, and SkyLight raw field 40 = pid. Posted via `SLEventPostToPid` without auth message.
 - **Mouse right / middle / modifier-held**: skip the primer, NSEvent-bridged `rightMouseDown/Up` / `otherMouseDown/Up` / modified `leftMouseDown/Up` posted via `postBoth` (SkyLight + public `CGEvent.postToPid`).
@@ -64,7 +66,7 @@ Per-PID input goes through `packages/cua-helper`, a 167 KB Swift binary that tal
 - **Type text**: per-character `CGEvent` with `keyboardSetUnicodeString` (UTF-16), no auth message, posted via `SLEventPostToPid`.
 - **Scroll**: keyboard `PageUp` / `PageDown` / arrows repeated `amount` times. Wheel events posted per-PID are silently dropped by Chromium (no SkyLight scroll auth subclass).
 
-The Swift helper is built by `bash packages/cua-helper/build.sh` (also invoked automatically by `pnpm --filter @macos-cua/core build`) and copied to `packages/core/dist/bin/cua-helper`. Non-Darwin hosts and missing Swift toolchain skip cleanly. `MACOS_CUA_HELPER_PATH` env var overrides binary resolution.
+The Swift helper is built by `bash packages/cua-helper/build.sh` (also invoked automatically by `pnpm --filter @macos-cua/core build`) and copied to `packages/core/dist/bin/cua-helper`. Non-Darwin hosts and missing Swift toolchain skip cleanly.
 
 ## Future work
 

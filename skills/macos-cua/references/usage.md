@@ -10,8 +10,11 @@ Prerequisites: [`installation.md`](installation.md) completed, OS-level permissi
 |---|---|---|
 | `screenshot` | Capture the active display | `macos-cua screenshot -o /tmp/shot.png` |
 | `click` | Single click at (x,y) | `macos-cua click -x 100 -y 200` |
+| `right-click` / `middle-click` | Secondary mouse buttons | `macos-cua right-click -x 100 -y 200` |
+| `double-click` / `drag` / `move` | Mouse gestures | `macos-cua drag --from-x 100 --from-y 100 --to-x 300 --to-y 300` |
 | `type` | Type literal text | `macos-cua type "Hello, world"` |
 | `key` | Press a key with modifiers | `macos-cua key s -m cmd,shift` |
+| `scroll` | Scroll wheel globally or helper keys per-PID | `macos-cua scroll --direction down --amount 5` |
 | `cursor` | Get cursor position | `macos-cua cursor` |
 | `screen` | Get screen size | `macos-cua screen` |
 
@@ -144,13 +147,16 @@ open -a Safari
 # 2. get its PID
 SAFARI_PID=$(pgrep -x Safari)
 
-# 3. while Slack (or Terminal) is frontmost, send keyboard input to Safari
+# 3. while Slack (or Terminal) is frontmost, send input to Safari
 macos-cua --target-pid "$SAFARI_PID" key l -m cmd
 macos-cua --target-pid "$SAFARI_PID" type "https://example.com"
 macos-cua --target-pid "$SAFARI_PID" key Return
+macos-cua --target-pid "$SAFARI_PID" click -x 500 -y 300
+macos-cua --target-pid "$SAFARI_PID" scroll --direction down --amount 5
+macos-cua --target-pid "$SAFARI_PID" drag --from-x 100 --from-y 100 --to-x 300 --to-y 300
 ```
 
-Safari navigates to the URL without becoming frontmost. This is useful for background automation workflows where the user keeps working in another app.
+Safari navigates, clicks, scrolls, and drags without becoming frontmost. The no-focus-steal path requires `packages/core/dist/bin/cua-helper`; build it with `pnpm --filter @macos-cua/core build` and grant that helper binary Accessibility permission. Global input (no `--target-pid`) still uses the original koffi CoreGraphics path.
 
 ## Concurrency and serialization
 

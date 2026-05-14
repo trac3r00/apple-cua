@@ -31,6 +31,8 @@ macos-cua has three entry points. Pick the one that matches the host's setup.
 
 All three modes share the same underlying `MacOSHostComputer` implementation. The CLI mode is preferred for ad-hoc automation because it requires no host configuration beyond building the package.
 
+When the `@macos-cua/pi-extension` is loaded, Anthropic models automatically receive the native `computer` beta tool with the `MacOSHostComputer.getScreenSize()` display size, the beta header/body fields, and a short computer-use system prompt; the existing `macos_cua_*` per-PID tools stay available. This is default-on because installing the extension is explicit computer-use intent, but it adds Anthropic's documented roughly +1200-token overhead per request (about 466-499 prompt + 735 tool definition); set `MACOS_CUA_DISABLE_COMPUTER_USE_BETA=1` only when you intentionally want the prefixed tools without native beta activation.
+
 ## First-time host consent
 
 macOS requires these permissions before `macos-cua` can control the desktop:

@@ -159,7 +159,9 @@ Install into a [pi coding agent](https://github.com/badlogic/pi-mono/tree/main/p
 pi install file://./packages/pi-extension
 ```
 
-The extension registers 9 tools with the `macos_cua_` prefix:
+Loading the extension auto-enables Anthropic's `computer-use-2025-01-24` beta for Anthropic models: it injects the native `computer` tool, merges the required beta header/body fields, appends a short computer-use system prompt, and auto-detects display dimensions from `MacOSHostComputer.getScreenSize()`. No configuration is required. The trade-off is Anthropic's native computer-use overhead of roughly +1200 tokens per request (about 466-499 from the system prompt and 735 from the tool definition); advanced users can opt out with `MACOS_CUA_DISABLE_COMPUTER_USE_BETA=1` (`true`, `yes`, and `on` also work).
+
+The extension also registers 9 tools with the `macos_cua_` prefix:
 
 | Tool | Purpose |
 |---|---|
@@ -173,7 +175,7 @@ The extension registers 9 tools with the `macos_cua_` prefix:
 | `macos_cua_cursor_position` | Get cursor coordinates |
 | `macos_cua_screen_size` | Get display dimensions |
 
-The extension default-exports an `activate` factory that takes a `registerTool` context and an optional `{ display?: number }` config.
+The extension default-exports a pi extension factory and keeps the prefixed tools available even when Anthropic native computer-use beta injection is disabled.
 
 ### Programmatic API
 
@@ -259,6 +261,7 @@ Full walkthrough: [`skills/macos-cua/references/installation.md`](./skills/macos
 | Package | Path | Role |
 |---|---|---|
 | `@macos-cua/core` | [`packages/core`](./packages/core) | `ComputerInterface` + platform abstractions (`HostComputer`, `VMComputer`, `CloudComputer`) + `MacOSHostComputer` implementation |
+| `cua-helper` | [`packages/cua-helper`](./packages/cua-helper) | Swift Package Manager executable for SkyLight per-PID mouse/keyboard delivery (not a pnpm package) |
 | `@macos-cua/cli` | [`packages/cli`](./packages/cli) | `commander.js` binary (`macos-cua`) |
 | `@macos-cua/mcp` | [`packages/mcp`](./packages/mcp) | MCP stdio server (`macos-cua-mcp`) exposing 9 tools |
 | `@macos-cua/pi-extension` | [`packages/pi-extension`](./packages/pi-extension) | Pi coding-agent extension with `macos_cua_*` tool prefix |

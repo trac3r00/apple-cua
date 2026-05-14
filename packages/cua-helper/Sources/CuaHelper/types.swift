@@ -32,6 +32,9 @@ struct HelperRequest: Decodable {
 	let pollMs: Int?
 	let width: Int?
 	let height: Int?
+	let elementIndex: Int?
+	let targetValue: String?
+	let action: String?
 }
 
 struct HelperResponse: Encodable {
@@ -45,6 +48,8 @@ struct HelperResponse: Encodable {
 	let data: String?
 	let width: Int?
 	let height: Int?
+	let axAvailable: Bool?
+	let elements: [AXElementJSON]?
 
 	static func success(
 		id: String,
@@ -54,7 +59,9 @@ struct HelperResponse: Encodable {
 		settled: Bool? = nil,
 		data: String? = nil,
 		width: Int? = nil,
-		height: Int? = nil
+		height: Int? = nil,
+		axAvailable: Bool? = nil,
+		elements: [AXElementJSON]? = nil
 	) -> HelperResponse {
 		HelperResponse(
 			id: id,
@@ -66,7 +73,9 @@ struct HelperResponse: Encodable {
 			settled: settled,
 			data: data,
 			width: width,
-			height: height
+			height: height,
+			axAvailable: axAvailable,
+			elements: elements
 		)
 	}
 
@@ -81,7 +90,9 @@ struct HelperResponse: Encodable {
 			settled: nil,
 			data: nil,
 			width: nil,
-			height: nil
+			height: nil,
+			axAvailable: nil,
+			elements: nil
 		)
 	}
 }

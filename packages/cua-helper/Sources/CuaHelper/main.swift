@@ -31,6 +31,8 @@ final class HelperServer {
 			write(.failure(id: request.id, error.description))
 		} catch let error as ScreenshotFailure {
 			write(.failure(id: request.id, error.description))
+		} catch let error as AccessibilityFailure {
+			write(.failure(id: request.id, error.description))
 		} catch {
 			write(.failure(id: request.id, "unexpected error: \(error)"))
 		}
@@ -57,6 +59,21 @@ final class HelperServer {
 		case "screenshot":
 			let result = try await ScreenshotCapture.capture(width: screenshotWidth(request), height: screenshotHeight(request))
 			return .success(id: request.id, data: result.data.base64EncodedString(), width: result.width, height: result.height)
+		case "getAXTree":
+			let targetPID = try pid(request)
+			guard NSRunningApplication(processIdentifier: targetPID) != nil else {
+				throw AccessibilityFailure.invalidProcess(targetPID)
+			}
+			let tree = AccessibilityTree.extract(pid: targetPID)
+			return .success(id: request.id, axAvailable: tree.axAvailable, elements: tree.elements.map(AXElementJSON.init))
+		case "performAction":
+			guard let elementIndex = request.elementIndex else { throw HelperFailure.missing("elementIndex") }
+			guard let action = request.action else { throw HelperFailure.missing("action") }
+			try AccessibilityTree.performAction(pid: pid(request), elementIndex: elementIndex, action: action)
+		case "setValue":
+			guard let elementIndex = request.elementIndex else { throw HelperFailure.missing("elementIndex") }
+			guard let value = request.targetValue else { throw HelperFailure.missing("targetValue") }
+			try AccessibilityTree.setValue(pid: pid(request), elementIndex: elementIndex, value: value)
 		case "scroll": throw HelperFailure.invalid("scroll is implemented in TypeScript via key events, not in cua-helper")
 		case "waitForSettle":
 			let settled = await UISettleDetector.waitForSettle(

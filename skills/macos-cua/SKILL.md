@@ -5,7 +5,7 @@ description: "MUST USE whenever the user wants to automate the local macOS deskt
 
 # macos-cua
 
-`macos-cua` is a TypeScript-native computer-use automation framework for macOS. It drives the mouse, keyboard, and screen through native macOS APIs (CoreGraphics CGEvent, ScreenCaptureKit, and Accessibility) without requiring Python or a VM sandbox. This skill teaches you how to invoke it directly from pi's built-in bash. No custom extension tools are registered, so every action is shell-mediated.
+`macos-cua` is a TypeScript-native computer-use automation framework for macOS. It drives the mouse, keyboard, and screen through native macOS APIs (CoreGraphics CGEvent, a Swift SkyLight per-PID helper, ScreenCaptureKit/screencapture, and Accessibility) without requiring Python or a VM sandbox. This skill teaches you how to invoke it directly from pi's built-in bash. No custom extension tools are registered, so every action is shell-mediated.
 
 ## When to reach for macos-cua
 
@@ -33,15 +33,17 @@ All three modes share the same underlying `MacOSHostComputer` implementation. Th
 
 ## First-time host consent
 
-macOS requires two permissions before `macos-cua` can control the desktop:
+macOS requires these permissions before `macos-cua` can control the desktop:
 
 1. **Screen Recording** — required for `screenshot` to capture the display.
 2. **Accessibility** — required for `click`, `type`, `key`, `scroll`, and `drag` to synthesize input events.
+3. **Apple Events** — required when resolving `--target-bundle-id` through System Events.
 
 Grant both manually in **System Settings → Privacy & Security**:
 
 - **Screen Recording** → enable for the terminal/IDE that launches `macos-cua`.
 - **Accessibility** → enable for the same terminal/IDE.
+- **Accessibility** → also enable `packages/core/dist/bin/cua-helper` after building it; it is a separate binary from Node.
 
 If either permission is missing, `screenshot` returns a black image and input verbs silently do nothing. Permission is per-binary, so switching from iTerm to Ghostty (or VS Code's integrated terminal) requires re-granting for the new app.
 
@@ -49,7 +51,7 @@ Full installation walkthrough: [`references/installation.md`](references/install
 
 ## Per-PID targeting
 
-When you want the agent to drive a specific app without stealing the user's focus, pass `--target-pid` (or `--target-bundle-id`) to every CLI call. Safari, Notes, Mail and similar AppKit apps accept per-PID keyboard input. Chromium/Electron and OpenGL viewports currently require focus for mouse events.
+When you want the agent to drive a specific app without stealing the user's focus, pass `--target-pid` (or `--target-bundle-id`) to every CLI call. Mouse clicks, right/middle/double-clicks, drags, moves, key chords, and text are delivered through the persistent Swift `cua-helper` SkyLight bridge. Scroll uses helper key events (`PageUp`/`PageDown`/arrows), because Chromium drops pid-routed wheel events. If the helper is missing, per-PID input fails loudly rather than falling back to global cursor-moving input.
 
 ## Core surface — `macos-cua <verb>`
 

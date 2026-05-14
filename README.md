@@ -9,7 +9,7 @@ Native macOS computer-use control, designed for the OpenAI computer-use action v
 
 OpenAI Codex Computer Use is fast because it runs on the host with macOS-native APIs (ScreenCaptureKit, CoreGraphics, local MCP stdio). By contrast, [trycua/cua](https://github.com/trycua/cua) is portable but slow because of the multi-hop VM/HTTP/PIL pipeline: Python agent loop, 500 ms post-action screenshot delay, HTTP/WebSocket JSON to a guest FastAPI server, PIL encode, base64 SSE, client decode/re-encode. Codex removes the VM boundary and repeated image serialization; cua keeps it for sandbox isolation.
 
-`macos-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same `screenshot / click / type / key / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs — `screencapture` for screen capture, `koffi`-bound CoreGraphics `CGEventPost` / `CGEventPostToPid` for input synthesis (with optional per-PID targeting so the agent can drive a backgrounded app while the user keeps focus elsewhere). No Docker, no QEMU, no VNC, no cloud API key.
+`macos-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same `screenshot / click / type / key / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs — `screencapture` for screen capture, `koffi`-bound CoreGraphics `CGEventPost` for global input, and a small Swift `cua-helper` SkyLight bridge for background per-PID mouse/keyboard delivery. No Docker, no QEMU, no VNC, no cloud API key.
 
 The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-comparison.md). If you need strong VM isolation, use cua. If you need low-latency host-native control, use this.
 
@@ -19,7 +19,7 @@ The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-co
 | Needs VM | No | Yes (default) | No |
 | Needs API key | OpenAI only | Optional `CUA_API_KEY` for cloud | No |
 | Screenshot path | Native ScreenCaptureKit / IOSurface | PIL `ImageGrab` in guest | `screencapture` CLI (ScreenCaptureKit FFI planned) |
-| Input path | Native CGEvent / Apple Events | `pynput` in guest | Native CoreGraphics CGEvent via koffi (per-PID targeting via CGEventPostToPid) |
+| Input path | Native CGEvent / Apple Events | `pynput` in guest | Native CoreGraphics CGEvent via koffi + Swift SkyLight helper for per-PID mouse/keyboard |
 | Transport | Local MCP stdio | HTTP/WebSocket JSON + SSE | Local process / MCP stdio / pi extension |
 | Post-action delay | None reported | 500 ms default | None |
 | Isolation | macOS permissions + app scoping | VM / container sandbox | macOS permissions only |
@@ -30,6 +30,7 @@ The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-co
 git clone <repo>
 cd macos-cua
 pnpm install
+pnpm --filter @macos-cua/core build
 pnpm --filter @macos-cua/cli build
 ./packages/cli/dist/cli.js --version
 ./packages/cli/dist/cli.js screenshot -o /tmp/shot.png
@@ -80,7 +81,7 @@ Pressed: command+shift+cmd
 
 ### Per-PID targeting
 
-By default, input events go to the globally focused application. If you want the agent to drive a specific app while you keep focus elsewhere, pass `--target-pid <pid>` or `--target-bundle-id <id>` to any CLI call. The events are delivered via `CGEventPostToPid` so the target app receives them without becoming frontmost.
+By default, input events go to the globally focused application. If you want the agent to drive a specific app while you keep focus elsewhere, pass `--target-pid <pid>` or `--target-bundle-id <id>` to any CLI call. Per-PID mouse, drag, and keyboard events are delivered through `packages/cua-helper`, a persistent Swift helper that posts NSEvent-bridged CGEvents via SkyLight without moving the real cursor or raising the target window. Per-PID scroll maps to authenticated helper key events (`PageUp` / `PageDown` / arrows) because Chromium drops private scroll-wheel posts.
 
 Example: send a URL to Safari while Terminal stays focused:
 
@@ -92,9 +93,22 @@ SAFARI_PID=$(pgrep -x Safari)
 macos-cua --target-pid "$SAFARI_PID" key l -m cmd
 macos-cua --target-pid "$SAFARI_PID" type "https://example.com"
 macos-cua --target-pid "$SAFARI_PID" key Return
+
+# click/scroll/drag Safari content while Slack stays frontmost
+macos-cua --target-pid "$SAFARI_PID" click -x 500 -y 300
+macos-cua --target-pid "$SAFARI_PID" scroll --direction down --amount 5
+macos-cua --target-pid "$SAFARI_PID" drag --from-x 100 --from-y 100 --to-x 300 --to-y 300
 ```
 
-**Known v1 gap:** per-PID mouse events are filtered by Chromium/Electron and by Safari/WebKit content views. Keyboard events work on all tested apps. If you need to send a mouse click to a backgrounded WebKit or Chromium window, omit `--target-pid` so the global HID tap is used. This will move the real cursor and may steal focus briefly.
+If `--target-pid` is used before the helper is built, the command fails with a clear build instruction instead of falling back to the global path. That preserves the no-focus-steal contract.
+
+### Per-PID mouse/scroll/keyboard architecture
+
+- **Global input** (no `--target-pid`) stays on the existing koffi CoreGraphics HID-tap path and remains backward compatible.
+- **Per-PID mouse** uses the Swift helper. It creates AppKit `NSEvent.mouseEvent(...)` objects, bridges them to `CGEvent`, stamps target-window fields plus SkyLight field 40, and posts through `SLEventPostToPid`; left-clicks include the focus-without-raise + off-screen primer recipe Chromium/WebKit require.
+- **Per-PID keyboard** uses SkyLight `SLSEventAuthenticationMessage` so Chromium omniboxes accept shortcuts and typed keys natively.
+- **Per-PID text** uses Unicode CGEvent payloads so background text fields receive literal characters.
+- **Per-PID scroll** is intentionally keyboard-backed (`PageUp`/`PageDown`/arrows), because Chromium silently drops private scroll-wheel events.
 
 ### MCP server
 
@@ -203,11 +217,13 @@ Every tool/action exposed by CLI, MCP, and pi-extension:
 
 ## Permissions
 
-macOS gates screen capture and input synthesis behind two separate permission dialogs. The first time you run `screenshot` or `click`, macOS may prompt automatically. If it does not, grant them manually:
+macOS gates screen capture, input synthesis, and app lookup behind separate permission dialogs. The first time you run `screenshot` or `click`, macOS may prompt automatically. If it does not, grant them manually:
 
 1. **System Settings → Privacy & Security → Screen Recording** — toggle your terminal/IDE ON.
 2. **System Settings → Privacy & Security → Accessibility** — toggle the same terminal/IDE ON.
-3. Restart the terminal (some apps cache the permission state at launch).
+3. **System Settings → Privacy & Security → Apple Events** — allow the terminal/IDE if you use `--target-bundle-id` or permission helpers that query System Events.
+4. Build and run `packages/core/dist/bin/cua-helper` once, then grant **Accessibility** to that helper binary too.
+5. Restart the terminal (some apps cache the permission state at launch).
 
 Permission is per-binary. If you switch from iTerm2 to Ghostty, you must re-grant for the new app.
 
@@ -235,8 +251,8 @@ Full walkthrough: [`skills/macos-cua/references/installation.md`](./skills/macos
 |  +----------------+------------------+                 |
 |                    |                                     |
 |  v                 v                  v                  |
-|  screencapture   koffi/CGEvent     osascript             |
-|  (screenshots)   (mouse/keyboard)  (screen size)         |
+|  screencapture   koffi/CGEvent     Swift cua-helper      |
+|  (screenshots)   (global input)    (per-PID SkyLight)    |
 +----------------------------------------------------------+
 ```
 
@@ -253,13 +269,13 @@ Full walkthrough: [`skills/macos-cua/references/installation.md`](./skills/macos
 | Feature | Status | Notes |
 |---|---|---|
 | macOS host-native screenshot | Implemented | `screencapture` CLI fallback |
-| macOS host-native input | Implemented | Native CoreGraphics CGEvent via koffi (per-PID via CGEventPostToPid) |
+| macOS host-native input | Implemented | Native CoreGraphics CGEvent via koffi for global input; Swift SkyLight helper for per-PID mouse/keyboard |
 | QEMU runtime | Interface stub | [`packages/core/src/platform/vm.ts`](./packages/core/src/platform/vm.ts) |
 | Lume runtime | Interface stub | Apple Virtualization.Framework VM |
 | VirtualBox / Parallels runtime | Interface stub | Planned |
 | Cloud provider runtime | Interface stub | [`packages/core/src/platform/cloud.ts`](./packages/core/src/platform/cloud.ts) |
 | ScreenCaptureKit direct FFI | Future | Replace `screencapture` with `SCStream` / IOSurface for 60 fps capture |
-| SkyLight authenticated per-PID mouse | Future | Replace public `CGEventPostToPid` with private `SLEventPostToPid` + `SLSEventAuthenticationMessage` to deliver mouse events to Chromium/Electron and Safari WebKit content without focus stealing |
+| SkyLight authenticated per-PID mouse | Implemented | Swift `packages/cua-helper` uses `SLEventPostToPid`, focus-without-raise, NSEvent bridging, and keyboard auth messages. |
 | Accessibility API queries | Future | `AXUIElement` for element-level targeting instead of coordinate-only |
 
 ## Development

@@ -53,13 +53,23 @@ Two platform implementations exist as stubs:
 
 These are placeholders for future expansion. The `ComputerInterface` contract is intentionally platform-agnostic so that a single automation script can switch from `MacOSHostComputer` to `VMComputer` by changing one import.
 
+## Per-PID mouse / scroll / keyboard (Implemented)
+
+Per-PID input goes through `packages/cua-helper`, a 167 KB Swift binary that talks JSON over stdin/stdout. The TypeScript wrapper (`MacOSCuaHelper`) lazily spawns it on first use, matches replies on uuid id, and auto-restarts on subprocess crash. Recipes:
+
+- **Mouse left-click**: `FocusWithoutRaise.activateWithoutRaise` (yabai-style 248-byte PSN defocus + focus event records via `SLPSPostEventRecordTo`) → 50 ms settle → `mouseMoved` at target → 15 ms → off-screen `(-1, -1)` primer down/up (opens Chromium's user-activation gate) → 100 ms → target down/up pair. Each event is built via `NSEvent.mouseEvent(...).cgEvent` (raw `CGEventCreateMouseEvent` is filtered by Chromium), stamped with `mouseEventSubtype = 3`, `mouseEventClickState`, target window IDs, `CGEventSetWindowLocation` for window-local coords, and SkyLight raw field 40 = pid. Posted via `SLEventPostToPid` without auth message.
+- **Mouse right / middle / modifier-held**: skip the primer, NSEvent-bridged `rightMouseDown/Up` / `otherMouseDown/Up` / modified `leftMouseDown/Up` posted via `postBoth` (SkyLight + public `CGEvent.postToPid`).
+- **Drag**: NSEvent-bridged down + linearly-interpolated `mouseDragged` events + up, all stamped + posted via `postBoth`.
+- **Keyboard**: standard `CGEventCreateKeyboardEvent`, then `SLEventSetAuthenticationMessage` via `+[SLSEventAuthenticationMessage messageWithEventRecord:pid:version:]` (Chromium omnibox accepts these as trusted), posted via `SLEventPostToPid`.
+- **Type text**: per-character `CGEvent` with `keyboardSetUnicodeString` (UTF-16), no auth message, posted via `SLEventPostToPid`.
+- **Scroll**: keyboard `PageUp` / `PageDown` / arrows repeated `amount` times. Wheel events posted per-PID are silently dropped by Chromium (no SkyLight scroll auth subclass).
+
+The Swift helper is built by `bash packages/cua-helper/build.sh` (also invoked automatically by `pnpm --filter @macos-cua/core build`) and copied to `packages/core/dist/bin/cua-helper`. Non-Darwin hosts and missing Swift toolchain skip cleanly. `MACOS_CUA_HELPER_PATH` env var overrides binary resolution.
+
 ## Future work
 
-The current CLI-tool approach is pragmatic but not the final architecture. Planned improvements:
+The current architecture is fully functional. Planned improvements:
 
-1. **ScreenCaptureKit / IOSurface** — replace `screencapture` with a native addon that uses `SCStream` for GPU-backed, low-latency capture. This removes the subprocess spawn overhead and enables streaming frames instead of one-shot files.
-2. **SkyLight authenticated per-PID mouse** — replace the public `CGEventPostToPid` path with the private SkyLight `SLEventPostToPid` + `SLSEventAuthenticationMessage` SPI so mouse events reach Chromium/Electron and Safari WebKit content views without focus stealing. Also explore direct `AXUIElement` activation to bring windows forward without raising the entire app.
-3. **Accessibility APIs** — add `osascript`-based UI element queries (button labels, window titles) so the agent can target elements by name instead of raw coordinates.
-4. **Display selection** — support `--display` for multi-monitor setups.
-
-The current `screencapture` + `koffi/CGEvent` stack is fully functional and requires only the `koffi` npm package (version `2.16.2`) as a compiled dependency.
+1. **ScreenCaptureKit / IOSurface** — replace `screencapture` with a native addon that uses `SCStream` for GPU-backed, low-latency capture. Removes the subprocess spawn overhead and enables streaming frames instead of one-shot files.
+2. **AXUIElement semantic targeting** — add `AXUIElementPerformAction(kAXPressAction)` paths for buttons / links / toolbar items so the agent can click named elements without coordinates. Falls back to the helper pixel-click path for canvas / WebGL surfaces.
+3. **Display selection** — support `--display` for multi-monitor setups.

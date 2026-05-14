@@ -1,4 +1,4 @@
-import type { MacOSHostComputer } from "@macos-cua/core";
+import type { ComputerInterface } from "@macos-cua/core";
 import { Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
@@ -6,7 +6,7 @@ import { textResult } from "./result.js";
 
 export const ScreenSizeParams = Type.Object({}, { additionalProperties: false });
 
-export function createScreenSizeTool(computer: MacOSHostComputer): ToolDefinition {
+export function createScreenSizeTool(computer: ComputerInterface): ToolDefinition {
 	return defineTool({
 		name: "macos_cua_screen_size",
 		label: "macOS CUA: screen size",

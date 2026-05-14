@@ -1,4 +1,4 @@
-import type { MacOSHostComputer } from "@macos-cua/core";
+import type { ComputerInterface } from "@macos-cua/core";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ExtensionAPI } from "../pi/index.js";
@@ -47,7 +47,7 @@ function createPiApi(): ExtensionAPI {
 	};
 }
 
-function createComputer(): MacOSHostComputer {
+function createComputer(): ComputerInterface {
 	return {
 		capabilities: {
 			supportsScreenshot: true,
@@ -56,7 +56,10 @@ function createComputer(): MacOSHostComputer {
 			supportsClipboard: true,
 		},
 		screenshot: vi.fn(),
+		move: vi.fn(),
 		click: vi.fn(),
+		rightClick: vi.fn(),
+		middleClick: vi.fn(),
 		doubleClick: vi.fn(),
 		type: vi.fn(),
 		key: vi.fn(),

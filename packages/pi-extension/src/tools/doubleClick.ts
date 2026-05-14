@@ -1,4 +1,4 @@
-import type { MacOSHostComputer } from "@macos-cua/core";
+import type { ComputerInterface } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
@@ -19,7 +19,7 @@ export const DoubleClickParams = Type.Object(
 
 export type DoubleClickInput = Static<typeof DoubleClickParams>;
 
-export function createDoubleClickTool(computer: MacOSHostComputer): ToolDefinition {
+export function createDoubleClickTool(computer: ComputerInterface): ToolDefinition {
 	return defineTool({
 		name: "macos_cua_double_click",
 		label: "macOS CUA: double click",

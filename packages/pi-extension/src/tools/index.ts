@@ -1,4 +1,4 @@
-import type { MacOSHostComputer } from "@macos-cua/core";
+import type { ComputerInterface } from "@macos-cua/core";
 import type { ExtensionAPI, ToolDefinition } from "../pi/index.js";
 
 import { createClickTool } from "./click.js";
@@ -12,7 +12,7 @@ import { createScrollTool } from "./scroll.js";
 import { createTypeTool } from "./type.js";
 
 export interface ToolRegistrationOptions {
-	readonly computer: MacOSHostComputer;
+	readonly computer: ComputerInterface;
 }
 
 export function buildAllTools(options: ToolRegistrationOptions): ReadonlyArray<ToolDefinition> {

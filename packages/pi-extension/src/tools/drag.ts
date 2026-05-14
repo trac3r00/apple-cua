@@ -1,4 +1,4 @@
-import type { MacOSHostComputer } from "@macos-cua/core";
+import type { ComputerInterface } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
@@ -16,7 +16,7 @@ export const DragParams = Type.Object(
 
 export type DragInput = Static<typeof DragParams>;
 
-export function createDragTool(computer: MacOSHostComputer): ToolDefinition {
+export function createDragTool(computer: ComputerInterface): ToolDefinition {
 	return defineTool({
 		name: "macos_cua_drag",
 		label: "macOS CUA: drag",

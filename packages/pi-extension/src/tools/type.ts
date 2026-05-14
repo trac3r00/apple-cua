@@ -1,4 +1,4 @@
-import type { MacOSHostComputer } from "@macos-cua/core";
+import type { ComputerInterface } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
@@ -13,7 +13,7 @@ export const TypeParams = Type.Object(
 
 export type TypeInput = Static<typeof TypeParams>;
 
-export function createTypeTool(computer: MacOSHostComputer): ToolDefinition {
+export function createTypeTool(computer: ComputerInterface): ToolDefinition {
 	return defineTool({
 		name: "macos_cua_type",
 		label: "macOS CUA: type",

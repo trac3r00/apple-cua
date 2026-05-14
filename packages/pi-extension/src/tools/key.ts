@@ -1,4 +1,4 @@
-import type { MacOSHostComputer } from "@macos-cua/core";
+import type { ComputerInterface } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
@@ -43,7 +43,7 @@ function normalizeModifier(modifier: ModifierInput): MacOSModifier {
 	}
 }
 
-export function createKeyTool(computer: MacOSHostComputer): ToolDefinition {
+export function createKeyTool(computer: ComputerInterface): ToolDefinition {
 	return defineTool({
 		name: "macos_cua_key",
 		label: "macOS CUA: keypress",

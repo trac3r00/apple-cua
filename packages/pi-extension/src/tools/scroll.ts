@@ -1,4 +1,4 @@
-import type { MacOSHostComputer } from "@macos-cua/core";
+import type { ComputerInterface } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
@@ -16,7 +16,7 @@ export const ScrollParams = Type.Object(
 
 export type ScrollInput = Static<typeof ScrollParams>;
 
-export function createScrollTool(computer: MacOSHostComputer): ToolDefinition {
+export function createScrollTool(computer: ComputerInterface): ToolDefinition {
 	return defineTool({
 		name: "macos_cua_scroll",
 		label: "macOS CUA: scroll",

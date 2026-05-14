@@ -1,4 +1,4 @@
-import type { MacOSHostComputer } from "@macos-cua/core";
+import type { ComputerInterface } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
@@ -23,7 +23,7 @@ export const ScreenshotParams = Type.Object(
 
 export type ScreenshotInput = Static<typeof ScreenshotParams>;
 
-export function createScreenshotTool(computer: MacOSHostComputer): ToolDefinition {
+export function createScreenshotTool(computer: ComputerInterface): ToolDefinition {
 	return defineTool({
 		name: "macos_cua_screenshot",
 		label: "macOS CUA: screenshot",

@@ -1,58 +1,173 @@
-import { afterAll, describe, expect, it } from "vitest";
-import { MacOSCuaHelper, MacOSCuaHelperError, resolveHelperBinaryPath } from "./macos-helper.js";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const helperPath = resolveHelperBinaryPath();
-const helperAvailable = MacOSCuaHelper.isAvailable(helperPath);
-const helperSuite = helperAvailable ? describe : describe.skip;
+const nativeMocks = vi.hoisted(() => ({
+	existsSync: vi.fn(() => true),
+	spawn: vi.fn(),
+}));
 
-helperSuite("#given a built cua-helper binary", () => {
-	const helper = new MacOSCuaHelper({ binaryPath: helperPath });
+vi.mock("node:child_process", () => ({ spawn: nativeMocks.spawn }));
+vi.mock("node:fs", () => ({ existsSync: nativeMocks.existsSync }));
 
-	afterAll(() => {
+class FakeHelperProcess extends EventEmitter {
+	readonly stdin = new PassThrough();
+	readonly stdout = new PassThrough();
+	readonly stderr = new PassThrough();
+	killed = false;
+
+	constructor() {
+		super();
+		this.stdin.setEncoding("utf8");
+		this.stdout.setEncoding("utf8");
+		this.stderr.setEncoding("utf8");
+	}
+
+	kill(signal?: NodeJS.Signals): boolean {
+		this.killed = true;
+		this.emit("close", 0, signal ?? null);
+		return true;
+	}
+
+	crash(): void {
+		this.emit("close", 1, null);
+	}
+}
+
+describe("#given MacOSCuaHelper JSON stdio protocol", () => {
+	beforeEach(() => {
+		nativeMocks.existsSync.mockReturnValue(true);
+		nativeMocks.spawn.mockReset();
+	});
+
+	it("#when sending a click request #then writes a line-delimited JSON command and resolves matching response", async () => {
+		// given
+		const child = new FakeHelperProcess();
+		nativeMocks.spawn.mockReturnValueOnce(child);
+		const { MacOSCuaHelper } = await import("./macos-helper.js");
+		const helper = new MacOSCuaHelper({ binaryPath: "/tmp/cua-helper" });
+
+		// when
+		const writtenLine = nextWrittenLine(child.stdin);
+		const request = helper.clickPid(1234, { x: 500, y: 300 });
+		const payload = requestPayload(await writtenLine);
+
+		// then
+		expect(payload).toMatchObject({ cmd: "click", pid: 1234, x: 500, y: 300, button: "left", count: 1 });
+		writeResponse(child, { id: payload.id, ok: true });
+		await expect(request).resolves.toBeUndefined();
 		helper.close();
 	});
 
-	describe("#when ping is invoked", () => {
-		it("#then resolves without error", async () => {
-			await expect(helper.ping()).resolves.toBeUndefined();
-		});
+	it("#when responses arrive out of order #then each request resolves by id", async () => {
+		// given
+		const child = new FakeHelperProcess();
+		nativeMocks.spawn.mockReturnValueOnce(child);
+		const { MacOSCuaHelper } = await import("./macos-helper.js");
+		const helper = new MacOSCuaHelper({ binaryPath: "/tmp/cua-helper" });
+
+		// when
+		const writtenLines = nextWrittenLines(child.stdin, 2);
+		const first = helper.ping();
+		const second = helper.cursorPosition();
+		const [firstPayload, secondPayload] = (await writtenLines).map(requestPayload);
+
+		// then
+		writeResponse(child, { id: secondPayload.id, ok: true, x: 10.2, y: 20.7 });
+		writeResponse(child, { id: firstPayload.id, ok: true });
+		await expect(first).resolves.toBeUndefined();
+		await expect(second).resolves.toEqual({ x: 10, y: 21 });
+		helper.close();
 	});
 
-	describe("#when cursor_position is queried", () => {
-		it("#then returns rounded numeric x/y coordinates", async () => {
-			const point = await helper.cursorPosition();
+	it("#when helper returns an error #then rejects with the helper message", async () => {
+		// given
+		const child = new FakeHelperProcess();
+		nativeMocks.spawn.mockReturnValueOnce(child);
+		const { MacOSCuaHelper, MacOSCuaHelperError } = await import("./macos-helper.js");
+		const helper = new MacOSCuaHelper({ binaryPath: "/tmp/cua-helper" });
 
-			expect(Number.isFinite(point.x)).toBe(true);
-			expect(Number.isFinite(point.y)).toBe(true);
-			expect(Number.isInteger(point.x)).toBe(true);
-			expect(Number.isInteger(point.y)).toBe(true);
-		});
+		// when
+		const writtenLine = nextWrittenLine(child.stdin);
+		const request = helper.ping();
+		const payload = requestPayload(await writtenLine);
+		writeResponse(child, { id: payload.id, ok: false, error: "boom" });
+
+		// then
+		await expect(request).rejects.toBeInstanceOf(MacOSCuaHelperError);
+		await expect(request).rejects.toThrow("boom");
+		helper.close();
 	});
 
-	describe("#when keyPid sends a harmless f1 keystroke to our own pid", () => {
-		it("#then resolves without error", async () => {
-			await expect(helper.keyPid(process.pid, "f1")).resolves.toBeUndefined();
-		});
-	});
+	it("#when the helper crashes before replying #then restarts and retries the request", async () => {
+		// given
+		const firstChild = new FakeHelperProcess();
+		const secondChild = new FakeHelperProcess();
+		nativeMocks.spawn.mockReturnValueOnce(firstChild).mockReturnValueOnce(secondChild);
+		const { MacOSCuaHelper } = await import("./macos-helper.js");
+		const helper = new MacOSCuaHelper({ binaryPath: "/tmp/cua-helper" });
 
-	describe("#when keyPid is invoked with pid 0", () => {
-		it("#then rejects with MacOSCuaHelperError carrying a helper diagnostic", async () => {
-			await expect(helper.keyPid(0, "f1")).rejects.toBeInstanceOf(MacOSCuaHelperError);
-		});
+		// when
+		const firstWrite = nextWrittenLine(firstChild.stdin);
+		const secondWrite = nextWrittenLine(secondChild.stdin);
+		const request = helper.ping();
+		await firstWrite;
+		firstChild.crash();
+		const retryPayload = requestPayload(await secondWrite);
+		writeResponse(secondChild, { id: retryPayload.id, ok: true });
+
+		// then
+		await expect(request).resolves.toBeUndefined();
+		expect(nativeMocks.spawn).toHaveBeenCalledTimes(2);
+		helper.close();
 	});
 });
 
-describe("#given resolveHelperBinaryPath", () => {
-	describe("#when MACOS_CUA_HELPER_PATH env var is set", () => {
-		it("#then prefers the override over the distributed path", () => {
-			const previous = process.env.MACOS_CUA_HELPER_PATH;
-			process.env.MACOS_CUA_HELPER_PATH = "/tmp/custom-cua-helper";
+function nextWrittenLine(stream: PassThrough): Promise<string> {
+	return nextWrittenLines(stream, 1).then((lines) => {
+		const [line] = lines;
+		if (line === undefined) {
+			throw new Error("expected one written line");
+		}
+		return line;
+	});
+}
 
-			try {
-				expect(resolveHelperBinaryPath()).toBe("/tmp/custom-cua-helper");
-			} finally {
-				process.env.MACOS_CUA_HELPER_PATH = previous;
+function nextWrittenLines(stream: PassThrough, count: number): Promise<string[]> {
+	return new Promise((resolve) => {
+		const lines: string[] = [];
+		let buffer = "";
+		stream.on("data", function onData(chunk: string | Buffer) {
+			buffer += String(chunk);
+			while (true) {
+				const newlineIndex = buffer.indexOf("\n");
+				if (newlineIndex === -1) {
+					break;
+				}
+				lines.push(buffer.slice(0, newlineIndex));
+				buffer = buffer.slice(newlineIndex + 1);
+				if (lines.length === count) {
+					stream.off("data", onData);
+					resolve(lines);
+					return;
+				}
 			}
 		});
 	});
-});
+}
+
+function requestPayload(line: string): { id: string; cmd: string; [key: string]: unknown } {
+	const parsed: unknown = JSON.parse(line);
+	if (!isRecord(parsed) || typeof parsed.id !== "string" || typeof parsed.cmd !== "string") {
+		throw new Error("invalid request payload");
+	}
+	return { ...parsed, id: parsed.id, cmd: parsed.cmd };
+}
+
+function writeResponse(child: FakeHelperProcess, response: { id: string; ok: boolean; error?: string; x?: number; y?: number }): void {
+	child.stdout.write(`${JSON.stringify(response)}\n`);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}

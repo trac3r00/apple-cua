@@ -38,6 +38,8 @@ describe("macos-cua CLI", () => {
 		const expectedTopLevelCommands = [
 			"screenshot",
 			"click",
+			"right-click",
+			"middle-click",
 			"double-click",
 			"move",
 			"drag",

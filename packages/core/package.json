@@ -12,8 +12,10 @@
 		}
 	},
 	"scripts": {
-		"build": "tsc",
-		"typecheck": "tsc --noEmit",
+		"build": "bash ../cua-helper/build.sh && tsgo",
+		"build:ts": "tsgo",
+		"build:helper": "bash ../cua-helper/build.sh",
+		"typecheck": "tsgo --noEmit",
 		"test": "vitest --run"
 	},
 	"dependencies": {

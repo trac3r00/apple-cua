@@ -287,10 +287,6 @@ async function screenshotResult(computer: ComputerInterface, display: DisplayCon
 	return imageResult(resized.toString("base64"));
 }
 
-export function buildOpenAIComputerUseSection(display: DisplayConfig): string {
-	return `## OpenAI Computer Use\nNative computer tool available; screenshots are ${display.modelWidth}x${display.modelHeight}. Use it for GUI; macos_cua_* per-PID tools also exist.\n`;
-}
-
 function imageResult(pngBase64: string): ComputerUseResult {
 	return {
 		content: [{ type: "image", data: pngBase64, mimeType: "image/png" }],

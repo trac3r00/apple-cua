@@ -18,11 +18,11 @@ describe("#given a large 16:9 screen #when resolving display config #then dimens
 	});
 });
 
-describe("#given a large non-16:9 screen #when resolving display config #then the limiting edge is respected", () => {
-	it("uses the smaller scale factor", () => {
+describe("#given a large non-16:9 screen #when resolving display config #then the long edge is capped", () => {
+	it("preserves aspect ratio against the 1280 long edge", () => {
 		const display = resolveDisplayConfig({ width: 2560, height: 1600 });
 
-		expect(display).toEqual({ logicalWidth: 2560, logicalHeight: 1600, modelWidth: 1152, modelHeight: 720 });
+		expect(display).toEqual({ logicalWidth: 2560, logicalHeight: 1600, modelWidth: 1280, modelHeight: 800 });
 	});
 });
 

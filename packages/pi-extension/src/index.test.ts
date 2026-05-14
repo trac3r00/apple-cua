@@ -272,15 +272,13 @@ describe("#given enabled session #when agent prompt hook runs #then native compu
 		});
 	});
 
-	it("adds OpenAI computer prompt with downscaled dimensions", async () => {
+	it("does not add an OpenAI computer prompt", async () => {
 		const pi = createMockPi();
 		macosCuaExtension(pi);
 		await runSessionStart(pi);
 
 		const result = await runBeforeAgentStart(pi, "openai-responses");
 
-		expect(result).toEqual({
-			systemPrompt: expect.stringContaining("screenshots are 1280x720"),
-		});
+		expect(result).toBeUndefined();
 	});
 });

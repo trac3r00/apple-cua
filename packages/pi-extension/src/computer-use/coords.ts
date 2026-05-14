@@ -6,8 +6,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const MAX_MODEL_WIDTH = 1280;
-const MAX_MODEL_HEIGHT = 720;
+const MAX_MODEL_LONG_EDGE = 1280;
 const SIPS_TIMEOUT_MILLISECONDS = 10_000;
 
 let didWarnAboutResizeFallback = false;
@@ -26,11 +25,12 @@ export interface DisplayConfig {
 export function resolveDisplayConfig(screenSize: { readonly width: number; readonly height: number }): DisplayConfig {
 	const logicalWidth = assertPositiveFiniteDimension(screenSize.width, "width");
 	const logicalHeight = assertPositiveFiniteDimension(screenSize.height, "height");
-	if (logicalWidth <= MAX_MODEL_WIDTH && logicalHeight <= MAX_MODEL_HEIGHT) {
+	const logicalLongEdge = Math.max(logicalWidth, logicalHeight);
+	if (logicalLongEdge <= MAX_MODEL_LONG_EDGE) {
 		return { logicalWidth, logicalHeight, modelWidth: logicalWidth, modelHeight: logicalHeight };
 	}
 
-	const scale = Math.min(MAX_MODEL_WIDTH / logicalWidth, MAX_MODEL_HEIGHT / logicalHeight);
+	const scale = MAX_MODEL_LONG_EDGE / logicalLongEdge;
 	return {
 		logicalWidth,
 		logicalHeight,

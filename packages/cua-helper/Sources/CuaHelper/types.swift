@@ -27,6 +27,9 @@ struct HelperRequest: Decodable {
 	let text: String?
 	let duration: Int?
 	let steps: Int?
+	let timeoutMs: Int?
+	let settleMs: Int?
+	let pollMs: Int?
 }
 
 struct HelperResponse: Encodable {
@@ -36,13 +39,14 @@ struct HelperResponse: Encodable {
 	let x: Double?
 	let y: Double?
 	let version: String?
+	let settled: Bool?
 
-	static func success(id: String, x: Double? = nil, y: Double? = nil, version: String? = nil) -> HelperResponse {
-		HelperResponse(id: id, ok: true, error: nil, x: x, y: y, version: version)
+	static func success(id: String, x: Double? = nil, y: Double? = nil, version: String? = nil, settled: Bool? = nil) -> HelperResponse {
+		HelperResponse(id: id, ok: true, error: nil, x: x, y: y, version: version, settled: settled)
 	}
 
 	static func failure(id: String, _ error: String) -> HelperResponse {
-		HelperResponse(id: id, ok: false, error: error, x: nil, y: nil, version: nil)
+		HelperResponse(id: id, ok: false, error: error, x: nil, y: nil, version: nil, settled: nil)
 	}
 }
 

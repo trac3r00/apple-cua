@@ -10,14 +10,14 @@ final class HelperServer {
 	private let decoder = JSONDecoder()
 	private let encoder = JSONEncoder()
 
-	func run() {
+	func run() async {
 		while let line = readLine() {
 			guard !line.isEmpty else { continue }
-			handle(line)
+			await handle(line)
 		}
 	}
 
-	private func handle(_ line: String) {
+	private func handle(_ line: String) async {
 		let request: HelperRequest
 		do {
 			request = try decoder.decode(HelperRequest.self, from: Data(line.utf8))
@@ -26,7 +26,7 @@ final class HelperServer {
 			return
 		}
 		do {
-			write(try dispatch(request))
+			write(try await dispatch(request))
 		} catch let error as HelperFailure {
 			write(.failure(id: request.id, error.description))
 		} catch {
@@ -34,7 +34,7 @@ final class HelperServer {
 		}
 	}
 
-	private func dispatch(_ request: HelperRequest) throws -> HelperResponse {
+	private func dispatch(_ request: HelperRequest) async throws -> HelperResponse {
 		switch request.cmd {
 		case "ping": return .success(id: request.id, version: helperVersion)
 		case "cursor_position":
@@ -53,6 +53,14 @@ final class HelperServer {
 		case "key": try InputActions.key(pid: pid(request), key: request.key, keyCode: request.keyCode, modifiers: request.modifiers ?? [])
 		case "type_text": try InputActions.typeText(pid: pid(request), text: request.text ?? "")
 		case "scroll": throw HelperFailure.invalid("scroll is implemented in TypeScript via key events, not in cua-helper")
+		case "waitForSettle":
+			let settled = await UISettleDetector.waitForSettle(
+				pid: request.pid ?? 0,
+				timeoutMs: request.timeoutMs ?? 2000,
+				settleMs: request.settleMs ?? 300,
+				pollMs: request.pollMs ?? 50
+			)
+			return .success(id: request.id, settled: settled)
 		default: throw HelperFailure.invalid("unsupported command: \(request.cmd)")
 		}
 		return .success(id: request.id)
@@ -71,4 +79,4 @@ final class HelperServer {
 }
 
 NSApplication.shared.setActivationPolicy(.accessory)
-HelperServer().run()
+await HelperServer().run()

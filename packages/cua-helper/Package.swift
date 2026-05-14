@@ -15,6 +15,7 @@ let package = Package(
 			linkerSettings: [
 				.linkedFramework("ScreenCaptureKit"),
 				.linkedFramework("CoreImage"),
+				.linkedFramework("ApplicationServices"),
 			]
 		),
 	]

@@ -307,12 +307,15 @@ function modifierFlags(modifiers: NonNullable<KeyOptions["modifiers"]>): number 
 	for (const modifier of modifiers) {
 		switch (modifier) {
 			case "command":
+			case "cmd":
 				flags |= K_CG_EVENT_FLAG_MASK_COMMAND;
 				break;
 			case "option":
+			case "alt":
 				flags |= K_CG_EVENT_FLAG_MASK_ALTERNATE;
 				break;
 			case "control":
+			case "ctrl":
 				flags |= K_CG_EVENT_FLAG_MASK_CONTROL;
 				break;
 			case "shift":

@@ -22,7 +22,7 @@ export interface ScreenshotOptions {
 }
 
 export interface KeyOptions {
-	modifiers?: Array<"command" | "option" | "control" | "shift">;
+	modifiers?: Array<"command" | "option" | "control" | "shift" | "cmd" | "alt" | "ctrl">;
 }
 
 export interface ScrollOptions {

@@ -80,6 +80,25 @@ describe("#given MacOSCuaHelper JSON stdio protocol", () => {
 		helper.close();
 	});
 
+	it("#when requesting logical screen size #then writes screen_size_logical and returns rounded dimensions", async () => {
+		// given
+		const child = new FakeHelperProcess();
+		nativeMocks.spawn.mockReturnValueOnce(child);
+		const { MacOSCuaHelper } = await import("./macos-helper.js");
+		const helper = new MacOSCuaHelper({ binaryPath: "/tmp/cua-helper" });
+
+		// when
+		const writtenLine = nextWrittenLine(child.stdin);
+		const request = helper.getLogicalScreenSize();
+		const payload = requestPayload(await writtenLine);
+
+		// then
+		expect(payload).toMatchObject({ cmd: "screen_size_logical" });
+		writeResponse(child, { id: payload.id, ok: true, x: 2559.7, y: 1440.2 });
+		await expect(request).resolves.toEqual({ width: 2560, height: 1440 });
+		helper.close();
+	});
+
 	it("#when helper returns an error #then rejects with the helper message", async () => {
 		// given
 		const child = new FakeHelperProcess();

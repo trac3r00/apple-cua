@@ -26,6 +26,7 @@ type HelperCommand =
 	| "key"
 	| "type_text"
 	| "cursor_position"
+	| "screen_size_logical"
 	| "ping";
 
 type HelperRequestPayload = {
@@ -204,6 +205,14 @@ export class MacOSCuaHelper {
 			throw new MacOSCuaHelperError({ kind: "protocol", message: "cursor_position response missing x/y" });
 		}
 		return { x: Math.round(response.x), y: Math.round(response.y) };
+	}
+
+	async getLogicalScreenSize(): Promise<{ width: number; height: number }> {
+		const response = await this.request({ cmd: "screen_size_logical" });
+		if (response.x === undefined || response.y === undefined) {
+			throw new MacOSCuaHelperError({ kind: "protocol", message: "screen_size_logical response missing x/y" });
+		}
+		return { width: Math.round(response.x), height: Math.round(response.y) };
 	}
 
 	async ping(): Promise<void> {

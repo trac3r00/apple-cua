@@ -525,6 +525,9 @@ final class HelperServer {
 			guard let event = CGEvent(source: nil) else { throw HelperFailure.eventCreation("cursor") }
 			let point = event.location
 			return .success(id: request.id, x: point.x, y: point.y)
+		case "screen_size_logical":
+			let frame = NSScreen.main?.frame ?? CGRect.zero
+			return .success(id: request.id, x: Double(frame.width), y: Double(frame.height))
 		case "click": try InputActions.click(pid: pid(request), point: point(request), button: button(request, fallback: .left), count: request.count ?? 1, modifiers: request.modifiers ?? [])
 		case "right_click": try InputActions.click(pid: pid(request), point: point(request), button: .right, count: 1, modifiers: request.modifiers ?? [])
 		case "middle_click": try InputActions.click(pid: pid(request), point: point(request), button: .middle, count: 1, modifiers: request.modifiers ?? [])

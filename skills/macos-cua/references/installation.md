@@ -28,16 +28,6 @@ pnpm macos-cua screenshot -o "${SHOT}" && ls -lh "${SHOT}"
 
 If the screenshot is 0 bytes or black, the controlling terminal lacks Screen Recording permission. Fix it in **System Settings → Privacy & Security → Screen Recording** and toggle the entry for the terminal/IDE that launched the process.
 
-## Optional CLI dependency: cliclick
-
-The current macOS implementation uses `cliclick` for mouse and keyboard input synthesis. Install it via Homebrew:
-
-```bash
-brew install cliclick
-```
-
-`screencapture` (built into macOS) handles screenshots, so no extra screenshot dependency is needed.
-
 ## Granting Screen Recording + Accessibility permissions
 
 macOS gates screen capture and input synthesis behind two separate permission dialogs. The first time `macos-cua screenshot` or `macos-cua click` runs, macOS may prompt automatically. If it doesn't, grant them manually:

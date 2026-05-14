@@ -47,6 +47,10 @@ If either permission is missing, `screenshot` returns a black image and input ve
 
 Full installation walkthrough: [`references/installation.md`](references/installation.md).
 
+## Per-PID targeting
+
+When you want the agent to drive a specific app without stealing the user's focus, pass `--target-pid` (or `--target-bundle-id`) to every CLI call. Safari, Notes, Mail and similar AppKit apps accept per-PID keyboard input. Chromium/Electron and OpenGL viewports currently require focus for mouse events.
+
 ## Core surface — `macos-cua <verb>`
 
 Every desktop action goes through the `macos-cua` CLI. The verb taxonomy:

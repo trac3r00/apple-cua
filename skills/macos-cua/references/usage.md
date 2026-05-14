@@ -133,6 +133,25 @@ sleep 1   # give the app a moment to focus
 macos-cua key s -m cmd,shift   # cmd+shift+s (save as)
 ```
 
+### Per-PID targeting (drive a background app)
+
+Send input to a specific app without stealing focus from the frontmost app:
+
+```bash
+# 1. open Safari (or ensure it is running)
+open -a Safari
+
+# 2. get its PID
+SAFARI_PID=$(pgrep -x Safari)
+
+# 3. while Slack (or Terminal) is frontmost, send keyboard input to Safari
+macos-cua --target-pid "$SAFARI_PID" key l -m cmd
+macos-cua --target-pid "$SAFARI_PID" type "https://example.com"
+macos-cua --target-pid "$SAFARI_PID" key Return
+```
+
+Safari navigates to the URL without becoming frontmost. This is useful for background automation workflows where the user keeps working in another app.
+
 ## Concurrency and serialization
 
 `macos-cua` calls are serialized at the OS-event level on the same host. Don't interleave clicks and keystrokes from parallel invocations and expect deterministic ordering. Keep automation sequential within a single agent turn, or insert short `sleep` calls between independent actions when timing matters.

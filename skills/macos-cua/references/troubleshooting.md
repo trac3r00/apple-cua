@@ -68,6 +68,12 @@ pnpm macos-cua-mcp --version
 
 **Fix:** move the target window to the primary display before automating it. Future versions may add `--display` selection.
 
+## Per-PID input doesn't move the mouse in Safari/Chrome
+
+**Cause:** for v1 we use the public `CGEventPostToPid` API, which is filtered by WebKit/Chromium for mouse events. Keyboard events work fine.
+
+**Fix:** if you need to send a mouse click to a backgrounded WebKit/Chromium window, omit `--target-pid` so the global HID tap is used. This will move the real cursor and may steal focus briefly. For keyboard-driven flows (URL bar, form fields, shortcuts), per-PID targeting works as expected.
+
 ## Still stuck
 
 1. Capture the full error output (stderr + stdout).

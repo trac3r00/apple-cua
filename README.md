@@ -9,7 +9,7 @@ Native macOS computer-use control, designed for the OpenAI computer-use action v
 
 OpenAI Codex Computer Use is fast because it runs on the host with macOS-native APIs (ScreenCaptureKit, CoreGraphics, local MCP stdio). By contrast, [trycua/cua](https://github.com/trycua/cua) is portable but slow because of the multi-hop VM/HTTP/PIL pipeline: Python agent loop, 500 ms post-action screenshot delay, HTTP/WebSocket JSON to a guest FastAPI server, PIL encode, base64 SSE, client decode/re-encode. Codex removes the VM boundary and repeated image serialization; cua keeps it for sandbox isolation.
 
-`macos-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same `screenshot / click / type / key / scroll / drag` vocabulary that models expect, but executes directly on your Mac through `screencapture` and `cliclick` (with ScreenCaptureKit/CoreGraphics FFI planned). No Docker, no QEMU, no VNC, no cloud API key.
+`macos-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same `screenshot / click / type / key / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs — `screencapture` for screen capture, `koffi`-bound CoreGraphics `CGEventPost` / `CGEventPostToPid` for input synthesis (with optional per-PID targeting so the agent can drive a backgrounded app while the user keeps focus elsewhere). No Docker, no QEMU, no VNC, no cloud API key.
 
 The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-comparison.md). If you need strong VM isolation, use cua. If you need low-latency host-native control, use this.
 
@@ -19,7 +19,7 @@ The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-co
 | Needs VM | No | Yes (default) | No |
 | Needs API key | OpenAI only | Optional `CUA_API_KEY` for cloud | No |
 | Screenshot path | Native ScreenCaptureKit / IOSurface | PIL `ImageGrab` in guest | `screencapture` CLI (ScreenCaptureKit FFI planned) |
-| Input path | Native CGEvent / Apple Events | `pynput` in guest | `cliclick` CLI (CGEvent FFI planned) |
+| Input path | Native CGEvent / Apple Events | `pynput` in guest | Native CoreGraphics CGEvent via koffi (per-PID targeting via CGEventPostToPid) |
 | Transport | Local MCP stdio | HTTP/WebSocket JSON + SSE | Local process / MCP stdio / pi extension |
 | Post-action delay | None reported | 500 ms default | None |
 | Isolation | macOS permissions + app scoping | VM / container sandbox | macOS permissions only |
@@ -77,6 +77,24 @@ Pressed: command+shift+cmd
 1200,800
 2560x1600
 ```
+
+### Per-PID targeting
+
+By default, input events go to the globally focused application. If you want the agent to drive a specific app while you keep focus elsewhere, pass `--target-pid <pid>` or `--target-bundle-id <id>` to any CLI call. The events are delivered via `CGEventPostToPid` so the target app receives them without becoming frontmost.
+
+Example: send a URL to Safari while Terminal stays focused:
+
+```bash
+# 1. get Safari's PID
+SAFARI_PID=$(pgrep -x Safari)
+
+# 2. focus Safari's address bar, type the URL, and press Return — all while Terminal keeps focus
+macos-cua --target-pid "$SAFARI_PID" key l -m cmd
+macos-cua --target-pid "$SAFARI_PID" type "https://example.com"
+macos-cua --target-pid "$SAFARI_PID" key Return
+```
+
+**Known v1 gap:** per-PID mouse events are filtered by Chromium/Electron and by Safari/WebKit content views. Keyboard events work on all tested apps. If you need to send a mouse click to a backgrounded WebKit or Chromium window, omit `--target-pid` so the global HID tap is used. This will move the real cursor and may steal focus briefly.
 
 ### MCP server
 
@@ -174,13 +192,13 @@ Every tool/action exposed by CLI, MCP, and pi-extension:
 | Action | Parameters | Returns | What it does |
 |---|---|---|---|
 | `screenshot` | `region?: { x, y, width, height }` | PNG `Buffer` + dimensions | Full-screen or region capture via `screencapture` |
-| `click` | `x: number`, `y: number` | void | Single click via `cliclick` |
-| `double_click` | `x: number`, `y: number` | void | Double click via `cliclick` |
-| `type` | `text: string` | void | Type literal text via `cliclick` |
-| `key` | `key: string`, `modifiers?: string[]` | void | Key press with optional cmd/alt/ctrl/shift modifiers |
-| `scroll` | `direction: "up" \| "down" \| "left" \| "right"`, `amount: number` | void | Scroll wheel event via `cliclick` |
-| `drag` | `fromX, fromY, toX, toY` | void | Mouse down, move, up via `cliclick` |
-| `cursor_position` | none | `{ x, y }` | Current mouse coordinates via `cliclick` |
+| `click` | `x: number`, `y: number` | void | Single click via CoreGraphics `CGEventCreateMouseEvent` / `CGEventPost` |
+| `double_click` | `x: number`, `y: number` | void | Double click via CoreGraphics `CGEventCreateMouseEvent` / `CGEventPost` |
+| `type` | `text: string` | void | Type literal text via CoreGraphics `CGEventCreateKeyboardEvent` |
+| `key` | `key: string`, `modifiers?: string[]` | void | Key press with optional cmd/alt/ctrl/shift modifiers via CoreGraphics |
+| `scroll` | `direction: "up" \| "down" \| "left" \| "right"`, `amount: number` | void | Scroll wheel event via CoreGraphics `CGEventCreateScrollWheelEvent` |
+| `drag` | `fromX, fromY, toX, toY` | void | Mouse down, move, up via CoreGraphics `CGEventCreateMouseEvent` |
+| `cursor_position` | none | `{ x, y }` | Current mouse coordinates via `CGEventGetLocation` |
 | `screen_size` | none | `{ width, height }` | Desktop bounds via `osascript` |
 
 ## Permissions
@@ -192,8 +210,6 @@ macOS gates screen capture and input synthesis behind two separate permission di
 3. Restart the terminal (some apps cache the permission state at launch).
 
 Permission is per-binary. If you switch from iTerm2 to Ghostty, you must re-grant for the new app.
-
-Optional dependency: `cliclick` for input synthesis. Install via `brew install cliclick`. `screencapture` is built into macOS.
 
 Full walkthrough: [`skills/macos-cua/references/installation.md`](./skills/macos-cua/references/installation.md).
 
@@ -219,7 +235,7 @@ Full walkthrough: [`skills/macos-cua/references/installation.md`](./skills/macos
 |  +----------------+------------------+                 |
 |                    |                                     |
 |  v                 v                  v                  |
-|  screencapture   cliclick          osascript             |
+|  screencapture   koffi/CGEvent     osascript             |
 |  (screenshots)   (mouse/keyboard)  (screen size)         |
 +----------------------------------------------------------+
 ```
@@ -237,13 +253,13 @@ Full walkthrough: [`skills/macos-cua/references/installation.md`](./skills/macos
 | Feature | Status | Notes |
 |---|---|---|
 | macOS host-native screenshot | Implemented | `screencapture` CLI fallback |
-| macOS host-native input | Implemented | `cliclick` CLI fallback |
+| macOS host-native input | Implemented | Native CoreGraphics CGEvent via koffi (per-PID via CGEventPostToPid) |
 | QEMU runtime | Interface stub | [`packages/core/src/platform/vm.ts`](./packages/core/src/platform/vm.ts) |
 | Lume runtime | Interface stub | Apple Virtualization.Framework VM |
 | VirtualBox / Parallels runtime | Interface stub | Planned |
 | Cloud provider runtime | Interface stub | [`packages/core/src/platform/cloud.ts`](./packages/core/src/platform/cloud.ts) |
 | ScreenCaptureKit direct FFI | Future | Replace `screencapture` with `SCStream` / IOSurface for 60 fps capture |
-| CGEvent FFI for input | Future | Replace `cliclick` with `CGEventCreate` / `CGEventPost` |
+| SkyLight authenticated per-PID mouse | Future | Replace public `CGEventPostToPid` with private `SLEventPostToPid` + `SLSEventAuthenticationMessage` to deliver mouse events to Chromium/Electron and Safari WebKit content without focus stealing |
 | Accessibility API queries | Future | `AXUIElement` for element-level targeting instead of coordinate-only |
 
 ## Development
@@ -280,7 +296,7 @@ Standards: ultra-strict TypeScript, ESM with `.js` imports, Biome formatting, Vi
 | Language | Python | Rust + proprietary plugin | TypeScript |
 | Sandbox | VM / container / cloud | Host macOS (permission-scoped) | Host macOS (permission-scoped) |
 | Screenshot latency | ~500 ms + encode + transport | Native frame interval + local IPC | `screencapture` CLI (FFI planned) |
-| Input latency | HTTP → guest → pynput | Native CGEvent / Apple Events | `cliclick` CLI (FFI planned) |
+| Input latency | HTTP → guest → pynput | Native CGEvent / Apple Events | Native CoreGraphics CGEvent via koffi (~microseconds per event) |
 | Portability | Linux, macOS, Windows, Android, cloud | macOS only | macOS only (stubs for VM/cloud) |
 | Open source | Full SDK | Plugin host OSS, Computer Use plugin proprietary | Fully open source |
 | Agent integration | Any Python agent | Codex desktop only | CLI, MCP, pi-extension, or any TS agent |

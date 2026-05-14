@@ -22,7 +22,7 @@
 
 ## macOS Native APIs
 - Screenshot: ScreenCaptureKit/IOSurface (preferred) or `screencapture` CLI fallback
-- Input: CoreGraphics CGEvent (preferred) or `cliclick` CLI fallback
+- Input: koffi-bound CoreGraphics CGEvent (CGEventPost for global, CGEventPostToPid for per-PID); no CLI fallback
 - Accessibility: `osascript` for UI queries when needed
 
 ## Platform Abstraction

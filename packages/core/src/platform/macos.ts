@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import type { ComputerInterface, ScreenshotResult } from "../computer/interface.js";
 import type { DragOptions, KeyOptions, Point, ScreenshotOptions, ScrollOptions } from "../types/index.js";
 import { HostComputer, type HostComputerOptions } from "./host.js";
+import { MacOSInputController } from "./macos-input.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -14,6 +15,10 @@ const PNG_SIGNATURE = "89504e470d0a1a0a";
 const PNG_IHDR_WIDTH_OFFSET = 16;
 const PNG_IHDR_HEIGHT_OFFSET = 20;
 const PNG_MINIMUM_IHDR_LENGTH = 24;
+
+export interface MacOSHostComputerOptions extends HostComputerOptions {
+	defaultTargetPid?: number;
+}
 
 export class MacOSHostComputer extends HostComputer {
 	readonly capabilities: ComputerInterface["capabilities"] = {
@@ -23,10 +28,17 @@ export class MacOSHostComputer extends HostComputer {
 		supportsClipboard: true,
 	};
 
-	constructor(options: HostComputerOptions = {}) {
+	private readonly input: MacOSInputController;
+
+	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
+		this.input = new MacOSInputController(options.defaultTargetPid);
 		// TODO: use options for display selection
-		void options;
+		void options.display;
+	}
+
+	setTarget(pid?: number): void {
+		this.input.setTarget(pid);
 	}
 
 	async screenshot(options?: ScreenshotOptions): Promise<ScreenshotResult> {
@@ -51,58 +63,44 @@ export class MacOSHostComputer extends HostComputer {
 		}
 	}
 
+	async move(position: Point): Promise<void> {
+		this.input.move(position);
+	}
+
 	async click(position: Point): Promise<void> {
-		await execFileAsync("cliclick", [`c:${position.x},${position.y}`]);
+		this.input.click(position);
+	}
+
+	async rightClick(position: Point): Promise<void> {
+		this.input.click(position, "right");
+	}
+
+	async middleClick(position: Point): Promise<void> {
+		this.input.click(position, "middle");
 	}
 
 	async doubleClick(position: Point): Promise<void> {
-		await execFileAsync("cliclick", [`dc:${position.x},${position.y}`]);
+		this.input.doubleClick(position);
 	}
 
 	async type(text: string): Promise<void> {
-		await execFileAsync("cliclick", [`t:${text}`]);
+		await this.input.typeText(text);
 	}
 
 	async key(key: string, options?: KeyOptions): Promise<void> {
-		const modifiers =
-			options?.modifiers?.map((m) => {
-				switch (m) {
-					case "command":
-						return "cmd";
-					case "option":
-						return "alt";
-					case "control":
-						return "ctrl";
-					case "shift":
-						return "shift";
-				}
-			}) ?? [];
-
-		const keyCombo = modifiers.length > 0 ? `${modifiers.join("+")}+${key}` : key;
-		await execFileAsync("cliclick", [`kp:${keyCombo}`]);
+		this.input.pressKey(key, options);
 	}
 
 	async scroll(options: ScrollOptions): Promise<void> {
-		const direction = options.direction === "up" || options.direction === "left" ? "-" : "";
-		const amount = String(options.amount);
-		await execFileAsync("cliclick", [`scroll:${direction}${amount}`]);
+		this.input.scroll(options);
 	}
 
 	async drag(options: DragOptions): Promise<void> {
-		await execFileAsync("cliclick", [
-			`dd:${options.from.x},${options.from.y}`,
-			`dm:${options.to.x},${options.to.y}`,
-			`du:${options.to.x},${options.to.y}`,
-		]);
+		await this.input.drag(options);
 	}
 
 	async getCursorPosition(): Promise<Point> {
-		const { stdout } = await execFileAsync("cliclick", ["p"], { encoding: "utf8" });
-		const match = stdout.trim().match(/^(\d+),(\d+)$/);
-		if (!match) {
-			throw new Error("Failed to parse cursor position");
-		}
-		return { x: Number(match[1]), y: Number(match[2]) };
+		return this.input.getCursorPosition();
 	}
 
 	async getScreenSize(): Promise<{ width: number; height: number }> {

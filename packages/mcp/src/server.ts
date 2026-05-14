@@ -14,6 +14,8 @@ type ToolResult = {
 	content: ToolContent[];
 };
 
+type MouseButton = "left" | "right" | "middle";
+
 const SERVER_INFO = {
 	name: "macos-cua",
 	version: "0.1.0",
@@ -52,7 +54,7 @@ const screenshotSchema = z.object({
 const clickSchema = z.object({
 	x: z.number(),
 	y: z.number(),
-	button: z.string().optional(),
+	button: z.enum(["left", "right", "middle"]).optional(),
 });
 
 const doubleClickSchema = z.object({
@@ -177,9 +179,10 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 			description: "Click at a specific position on the screen",
 			inputSchema: clickSchema,
 		},
-		async ({ x, y }): Promise<ToolResult> => {
-			await computer.click({ x, y });
-			return textResult(`Clicked at ${x},${y}`);
+		async ({ x, y, button }): Promise<ToolResult> => {
+			const mouseButton = button ?? "left";
+			await clickWithButton(computer, { x, y }, mouseButton);
+			return textResult(`Clicked ${mouseButton} at ${x},${y}`);
 		},
 	);
 
@@ -285,7 +288,7 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 			inputSchema: moveSchema,
 		},
 		async ({ x, y }): Promise<ToolResult> => {
-			await computer.drag({ from: { x, y }, to: { x, y } });
+			await computer.move({ x, y });
 			return textResult(`Moved to ${x},${y}`);
 		},
 	);
@@ -315,6 +318,24 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 	);
 
 	return server;
+}
+
+async function clickWithButton(
+	computer: ComputerInterface,
+	position: { readonly x: number; readonly y: number },
+	button: MouseButton,
+): Promise<void> {
+	switch (button) {
+		case "left":
+			await computer.click(position);
+			return;
+		case "right":
+			await computer.rightClick(position);
+			return;
+		case "middle":
+			await computer.middleClick(position);
+			return;
+	}
 }
 
 export async function main(): Promise<void> {

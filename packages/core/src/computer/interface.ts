@@ -18,7 +18,10 @@ export interface ComputerInterface {
 	readonly capabilities: ComputerCapabilities;
 
 	screenshot(options?: ScreenshotOptions): Promise<ScreenshotResult>;
+	move(position: Point): Promise<void>;
 	click(position: Point): Promise<void>;
+	rightClick(position: Point): Promise<void>;
+	middleClick(position: Point): Promise<void>;
 	doubleClick(position: Point): Promise<void>;
 	type(text: string): Promise<void>;
 	key(key: string, options?: KeyOptions): Promise<void>;

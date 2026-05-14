@@ -15,6 +15,8 @@ type PackageJson = {
 
 type GlobalOptions = {
 	json?: boolean;
+	targetPid?: number;
+	targetBundleId?: string;
 };
 
 type MouseButton = "left" | "right" | "middle";
@@ -63,7 +65,9 @@ program
 	.name("macos-cua")
 	.description("Native macOS computer-use control")
 	.version(packageJson.version)
-	.option("--json", "print machine-readable JSON output");
+	.option("--json", "print machine-readable JSON output")
+	.option("--target-pid <pid>", "deliver input to a target process id without focusing it", parsePositiveInteger)
+	.option("--target-bundle-id <id>", "deliver input to the running app with this bundle identifier");
 
 program
 	.command("screenshot")
@@ -109,13 +113,7 @@ program
 	.option("-b, --button <button>", "mouse button: left, right, or middle", parseMouseButton, "left")
 	.action(async (x: string, y: string, options: ClickCommandOptions) => {
 		const position = { x: parseInteger(x, "x"), y: parseInteger(y, "y") };
-		if (options.button === "right") {
-			await execFileAsync("cliclick", [`rc:${position.x},${position.y}`]);
-		} else if (options.button === "middle") {
-			await execFileAsync("cliclick", [`mc:${position.x},${position.y}`]);
-		} else {
-			await withComputer((computer) => computer.click(position));
-		}
+		await withComputer((computer) => clickWithButton(computer, position, options.button));
 		writeActionOutput(
 			"click",
 			{ ...position, button: options.button },
@@ -141,7 +139,7 @@ program
 	.argument("<y>", "y coordinate")
 	.action(async (x: string, y: string) => {
 		const position = { x: parseInteger(x, "x"), y: parseInteger(y, "y") };
-		await execFileAsync("cliclick", [`m:${position.x},${position.y}`]);
+		await withComputer((computer) => computer.move(position));
 		writeActionOutput("move", position, `Moved cursor to ${position.x},${position.y}`);
 	});
 
@@ -306,13 +304,57 @@ function readPackageJson(): PackageJson {
 	return parsed;
 }
 
-async function withComputer(action: (computer: ComputerInterface) => Promise<void>): Promise<void> {
+async function withComputer(action: (computer: MacOSHostComputer) => Promise<void>): Promise<void> {
 	const computer = new MacOSHostComputer();
 	try {
+		const targetPid = await resolveTargetPid();
+		computer.setTarget(targetPid);
 		await action(computer);
 	} finally {
 		await computer.close();
 	}
+}
+
+async function clickWithButton(
+	computer: ComputerInterface,
+	position: { x: number; y: number },
+	button: MouseButton,
+): Promise<void> {
+	switch (button) {
+		case "left":
+			await computer.click(position);
+			return;
+		case "right":
+			await computer.rightClick(position);
+			return;
+		case "middle":
+			await computer.middleClick(position);
+			return;
+	}
+}
+
+async function resolveTargetPid(): Promise<number | undefined> {
+	const options = program.opts<GlobalOptions>();
+	if (options.targetPid !== undefined && options.targetBundleId !== undefined) {
+		throw new Error("Use only one of --target-pid or --target-bundle-id");
+	}
+	if (options.targetPid !== undefined) {
+		return options.targetPid;
+	}
+	if (options.targetBundleId !== undefined) {
+		return resolvePidForBundleId(options.targetBundleId);
+	}
+	return undefined;
+}
+
+async function resolvePidForBundleId(bundleId: string): Promise<number> {
+	const script = `tell application "System Events" to get unix id of first process whose bundle identifier is ${toAppleScriptString(bundleId)}`;
+	const { stdout } = await execFileAsync("osascript", ["-e", script], { encoding: "utf8" });
+	return parsePositiveInteger(stdout.trim());
+}
+
+function toAppleScriptString(value: string): string {
+	return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
 function parseInteger(value: string, name: string): number {

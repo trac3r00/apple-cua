@@ -10,7 +10,10 @@ export abstract class VMComputer implements ComputerInterface {
 	abstract screenshot(
 		options?: import("../types/index.js").ScreenshotOptions,
 	): Promise<import("../computer/interface.js").ScreenshotResult>;
+	abstract move(position: import("../types/index.js").Point): Promise<void>;
 	abstract click(position: import("../types/index.js").Point): Promise<void>;
+	abstract rightClick(position: import("../types/index.js").Point): Promise<void>;
+	abstract middleClick(position: import("../types/index.js").Point): Promise<void>;
 	abstract doubleClick(position: import("../types/index.js").Point): Promise<void>;
 	abstract type(text: string): Promise<void>;
 	abstract key(key: string, options?: import("../types/index.js").KeyOptions): Promise<void>;

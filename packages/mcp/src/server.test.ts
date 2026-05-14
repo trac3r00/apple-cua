@@ -12,7 +12,10 @@ const mockedComputer = vi.hoisted(() => ({
 		supportsClipboard: true,
 	},
 	screenshot: vi.fn(),
+	move: vi.fn(),
 	click: vi.fn(),
+	rightClick: vi.fn(),
+	middleClick: vi.fn(),
 	doubleClick: vi.fn(),
 	type: vi.fn(),
 	key: vi.fn(),
@@ -83,7 +86,10 @@ beforeEach(() => {
 		width: 1920,
 		height: 1080,
 	});
+	mockedComputer.move.mockResolvedValue(undefined);
 	mockedComputer.click.mockResolvedValue(undefined);
+	mockedComputer.rightClick.mockResolvedValue(undefined);
+	mockedComputer.middleClick.mockResolvedValue(undefined);
 	mockedComputer.doubleClick.mockResolvedValue(undefined);
 	mockedComputer.type.mockResolvedValue(undefined);
 	mockedComputer.key.mockResolvedValue(undefined);

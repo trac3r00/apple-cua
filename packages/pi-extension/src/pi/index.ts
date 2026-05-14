@@ -3,6 +3,8 @@ export type {
 	AgentToolUpdateCallback,
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
+	BeforeProviderRequestEvent,
+	BeforeProviderRequestEventResult,
 	ExtensionAPI,
 	ExtensionContext,
 	ExtensionHandler,

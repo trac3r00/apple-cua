@@ -20,6 +20,7 @@ import {
 	executeOpenAIComputerAction,
 	openaiComputerActionBatchSchema,
 	openaiComputerToolSchema,
+	sanitizeOpenAIComputerUsePayload,
 } from "./openai-computer-use.js";
 import { type AgentToolResult, type ExtensionAPI, defineTool } from "./pi/index.js";
 import { registerAllTools } from "./tools/index.js";
@@ -84,7 +85,11 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 			return addAnthropicComputerUseToPayload(api, event.payload, state.display);
 		}
 		if (api === "openai-responses") {
-			return addOpenAIComputerUseToPayload(api, event.payload, state.display);
+			const payload = sanitizeOpenAIComputerUsePayload(api, event.payload);
+			if (shouldInjectOpenAINativeComputerUse(ctx.model)) {
+				return addOpenAIComputerUseToPayload(api, payload, state.display);
+			}
+			return payload;
 		}
 		return event.payload;
 	});
@@ -115,6 +120,21 @@ function isOptedOut(value: string | undefined): boolean {
 	}
 	const normalized = value.trim().toLowerCase();
 	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function shouldInjectOpenAINativeComputerUse(
+	model: { readonly provider?: string; readonly baseUrl?: string } | undefined,
+): boolean {
+	if (model?.provider !== "openai") {
+		return false;
+	}
+	const baseUrl = model.baseUrl ?? "https://api.openai.com/v1";
+	try {
+		const hostname = new URL(baseUrl).hostname.toLowerCase();
+		return hostname === "api.openai.com";
+	} catch {
+		return false;
+	}
 }
 
 async function executeComputerFallback(

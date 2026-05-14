@@ -105,12 +105,19 @@ async function runSessionStart(pi: MockPi): Promise<void> {
 	await sessionStart();
 }
 
-function runBeforeProviderRequest(pi: MockPi, api: string, payload: unknown): unknown {
+interface TestModel {
+	readonly api: string;
+	readonly baseUrl?: string;
+	readonly provider?: string;
+}
+
+function runBeforeProviderRequest(pi: MockPi, model: string | TestModel, payload: unknown): unknown {
 	const beforeProviderRequest = pi.handlers.get("before_provider_request");
 	if (beforeProviderRequest === undefined) {
 		throw new Error("before_provider_request handler missing");
 	}
-	return beforeProviderRequest({ payload }, { model: { api } });
+	const resolvedModel = typeof model === "string" ? { api: model } : model;
+	return beforeProviderRequest({ payload }, { model: resolvedModel });
 }
 
 async function runBeforeAgentStart(pi: MockPi, api: string): Promise<unknown> {
@@ -224,15 +231,36 @@ describe("#given enabled session and non-computer provider #when provider payloa
 });
 
 describe("#given enabled session and OpenAI Responses #when provider payload hook runs #then native computer tool is added", () => {
-	it("appends the OpenAI computer tool", async () => {
+	it("appends the OpenAI computer tool for direct OpenAI", async () => {
 		const pi = createMockPi();
 		macosCuaExtension(pi);
 		await runSessionStart(pi);
+		const computerFunction = { type: "function", name: "computer", parameters: { anyOf: [] } };
 		const shellTool = { type: "function", name: "shell" };
 
-		const result = runBeforeProviderRequest(pi, "openai-responses", { tools: [shellTool] });
+		const result = runBeforeProviderRequest(
+			pi,
+			{ api: "openai-responses", provider: "openai", baseUrl: "https://api.openai.com/v1" },
+			{ tools: [computerFunction, shellTool] },
+		);
 
 		expect(result).toEqual({ tools: [shellTool, { type: "computer" }] });
+	});
+
+	it("leaves OpenAI-compatible proxy payloads on prefixed macos_cua tools", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+		await runSessionStart(pi);
+		const screenshotTool = { type: "function", name: "macos_cua_screenshot" };
+		const payload = { tools: [{ type: "function", name: "computer", parameters: { anyOf: [] } }, screenshotTool] };
+
+		const result = runBeforeProviderRequest(
+			pi,
+			{ api: "openai-responses", provider: "openai", baseUrl: "https://quotio.mengmota.com/v1" },
+			payload,
+		);
+
+		expect(result).toEqual({ tools: [screenshotTool] });
 	});
 });
 

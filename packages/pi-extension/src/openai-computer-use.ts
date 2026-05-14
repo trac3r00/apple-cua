@@ -5,6 +5,7 @@ import { ComputerUseError, type ComputerUseResult } from "./anthropic-computer-u
 import { type DisplayConfig, resizeScreenshotPng, unscaleCoord } from "./computer-use/coords.js";
 
 export const OPENAI_COMPUTER_TOOL_TYPE = "computer";
+const OPENAI_COMPUTER_TOOL_NAME = "computer";
 
 type KeyModifier = "command" | "option" | "control" | "shift";
 type ScrollDirection = ScrollOptions["direction"];
@@ -64,6 +65,18 @@ export const openaiComputerActionBatchSchema = Type.Object(
 
 export type OpenAIComputerActionBatch = Static<typeof openaiComputerActionBatchSchema>;
 
+export function sanitizeOpenAIComputerUsePayload(api: string | undefined, payload: unknown): unknown {
+	if (api !== "openai-responses" || !isRecord(payload)) {
+		return payload;
+	}
+	const tools = Array.isArray(payload["tools"]) ? payload["tools"] : [];
+	const sanitizedTools = sanitizeOpenAITools(tools);
+	if (sanitizedTools.length === tools.length) {
+		return payload;
+	}
+	return { ...payload, tools: sanitizedTools };
+}
+
 export function addOpenAIComputerUseToPayload(
 	api: string | undefined,
 	payload: unknown,
@@ -78,9 +91,31 @@ export function addOpenAIComputerUseToPayload(
 	}
 
 	const existingTools = Array.isArray(payload["tools"]) ? payload["tools"] : [];
-	const hasComputerTool = existingTools.some((tool) => isRecord(tool) && tool["type"] === OPENAI_COMPUTER_TOOL_TYPE);
-	const tools = hasComputerTool ? existingTools : [...existingTools, { type: OPENAI_COMPUTER_TOOL_TYPE }];
+	const sanitizedTools = sanitizeOpenAITools(existingTools);
+	const hasComputerTool = sanitizedTools.some((tool) => isRecord(tool) && tool["type"] === OPENAI_COMPUTER_TOOL_TYPE);
+	const tools = hasComputerTool ? sanitizedTools : [...sanitizedTools, { type: OPENAI_COMPUTER_TOOL_TYPE }];
 	return { ...payload, tools };
+}
+
+function sanitizeOpenAITools(tools: readonly unknown[]): unknown[] {
+	const sanitizedTools: unknown[] = [];
+	for (const tool of tools) {
+		if (!isOpenAIComputerFunctionTool(tool)) {
+			sanitizedTools.push(tool);
+		}
+	}
+	return sanitizedTools;
+}
+
+function isOpenAIComputerFunctionTool(tool: unknown): boolean {
+	if (!isRecord(tool) || tool["type"] !== "function") {
+		return false;
+	}
+	if (tool["name"] === OPENAI_COMPUTER_TOOL_NAME) {
+		return true;
+	}
+	const nestedFunction = tool["function"];
+	return isRecord(nestedFunction) && nestedFunction["name"] === OPENAI_COMPUTER_TOOL_NAME;
 }
 
 export async function executeOpenAINativeComputerAction(

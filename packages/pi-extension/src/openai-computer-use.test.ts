@@ -6,6 +6,7 @@ import {
 	addOpenAIComputerUseToPayload,
 	executeOpenAIComputerAction,
 	normalizeOpenAIKeys,
+	sanitizeOpenAIComputerUsePayload,
 } from "./openai-computer-use.js";
 
 const coordsMock = vi.hoisted(() => ({
@@ -72,6 +73,21 @@ describe("#given OpenAI payloads #when adding computer use #then passthrough and
 		expect(addOpenAIComputerUseToPayload("openai-responses", { tools: [] }, DISPLAY)).toEqual({
 			tools: [{ type: "computer" }],
 		});
+	});
+
+	it("strips the fallback computer function before OpenAI sees the payload", () => {
+		const computerFunction = { type: "function", name: "computer", parameters: { anyOf: [] } };
+		const nestedComputerFunction = { type: "function", function: { name: "computer" } };
+		const shellTool = { type: "function", name: "shell" };
+
+		expect(
+			sanitizeOpenAIComputerUsePayload("openai-responses", {
+				tools: [computerFunction, nestedComputerFunction, shellTool],
+			}),
+		).toEqual({ tools: [shellTool] });
+		expect(
+			addOpenAIComputerUseToPayload("openai-responses", { tools: [computerFunction, shellTool] }, DISPLAY),
+		).toEqual({ tools: [shellTool, { type: "computer" }] });
 	});
 });
 

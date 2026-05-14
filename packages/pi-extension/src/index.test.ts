@@ -19,7 +19,7 @@ const macOSHostComputerMock = vi.hoisted(() => {
 		scroll: vi.fn(),
 		drag: vi.fn(),
 		getCursorPosition: vi.fn(),
-		getScreenSize: vi.fn().mockResolvedValue({ width: 2560, height: 1600 }),
+		getScreenSize: vi.fn().mockResolvedValue({ width: 2560, height: 1440 }),
 		close: vi.fn().mockResolvedValue(undefined),
 	};
 	return {
@@ -35,7 +35,7 @@ vi.mock("@macos-cua/core", () => ({
 import macosCuaExtension from "./index.js";
 import type { ExtensionAPI } from "./pi/index.js";
 
-type EventHandler = (...parameters: ReadonlyArray<never>) => unknown;
+type EventHandler = (...parameters: ReadonlyArray<unknown>) => unknown;
 
 interface MockPi extends ExtensionAPI {
 	readonly handlers: Map<string, EventHandler>;
@@ -93,7 +93,7 @@ function createMockPi(): MockPi {
 beforeEach(() => {
 	process.env["MACOS_CUA_DISABLE_COMPUTER_USE_BETA"] = undefined;
 	vi.clearAllMocks();
-	macOSHostComputerMock.instance.getScreenSize.mockResolvedValue({ width: 2560, height: 1600 });
+	macOSHostComputerMock.instance.getScreenSize.mockResolvedValue({ width: 2560, height: 1440 });
 	macOSHostComputerMock.instance.close.mockResolvedValue(undefined);
 });
 
@@ -103,6 +103,22 @@ async function runSessionStart(pi: MockPi): Promise<void> {
 		throw new Error("session_start handler missing");
 	}
 	await sessionStart();
+}
+
+function runBeforeProviderRequest(pi: MockPi, api: string, payload: unknown): unknown {
+	const beforeProviderRequest = pi.handlers.get("before_provider_request");
+	if (beforeProviderRequest === undefined) {
+		throw new Error("before_provider_request handler missing");
+	}
+	return beforeProviderRequest({ payload }, { model: { api } });
+}
+
+async function runBeforeAgentStart(pi: MockPi, api: string): Promise<unknown> {
+	const beforeAgentStart = pi.handlers.get("before_agent_start");
+	if (beforeAgentStart === undefined) {
+		throw new Error("before_agent_start handler missing");
+	}
+	return beforeAgentStart({ systemPrompt: "base prompt" }, { model: { api } });
 }
 
 describe("#given macosCuaExtension #when imported #then default export is a named function", () => {
@@ -190,6 +206,81 @@ describe("#given resources_discover #when invoked #then macOS skill path is retu
 
 		expect(result).toEqual({
 			skillPaths: [expect.stringContaining("skills/macos-cua/SKILL.md")],
+		});
+	});
+});
+
+describe("#given enabled session and non-computer provider #when provider payload hook runs #then payload passes through", () => {
+	it("returns the original payload for other APIs", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+		await runSessionStart(pi);
+		const payload = { tools: [] };
+
+		const result = runBeforeProviderRequest(pi, "google-generative-ai", payload);
+
+		expect(result).toBe(payload);
+	});
+});
+
+describe("#given enabled session and OpenAI Responses #when provider payload hook runs #then native computer tool is added", () => {
+	it("appends the OpenAI computer tool", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+		await runSessionStart(pi);
+		const shellTool = { type: "function", name: "shell" };
+
+		const result = runBeforeProviderRequest(pi, "openai-responses", { tools: [shellTool] });
+
+		expect(result).toEqual({ tools: [shellTool, { type: "computer" }] });
+	});
+});
+
+describe("#given enabled session and Anthropic Messages #when provider payload hook runs #then downscaled native computer tool is added", () => {
+	it("injects Anthropic computer use with 1280x720 display dimensions", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+		await runSessionStart(pi);
+
+		const result = runBeforeProviderRequest(pi, "anthropic-messages", { messages: [] });
+
+		expect(result).toMatchObject({
+			tools: [
+				{
+					type: "computer_20250124",
+					name: "computer",
+					display_width_px: 1280,
+					display_height_px: 720,
+				},
+			],
+			headers: { "anthropic-beta": "computer-use-2025-01-24" },
+			extra_body: { betas: ["computer-use-2025-01-24"] },
+		});
+	});
+});
+
+describe("#given enabled session #when agent prompt hook runs #then native computer scaffolds match provider", () => {
+	it("adds Anthropic computer prompt with downscaled dimensions", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+		await runSessionStart(pi);
+
+		const result = await runBeforeAgentStart(pi, "anthropic-messages");
+
+		expect(result).toEqual({
+			systemPrompt: expect.stringContaining("Native `computer` tool available (1280x720)"),
+		});
+	});
+
+	it("adds OpenAI computer prompt with downscaled dimensions", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+		await runSessionStart(pi);
+
+		const result = await runBeforeAgentStart(pi, "openai-responses");
+
+		expect(result).toEqual({
+			systemPrompt: expect.stringContaining("screenshots are 1280x720"),
 		});
 	});
 });

@@ -2,29 +2,46 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { MacOSHostComputer } from "@macos-cua/core";
+import { Type } from "typebox";
 
 import {
 	ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
-	type DisplayConfig,
+	type ComputerToolInput,
 	addAnthropicComputerUseToPayload,
 	buildComputerUseSection,
 	computerToolSchema,
 	executeNativeComputerAction,
 } from "./anthropic-computer-use.js";
-import { type ExtensionAPI, defineTool } from "./pi/index.js";
+import { type DisplayConfig, resolveDisplayConfig } from "./computer-use/coords.js";
+import {
+	type OpenAIComputerAction,
+	type OpenAIComputerActionBatch,
+	addOpenAIComputerUseToPayload,
+	executeOpenAIComputerAction,
+	openaiComputerActionBatchSchema,
+	openaiComputerToolSchema,
+} from "./openai-computer-use.js";
+import { type AgentToolResult, type ExtensionAPI, defineTool } from "./pi/index.js";
 import { registerAllTools } from "./tools/index.js";
 
 interface ExtensionState {
 	readonly computer: MacOSHostComputer;
-	readonly displayConfig: DisplayConfig;
+	readonly display: DisplayConfig;
 	readonly enabled: boolean;
 }
+
+type ComputerFallbackInput = ComputerToolInput | OpenAIComputerAction | OpenAIComputerActionBatch;
 
 const DISABLE_COMPUTER_USE_BETA_ENV = "MACOS_CUA_DISABLE_COMPUTER_USE_BETA";
 
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(sourceDirectory, "..");
 const skillPath = path.resolve(packageRoot, "../../skills/macos-cua/SKILL.md");
+const computerFallbackToolSchema = Type.Union([
+	computerToolSchema,
+	openaiComputerToolSchema,
+	openaiComputerActionBatchSchema,
+]);
 
 let state: ExtensionState | undefined;
 
@@ -35,10 +52,9 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async () => {
 		const computer = new MacOSHostComputer();
-		const { width, height } = await computer.getScreenSize();
-		const displayConfig = { width, height };
+		const display = resolveDisplayConfig(await computer.getScreenSize());
 		const enabled = !isOptedOut(process.env[DISABLE_COMPUTER_USE_BETA_ENV]);
-		state = { computer, displayConfig, enabled };
+		state = { computer, display, enabled };
 		registerAllTools(pi, { computer });
 
 		if (!enabled) {
@@ -50,10 +66,10 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 				name: ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
 				label: "Computer Use",
 				description:
-					"Anthropic native actions: screenshot, key, type, mouse_move, left/right/middle click, double/triple click, left_click_drag, cursor_position, scroll, wait.",
-				parameters: computerToolSchema,
+					"Native computer-use actions for Anthropic and OpenAI Responses: screenshots, pointer, keyboard, scroll, drag, type, and wait.",
+				parameters: computerFallbackToolSchema,
 				async execute(_toolCallId, params) {
-					return executeNativeComputerAction(params, computer);
+					return executeComputerFallback(params, computer, display);
 				},
 			}),
 		);
@@ -63,7 +79,14 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 		if (state === undefined || !state.enabled) {
 			return event.payload;
 		}
-		return addAnthropicComputerUseToPayload(ctx.model?.api, event.payload, state.displayConfig);
+		const api = ctx.model?.api;
+		if (api === "anthropic-messages") {
+			return addAnthropicComputerUseToPayload(api, event.payload, state.display);
+		}
+		if (api === "openai-responses") {
+			return addOpenAIComputerUseToPayload(api, event.payload, state.display);
+		}
+		return event.payload;
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
@@ -74,7 +97,7 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 			return undefined;
 		}
 		return {
-			systemPrompt: `${event.systemPrompt}\n${buildComputerUseSection(state.displayConfig.width, state.displayConfig.height)}`,
+			systemPrompt: `${event.systemPrompt}\n${buildComputerUseSection(state.display.modelWidth, state.display.modelHeight)}`,
 		};
 	});
 
@@ -92,4 +115,33 @@ function isOptedOut(value: string | undefined): boolean {
 	}
 	const normalized = value.trim().toLowerCase();
 	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+async function executeComputerFallback(
+	params: ComputerFallbackInput,
+	computer: MacOSHostComputer,
+	display: DisplayConfig,
+): Promise<AgentToolResult<undefined>> {
+	if (isOpenAIComputerActionBatch(params)) {
+		let result: AgentToolResult<undefined> | undefined;
+		for (const action of params.actions) {
+			result = await executeOpenAIComputerAction(action, computer, display);
+		}
+		if (result === undefined) {
+			throw new Error("OpenAI computer action batch must include at least one action");
+		}
+		return result;
+	}
+	if (isOpenAIComputerAction(params)) {
+		return executeOpenAIComputerAction(params, computer, display);
+	}
+	return executeNativeComputerAction(params, computer, display);
+}
+
+function isOpenAIComputerActionBatch(params: ComputerFallbackInput): params is OpenAIComputerActionBatch {
+	return "actions" in params;
+}
+
+function isOpenAIComputerAction(params: ComputerFallbackInput): params is OpenAIComputerAction {
+	return "type" in params;
 }

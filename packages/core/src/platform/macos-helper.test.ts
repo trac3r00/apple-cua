@@ -123,14 +123,13 @@ describe("#given MacOSCuaHelper JSON stdio protocol", () => {
 	});
 });
 
-function nextWrittenLine(stream: PassThrough): Promise<string> {
-	return nextWrittenLines(stream, 1).then((lines) => {
-		const [line] = lines;
-		if (line === undefined) {
-			throw new Error("expected one written line");
-		}
-		return line;
-	});
+async function nextWrittenLine(stream: PassThrough): Promise<string> {
+	const lines = await nextWrittenLines(stream, 1);
+	const [line] = lines;
+	if (line === undefined) {
+		throw new Error("expected one written line");
+	}
+	return line;
 }
 
 function nextWrittenLines(stream: PassThrough, count: number): Promise<string[]> {
@@ -164,7 +163,10 @@ function requestPayload(line: string): { id: string; cmd: string; [key: string]:
 	return { ...parsed, id: parsed.id, cmd: parsed.cmd };
 }
 
-function writeResponse(child: FakeHelperProcess, response: { id: string; ok: boolean; error?: string; x?: number; y?: number }): void {
+function writeResponse(
+	child: FakeHelperProcess,
+	response: { id: string; ok: boolean; error?: string; x?: number; y?: number },
+): void {
 	child.stdout.write(`${JSON.stringify(response)}\n`);
 }
 

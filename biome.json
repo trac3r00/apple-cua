@@ -34,6 +34,14 @@
 		}
 	},
 	"files": {
-		"ignore": ["dist", ".sisyphus", "node_modules"]
+		"ignore": [
+			"dist",
+			".sisyphus",
+			"node_modules",
+			".build",
+			"Package.resolved",
+			"packages/cua-helper/.build",
+			"packages/cua-helper/Package.resolved"
+		]
 	}
 }

@@ -8,8 +8,8 @@
 		"macos-cua": "./dist/cli.js"
 	},
 	"scripts": {
-		"build": "tsc",
-		"typecheck": "tsc --noEmit",
+		"build": "tsgo",
+		"typecheck": "tsgo --noEmit",
 		"test": "vitest --run"
 	},
 	"dependencies": {

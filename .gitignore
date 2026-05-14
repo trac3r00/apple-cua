@@ -6,6 +6,7 @@ dist/
 .env.local
 coverage/
 *.tsbuildinfo
+packages/cua-helper/.build/
+packages/cua-helper/.swiftpm/
 .build/
 Package.resolved
-

@@ -20,5 +20,7 @@ export abstract class HostComputer implements ComputerInterface {
 	abstract drag(options: import("../types/index.js").DragOptions): Promise<void>;
 	abstract getCursorPosition(): Promise<import("../types/index.js").Point>;
 	abstract getScreenSize(): Promise<{ width: number; height: number }>;
+	abstract getAppState(targetPid?: number): Promise<import("../accessibility/types.js").AppState>;
+	abstract listApps(): Promise<import("../accessibility/types.js").AppInfo[]>;
 	abstract close(): Promise<void>;
 }

@@ -116,6 +116,15 @@ export class MacOSHostComputer extends HostComputer {
 		}
 	}
 
+	async getAppState(targetPid?: number): Promise<import("../accessibility/types.js").AppState> {
+		void targetPid;
+		throw new Error("Not implemented — requires cua-helper skyshot command (T10)");
+	}
+
+	async listApps(): Promise<import("../accessibility/types.js").AppInfo[]> {
+		throw new Error("Not implemented — requires cua-helper skyshot command (T10)");
+	}
+
 	async close(): Promise<void> {
 		this.input.close();
 		this.helper.close();

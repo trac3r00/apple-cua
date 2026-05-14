@@ -1,3 +1,4 @@
+import type { AppInfo, AppState } from "../accessibility/types.js";
 import type {
 	ComputerCapabilities,
 	DragOptions,
@@ -29,5 +30,7 @@ export interface ComputerInterface {
 	drag(options: DragOptions): Promise<void>;
 	getCursorPosition(): Promise<Point>;
 	getScreenSize(): Promise<{ width: number; height: number }>;
+	getAppState(targetPid?: number): Promise<AppState>;
+	listApps(): Promise<AppInfo[]>;
 	close(): Promise<void>;
 }

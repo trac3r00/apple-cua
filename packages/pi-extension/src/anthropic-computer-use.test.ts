@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
 	ANTHROPIC_COMPUTER_USE_BETA,
@@ -9,6 +9,32 @@ import {
 	addAnthropicComputerUseToPayload,
 	executeNativeComputerAction,
 } from "./anthropic-computer-use.js";
+import type { DisplayConfig } from "./computer-use/coords.js";
+
+const coordsMock = vi.hoisted(() => ({
+	resizeScreenshotPng: vi.fn<(rawPng: Buffer, targetWidth: number, targetHeight: number) => Promise<Buffer>>(
+		async (rawPng) => rawPng,
+	),
+}));
+
+vi.mock("./computer-use/coords.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./computer-use/coords.js")>();
+	return { ...actual, resizeScreenshotPng: coordsMock.resizeScreenshotPng };
+});
+
+const DEFAULT_DOWNSCALE = {
+	logicalWidth: 2560,
+	logicalHeight: 1440,
+	modelWidth: 1280,
+	modelHeight: 720,
+} satisfies DisplayConfig;
+
+const ONE_TO_ONE_DOWNSCALE = {
+	logicalWidth: 100,
+	logicalHeight: 80,
+	modelWidth: 100,
+	modelHeight: 80,
+} satisfies DisplayConfig;
 
 function createComputer(): ComputerActionDriver {
 	return {
@@ -39,6 +65,10 @@ function createComputer(): ComputerActionDriver {
 	};
 }
 
+beforeEach(() => {
+	coordsMock.resizeScreenshotPng.mockImplementation(async (rawPng) => rawPng);
+});
+
 afterEach(() => {
 	vi.useRealTimers();
 	vi.restoreAllMocks();
@@ -48,7 +78,7 @@ describe("#given a non-Anthropic provider #when adding computer use #then payloa
 	it("returns the original payload reference", () => {
 		const payload = { messages: [] };
 
-		const result = addAnthropicComputerUseToPayload("openai-responses", payload, { width: 1920, height: 1080 });
+		const result = addAnthropicComputerUseToPayload("openai-responses", payload, DEFAULT_DOWNSCALE);
 
 		expect(result).toBe(payload);
 	});
@@ -58,17 +88,17 @@ describe("#given a non-record payload #when adding computer use #then payload is
 	it("returns the original payload value", () => {
 		const payload = "not-a-record";
 
-		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, { width: 1920, height: 1080 });
+		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, DEFAULT_DOWNSCALE);
 
 		expect(result).toBe(payload);
 	});
 });
 
 describe("#given a fresh Anthropic payload #when adding computer use #then beta and native tool are injected", () => {
-	it("adds headers, extra_body betas, and display-sized computer tool", () => {
+	it("adds headers, extra_body betas, and downscaled computer tool dimensions", () => {
 		const payload = { messages: [] };
 
-		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, { width: 2560, height: 1600 });
+		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, DEFAULT_DOWNSCALE);
 
 		expect(result).toEqual({
 			messages: [],
@@ -76,8 +106,8 @@ describe("#given a fresh Anthropic payload #when adding computer use #then beta 
 				{
 					type: ANTHROPIC_NATIVE_COMPUTER_TOOL_TYPE,
 					name: ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
-					display_width_px: 2560,
-					display_height_px: 1600,
+					display_width_px: 1280,
+					display_height_px: 720,
 				},
 			],
 			headers: { "anthropic-beta": ANTHROPIC_COMPUTER_USE_BETA },
@@ -90,7 +120,7 @@ describe("#given an existing Anthropic beta header #when adding computer use #th
 	it("does not duplicate the computer-use beta header", () => {
 		const payload = { headers: { "anthropic-beta": `foo, ${ANTHROPIC_COMPUTER_USE_BETA}` } };
 
-		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, { width: 1, height: 2 });
+		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, DEFAULT_DOWNSCALE);
 
 		expect(result).toMatchObject({
 			headers: { "anthropic-beta": `foo,${ANTHROPIC_COMPUTER_USE_BETA}` },
@@ -102,7 +132,7 @@ describe("#given an existing extra_body beta #when adding computer use #then bet
 	it("does not duplicate the computer-use beta entry", () => {
 		const payload = { extra_body: { betas: [ANTHROPIC_COMPUTER_USE_BETA] } };
 
-		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, { width: 1, height: 2 });
+		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, DEFAULT_DOWNSCALE);
 
 		expect(result).toMatchObject({ extra_body: { betas: [ANTHROPIC_COMPUTER_USE_BETA] } });
 	});
@@ -115,7 +145,7 @@ describe("#given a function-shaped computer tool #when adding computer use #then
 			tools: [{ name: "computer", input_schema: {} }, unrelatedTool],
 		};
 
-		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, { width: 1440, height: 900 });
+		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, DEFAULT_DOWNSCALE);
 
 		expect(result).toMatchObject({
 			tools: [
@@ -123,8 +153,8 @@ describe("#given a function-shaped computer tool #when adding computer use #then
 				{
 					type: ANTHROPIC_NATIVE_COMPUTER_TOOL_TYPE,
 					name: ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
-					display_width_px: 1440,
-					display_height_px: 900,
+					display_width_px: 1280,
+					display_height_px: 720,
 				},
 			],
 		});
@@ -140,7 +170,7 @@ describe("#given unrelated payload fields #when adding computer use #then existi
 			extra_body: { temperature: 0.2, betas: ["other-beta"] },
 		};
 
-		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, { width: 800, height: 600 });
+		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, ONE_TO_ONE_DOWNSCALE);
 
 		expect(result).toMatchObject({
 			tools: [
@@ -148,8 +178,8 @@ describe("#given unrelated payload fields #when adding computer use #then existi
 				{
 					type: ANTHROPIC_NATIVE_COMPUTER_TOOL_TYPE,
 					name: ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
-					display_width_px: 800,
-					display_height_px: 600,
+					display_width_px: 100,
+					display_height_px: 80,
 				},
 			],
 			headers: { "x-custom": "kept", "anthropic-beta": ANTHROPIC_COMPUTER_USE_BETA },
@@ -162,7 +192,7 @@ describe("#given screenshot action #when executed #then image content is returne
 	it("returns PNG mime content", async () => {
 		const computer = createComputer();
 
-		const result = await executeNativeComputerAction({ action: "screenshot" }, computer);
+		const result = await executeNativeComputerAction({ action: "screenshot" }, computer, ONE_TO_ONE_DOWNSCALE);
 
 		expect(result.content).toEqual([
 			{ type: "image", data: Buffer.from("png").toString("base64"), mimeType: "image/png" },
@@ -174,7 +204,11 @@ describe("#given left_click action #when executed #then click runs once and scre
 	it("dispatches click to the computer", async () => {
 		const computer = createComputer();
 
-		const result = await executeNativeComputerAction({ action: "left_click", coordinate: [10, 20] }, computer);
+		const result = await executeNativeComputerAction(
+			{ action: "left_click", coordinate: [10, 20] },
+			computer,
+			ONE_TO_ONE_DOWNSCALE,
+		);
 
 		expect(computer.click).toHaveBeenCalledTimes(1);
 		expect(computer.click).toHaveBeenCalledWith({ x: 10, y: 20 });
@@ -188,7 +222,7 @@ describe("#given key combo action #when executed #then combo is split into key a
 	it("splits cmd+shift+t", async () => {
 		const computer = createComputer();
 
-		await executeNativeComputerAction({ action: "key", text: "cmd+shift+t" }, computer);
+		await executeNativeComputerAction({ action: "key", text: "cmd+shift+t" }, computer, ONE_TO_ONE_DOWNSCALE);
 
 		expect(computer.key).toHaveBeenCalledWith("t", { modifiers: ["cmd", "shift"] });
 	});
@@ -198,7 +232,7 @@ describe("#given triple_click action #when executed #then click runs three times
 	it("dispatches three clicks", async () => {
 		const computer = createComputer();
 
-		await executeNativeComputerAction({ action: "triple_click", coordinate: [3, 4] }, computer);
+		await executeNativeComputerAction({ action: "triple_click", coordinate: [3, 4] }, computer, ONE_TO_ONE_DOWNSCALE);
 
 		expect(computer.click).toHaveBeenCalledTimes(3);
 		expect(computer.click).toHaveBeenNthCalledWith(1, { x: 3, y: 4 });
@@ -212,7 +246,11 @@ describe("#given wait action #when executed #then it resolves after duration", (
 		vi.useFakeTimers();
 		const computer = createComputer();
 
-		const resultPromise = executeNativeComputerAction({ action: "wait", duration: 0.25 }, computer);
+		const resultPromise = executeNativeComputerAction(
+			{ action: "wait", duration: 0.25 },
+			computer,
+			ONE_TO_ONE_DOWNSCALE,
+		);
 		await vi.advanceTimersByTimeAsync(250);
 
 		await expect(resultPromise).resolves.toEqual({
@@ -227,13 +265,35 @@ describe("#given unsupported mouse phase action #when executed #then tagged erro
 	it("throws ComputerUseError with unsupported_action kind", async () => {
 		const computer = createComputer();
 
-		await expect(executeNativeComputerAction({ action: "left_mouse_down" }, computer)).rejects.toBeInstanceOf(
-			ComputerUseError,
-		);
-		await expect(executeNativeComputerAction({ action: "left_mouse_down" }, computer)).rejects.toMatchObject({
+		await expect(
+			executeNativeComputerAction({ action: "left_mouse_down" }, computer, ONE_TO_ONE_DOWNSCALE),
+		).rejects.toBeInstanceOf(ComputerUseError);
+		await expect(
+			executeNativeComputerAction({ action: "left_mouse_down" }, computer, ONE_TO_ONE_DOWNSCALE),
+		).rejects.toMatchObject({
 			action: "left_mouse_down",
 			kind: "unsupported_action",
 			message: "Use macos_cua_* tools for fine-grained mouse phases",
 		});
+	});
+});
+
+describe("#given scaled Anthropic coordinates #when left click executes #then logical screen points are clicked", () => {
+	it("unscales model-space coordinates before dispatch", async () => {
+		const computer = createComputer();
+
+		await executeNativeComputerAction({ action: "left_click", coordinate: [640, 360] }, computer, DEFAULT_DOWNSCALE);
+
+		expect(computer.click).toHaveBeenCalledWith({ x: 1280, y: 720 });
+	});
+});
+
+describe("#given a screenshot action #when screenshot action executes #then returned image is downscaled", () => {
+	it("passes target dimensions into the resize wrapper", async () => {
+		const computer = createComputer();
+
+		await executeNativeComputerAction({ action: "screenshot" }, computer, DEFAULT_DOWNSCALE);
+
+		expect(coordsMock.resizeScreenshotPng).toHaveBeenCalledWith(Buffer.from("png"), 1280, 720);
 	});
 });

@@ -1,17 +1,16 @@
 import type { ComputerInterface, Point } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
+import { type DisplayConfig, resizeScreenshotPng, unscaleCoord } from "./computer-use/coords.js";
 import type { AgentToolResult } from "./pi/index.js";
 
 export const ANTHROPIC_COMPUTER_USE_BETA = "computer-use-2025-01-24";
 export const ANTHROPIC_NATIVE_COMPUTER_TOOL_TYPE = "computer_20250124";
 export const ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME = "computer";
 
-export type DisplayConfig = { width: number; height: number; displayNumber?: number };
-
 type ToolDefinition = Record<string, unknown>;
 type ComputerUseErrorKind = "unsupported_action" | "invalid_arguments" | "execution_failed";
-type ComputerUseResult = AgentToolResult<undefined>;
+export type ComputerUseResult = AgentToolResult<undefined>;
 type KeyModifier = "command" | "option" | "control" | "shift" | "cmd" | "alt" | "ctrl";
 type ScrollDirection = "up" | "down" | "left" | "right";
 
@@ -42,7 +41,7 @@ export class ComputerUseError extends Error {
 
 const coordinateSchema = Type.Array(Type.Number(), { minItems: 2, maxItems: 2 });
 
-export const computerToolSchema = Type.Object(
+export const anthropicComputerToolSchema = Type.Object(
 	{
 		action: Type.Union([
 			Type.Literal("screenshot"),
@@ -75,7 +74,8 @@ export const computerToolSchema = Type.Object(
 	{ additionalProperties: false },
 );
 
-export type ComputerToolInput = Static<typeof computerToolSchema>;
+export const computerToolSchema = anthropicComputerToolSchema;
+export type ComputerToolInput = Static<typeof anthropicComputerToolSchema>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
@@ -119,10 +119,7 @@ export function addAnthropicComputerUseToPayload(
 	payload: unknown,
 	display: DisplayConfig,
 ): unknown {
-	if (api !== "anthropic-messages") {
-		return payload;
-	}
-	if (!isRecord(payload)) {
+	if (api !== "anthropic-messages" || !isRecord(payload)) {
 		return payload;
 	}
 
@@ -133,9 +130,8 @@ export function addAnthropicComputerUseToPayload(
 		sanitizedTools.push({
 			type: ANTHROPIC_NATIVE_COMPUTER_TOOL_TYPE,
 			name: ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
-			display_width_px: display.width,
-			display_height_px: display.height,
-			...(display.displayNumber !== undefined ? { display_number: display.displayNumber } : {}),
+			display_width_px: display.modelWidth,
+			display_height_px: display.modelHeight,
 		});
 	}
 
@@ -146,22 +142,14 @@ export function addAnthropicComputerUseToPayload(
 			? existingBetas
 			: [...existingBetas, ANTHROPIC_COMPUTER_USE_BETA]
 		: [ANTHROPIC_COMPUTER_USE_BETA];
-
 	const headers = payload["headers"];
 	const headerRecord = isRecord(headers) ? headers : {};
-	const nextHeaders = {
-		...headerRecord,
-		"anthropic-beta": mergeBetaHeader(headerRecord["anthropic-beta"]),
-	};
 
 	return {
 		...payload,
 		tools: sanitizedTools,
-		headers: nextHeaders,
-		extra_body: {
-			...(isRecord(extraBody) ? extraBody : {}),
-			betas: mergedBetas,
-		},
+		headers: { ...headerRecord, "anthropic-beta": mergeBetaHeader(headerRecord["anthropic-beta"]) },
+		extra_body: { ...(isRecord(extraBody) ? extraBody : {}), betas: mergedBetas },
 	};
 }
 
@@ -172,51 +160,52 @@ export function buildComputerUseSection(width: number, height: number): string {
 export async function executeNativeComputerAction(
 	input: ComputerToolInput,
 	computer: ComputerActionDriver,
+	display: DisplayConfig,
 ): Promise<ComputerUseResult> {
 	try {
 		switch (input.action) {
 			case "screenshot":
-				return await screenshotResult(computer);
+				return await screenshotResult(computer, display);
 			case "mouse_move":
-				await computer.move(parseCoordinate(input.coordinate, "mouse_move"));
-				return await screenshotResult(computer);
+				await computer.move(unscaleCoord(parseCoordinate(input.coordinate, "mouse_move"), display));
+				return await screenshotResult(computer, display);
 			case "left_click":
-				await computer.click(parseCoordinate(input.coordinate, "left_click"));
-				return await screenshotResult(computer);
+				await computer.click(unscaleCoord(parseCoordinate(input.coordinate, "left_click"), display));
+				return await screenshotResult(computer, display);
 			case "right_click":
-				await computer.rightClick(parseCoordinate(input.coordinate, "right_click"));
-				return await screenshotResult(computer);
+				await computer.rightClick(unscaleCoord(parseCoordinate(input.coordinate, "right_click"), display));
+				return await screenshotResult(computer, display);
 			case "middle_click":
-				await computer.middleClick(parseCoordinate(input.coordinate, "middle_click"));
-				return await screenshotResult(computer);
+				await computer.middleClick(unscaleCoord(parseCoordinate(input.coordinate, "middle_click"), display));
+				return await screenshotResult(computer, display);
 			case "double_click":
-				await computer.doubleClick(parseCoordinate(input.coordinate, "double_click"));
-				return await screenshotResult(computer);
+				await computer.doubleClick(unscaleCoord(parseCoordinate(input.coordinate, "double_click"), display));
+				return await screenshotResult(computer, display);
 			case "triple_click":
-				await tripleClick(computer, parseCoordinate(input.coordinate, "triple_click"));
-				return await screenshotResult(computer);
+				await tripleClick(computer, unscaleCoord(parseCoordinate(input.coordinate, "triple_click"), display));
+				return await screenshotResult(computer, display);
 			case "left_click_drag":
 				await computer.drag({
-					from: parseCoordinate(input.start_coordinate, "left_click_drag.start_coordinate"),
-					to: parseCoordinate(input.coordinate, "left_click_drag.coordinate"),
+					from: unscaleCoord(parseCoordinate(input.start_coordinate, "left_click_drag.start_coordinate"), display),
+					to: unscaleCoord(parseCoordinate(input.coordinate, "left_click_drag.coordinate"), display),
 					duration: DEFAULT_DRAG_DURATION_MILLISECONDS,
 				});
-				return await screenshotResult(computer);
+				return await screenshotResult(computer, display);
 			case "cursor_position": {
-				const position = await computer.getCursorPosition();
+				const position = scaleCoord(await computer.getCursorPosition(), display);
 				return textResult(`${position.x},${position.y}`);
 			}
 			case "key": {
 				const combo = parseKeyCombo(input.text ?? input.key);
 				await computer.key(combo.key, combo.modifiers.length === 0 ? undefined : { modifiers: combo.modifiers });
-				return await screenshotResult(computer);
+				return await screenshotResult(computer, display);
 			}
 			case "type":
 				await computer.type(parseText(input.text, "type"));
-				return await screenshotResult(computer);
+				return await screenshotResult(computer, display);
 			case "scroll":
 				await computer.scroll(parseScroll(input.scroll_direction, input.scroll_amount));
-				return await screenshotResult(computer);
+				return await screenshotResult(computer, display);
 			case "wait":
 				await sleep(parseWaitDurationMilliseconds(input.duration));
 				return textResult("wait complete");
@@ -234,22 +223,24 @@ export async function executeNativeComputerAction(
 }
 
 function imageResult(pngBase64: string): ComputerUseResult {
-	return {
-		content: [{ type: "image", data: pngBase64, mimeType: "image/png" }],
-		details: undefined,
-	};
+	return { content: [{ type: "image", data: pngBase64, mimeType: "image/png" }], details: undefined };
 }
 
 function textResult(text: string): ComputerUseResult {
-	return {
-		content: [{ type: "text", text }],
-		details: undefined,
-	};
+	return { content: [{ type: "text", text }], details: undefined };
 }
 
-async function screenshotResult(computer: ComputerActionDriver): Promise<ComputerUseResult> {
+async function screenshotResult(computer: ComputerActionDriver, display: DisplayConfig): Promise<ComputerUseResult> {
 	const screenshot = await computer.screenshot();
-	return imageResult(screenshot.data.toString("base64"));
+	const resized = await resizeScreenshotPng(screenshot.data, display.modelWidth, display.modelHeight);
+	return imageResult(resized.toString("base64"));
+}
+
+function scaleCoord(point: Point, display: DisplayConfig): Point {
+	return {
+		x: Math.round(point.x * (display.modelWidth / display.logicalWidth)),
+		y: Math.round(point.y * (display.modelHeight / display.logicalHeight)),
+	};
 }
 
 function parseCoordinate(coordinate: readonly number[] | undefined, action: string): Point {
@@ -276,9 +267,6 @@ function parseKeyCombo(text: string | undefined): { readonly key: string; readon
 		.split("+")
 		.map((part) => part.trim().toLowerCase())
 		.filter(Boolean);
-	if (parts.length === 0) {
-		throw new ComputerUseError("invalid_arguments", "key requires a non-empty key combo");
-	}
 	const key = parts.at(-1);
 	if (key === undefined) {
 		throw new ComputerUseError("invalid_arguments", "key requires a non-empty key combo");
@@ -318,8 +306,7 @@ function parseWaitDurationMilliseconds(duration: number | undefined): number {
 	if (duration === undefined || !Number.isFinite(duration)) {
 		throw new ComputerUseError("invalid_arguments", "wait requires finite duration");
 	}
-	const clamped = Math.min(MAX_WAIT_SECONDS, Math.max(0, duration));
-	return clamped * 1000;
+	return Math.min(MAX_WAIT_SECONDS, Math.max(0, duration)) * 1000;
 }
 
 async function tripleClick(computer: ComputerActionDriver, position: Point): Promise<void> {

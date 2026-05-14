@@ -64,23 +64,23 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async move(position: Point): Promise<void> {
-		this.input.move(position);
+		await this.input.move(position);
 	}
 
 	async click(position: Point): Promise<void> {
-		this.input.click(position);
+		await this.input.click(position);
 	}
 
 	async rightClick(position: Point): Promise<void> {
-		this.input.click(position, "right");
+		await this.input.click(position, "right");
 	}
 
 	async middleClick(position: Point): Promise<void> {
-		this.input.click(position, "middle");
+		await this.input.click(position, "middle");
 	}
 
 	async doubleClick(position: Point): Promise<void> {
-		this.input.doubleClick(position);
+		await this.input.doubleClick(position);
 	}
 
 	async type(text: string): Promise<void> {
@@ -88,11 +88,11 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async key(key: string, options?: KeyOptions): Promise<void> {
-		this.input.pressKey(key, options);
+		await this.input.pressKey(key, options);
 	}
 
 	async scroll(options: ScrollOptions): Promise<void> {
-		this.input.scroll(options);
+		await this.input.scroll(options);
 	}
 
 	async drag(options: DragOptions): Promise<void> {
@@ -127,7 +127,7 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async close(): Promise<void> {
-		// Nothing to clean up for host computer
+		this.input.close();
 	}
 }
 

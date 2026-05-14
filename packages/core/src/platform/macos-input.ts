@@ -12,6 +12,7 @@ import {
 	postScrollEvent,
 	postUnicodeText,
 } from "./macos-ffi/coregraphics.js";
+import { MacOSCuaHelper } from "./macos-helper.js";
 
 const DEFAULT_DRAG_FRAME_MILLISECONDS = 16;
 const MAX_DRAG_STEPS = 60;
@@ -124,9 +125,8 @@ const VIRTUAL_KEY_CODES = new Map<string, number>([
 ]);
 
 export class MacOSInputController {
-	// v1 per-PID mouse events intentionally stay on public CGEventPostToPid.
-	// Chromium/Electron mouse handling and OpenGL/game viewports may require future SkyLight-authenticated events.
 	private targetPid: number | undefined;
+	private readonly helper = new MacOSCuaHelper();
 
 	constructor(targetPid?: number) {
 		this.setTarget(targetPid);
@@ -139,18 +139,30 @@ export class MacOSInputController {
 		this.targetPid = pid;
 	}
 
-	move(position: Point): void {
+	async move(position: Point): Promise<void> {
+		if (this.targetPid !== undefined) {
+			await this.helper.movePid(this.targetPid, position);
+			return;
+		}
 		this.postMouse("move", position, "left", undefined);
 	}
 
-	click(position: Point, button: MouseButton = "left"): void {
-		this.move(position);
+	async click(position: Point, button: MouseButton = "left"): Promise<void> {
+		if (this.targetPid !== undefined) {
+			await this.clickPid(this.targetPid, position, button);
+			return;
+		}
+		await this.move(position);
 		this.postMouse("down", position, button, 1);
 		this.postMouse("up", position, button, 1);
 	}
 
-	doubleClick(position: Point): void {
-		this.move(position);
+	async doubleClick(position: Point): Promise<void> {
+		if (this.targetPid !== undefined) {
+			await this.helper.doubleClickPid(this.targetPid, position);
+			return;
+		}
+		await this.move(position);
 		this.postMouse("down", position, "left", 1);
 		this.postMouse("up", position, "left", 1);
 		this.postMouse("down", position, "left", 2);
@@ -158,41 +170,54 @@ export class MacOSInputController {
 	}
 
 	async typeText(text: string): Promise<void> {
+		if (this.targetPid !== undefined) {
+			await this.helper.typeTextPid(this.targetPid, text);
+			return;
+		}
 		for (const segment of Array.from(text)) {
-			postUnicodeText(segment, this.targetPid);
-			if (this.targetPid !== undefined) {
-				await sleep(TARGET_TEXT_EVENT_DELAY_MILLISECONDS);
-			}
+			postUnicodeText(segment, undefined);
 		}
 	}
 
-	pressKey(key: string, options?: KeyOptions): void {
+	async pressKey(key: string, options?: KeyOptions): Promise<void> {
+		if (this.targetPid !== undefined) {
+			await this.helper.keyPid(this.targetPid, key, options);
+			return;
+		}
 		const keyCode = virtualKeyCodeFor(key);
 		const flags = modifierFlags(options?.modifiers ?? []);
-		postKeyboardEvent({ keyCode, keyDown: true, flags, text: undefined, targetPid: this.targetPid });
-		postKeyboardEvent({ keyCode, keyDown: false, flags, text: undefined, targetPid: this.targetPid });
+		postKeyboardEvent({ keyCode, keyDown: true, flags, text: undefined, targetPid: undefined });
+		postKeyboardEvent({ keyCode, keyDown: false, flags, text: undefined, targetPid: undefined });
 	}
 
-	scroll(options: ScrollOptions): void {
+	async scroll(options: ScrollOptions): Promise<void> {
 		const amount = Math.trunc(options.amount);
+		if (this.targetPid !== undefined) {
+			await this.scrollPid(this.targetPid, options.direction, amount);
+			return;
+		}
 		switch (options.direction) {
 			case "up":
-				postScrollEvent({ deltaX: 0, deltaY: amount, targetPid: this.targetPid });
+				postScrollEvent({ deltaX: 0, deltaY: amount, targetPid: undefined });
 				return;
 			case "down":
-				postScrollEvent({ deltaX: 0, deltaY: -amount, targetPid: this.targetPid });
+				postScrollEvent({ deltaX: 0, deltaY: -amount, targetPid: undefined });
 				return;
 			case "left":
-				postScrollEvent({ deltaX: -amount, deltaY: 0, targetPid: this.targetPid });
+				postScrollEvent({ deltaX: -amount, deltaY: 0, targetPid: undefined });
 				return;
 			case "right":
-				postScrollEvent({ deltaX: amount, deltaY: 0, targetPid: this.targetPid });
+				postScrollEvent({ deltaX: amount, deltaY: 0, targetPid: undefined });
 				return;
 		}
 	}
 
 	async drag(options: DragOptions): Promise<void> {
-		this.move(options.from);
+		if (this.targetPid !== undefined) {
+			await this.helper.dragPid(this.targetPid, options);
+			return;
+		}
+		await this.move(options.from);
 		this.postMouse("down", options.from, "left", 1);
 
 		const duration = options.duration ?? 0;
@@ -214,13 +239,52 @@ export class MacOSInputController {
 		return { x: Math.round(position.x), y: Math.round(position.y) };
 	}
 
+	close(): void {
+		this.helper.close();
+	}
+
 	private postMouse(
 		kind: "move" | "down" | "up" | "drag",
 		position: Point,
 		button: MouseButton,
 		clickState: number | undefined,
 	): void {
-		postMouseEvent({ kind, position, button, clickState, targetPid: this.targetPid });
+		postMouseEvent({ kind, position, button, clickState, targetPid: undefined });
+	}
+
+	private async clickPid(pid: number, position: Point, button: MouseButton): Promise<void> {
+		switch (button) {
+			case "left":
+				await this.helper.clickPid(pid, position);
+				return;
+			case "right":
+				await this.helper.rightClickPid(pid, position);
+				return;
+			case "middle":
+				await this.helper.middleClickPid(pid, position);
+				return;
+		}
+	}
+
+	private async scrollPid(pid: number, direction: ScrollOptions["direction"], amount: number): Promise<void> {
+		const key = scrollKeyFor(direction);
+		for (let index = 0; index < Math.max(0, amount); index += 1) {
+			await this.helper.keyPid(pid, key, { modifiers: [] });
+			await sleep(TARGET_TEXT_EVENT_DELAY_MILLISECONDS);
+		}
+	}
+}
+
+function scrollKeyFor(direction: ScrollOptions["direction"]): string {
+	switch (direction) {
+		case "up":
+			return "pageup";
+		case "down":
+			return "pagedown";
+		case "left":
+			return "left";
+		case "right":
+			return "right";
 	}
 }
 

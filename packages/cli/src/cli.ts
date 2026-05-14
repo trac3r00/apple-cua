@@ -37,11 +37,20 @@ type ScreenshotCommandOptions = {
 	quality: number;
 };
 
-type ClickCommandOptions = {
+type PointCommandOptions = {
+	x?: number;
+	y?: number;
+};
+
+type ClickCommandOptions = PointCommandOptions & {
 	button: MouseButton;
 };
 
 type DragCommandOptions = {
+	fromX?: number;
+	fromY?: number;
+	toX?: number;
+	toY?: number;
 	duration: number;
 };
 
@@ -63,10 +72,14 @@ const program = new Command();
 
 program
 	.name("macos-cua")
-	.description("Native macOS computer-use control")
+	.description("Native macOS computer-use control. Per-PID mouse/scroll uses the Swift cua-helper SkyLight bridge.")
 	.version(packageJson.version)
 	.option("--json", "print machine-readable JSON output")
-	.option("--target-pid <pid>", "deliver input to a target process id without focusing it", parsePositiveInteger)
+	.option(
+		"--target-pid <pid>",
+		"deliver input to a target process id without focusing it (requires built cua-helper for mouse/scroll)",
+		parsePositiveInteger,
+	)
 	.option("--target-bundle-id <id>", "deliver input to the running app with this bundle identifier");
 
 program
@@ -107,12 +120,14 @@ program
 
 program
 	.command("click")
-	.description("Click")
-	.argument("<x>", "x coordinate")
-	.argument("<y>", "y coordinate")
+	.description("Click. With --target-pid, posts through cua-helper without cursor movement or focus steal.")
+	.argument("[x]", "x coordinate")
+	.argument("[y]", "y coordinate")
+	.option("-x, --x <x>", "x coordinate", parseXCoordinate)
+	.option("-y, --y <y>", "y coordinate", parseYCoordinate)
 	.option("-b, --button <button>", "mouse button: left, right, or middle", parseMouseButton, "left")
-	.action(async (x: string, y: string, options: ClickCommandOptions) => {
-		const position = { x: parseInteger(x, "x"), y: parseInteger(y, "y") };
+	.action(async (x: string | undefined, y: string | undefined, options: ClickCommandOptions) => {
+		const position = parsePointArguments(x, y, options);
 		await withComputer((computer) => clickWithButton(computer, position, options.button));
 		writeActionOutput(
 			"click",
@@ -122,56 +137,92 @@ program
 	});
 
 program
+	.command("right-click")
+	.description("Right-click. With --target-pid, posts through cua-helper without cursor movement or focus steal.")
+	.argument("[x]", "x coordinate")
+	.argument("[y]", "y coordinate")
+	.option("-x, --x <x>", "x coordinate", parseXCoordinate)
+	.option("-y, --y <y>", "y coordinate", parseYCoordinate)
+	.action(async (x: string | undefined, y: string | undefined, options: PointCommandOptions) => {
+		const position = parsePointArguments(x, y, options);
+		await withComputer((computer) => computer.rightClick(position));
+		writeActionOutput("right-click", position, `Right-clicked at ${position.x},${position.y}`);
+	});
+
+program
+	.command("middle-click")
+	.description("Middle-click. With --target-pid, posts through cua-helper without cursor movement or focus steal.")
+	.argument("[x]", "x coordinate")
+	.argument("[y]", "y coordinate")
+	.option("-x, --x <x>", "x coordinate", parseXCoordinate)
+	.option("-y, --y <y>", "y coordinate", parseYCoordinate)
+	.action(async (x: string | undefined, y: string | undefined, options: PointCommandOptions) => {
+		const position = parsePointArguments(x, y, options);
+		await withComputer((computer) => computer.middleClick(position));
+		writeActionOutput("middle-click", position, `Middle-clicked at ${position.x},${position.y}`);
+	});
+
+program
 	.command("double-click")
-	.description("Double-click")
-	.argument("<x>", "x coordinate")
-	.argument("<y>", "y coordinate")
-	.action(async (x: string, y: string) => {
-		const position = { x: parseInteger(x, "x"), y: parseInteger(y, "y") };
+	.description("Double-click. With --target-pid, posts through cua-helper without cursor movement or focus steal.")
+	.argument("[x]", "x coordinate")
+	.argument("[y]", "y coordinate")
+	.option("-x, --x <x>", "x coordinate", parseXCoordinate)
+	.option("-y, --y <y>", "y coordinate", parseYCoordinate)
+	.action(async (x: string | undefined, y: string | undefined, options: PointCommandOptions) => {
+		const position = parsePointArguments(x, y, options);
 		await withComputer((computer) => computer.doubleClick(position));
 		writeActionOutput("double-click", position, `Double-clicked at ${position.x},${position.y}`);
 	});
 
 program
 	.command("move")
-	.description("Move cursor")
-	.argument("<x>", "x coordinate")
-	.argument("<y>", "y coordinate")
-	.action(async (x: string, y: string) => {
-		const position = { x: parseInteger(x, "x"), y: parseInteger(y, "y") };
+	.description("Move cursor globally, or send mouseMoved to --target-pid without moving the real cursor.")
+	.argument("[x]", "x coordinate")
+	.argument("[y]", "y coordinate")
+	.option("-x, --x <x>", "x coordinate", parseXCoordinate)
+	.option("-y, --y <y>", "y coordinate", parseYCoordinate)
+	.action(async (x: string | undefined, y: string | undefined, options: PointCommandOptions) => {
+		const position = parsePointArguments(x, y, options);
 		await withComputer((computer) => computer.move(position));
 		writeActionOutput("move", position, `Moved cursor to ${position.x},${position.y}`);
 	});
 
 program
 	.command("drag")
-	.description("Drag")
-	.argument("<fromX>", "start x coordinate")
-	.argument("<fromY>", "start y coordinate")
-	.argument("<toX>", "end x coordinate")
-	.argument("<toY>", "end y coordinate")
+	.description("Drag. With --target-pid, posts through cua-helper without cursor movement or focus steal.")
+	.argument("[fromX]", "start x coordinate")
+	.argument("[fromY]", "start y coordinate")
+	.argument("[toX]", "end x coordinate")
+	.argument("[toY]", "end y coordinate")
+	.option("--from-x <x>", "start x coordinate", parseXCoordinate)
+	.option("--from-y <y>", "start y coordinate", parseYCoordinate)
+	.option("--to-x <x>", "end x coordinate", parseXCoordinate)
+	.option("--to-y <y>", "end y coordinate", parseYCoordinate)
 	.option("-d, --duration <ms>", "duration in milliseconds", parseNonNegativeInteger, 500)
-	.action(async (fromX: string, fromY: string, toX: string, toY: string, options: DragCommandOptions) => {
-		const args = {
-			fromX: parseInteger(fromX, "fromX"),
-			fromY: parseInteger(fromY, "fromY"),
-			toX: parseInteger(toX, "toX"),
-			toY: parseInteger(toY, "toY"),
-			duration: options.duration,
-		};
-		await withComputer((computer) =>
-			computer.drag({
-				from: { x: args.fromX, y: args.fromY },
-				to: { x: args.toX, y: args.toY },
-				duration: args.duration,
-			}),
-		);
-		writeActionOutput("drag", args, `Dragged from ${args.fromX},${args.fromY} to ${args.toX},${args.toY}`);
-	});
+	.action(
+		async (
+			fromX: string | undefined,
+			fromY: string | undefined,
+			toX: string | undefined,
+			toY: string | undefined,
+			options: DragCommandOptions,
+		) => {
+			const args = parseDragArguments(fromX, fromY, toX, toY, options);
+			await withComputer((computer) =>
+				computer.drag({
+					from: { x: args.fromX, y: args.fromY },
+					to: { x: args.toX, y: args.toY },
+					duration: args.duration,
+				}),
+			);
+			writeActionOutput("drag", args, `Dragged from ${args.fromX},${args.fromY} to ${args.toX},${args.toY}`);
+		},
+	);
 
 program
 	.command("scroll")
-	.description("Scroll")
+	.description("Scroll globally with a wheel event, or scroll --target-pid via helper PageUp/PageDown/arrow keys.")
 	.requiredOption("-d, --direction <direction>", "direction: up, down, left, or right", parseScrollDirection)
 	.option("-a, --amount <n>", "scroll amount", parsePositiveInteger, 3)
 	.action(async (options: ScrollCommandOptions) => {
@@ -363,6 +414,46 @@ function parseInteger(value: string, name: string): number {
 		throw new Error(`${name} must be an integer`);
 	}
 	return number;
+}
+
+function parseXCoordinate(value: string): number {
+	return parseInteger(value, "x");
+}
+
+function parseYCoordinate(value: string): number {
+	return parseInteger(value, "y");
+}
+
+function parsePointArguments(
+	xArgument: string | undefined,
+	yArgument: string | undefined,
+	options: PointCommandOptions,
+): { x: number; y: number } {
+	const x = options.x ?? (xArgument === undefined ? undefined : parseInteger(xArgument, "x"));
+	const y = options.y ?? (yArgument === undefined ? undefined : parseInteger(yArgument, "y"));
+	if (x === undefined || y === undefined) {
+		throw new Error("x and y are required (pass positional coordinates or --x/--y)");
+	}
+	return { x, y };
+}
+
+function parseDragArguments(
+	fromXArgument: string | undefined,
+	fromYArgument: string | undefined,
+	toXArgument: string | undefined,
+	toYArgument: string | undefined,
+	options: DragCommandOptions,
+): { fromX: number; fromY: number; toX: number; toY: number; duration: number } {
+	const fromX = options.fromX ?? (fromXArgument === undefined ? undefined : parseInteger(fromXArgument, "fromX"));
+	const fromY = options.fromY ?? (fromYArgument === undefined ? undefined : parseInteger(fromYArgument, "fromY"));
+	const toX = options.toX ?? (toXArgument === undefined ? undefined : parseInteger(toXArgument, "toX"));
+	const toY = options.toY ?? (toYArgument === undefined ? undefined : parseInteger(toYArgument, "toY"));
+	if (fromX === undefined || fromY === undefined || toX === undefined || toY === undefined) {
+		throw new Error(
+			"fromX, fromY, toX, and toY are required (pass positional coordinates or --from-x/--from-y/--to-x/--to-y)",
+		);
+	}
+	return { fromX, fromY, toX, toY, duration: options.duration };
 }
 
 function parseNonNegativeInteger(value: string): number {

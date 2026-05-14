@@ -5,7 +5,7 @@ import PackageDescription
 
 let package = Package(
 	name: "cua-helper",
-	platforms: [.macOS(.v13)],
+	platforms: [.macOS(.v14)],
 	products: [
 		.executable(name: "cua-helper", targets: ["CuaHelper"]),
 	],

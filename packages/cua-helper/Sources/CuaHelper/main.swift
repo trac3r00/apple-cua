@@ -29,6 +29,8 @@ final class HelperServer {
 			write(try await dispatch(request))
 		} catch let error as HelperFailure {
 			write(.failure(id: request.id, error.description))
+		} catch let error as ScreenshotFailure {
+			write(.failure(id: request.id, error.description))
 		} catch {
 			write(.failure(id: request.id, "unexpected error: \(error)"))
 		}
@@ -52,6 +54,9 @@ final class HelperServer {
 		case "drag": try InputActions.drag(pid: pid(request), from: fromPoint(request), to: toPoint(request), duration: request.duration ?? 500, steps: request.steps ?? defaultDragSteps, modifiers: request.modifiers ?? [])
 		case "key": try InputActions.key(pid: pid(request), key: request.key, keyCode: request.keyCode, modifiers: request.modifiers ?? [])
 		case "type_text": try InputActions.typeText(pid: pid(request), text: request.text ?? "")
+		case "screenshot":
+			let result = try await ScreenshotCapture.capture(width: screenshotWidth(request), height: screenshotHeight(request))
+			return .success(id: request.id, data: result.data.base64EncodedString(), width: result.width, height: result.height)
 		case "scroll": throw HelperFailure.invalid("scroll is implemented in TypeScript via key events, not in cua-helper")
 		case "waitForSettle":
 			let settled = await UISettleDetector.waitForSettle(

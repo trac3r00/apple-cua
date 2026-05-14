@@ -31,7 +31,7 @@ The result is lower latency and real-app fidelity. The cost is weaker environmen
 │    screencapture → PNG buffer                            │
 │    koffi/CGEvent → global mouse/keyboard/scroll          │
 │    Swift cua-helper → per-PID SkyLight mouse/keyboard    │
-│    system_profiler → screen bounds                       │
+│    Swift cua-helper → logical screen size                │
 │  VMComputer (interface only)                             │
 │  CloudComputer (interface only)                            │
 └─────────────────────────────────────────────────────────┘
@@ -44,7 +44,20 @@ The result is lower latency and real-app fidelity. The cost is weaker environmen
 - **Screenshots**: `screencapture -x -` (captures to stdout as PNG bytes). Region capture is supported via `-R x,y,w,h`.
 - **Global input**: `koffi`-bound CoreGraphics CGEvent for click, double-click, type, key chords, scroll, and drag. Events are posted globally via `CGEventPost` by default, preserving the original behavior.
 - **Per-PID input**: `packages/cua-helper` is a Swift executable managed by `MacOSCuaHelper`. It speaks line-delimited JSON over stdio and posts mouse/key/text events to a target PID through SkyLight `SLEventPostToPid`.
-- **Queries**: `system_profiler SPDisplaysDataType` reports the screen size (chosen specifically because it does not require Apple Events permission and won't hang) and `CGEventGetLocation(CGEventCreate(NULL))` reports the current cursor position.
+- **Queries**: `cua-helper` reports logical screen size through AppKit `NSScreen.frame`, with `system_profiler SPDisplaysDataType` as a cold fallback when the helper is unavailable. `CGEventGetLocation(CGEventCreate(NULL))` reports the current cursor position.
+
+## Computer-use coordinate scaling
+
+The pi-extension keeps model coordinates and macOS input coordinates separate:
+
+1. `MacOSHostComputer.getScreenSize()` returns logical desktop points.
+2. `computeDownscale()` downscales those logical dimensions to a 1280px long edge while preserving aspect ratio.
+3. Screenshots returned through native computer-use are resized to `targetWidth x targetHeight`.
+4. Model actions are interpreted in that resized image space. `unscaleCoordinate()` maps them back to logical points before `click`, `move`, or `drag` reaches `MacOSHostComputer`.
+
+Pipeline shorthand: logical points → 1280-edge screenshot → model coordinate → unscaled logical point → macOS input.
+
+Anthropic receives `display_width_px` and `display_height_px` set to the downscaled model dimensions. OpenAI Responses needs only `{ type: "computer" }`, but follows the same resized-screenshot and unscale-on-action invariant.
 
 ## Reserved interfaces
 

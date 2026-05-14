@@ -31,7 +31,9 @@ macos-cua has three entry points. Pick the one that matches the host's setup.
 
 All three modes share the same underlying `MacOSHostComputer` implementation. The CLI mode is preferred for ad-hoc automation because it requires no host configuration beyond building the package.
 
-When the `@macos-cua/pi-extension` is loaded, Anthropic models automatically receive the native `computer` beta tool with the `MacOSHostComputer.getScreenSize()` display size, the beta header/body fields, and a short computer-use system prompt; the existing `macos_cua_*` per-PID tools stay available. This is default-on because installing the extension is explicit computer-use intent, but it adds Anthropic's documented roughly +1200-token overhead per request (about 466-499 prompt + 735 tool definition); set `MACOS_CUA_DISABLE_COMPUTER_USE_BETA=1` only when you intentionally want the prefixed tools without native beta activation.
+When the `@macos-cua/pi-extension` is loaded, Anthropic Messages and OpenAI Responses models automatically receive native computer-use. Anthropic gets the `computer-use-2025-01-24` beta tool plus header/body fields; OpenAI Responses gets `{ type: "computer" }` in the provider payload. `gpt-5.*` Responses API models get the GA `computer` tool with zero token overhead from extension prompt scaffolding. Both flows keep the existing `macos_cua_*` per-PID tools available and both are disabled only by `MACOS_CUA_DISABLE_COMPUTER_USE_BETA=1` (`true`, `yes`, and `on` also work).
+
+The extension sends model-facing screenshots downscaled to a 1280x720 maximum. Coordinates returned by the model are interpreted in that downscaled image space, then unscaled back to macOS logical points before `click`, `move`, or `drag` dispatch.
 
 ## First-time host consent
 
@@ -112,9 +114,9 @@ On localhost, prefer pi's built-in bash tool for shell commands. It has the same
 
 Before executing any irreversible UI action (deleting files in Finder, confirming a system dialog, submitting a form, purchasing something), pause and ask the user for explicit confirmation. The agent can see the screen, but the user is the one who bears the consequences.
 
-### Logical points, not physical pixels
+### Coordinate spaces
 
-macos-cua uses **physical pixels** in screenshots and clicks. On Retina displays, physical pixels are 2x the logical points shown in CSS or browser devtools. A button that appears at (540, 360) in logical space is actually at (1080, 720) in the screenshot PNG. When reading coordinates from a screenshot, use the pixel values from the image itself, not the logical values from any web inspector.
+`MacOSHostComputer` input uses macOS logical points. The pi-extension native computer tool shows models a downscaled screenshot (1280x720 maximum) and unscales model-space coordinates back to logical points before input dispatch. Raw CLI screenshots may still be Retina physical PNGs, so convert screenshot pixels to logical points when driving the CLI directly.
 
 ### One screenshot per decision, not per turn
 

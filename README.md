@@ -159,7 +159,9 @@ Install into a [pi coding agent](https://github.com/badlogic/pi-mono/tree/main/p
 pi install file://./packages/pi-extension
 ```
 
-Loading the extension auto-enables Anthropic's `computer-use-2025-01-24` beta for Anthropic models: it injects the native `computer` tool, merges the required beta header/body fields, appends a short computer-use system prompt, and auto-detects display dimensions from `MacOSHostComputer.getScreenSize()`. No configuration is required. The trade-off is Anthropic's native computer-use overhead of roughly +1200 tokens per request (about 466-499 from the system prompt and 735 from the tool definition); advanced users can opt out with `MACOS_CUA_DISABLE_COMPUTER_USE_BETA=1` (`true`, `yes`, and `on` also work).
+Loading the extension auto-enables native computer-use for Anthropic Messages and OpenAI Responses models. Anthropic requests receive the `computer-use-2025-01-24` native `computer` tool plus the required beta header/body fields and a short system prompt. OpenAI Responses requests receive only `{ "type": "computer" }` in `payload.tools` — no headers, no `extra_body`, and no extra system prompt. No configuration is required; advanced users can opt out of both providers with `MACOS_CUA_DISABLE_COMPUTER_USE_BETA=1` (`true`, `yes`, and `on` also work).
+
+The extension resolves the host display in logical macOS points, downscales the model-facing screenshot to a 1280px long edge (1280x720 on 16:9 displays), declares those downscaled dimensions to Anthropic, and unscales returned model coordinates back to logical points before dispatching clicks, moves, and drags. OpenAI Responses uses the same resized screenshot invariant: model coordinates are always in the image space the model received, while `MacOSHostComputer` still receives logical points.
 
 The extension also registers 9 tools with the `macos_cua_` prefix:
 
@@ -175,7 +177,7 @@ The extension also registers 9 tools with the `macos_cua_` prefix:
 | `macos_cua_cursor_position` | Get cursor coordinates |
 | `macos_cua_screen_size` | Get display dimensions |
 
-The extension default-exports a pi extension factory and keeps the prefixed tools available even when Anthropic native computer-use beta injection is disabled.
+The extension default-exports a pi extension factory and keeps the prefixed tools available even when native computer-use auto-activation is disabled.
 
 ### Programmatic API
 
@@ -215,7 +217,7 @@ Every tool/action exposed by CLI, MCP, and pi-extension:
 | `scroll` | `direction: "up" \| "down" \| "left" \| "right"`, `amount: number` | void | Scroll wheel event via CoreGraphics `CGEventCreateScrollWheelEvent` |
 | `drag` | `fromX, fromY, toX, toY` | void | Mouse down, move, up via CoreGraphics `CGEventCreateMouseEvent` |
 | `cursor_position` | none | `{ x, y }` | Current mouse coordinates via `CGEventGetLocation` |
-| `screen_size` | none | `{ width, height }` | Desktop bounds via `osascript` |
+| `screen_size` | none | `{ width, height }` | Logical desktop bounds via Swift helper, with `system_profiler` fallback |
 
 ## Permissions
 

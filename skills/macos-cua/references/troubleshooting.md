@@ -22,6 +22,12 @@ Specific errors and their fixes. Most macos-cua failures come from OS-permission
 
 Permission is per-binary. If you switch from iTerm to Ghostty, you must grant Ghostty too. The same applies to VS Code's integrated terminal.
 
+## pi-extension screenshot downscale warning mentions `sips`
+
+**Cause:** native computer-use screenshot resizing calls macOS `sips` before returning screenshots to Anthropic or OpenAI. `sips` ships with macOS, but the resize can fail if the input PNG is malformed or the command is unavailable.
+
+**Fix:** confirm `/usr/bin/sips --version` works. The extension falls back to the original PNG base64 with a warning, so the model still gets an image; it is just larger and can reintroduce provider image-size limits.
+
 ## Click doesn't work in Chrome or Firefox
 
 **Cause:** Accessibility permission is granted, but the browser's trusted-event policy rejects synthetic clicks on certain elements (e.g., file inputs, permission prompts).
@@ -58,9 +64,9 @@ pnpm macos-cua-mcp --version
 
 ## Coordinates seem off by 2x
 
-**Cause:** Retina displays use physical pixels (2x on standard Retina, 3x on some Pro models) while web inspectors and CSS report logical points. `macos-cua` operates in physical pixels.
+**Cause:** Retina screenshots can be physical pixels (for example 5120x2880) while macOS input and `MacOSHostComputer.getScreenSize()` use logical points (for example 2560x1440). Clicks landing at half the intended position usually mean a physical screenshot coordinate was sent as a logical input coordinate, or a model saw physical pixels but returned coordinates for a downscaled/logical space.
 
-**Fix:** read coordinates directly from the screenshot PNG dimensions, not from browser devtools. If a screenshot is 3024x1964, those are the physical pixel bounds you should use for clicks.
+**Fix:** for the pi-extension, keep the built-in pipeline intact: logical screen size → `sips` downscale to a 1280px long edge → model coordinate → unscaled logical click. For direct CLI use, convert physical screenshot pixels to logical points before clicking on Retina displays.
 
 ## Multiple monitors
 

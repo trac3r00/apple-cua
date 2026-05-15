@@ -37,5 +37,6 @@ export interface ComputerInterface {
 	setValue(targetPid: number, elementIndex: number, value: string): Promise<void>;
 	performAction(targetPid: number, elementIndex: number, action: string): Promise<void>;
 	pressAtPosition(targetPid: number, position: Point): Promise<boolean>;
+	typeIntoFocused(targetPid: number, text: string): Promise<boolean>;
 	close(): Promise<void>;
 }

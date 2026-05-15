@@ -52,6 +52,7 @@ function createComputer(): ComputerInterface {
 		setValue: vi.fn<ComputerInterface["setValue"]>(),
 		performAction: vi.fn<ComputerInterface["performAction"]>().mockResolvedValue(undefined),
 		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>().mockResolvedValue(false),
+		typeIntoFocused: vi.fn<ComputerInterface["typeIntoFocused"]>().mockResolvedValue(false),
 		close: vi.fn<ComputerInterface["close"]>(),
 	};
 }

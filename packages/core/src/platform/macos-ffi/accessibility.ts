@@ -32,6 +32,8 @@ export const K_AX_DESCRIPTION_ATTRIBUTE = "AXDescription";
 export const K_AX_POSITION_ATTRIBUTE = "AXPosition";
 export const K_AX_SIZE_ATTRIBUTE = "AXSize";
 export const K_AX_CHILDREN_ATTRIBUTE = "AXChildren";
+export const K_AX_SELECTED_TEXT_ATTRIBUTE = "AXSelectedText";
+export const K_AX_SELECTED_TEXT_RANGE_ATTRIBUTE = "AXSelectedTextRange";
 
 const AX_SUCCESS = 0;
 const AX_VALUE_CG_POINT = 1;
@@ -170,6 +172,52 @@ export function performActionByIndex(pid: number, elementIndex: number, action: 
 	} finally {
 		releaseAXElement(element);
 	}
+}
+
+export function typeIntoFocusedAXElement(targetPid: number, text: string): boolean {
+	if (!AXIsProcessTrusted() || !isRunning(targetPid) || text.length === 0) {
+		return false;
+	}
+	const app = createApplicationElement(targetPid);
+	try {
+		const focused = copyOptionalAttributeValue(app, K_AX_FOCUSED_UI_ELEMENT_ATTRIBUTE);
+		if (focused === null) {
+			return false;
+		}
+		try {
+			if (trySetSelectedText(focused, text)) {
+				return true;
+			}
+			return tryAppendValue(focused, text);
+		} finally {
+			releaseAXElement(focused);
+		}
+	} finally {
+		releaseAXElement(app);
+	}
+}
+
+function trySetSelectedText(element: AXUIElementRef, text: string): boolean {
+	return withCFString(K_AX_SELECTED_TEXT_ATTRIBUTE, (attributeReference) => {
+		const valueReference = toCFString(text);
+		try {
+			return AXUIElementSetAttributeValue(element, attributeReference, valueReference) === AX_SUCCESS;
+		} finally {
+			cfRelease(valueReference);
+		}
+	});
+}
+
+function tryAppendValue(element: AXUIElementRef, text: string): boolean {
+	const current = copyStringAttribute(element, K_AX_VALUE_ATTRIBUTE) ?? "";
+	return withCFString(K_AX_VALUE_ATTRIBUTE, (attributeReference) => {
+		const valueReference = toCFString(`${current}${text}`);
+		try {
+			return AXUIElementSetAttributeValue(element, attributeReference, valueReference) === AX_SUCCESS;
+		} finally {
+			cfRelease(valueReference);
+		}
+	});
 }
 
 export function pressElementAtScreenPoint(targetPid: number, x: number, y: number): boolean {

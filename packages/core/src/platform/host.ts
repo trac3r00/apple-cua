@@ -29,5 +29,6 @@ export abstract class HostComputer implements ComputerInterface {
 	abstract setValue(targetPid: number, elementIndex: number, value: string): Promise<void>;
 	abstract performAction(targetPid: number, elementIndex: number, action: string): Promise<void>;
 	abstract pressAtPosition(targetPid: number, position: import("../types/index.js").Point): Promise<boolean>;
+	abstract typeIntoFocused(targetPid: number, text: string): Promise<boolean>;
 	abstract close(): Promise<void>;
 }

@@ -38,6 +38,7 @@ const macOSHostComputerMock = vi.hoisted(() => {
 		setValue: vi.fn().mockResolvedValue(undefined),
 		performAction: vi.fn().mockResolvedValue(undefined),
 		pressAtPosition: vi.fn().mockResolvedValue(false),
+		typeIntoFocused: vi.fn().mockResolvedValue(false),
 		close: vi.fn().mockResolvedValue(undefined),
 	};
 	return {

@@ -29,6 +29,7 @@ const mockedComputer = vi.hoisted(() => ({
 	setValue: vi.fn(),
 	performAction: vi.fn(),
 	pressAtPosition: vi.fn(),
+	typeIntoFocused: vi.fn(),
 	close: vi.fn(),
 }));
 
@@ -134,6 +135,7 @@ beforeEach(() => {
 	mockedComputer.setValue.mockResolvedValue(undefined);
 	mockedComputer.performAction.mockResolvedValue(undefined);
 	mockedComputer.pressAtPosition.mockResolvedValue(false);
+	mockedComputer.typeIntoFocused.mockResolvedValue(false);
 });
 
 afterEach(async () => {

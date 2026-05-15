@@ -73,6 +73,7 @@ function createComputer(): ComputerInterface {
 		setValue: vi.fn(),
 		performAction: vi.fn(),
 		pressAtPosition: vi.fn(),
+		typeIntoFocused: vi.fn(),
 		close: vi.fn(),
 	};
 }

@@ -16,6 +16,7 @@ import {
 	performActionByIndex,
 	pressElementAtScreenPoint,
 	setValueByIndex,
+	typeIntoFocusedAXElement,
 } from "./macos-ffi/accessibility.js";
 import { MacOSInputController } from "./macos-input.js";
 
@@ -167,6 +168,10 @@ export class MacOSHostComputer extends HostComputer {
 
 	async pressAtPosition(targetPid: number, position: Point): Promise<boolean> {
 		return pressElementAtScreenPoint(targetPid, position.x, position.y);
+	}
+
+	async typeIntoFocused(targetPid: number, text: string): Promise<boolean> {
+		return typeIntoFocusedAXElement(targetPid, text);
 	}
 
 	async close(): Promise<void> {

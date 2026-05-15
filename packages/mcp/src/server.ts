@@ -238,6 +238,9 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 		},
 		async ({ app, text }): Promise<ToolResult> => {
 			const targetPid = await resolveAppPid(computer, app);
+			if (await computer.typeIntoFocused(targetPid, text)) {
+				return actionComplete();
+			}
 			await withTargetedApp(computer, targetPid, async () => {
 				await computer.type(text);
 			});

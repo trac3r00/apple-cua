@@ -49,6 +49,7 @@ function createFakeComputer(): ComputerInterface {
 		setValue: vi.fn<ComputerInterface["setValue"]>().mockResolvedValue(undefined),
 		performAction: vi.fn<ComputerInterface["performAction"]>().mockResolvedValue(undefined),
 		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>().mockResolvedValue(false),
+		typeIntoFocused: vi.fn<ComputerInterface["typeIntoFocused"]>().mockResolvedValue(false),
 		close: vi.fn<ComputerInterface["close"]>().mockResolvedValue(undefined),
 	};
 }

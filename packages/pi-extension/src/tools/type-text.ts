@@ -22,6 +22,9 @@ export function createTypeTextTool(computer: ComputerInterface): ToolDefinition 
 		parameters: TypeTextParams,
 		async execute(_toolCallId, params) {
 			const targetPid = await resolveAppPid(computer, params.app);
+			if (await computer.typeIntoFocused(targetPid, params.text)) {
+				return actionCompleteResult();
+			}
 			await withTargetedApp(computer, targetPid, async () => {
 				await computer.type(params.text);
 			});

@@ -66,6 +66,7 @@ function createComputer(): ComputerActionDriver {
 		setValue: vi.fn<ComputerActionDriver["setValue"]>().mockResolvedValue(undefined),
 		performAction: vi.fn<ComputerActionDriver["performAction"]>().mockResolvedValue(undefined),
 		pressAtPosition: vi.fn<ComputerActionDriver["pressAtPosition"]>().mockResolvedValue(false),
+		typeIntoFocused: vi.fn<ComputerActionDriver["typeIntoFocused"]>().mockResolvedValue(false),
 		close: vi.fn<ComputerActionDriver["close"]>().mockResolvedValue(undefined),
 	};
 }

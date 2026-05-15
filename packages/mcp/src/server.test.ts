@@ -11,6 +11,7 @@ const mockedComputer = vi.hoisted(() => ({
 		supportsAccessibility: true,
 		supportsClipboard: true,
 	},
+	setTarget: vi.fn(),
 	screenshot: vi.fn(),
 	move: vi.fn(),
 	click: vi.fn(),
@@ -23,12 +24,20 @@ const mockedComputer = vi.hoisted(() => ({
 	drag: vi.fn(),
 	getCursorPosition: vi.fn(),
 	getScreenSize: vi.fn(),
+	getAppState: vi.fn(),
+	listApps: vi.fn(),
+	setValue: vi.fn(),
+	performAction: vi.fn(),
 	close: vi.fn(),
 }));
 
-vi.mock("@macos-cua/core", () => ({
-	MacOSHostComputer: vi.fn(() => mockedComputer),
-}));
+vi.mock("@macos-cua/core", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@macos-cua/core")>();
+	return {
+		...actual,
+		MacOSHostComputer: vi.fn(() => mockedComputer),
+	};
+});
 
 class InMemoryTransport implements Transport {
 	peer: InMemoryTransport | null = null;
@@ -97,6 +106,32 @@ beforeEach(() => {
 	mockedComputer.drag.mockResolvedValue(undefined);
 	mockedComputer.getCursorPosition.mockResolvedValue({ x: 10, y: 20 });
 	mockedComputer.getScreenSize.mockResolvedValue({ width: 1920, height: 1080 });
+	mockedComputer.getAppState.mockResolvedValue({
+		app: "Finder",
+		bundleId: "com.apple.finder",
+		pid: 1234,
+		frontmost: true,
+		axAvailable: true,
+		elements: [
+			{
+				id: 9,
+				role: "AXButton",
+				label: "Open",
+				value: null,
+				frame: { x: 100, y: 200, width: 20, height: 10 },
+				actions: ["AXPress"],
+				children: [],
+			},
+		],
+		screenshotBase64: Buffer.from("png-bytes").toString("base64"),
+		screenshotWidth: 1280,
+		screenshotHeight: 720,
+	});
+	mockedComputer.listApps.mockResolvedValue([
+		{ name: "Finder", bundleId: "com.apple.finder", pid: 1234, isRunning: true },
+	]);
+	mockedComputer.setValue.mockResolvedValue(undefined);
+	mockedComputer.performAction.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -123,72 +158,65 @@ describe("MCP server tools #given #when #then", () => {
 		expect(toolNames).toEqual([...TOOL_NAMES].sort());
 	});
 
-	it("returns image content and dimension text for screenshot", async () => {
+	it("returns image content and accessibility JSON for get_app_state", async () => {
 		// given
 		const { client, close } = await createHarness();
 		closeHarness = close;
 
 		// when
-		const result = await client.callTool({ name: "screenshot", arguments: {} });
+		const result = await client.callTool({ name: "get_app_state", arguments: { app: "Finder" } });
 
 		// then
-		expect(result.content).toEqual([
-			{ type: "image", data: Buffer.from("png-bytes").toString("base64"), mimeType: "image/png" },
-			{ type: "text", text: "Screenshot 1920x1080" },
-		]);
+		expect(result.content[0]).toEqual({
+			type: "image",
+			data: Buffer.from("png-bytes").toString("base64"),
+			mimeType: "image/png",
+		});
+		expect(result.content[1]?.type).toBe("text");
+		expect(mockedComputer.getAppState).toHaveBeenCalledWith(1234, undefined);
 	});
 
-	it("calls the computer click method with the requested coordinates", async () => {
+	it("calls the computer click method with the requested app and coordinates", async () => {
 		// given
 		const { client, close } = await createHarness();
 		closeHarness = close;
 
 		// when
-		await client.callTool({ name: "click", arguments: { x: 123, y: 456, button: "left" } });
+		await client.callTool({ name: "click", arguments: { app: "Finder", x: 123, y: 456, mouse_button: "left" } });
 
 		// then
 		expect(mockedComputer.click).toHaveBeenCalledOnce();
 		expect(mockedComputer.click).toHaveBeenCalledWith({ x: 123, y: 456 });
+		expect(mockedComputer.setTarget).toHaveBeenNthCalledWith(1, 1234);
+		expect(mockedComputer.setTarget).toHaveBeenLastCalledWith(undefined);
 	});
 
-	it("maps a keypress array to sequential computer key calls", async () => {
+	it("maps a press_key chord to a computer key call", async () => {
 		// given
 		const { client, close } = await createHarness();
 		closeHarness = close;
 
 		// when
-		await client.callTool({ name: "keypress", arguments: { keys: ["Meta", "K", "Enter"] } });
+		await client.callTool({ name: "press_key", arguments: { app: "Finder", key: "super+k" } });
 
 		// then
-		expect(mockedComputer.key).toHaveBeenNthCalledWith(1, "Meta");
-		expect(mockedComputer.key).toHaveBeenNthCalledWith(2, "K");
-		expect(mockedComputer.key).toHaveBeenNthCalledWith(3, "Enter");
-		expect(mockedComputer.key).toHaveBeenCalledTimes(3);
+		expect(mockedComputer.key).toHaveBeenCalledWith("k", { modifiers: ["command"] });
 	});
 
-	it("waits for the requested delay before returning text", async () => {
+	it("routes set_value and perform_secondary_action to accessibility helpers", async () => {
 		// given
-		vi.useFakeTimers();
 		const { client, close } = await createHarness();
 		closeHarness = close;
-		let settled = false;
 
 		// when
-		const resultPromise = client.callTool({ name: "wait", arguments: { ms: 250 } }).then((result) => {
-			settled = true;
-			return result;
+		await client.callTool({ name: "set_value", arguments: { app: "Finder", element_index: "9", value: "abc" } });
+		await client.callTool({
+			name: "perform_secondary_action",
+			arguments: { app: "Finder", element_index: "9", action: "AXPress" },
 		});
-		await vi.advanceTimersByTimeAsync(249);
 
 		// then
-		expect(settled).toBe(false);
-
-		// when
-		await vi.advanceTimersByTimeAsync(1);
-		const result = await resultPromise;
-
-		// then
-		expect(settled).toBe(true);
-		expect(result.content).toEqual([{ type: "text", text: "Waited 250ms" }]);
+		expect(mockedComputer.setValue).toHaveBeenCalledWith(1234, 9, "abc");
+		expect(mockedComputer.performAction).toHaveBeenCalledWith(1234, 9, "AXPress");
 	});
 });

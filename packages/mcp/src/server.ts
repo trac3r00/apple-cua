@@ -1,7 +1,18 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
-import { MacOSHostComputer } from "@macos-cua/core";
-import type { ComputerInterface, DragOptions, ScrollOptions } from "@macos-cua/core";
+import {
+	type ComputerInterface,
+	type DragOptions,
+	MacOSHostComputer,
+	type ScrollOptions,
+	clickPoint,
+	getAppStateForApp,
+	parseElementIndex,
+	parseKeyChord,
+	resolveAppPid,
+	resolvePointForElement,
+	withTargetedApp,
+} from "@macos-cua/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod/v4";
@@ -14,88 +25,73 @@ type ToolResult = {
 	content: ToolContent[];
 };
 
-type MouseButton = "left" | "right" | "middle";
-
 const SERVER_INFO = {
 	name: "macos-cua",
 	version: "0.1.0",
 } as const;
 
 export const TOOL_NAMES = [
-	"screenshot",
+	"list_apps",
+	"get_app_state",
 	"click",
-	"double_click",
-	"scroll",
-	"type",
-	"wait",
-	"keypress",
+	"perform_secondary_action",
+	"set_value",
 	"drag",
-	"move",
-	"cursor_position",
-	"screen_size",
+	"scroll",
+	"type_text",
+	"press_key",
 ] as const;
 
-const pointSchema = z.object({
-	x: z.number(),
-	y: z.number(),
-});
+const appSchema = z.string().min(1);
 
-const screenshotSchema = z.object({
-	region: z
-		.object({
-			x: z.number(),
-			y: z.number(),
-			width: z.number(),
-			height: z.number(),
-		})
-		.optional(),
+const getAppStateSchema = z.object({
+	app: appSchema,
 });
 
 const clickSchema = z.object({
-	x: z.number(),
-	y: z.number(),
-	button: z.enum(["left", "right", "middle"]).optional(),
+	app: appSchema,
+	element_index: z.string().optional(),
+	x: z.number().optional(),
+	y: z.number().optional(),
+	click_count: z.number().int().positive().optional(),
+	mouse_button: z.enum(["left", "right", "middle"]).optional(),
 });
 
-const doubleClickSchema = z.object({
-	x: z.number(),
-	y: z.number(),
+const performSecondaryActionSchema = z.object({
+	app: appSchema,
+	element_index: z.string(),
+	action: z.string().min(1),
+});
+
+const setValueSchema = z.object({
+	app: appSchema,
+	element_index: z.string(),
+	value: z.string(),
+});
+
+const dragSchema = z.object({
+	app: appSchema,
+	from_x: z.number(),
+	from_y: z.number(),
+	to_x: z.number(),
+	to_y: z.number(),
 });
 
 const scrollSchema = z.object({
-	x: z.number(),
-	y: z.number(),
-	scrollX: z.number(),
-	scrollY: z.number(),
+	app: appSchema,
+	direction: z.enum(["up", "down", "left", "right"]),
+	element_index: z.string().optional(),
+	pages: z.number().positive().optional(),
 });
 
-const typeSchema = z.object({
+const typeTextSchema = z.object({
+	app: appSchema,
 	text: z.string(),
 });
 
-const waitSchema = z.object({
-	ms: z.number().nonnegative(),
-});
-
-const keypressSchema = z.object({
-	keys: z.array(z.string()).min(1),
-});
-
-const dragSchema = z.union([
-	z.object({
-		path: z.array(pointSchema).min(2),
-	}),
-	z.object({
-		fromX: z.number(),
-		fromY: z.number(),
-		toX: z.number(),
-		toY: z.number(),
-	}),
-]);
-
-const moveSchema = z.object({
-	x: z.number(),
-	y: z.number(),
+const pressKeySchema = z.object({
+	app: appSchema,
+	key: z.string().min(1),
 });
 
 const emptySchema = z.object({});
@@ -104,70 +100,38 @@ function textResult(text: string): ToolResult {
 	return { content: [{ type: "text", text }] };
 }
 
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => {
-		setTimeout(resolve, ms);
-	});
-}
-
-function scrollOptionsFromDeltas(scrollX: number, scrollY: number): ScrollOptions[] {
-	const options: ScrollOptions[] = [];
-
-	if (scrollX < 0) {
-		options.push({ direction: "left", amount: Math.abs(scrollX) });
-	} else if (scrollX > 0) {
-		options.push({ direction: "right", amount: scrollX });
-	}
-
-	if (scrollY < 0) {
-		options.push({ direction: "up", amount: Math.abs(scrollY) });
-	} else if (scrollY > 0) {
-		options.push({ direction: "down", amount: scrollY });
-	}
-
-	return options;
-}
-
-function dragOptionsFromPath(path: Array<{ x: number; y: number }>): DragOptions[] {
-	const firstPoint = path[0];
-	if (!firstPoint) {
-		return [];
-	}
-
-	const options: DragOptions[] = [];
-	let previousPoint = firstPoint;
-
-	for (const point of path.slice(1)) {
-		options.push({ from: previousPoint, to: point });
-		previousPoint = point;
-	}
-
-	return options;
+function actionComplete(): ToolResult {
+	return textResult("Action completed. Call `get_app_state` to fetch the updated UI state.");
 }
 
 export function createMcpServer(computer: ComputerInterface = new MacOSHostComputer()): McpServer {
 	const server = new McpServer(SERVER_INFO);
 
 	server.registerTool(
-		"screenshot",
+		"list_apps",
 		{
-			description: "Capture a screenshot of the macOS screen",
-			inputSchema: screenshotSchema,
+			description:
+				"List the apps on this computer. Returns the set of apps that are currently running, including details on usage frequency where available.",
+			inputSchema: emptySchema,
 		},
-		async ({ region }): Promise<ToolResult> => {
-			const result = await computer.screenshot(region ? { region } : undefined);
+		async (): Promise<ToolResult> => {
+			return textResult(JSON.stringify(await computer.listApps(), null, 2));
+		},
+	);
 
+	server.registerTool(
+		"get_app_state",
+		{
+			description:
+				"Start an app use session if needed, then get the state of the app's key window and return a screenshot and accessibility tree.",
+			inputSchema: getAppStateSchema,
+		},
+		async ({ app }): Promise<ToolResult> => {
+			const state = await getAppStateForApp(computer, app);
 			return {
 				content: [
-					{
-						type: "image",
-						data: result.data.toString("base64"),
-						mimeType: result.mimeType,
-					},
-					{
-						type: "text",
-						text: `Screenshot ${result.width}x${result.height}`,
-					},
+					{ type: "image", data: state.screenshotBase64, mimeType: "image/png" },
+					{ type: "text", text: JSON.stringify({ ...state, screenshotBase64: undefined }, null, 2) },
 				],
 			};
 		},
@@ -176,166 +140,121 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 	server.registerTool(
 		"click",
 		{
-			description: "Click at a specific position on the screen",
+			description: "Click an element by index or pixel coordinates from screenshot.",
 			inputSchema: clickSchema,
 		},
-		async ({ x, y, button }): Promise<ToolResult> => {
-			const mouseButton = button ?? "left";
-			await clickWithButton(computer, { x, y }, mouseButton);
-			return textResult(`Clicked ${mouseButton} at ${x},${y}`);
+		async ({ app, element_index, x, y, click_count, mouse_button }): Promise<ToolResult> => {
+			const targetPid = await resolveAppPid(computer, app);
+			const point =
+				element_index === undefined
+					? parseCoordinate(x, y)
+					: await resolvePointForElement(computer, targetPid, parseElementIndex(element_index));
+			await withTargetedApp(computer, targetPid, async () => {
+				await clickPoint(computer, point, mouse_button ?? "left", click_count ?? 1);
+			});
+			return actionComplete();
 		},
 	);
 
 	server.registerTool(
-		"double_click",
+		"perform_secondary_action",
 		{
-			description: "Double-click at a specific position on the screen",
-			inputSchema: doubleClickSchema,
+			description: "Invoke a secondary accessibility action exposed by an element.",
+			inputSchema: performSecondaryActionSchema,
 		},
-		async ({ x, y }): Promise<ToolResult> => {
-			await computer.doubleClick({ x, y });
-			return textResult(`Double-clicked at ${x},${y}`);
+		async ({ app, element_index, action }): Promise<ToolResult> => {
+			await computer.performAction(await resolveAppPid(computer, app), parseElementIndex(element_index), action);
+			return actionComplete();
 		},
 	);
 
 	server.registerTool(
-		"scroll",
+		"set_value",
 		{
-			description: "Scroll at a screen position using Cartesian deltas",
-			inputSchema: scrollSchema,
+			description: "Set the value of a settable accessibility element.",
+			inputSchema: setValueSchema,
 		},
-		async ({ x, y, scrollX, scrollY }): Promise<ToolResult> => {
-			for (const options of scrollOptionsFromDeltas(scrollX, scrollY)) {
-				await computer.scroll(options);
-			}
-
-			return textResult(`Scrolled at ${x},${y} by ${scrollX},${scrollY}`);
-		},
-	);
-
-	server.registerTool(
-		"type",
-		{
-			description: "Type text at the current cursor position",
-			inputSchema: typeSchema,
-		},
-		async ({ text }): Promise<ToolResult> => {
-			await computer.type(text);
-			return textResult(`Typed: ${text}`);
-		},
-	);
-
-	server.registerTool(
-		"wait",
-		{
-			description: "Wait for the specified number of milliseconds",
-			inputSchema: waitSchema,
-		},
-		async ({ ms }): Promise<ToolResult> => {
-			await sleep(ms);
-			return textResult(`Waited ${ms}ms`);
-		},
-	);
-
-	server.registerTool(
-		"keypress",
-		{
-			description: "Press one or more keys in sequence",
-			inputSchema: keypressSchema,
-		},
-		async ({ keys }): Promise<ToolResult> => {
-			for (const key of keys) {
-				await computer.key(key);
-			}
-
-			return textResult(`Pressed keys: ${keys.join(",")}`);
+		async ({ app, element_index, value }): Promise<ToolResult> => {
+			await computer.setValue(await resolveAppPid(computer, app), parseElementIndex(element_index), value);
+			return actionComplete();
 		},
 	);
 
 	server.registerTool(
 		"drag",
 		{
-			description: "Drag along a path, or from one point to another",
+			description: "Drag from one point to another using pixel coordinates.",
 			inputSchema: dragSchema,
 		},
-		async (params): Promise<ToolResult> => {
-			if ("path" in params) {
-				for (const options of dragOptionsFromPath(params.path)) {
-					await computer.drag(options);
-				}
-
-				const firstPoint = params.path[0];
-				const lastPoint = params.path[params.path.length - 1];
-				if (!firstPoint || !lastPoint) {
-					throw new Error("Drag path must contain at least two points");
-				}
-
-				return textResult(`Dragged from ${firstPoint.x},${firstPoint.y} to ${lastPoint.x},${lastPoint.y}`);
-			}
-
-			await computer.drag({
-				from: { x: params.fromX, y: params.fromY },
-				to: { x: params.toX, y: params.toY },
+		async ({ app, from_x, from_y, to_x, to_y }): Promise<ToolResult> => {
+			const targetPid = await resolveAppPid(computer, app);
+			const dragOptions: DragOptions = { from: { x: from_x, y: from_y }, to: { x: to_x, y: to_y } };
+			await withTargetedApp(computer, targetPid, async () => {
+				await computer.drag(dragOptions);
 			});
-			return textResult(`Dragged from ${params.fromX},${params.fromY} to ${params.toX},${params.toY}`);
+			return actionComplete();
 		},
 	);
 
 	server.registerTool(
-		"move",
+		"scroll",
 		{
-			description: "Move the cursor to a specific position",
-			inputSchema: moveSchema,
+			description: "Scroll an element in a direction by a number of pages.",
+			inputSchema: scrollSchema,
 		},
-		async ({ x, y }): Promise<ToolResult> => {
-			await computer.move({ x, y });
-			return textResult(`Moved to ${x},${y}`);
+		async ({ app, direction, element_index, pages }): Promise<ToolResult> => {
+			void element_index;
+			const targetPid = await resolveAppPid(computer, app);
+			const scrollOptions: ScrollOptions = { direction, amount: pages ?? 1 };
+			await withTargetedApp(computer, targetPid, async () => {
+				await computer.scroll(scrollOptions);
+			});
+			return actionComplete();
 		},
 	);
 
 	server.registerTool(
-		"cursor_position",
+		"type_text",
 		{
-			description: "Get the current cursor position",
-			inputSchema: emptySchema,
+			description: "Type literal text using keyboard input.",
+			inputSchema: typeTextSchema,
 		},
-		async (): Promise<ToolResult> => {
-			const position = await computer.getCursorPosition();
-			return textResult(`Cursor position: ${position.x},${position.y}`);
+		async ({ app, text }): Promise<ToolResult> => {
+			const targetPid = await resolveAppPid(computer, app);
+			await withTargetedApp(computer, targetPid, async () => {
+				await computer.type(text);
+			});
+			return actionComplete();
 		},
 	);
 
 	server.registerTool(
-		"screen_size",
+		"press_key",
 		{
-			description: "Get the screen size",
-			inputSchema: emptySchema,
+			description: "Press a key or key-combination on the keyboard, including modifier and navigation keys.",
+			inputSchema: pressKeySchema,
 		},
-		async (): Promise<ToolResult> => {
-			const size = await computer.getScreenSize();
-			return textResult(`Screen size: ${size.width}x${size.height}`);
+		async ({ app, key }): Promise<ToolResult> => {
+			const targetPid = await resolveAppPid(computer, app);
+			const keypress = parseKeyChord(key);
+			await withTargetedApp(computer, targetPid, async () => {
+				await computer.key(
+					keypress.key,
+					keypress.modifiers.length === 0 ? undefined : { modifiers: [...keypress.modifiers] },
+				);
+			});
+			return actionComplete();
 		},
 	);
 
 	return server;
 }
 
-async function clickWithButton(
-	computer: ComputerInterface,
-	position: { readonly x: number; readonly y: number },
-	button: MouseButton,
-): Promise<void> {
-	switch (button) {
-		case "left":
-			await computer.click(position);
-			return;
-		case "right":
-			await computer.rightClick(position);
-			return;
-		case "middle":
-			await computer.middleClick(position);
-			return;
+function parseCoordinate(x: number | undefined, y: number | undefined): { x: number; y: number } {
+	if (x === undefined || y === undefined || !Number.isFinite(x) || !Number.isFinite(y)) {
+		throw new Error("click requires either element_index or finite x and y coordinates");
 	}
+	return { x, y };
 }
 
 export async function main(): Promise<void> {
@@ -346,7 +265,8 @@ export async function main(): Promise<void> {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	main().catch((error: unknown) => {
-		console.error("Fatal error:", error);
+		const details = error instanceof Error ? (error.stack ?? error.message) : String(error);
+		process.stderr.write(`Fatal error: ${details}\n`);
 		process.exit(1);
 	});
 }

@@ -1,11 +1,15 @@
 export type * from "./accessibility/types.js";
 export {
+	AX_PRESS_ACTION,
+	axScrollActionFor,
 	clickPoint,
 	getAppStateForApp,
 	parseElementIndex,
 	parseKeyChord,
+	pressElement,
 	resolveAppPid,
 	resolvePointForElement,
+	scrollElement,
 	withTargetedApp,
 	type ComputerUseMouseButton,
 } from "./computer/actions.js";

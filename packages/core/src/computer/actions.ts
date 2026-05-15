@@ -1,9 +1,44 @@
 import type { AppState } from "../accessibility/types.js";
 import { resolveElementCoordinate } from "../platform/macos-accessibility.js";
-import type { AppStateOptions } from "../types/index.js";
+import type { AppStateOptions, ScrollOptions } from "../types/index.js";
 import type { ComputerInterface } from "./interface.js";
 
 export type ComputerUseMouseButton = "left" | "right" | "middle";
+
+export const AX_PRESS_ACTION = "AXPress";
+
+const AX_SCROLL_ACTIONS: Record<ScrollOptions["direction"], string> = {
+	up: "AXScrollUpByPage",
+	down: "AXScrollDownByPage",
+	left: "AXScrollLeftByPage",
+	right: "AXScrollRightByPage",
+};
+
+export function axScrollActionFor(direction: ScrollOptions["direction"]): string {
+	return AX_SCROLL_ACTIONS[direction];
+}
+
+export async function pressElement(
+	computer: ComputerInterface,
+	targetPid: number,
+	elementIndex: number,
+): Promise<void> {
+	await computer.performAction(targetPid, elementIndex, AX_PRESS_ACTION);
+}
+
+export async function scrollElement(
+	computer: ComputerInterface,
+	targetPid: number,
+	elementIndex: number,
+	direction: ScrollOptions["direction"],
+	pages: number,
+): Promise<void> {
+	const pageCount = Math.max(1, Math.trunc(pages));
+	const action = axScrollActionFor(direction);
+	for (let index = 0; index < pageCount; index += 1) {
+		await computer.performAction(targetPid, elementIndex, action);
+	}
+}
 
 type KeyModifier = "command" | "option" | "control" | "shift";
 

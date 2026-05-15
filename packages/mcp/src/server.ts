@@ -4,13 +4,13 @@ import {
 	type ComputerInterface,
 	type DragOptions,
 	MacOSHostComputer,
-	type ScrollOptions,
 	clickPoint,
 	getAppStateForApp,
 	parseElementIndex,
 	parseKeyChord,
+	pressElement,
 	resolveAppPid,
-	resolvePointForElement,
+	scrollElement,
 	withTargetedApp,
 } from "@macos-cua/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -145,10 +145,16 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 		},
 		async ({ app, element_index, x, y, click_count, mouse_button }): Promise<ToolResult> => {
 			const targetPid = await resolveAppPid(computer, app);
-			const point =
-				element_index === undefined
-					? parseCoordinate(x, y)
-					: await resolvePointForElement(computer, targetPid, parseElementIndex(element_index));
+			if (element_index !== undefined) {
+				const index = parseElementIndex(element_index);
+				const pressCount = Math.max(1, Math.trunc(click_count ?? 1));
+				for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
+					await pressElement(computer, targetPid, index);
+				}
+				void mouse_button;
+				return actionComplete();
+			}
+			const point = parseCoordinate(x, y);
 			await withTargetedApp(computer, targetPid, async () => {
 				await clickPoint(computer, point, mouse_button ?? "left", click_count ?? 1);
 			});
@@ -203,12 +209,11 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 			inputSchema: scrollSchema,
 		},
 		async ({ app, direction, element_index, pages }): Promise<ToolResult> => {
-			void element_index;
+			if (element_index === undefined) {
+				throw new Error("scroll requires element_index of a scrollable accessibility element");
+			}
 			const targetPid = await resolveAppPid(computer, app);
-			const scrollOptions: ScrollOptions = { direction, amount: pages ?? 1 };
-			await withTargetedApp(computer, targetPid, async () => {
-				await computer.scroll(scrollOptions);
-			});
+			await scrollElement(computer, targetPid, parseElementIndex(element_index), direction, pages ?? 1);
 			return actionComplete();
 		},
 	);

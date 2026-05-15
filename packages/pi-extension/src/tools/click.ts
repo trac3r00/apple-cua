@@ -2,8 +2,8 @@ import {
 	type ComputerInterface,
 	clickPoint,
 	parseElementIndex,
+	pressElement,
 	resolveAppPid,
-	resolvePointForElement,
 	withTargetedApp,
 } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
@@ -35,10 +35,16 @@ export function createClickTool(computer: ComputerInterface): ToolDefinition {
 		parameters: ClickParams,
 		async execute(_toolCallId, params) {
 			const targetPid = await resolveAppPid(computer, params.app);
-			const point =
-				params.element_index === undefined
-					? parseCoordinate(params.x, params.y)
-					: await resolvePointForElement(computer, targetPid, parseElementIndex(params.element_index));
+			if (params.element_index !== undefined) {
+				const index = parseElementIndex(params.element_index);
+				const pressCount = Math.max(1, Math.trunc(params.click_count ?? 1));
+				for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
+					await pressElement(computer, targetPid, index);
+				}
+				void params.mouse_button;
+				return actionCompleteResult();
+			}
+			const point = parseCoordinate(params.x, params.y);
 			await withTargetedApp(computer, targetPid, async () => {
 				await clickPoint(computer, point, params.mouse_button ?? "left", params.click_count ?? 1);
 			});

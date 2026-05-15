@@ -121,12 +121,19 @@ describe("#given baseline regression suite #when exercising computer interface #
 	});
 
 	describe("scroll", () => {
-		it("scrolls down by the requested amount", async () => {
+		it("performs AXScrollDownByPage on the requested element_index pages times", async () => {
 			const tool = createScrollTool(computer);
-			await tool.execute("tc", { app: "TestApp", direction: "down", pages: 5 }, undefined, undefined, context);
+			await tool.execute(
+				"tc",
+				{ app: "TestApp", direction: "down", pages: 5, element_index: "3" },
+				undefined,
+				undefined,
+				context,
+			);
 
-			expect(computer.scroll).toHaveBeenCalledTimes(1);
-			expect(computer.scroll).toHaveBeenCalledWith({ direction: "down", amount: 5 });
+			expect(computer.scroll).not.toHaveBeenCalled();
+			expect(computer.performAction).toHaveBeenCalledTimes(5);
+			expect(computer.performAction).toHaveBeenNthCalledWith(1, 1234, 3, "AXScrollDownByPage");
 		});
 	});
 });

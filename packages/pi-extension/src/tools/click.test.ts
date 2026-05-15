@@ -76,7 +76,7 @@ describe("#given click tool #when executed #then target app receives coordinates
 		expect(computer.setTarget).toHaveBeenLastCalledWith(undefined);
 	});
 
-	it("clicks the center of an accessibility element index", async () => {
+	it("presses the accessibility element via AXPress instead of moving the cursor", async () => {
 		const computer = createComputer();
 		const tool = createClickTool(computer);
 
@@ -88,6 +88,26 @@ describe("#given click tool #when executed #then target app receives coordinates
 			{} as ExtensionContext,
 		);
 
-		expect(computer.click).toHaveBeenCalledWith({ x: 25, y: 40 });
+		expect(computer.performAction).toHaveBeenCalledWith(1234, 5, "AXPress");
+		expect(computer.click).not.toHaveBeenCalled();
+		expect(computer.setTarget).not.toHaveBeenCalled();
+	});
+
+	it("presses the AX element click_count times for repeated activations", async () => {
+		const computer = createComputer();
+		const tool = createClickTool(computer);
+
+		await tool.execute(
+			"tool-call",
+			{ app: "Finder", element_index: "5", click_count: 3 },
+			undefined,
+			undefined,
+			{} as ExtensionContext,
+		);
+
+		expect(computer.performAction).toHaveBeenCalledTimes(3);
+		expect(computer.performAction).toHaveBeenNthCalledWith(1, 1234, 5, "AXPress");
+		expect(computer.performAction).toHaveBeenNthCalledWith(2, 1234, 5, "AXPress");
+		expect(computer.performAction).toHaveBeenNthCalledWith(3, 1234, 5, "AXPress");
 	});
 });

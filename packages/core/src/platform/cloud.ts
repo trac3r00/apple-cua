@@ -11,6 +11,7 @@ export abstract class CloudComputer implements ComputerInterface {
 	abstract screenshot(
 		options?: import("../types/index.js").ScreenshotOptions,
 	): Promise<import("../computer/interface.js").ScreenshotResult>;
+	abstract setTarget(pid?: number): void;
 	abstract move(position: import("../types/index.js").Point): Promise<void>;
 	abstract click(position: import("../types/index.js").Point): Promise<void>;
 	abstract rightClick(position: import("../types/index.js").Point): Promise<void>;
@@ -22,7 +23,12 @@ export abstract class CloudComputer implements ComputerInterface {
 	abstract drag(options: import("../types/index.js").DragOptions): Promise<void>;
 	abstract getCursorPosition(): Promise<import("../types/index.js").Point>;
 	abstract getScreenSize(): Promise<{ width: number; height: number }>;
-	abstract getAppState(targetPid?: number): Promise<import("../accessibility/types.js").AppState>;
+	abstract getAppState(
+		targetPid?: number,
+		options?: import("../types/index.js").AppStateOptions,
+	): Promise<import("../accessibility/types.js").AppState>;
 	abstract listApps(): Promise<import("../accessibility/types.js").AppInfo[]>;
+	abstract setValue(targetPid: number, elementIndex: number, value: string): Promise<void>;
+	abstract performAction(targetPid: number, elementIndex: number, action: string): Promise<void>;
 	abstract close(): Promise<void>;
 }

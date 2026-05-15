@@ -4,6 +4,8 @@ import { koffi } from "./koffi.js";
 export type CFTypeRef = object;
 export type CFStringRef = CFTypeRef;
 export type CFArrayRef = CFTypeRef;
+export type CFNumberRef = CFTypeRef;
+export type CFBooleanRef = CFTypeRef;
 
 const CF_STRING_ENCODING_UTF8 = 0x08000100;
 
@@ -13,13 +15,23 @@ const CF_STRING_REF = koffi.pointer("CFStringRef", koffi.opaque());
 const CF_ARRAY_REF = koffi.pointer("CFArrayRef", koffi.opaque());
 const CF_TYPE_REF_POINTER = koffi.pointer(CF_TYPE_REF);
 
+const CF_NUMBER_DOUBLE_TYPE = 13;
+
+const CFGetTypeID = coreFoundation.func("CFGetTypeID", "ulong", ["void *"]) as KoffiFunc<
+	(reference: CFTypeRef) => number
+>;
+
+const CFRetainNative = coreFoundation.func("CFRetain", "void *", ["void *"]) as KoffiFunc<
+	(reference: CFTypeRef) => CFTypeRef
+>;
+
 const CFStringCreateWithCString = coreFoundation.func("CFStringCreateWithCString", CF_STRING_REF, [
 	"void *",
 	"string",
 	"uint32_t",
 ]) as KoffiFunc<(allocator: null, value: string, encoding: number) => CFStringRef | null>;
 
-const CFStringGetLength = coreFoundation.func("CFStringGetLength", "long", [CF_STRING_REF]) as KoffiFunc<
+const CFStringGetLength = coreFoundation.func("CFStringGetLength", "long", ["void *"]) as KoffiFunc<
 	(reference: CFStringRef) => number
 >;
 
@@ -29,7 +41,7 @@ const CFStringGetMaximumSizeForEncoding = coreFoundation.func("CFStringGetMaximu
 ]) as KoffiFunc<(length: number, encoding: number) => number>;
 
 const CFStringGetCString = coreFoundation.func("CFStringGetCString", "bool", [
-	CF_STRING_REF,
+	"void *",
 	"char *",
 	"long",
 	"uint32_t",
@@ -44,9 +56,39 @@ const CFArrayCreate = coreFoundation.func("CFArrayCreate", CF_ARRAY_REF, [
 	(allocator: null, values: readonly CFTypeRef[] | null, valueCount: number, callbacks: null) => CFArrayRef | null
 >;
 
+const CFArrayGetCount = coreFoundation.func("CFArrayGetCount", "long", ["void *"]) as KoffiFunc<
+	(reference: CFArrayRef) => number
+>;
+
+const CFArrayGetValueAtIndex = coreFoundation.func("CFArrayGetValueAtIndex", "void *", ["void *", "long"]) as KoffiFunc<
+	(reference: CFArrayRef, index: number) => CFTypeRef | null
+>;
+
+const CFStringGetTypeID = coreFoundation.func("CFStringGetTypeID", "ulong", []) as KoffiFunc<() => number>;
+
+const CFNumberGetTypeID = coreFoundation.func("CFNumberGetTypeID", "ulong", []) as KoffiFunc<() => number>;
+
+const CFNumberGetValue = coreFoundation.func("CFNumberGetValue", "bool", ["void *", "int32_t", "void *"]) as KoffiFunc<
+	(reference: CFNumberRef, type: number, valuePointer: Buffer) => boolean
+>;
+
+const CFBooleanGetTypeID = coreFoundation.func("CFBooleanGetTypeID", "ulong", []) as KoffiFunc<() => number>;
+
+const CFBooleanGetValue = coreFoundation.func("CFBooleanGetValue", "bool", ["void *"]) as KoffiFunc<
+	(reference: CFBooleanRef) => boolean
+>;
+
 const CFReleaseNative = coreFoundation.func("CFRelease", "void", ["void *"]) as KoffiFunc<
 	(reference: CFTypeRef) => void
 >;
+
+export function cfGetTypeId(reference: CFTypeRef): number {
+	return CFGetTypeID(reference);
+}
+
+export function cfRetain(reference: CFTypeRef): CFTypeRef {
+	return CFRetainNative(reference);
+}
 
 export function cfRelease(reference: CFTypeRef | null): void {
 	if (reference !== null) {
@@ -77,6 +119,38 @@ export function fromCFString(reference: CFStringRef): string {
 
 	const endIndex = buffer.indexOf(0);
 	return buffer.subarray(0, endIndex === -1 ? buffer.byteLength : endIndex).toString("utf8");
+}
+
+export function fromCFNumber(reference: CFNumberRef): number {
+	const buffer = Buffer.alloc(8);
+	if (!CFNumberGetValue(reference, CF_NUMBER_DOUBLE_TYPE, buffer)) {
+		throw new Error("CFNumberGetValue failed");
+	}
+	return buffer.readDoubleLE(0);
+}
+
+export function fromCFBoolean(reference: CFBooleanRef): boolean {
+	return CFBooleanGetValue(reference);
+}
+
+export function cfArrayLength(reference: CFArrayRef): number {
+	return CFArrayGetCount(reference);
+}
+
+export function cfArrayValueAt(reference: CFArrayRef, index: number): CFTypeRef | null {
+	return CFArrayGetValueAtIndex(reference, index);
+}
+
+export function isCFString(reference: CFTypeRef): reference is CFStringRef {
+	return cfGetTypeId(reference) === CFStringGetTypeID();
+}
+
+export function isCFNumber(reference: CFTypeRef): reference is CFNumberRef {
+	return cfGetTypeId(reference) === CFNumberGetTypeID();
+}
+
+export function isCFBoolean(reference: CFTypeRef): reference is CFBooleanRef {
+	return cfGetTypeId(reference) === CFBooleanGetTypeID();
 }
 
 export function withCFString<TResult>(value: string, callback: (reference: CFStringRef) => TResult): TResult {

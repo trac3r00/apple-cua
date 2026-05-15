@@ -12,9 +12,8 @@
 		}
 	},
 	"scripts": {
-		"build": "tsgo && bash ../cua-helper/build.sh",
+		"build": "tsgo",
 		"build:ts": "tsgo",
-		"build:helper": "bash ../cua-helper/build.sh",
 		"typecheck": "tsgo --noEmit",
 		"test": "vitest --run"
 	},

@@ -1,13 +1,17 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { readFile, unlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { promisify } from "node:util";
+import type { AppInfo, AppState } from "../accessibility/types.js";
 import type { ComputerInterface, ScreenshotResult } from "../computer/interface.js";
-import type { DragOptions, KeyOptions, Point, ScreenshotOptions, ScrollOptions } from "../types/index.js";
+import type {
+	AppStateOptions,
+	DragOptions,
+	KeyOptions,
+	Point,
+	ScreenshotOptions,
+	ScrollOptions,
+} from "../types/index.js";
 import { HostComputer, type HostComputerOptions } from "./host.js";
-import { MacOSCuaHelper } from "./macos-helper.js";
+import { extractAccessibilityTree, performActionByIndex, setValueByIndex } from "./macos-ffi/accessibility.js";
 import { MacOSInputController } from "./macos-input.js";
 
 const execFileAsync = promisify(execFile);
@@ -18,6 +22,14 @@ const PNG_IHDR_HEIGHT_OFFSET = 20;
 const PNG_MINIMUM_IHDR_LENGTH = 24;
 const FINDER_DESKTOP_BOUNDS_TIMEOUT_MILLISECONDS = 2_000;
 const SYSTEM_PROFILER_TIMEOUT_MILLISECONDS = 10_000;
+const SCREENSHOT_TIMEOUT_MILLISECONDS = 10_000;
+const LIST_APPS_TIMEOUT_MILLISECONDS = 20_000;
+const SCREENSHOT_MAX_BUFFER_BYTES = 100 * 1024 * 1024;
+const DEFAULT_APP_STATE_SETTLE_MILLISECONDS = 300;
+
+export interface RunningAppInfo extends AppInfo {
+	readonly isActive: boolean;
+}
 
 export interface MacOSHostComputerOptions extends HostComputerOptions {
 	defaultTargetPid?: number;
@@ -32,12 +44,10 @@ export class MacOSHostComputer extends HostComputer {
 	};
 
 	private readonly input: MacOSInputController;
-	private readonly helper: MacOSCuaHelper;
 
 	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
 		this.input = new MacOSInputController(options.defaultTargetPid);
-		this.helper = new MacOSCuaHelper();
 		// TODO: use options for display selection
 		void options.display;
 	}
@@ -46,26 +56,23 @@ export class MacOSHostComputer extends HostComputer {
 		this.input.setTarget(pid);
 	}
 
+	async rememberTargetWindow(pid: number): Promise<void> {
+		await this.input.rememberTargetWindow(pid);
+	}
+
 	async screenshot(options?: ScreenshotOptions): Promise<ScreenshotResult> {
-		// `screencapture -` (stdout) returns 0 bytes on macOS Sequoia/Tahoe,
-		// so we always route through a temp file and read it back.
-		const tempPath = join(tmpdir(), `macos-cua-${randomUUID()}.png`);
-		const args = ["-x"];
 		if (options?.region) {
-			args.push("-R", `${options.region.x},${options.region.y},${options.region.width},${options.region.height}`);
+			throw new Error("Region screenshots are not supported by the macOS screenshot fallback yet");
 		}
-		args.push(tempPath);
-		try {
-			await execFileAsync("screencapture", args, { encoding: "utf8" });
-			const data = await readFile(tempPath);
-			return {
-				data,
-				mimeType: "image/png",
-				...parsePngDimensions(data),
-			};
-		} finally {
-			await unlink(tempPath).catch(() => undefined);
-		}
+		const size = options?.targetSize ?? (await this.getScreenSize());
+		const data = await captureMacOSScreenshot(size);
+		const dimensions = parsePngDimensions(data);
+		return {
+			data,
+			mimeType: "image/png",
+			width: dimensions.width,
+			height: dimensions.height,
+		};
 	}
 
 	async move(position: Point): Promise<void> {
@@ -109,25 +116,52 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async getScreenSize(): Promise<{ width: number; height: number }> {
-		try {
-			return await this.helper.getLogicalScreenSize();
-		} catch {
-			return await getMacOSLogicalScreenSize();
+		return await getMacOSLogicalScreenSize();
+	}
+
+	async getAppState(targetPid?: number, options?: AppStateOptions): Promise<AppState> {
+		const size = options?.screenshotSize ?? (await this.getScreenSize());
+		const settleMs = options?.settleMs ?? DEFAULT_APP_STATE_SETTLE_MILLISECONDS;
+		if (settleMs > 0) {
+			await new Promise((resolve) => setTimeout(resolve, settleMs));
 		}
+		const apps = await getRunningMacOSApps();
+		const app = resolveTargetApp(apps, targetPid);
+		await this.input.rememberTargetWindow(app.pid);
+		const screenshot = await this.screenshot({ targetSize: size });
+		const tree = extractAccessibilityTree(app.pid);
+		return {
+			app: app.name,
+			bundleId: app.bundleId,
+			pid: app.pid,
+			frontmost: app.isActive,
+			axAvailable: tree.axAvailable,
+			elements: tree.elements,
+			screenshotBase64: screenshot.data.toString("base64"),
+			screenshotWidth: screenshot.width,
+			screenshotHeight: screenshot.height,
+		};
 	}
 
-	async getAppState(targetPid?: number): Promise<import("../accessibility/types.js").AppState> {
-		void targetPid;
-		throw new Error("Not implemented — requires cua-helper skyshot command (T10)");
+	async listApps(): Promise<AppInfo[]> {
+		return (await getRunningMacOSApps()).map(({ bundleId, name, pid }) => ({
+			bundleId,
+			name,
+			pid,
+			isRunning: true,
+		}));
 	}
 
-	async listApps(): Promise<import("../accessibility/types.js").AppInfo[]> {
-		throw new Error("Not implemented — requires cua-helper skyshot command (T10)");
+	async setValue(targetPid: number, elementIndex: number, value: string): Promise<void> {
+		setValueByIndex(targetPid, elementIndex, value);
+	}
+
+	async performAction(targetPid: number, elementIndex: number, action: string): Promise<void> {
+		performActionByIndex(targetPid, elementIndex, action);
 	}
 
 	async close(): Promise<void> {
 		this.input.close();
-		this.helper.close();
 	}
 }
 
@@ -158,6 +192,58 @@ export async function getMacOSLogicalScreenSize(): Promise<{ width: number; heig
 		throw new Error("Failed to parse logical screen size from system_profiler output");
 	}
 	return systemProfilerSize;
+}
+
+export async function captureMacOSScreenshot(targetSize: {
+	readonly width: number;
+	readonly height: number;
+}): Promise<Buffer> {
+	if (!Number.isSafeInteger(targetSize.width) || !Number.isSafeInteger(targetSize.height)) {
+		throw new Error("requested screenshot dimensions must be integers");
+	}
+	if (targetSize.width <= 0 || targetSize.height <= 0) {
+		throw new Error("requested screenshot dimensions must be positive");
+	}
+
+	const script = [
+		"set -eu",
+		'tmp=$(mktemp "${TMPDIR:-/tmp}/macos-cua-shot.XXXXXX.png")',
+		'out=""',
+		'cleanup() { rm -f "$tmp"; if [ -n "$out" ]; then rm -f "$out"; fi; }',
+		"trap cleanup EXIT",
+		'screencapture -x -t png "$tmp"',
+		'out=$(mktemp "${TMPDIR:-/tmp}/macos-cua-shot-resized.XXXXXX.png")',
+		'sips -z "$2" "$1" "$tmp" --out "$out" >/dev/null',
+		'cat "$out"',
+	].join("\n");
+	const result = await execFileAsync(
+		"sh",
+		["-c", script, "macos-cua-screenshot", String(targetSize.width), String(targetSize.height)],
+		{
+			encoding: "buffer",
+			maxBuffer: SCREENSHOT_MAX_BUFFER_BYTES,
+			timeout: SCREENSHOT_TIMEOUT_MILLISECONDS,
+		},
+	);
+	const data = execFileStdoutBuffer(result);
+	parsePngDimensions(data);
+	return data;
+}
+
+export async function getRunningMacOSApps(): Promise<RunningAppInfo[]> {
+	const result = await execFileAsync("osascript", ["-l", "JavaScript", "-e", LIST_APPS_JXA], {
+		encoding: "utf8",
+		timeout: LIST_APPS_TIMEOUT_MILLISECONDS,
+	});
+	return parseRunningApps(execFileStdout(result));
+}
+
+export function parseRunningApps(output: string): RunningAppInfo[] {
+	const parsed: unknown = JSON.parse(output);
+	if (!Array.isArray(parsed)) {
+		throw new Error("list apps output must be a JSON array");
+	}
+	return parsed.map(parseRunningApp).sort((left, right) => left.name.localeCompare(right.name));
 }
 
 async function getFinderDesktopBounds(): Promise<{ width: number; height: number }> {
@@ -276,6 +362,92 @@ function execFileStdout(result: { readonly stdout: string | Buffer } | string | 
 	}
 	return Buffer.isBuffer(result.stdout) ? result.stdout.toString("utf8") : result.stdout;
 }
+
+function execFileStdoutBuffer(result: { readonly stdout: string | Buffer } | string | Buffer): Buffer {
+	if (Buffer.isBuffer(result)) {
+		return result;
+	}
+	if (typeof result === "string") {
+		return Buffer.from(result, "binary");
+	}
+	return Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout, "binary");
+}
+
+function resolveTargetApp(apps: readonly RunningAppInfo[], targetPid: number | undefined): RunningAppInfo {
+	if (targetPid !== undefined) {
+		const app = apps.find((candidate) => candidate.pid === targetPid);
+		if (app === undefined) {
+			throw new Error(`No running app matched pid ${targetPid}`);
+		}
+		return app;
+	}
+	const frontmost = apps.find((candidate) => candidate.isActive);
+	if (frontmost === undefined) {
+		throw new Error("No frontmost application available");
+	}
+	return frontmost;
+}
+
+function parseRunningApp(value: unknown): RunningAppInfo {
+	if (!isRecord(value)) {
+		throw new Error("running app entry must be an object");
+	}
+	const name = stringField(value, "name");
+	const pid = numberField(value, "pid");
+	const bundleId = stringField(value, "bundleId");
+	const isActive = booleanField(value, "isActive");
+	return { name, pid, bundleId, isActive, isRunning: true };
+}
+
+function stringField(record: Record<string, unknown>, key: string): string {
+	const value = record[key];
+	if (typeof value !== "string") {
+		throw new Error(`running app ${key} must be a string`);
+	}
+	return value;
+}
+
+function numberField(record: Record<string, unknown>, key: string): number {
+	const value = record[key];
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+		throw new Error(`running app ${key} must be a positive integer`);
+	}
+	return value;
+}
+
+function booleanField(record: Record<string, unknown>, key: string): boolean {
+	const value = record[key];
+	if (typeof value !== "boolean") {
+		throw new Error(`running app ${key} must be a boolean`);
+	}
+	return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+const LIST_APPS_JXA = `
+const systemEvents = Application("System Events");
+function readString(value) {
+	try {
+		const result = value();
+		return typeof result === "string" ? result : "";
+	} catch {
+		return "";
+	}
+}
+JSON.stringify(
+	systemEvents.applicationProcesses.whose({ backgroundOnly: false })()
+		.map((process) => ({
+			name: readString(process.name),
+			bundleId: readString(process.bundleIdentifier),
+			pid: process.unixId(),
+			isActive: process.frontmost(),
+		}))
+		.filter((app) => app.name.length > 0 && Number.isInteger(app.pid) && app.pid > 0 && app.bundleId.length > 0),
+);
+`;
 
 function smallestScreenSize(
 	sizes: ReadonlyArray<{ readonly width: number; readonly height: number }>,

@@ -7,6 +7,8 @@ const koffiMock = vi.hoisted(() => {
 	const copiedValue = { type: "copied-value" };
 
 	const coreFoundationFunctions = {
+		CFGetTypeID: vi.fn(() => 1),
+		CFRetain: vi.fn((reference: object) => reference),
 		CFStringCreateWithCString: vi.fn((_allocator: null, value: string) =>
 			value === "AXPress" ? actionReference : attributeReference,
 		),
@@ -14,15 +16,31 @@ const koffiMock = vi.hoisted(() => {
 		CFStringGetMaximumSizeForEncoding: vi.fn(),
 		CFStringGetCString: vi.fn(),
 		CFArrayCreate: vi.fn(),
+		CFArrayGetCount: vi.fn(() => 0),
+		CFArrayGetValueAtIndex: vi.fn(),
+		CFStringGetTypeID: vi.fn(() => 1),
+		CFNumberGetTypeID: vi.fn(() => 2),
+		CFNumberGetValue: vi.fn(),
+		CFBooleanGetTypeID: vi.fn(() => 3),
+		CFBooleanGetValue: vi.fn(),
 		CFRelease: vi.fn(),
 	};
 
 	const accessibilityFunctions = {
+		AXIsProcessTrusted: vi.fn(() => true),
 		AXUIElementCreateApplication: vi.fn(() => applicationElement),
+		AXUIElementGetTypeID: vi.fn(() => 4),
+		AXValueGetTypeID: vi.fn(() => 5),
+		AXValueGetType: vi.fn(),
+		AXValueGetValue: vi.fn(),
 		AXUIElementPerformAction: vi.fn(() => 0),
 		AXUIElementSetAttributeValue: vi.fn(() => 0),
 		AXUIElementCopyAttributeValue: vi.fn((_element: object, _attribute: object, outValue: Array<object | null>) => {
 			outValue[0] = copiedValue;
+			return 0;
+		}),
+		AXUIElementCopyActionNames: vi.fn((_element: object, outActions: Array<object | null>) => {
+			outActions[0] = { type: "cf-array", values: [] };
 			return 0;
 		}),
 	};
@@ -48,7 +66,7 @@ const koffiMock = vi.hoisted(() => {
 			load: vi.fn((path: string) => ({
 				func: vi.fn((name: string | number) => {
 					const nativeFunctions = libraryFor(path);
-					const nativeFunction = nativeFunctions[String(name) as keyof typeof nativeFunctions];
+					const nativeFunction = nativeFunctions[nativeFunctionName(name) as keyof typeof nativeFunctions];
 					if (nativeFunction === undefined) {
 						throw new Error(`Unexpected native function: ${String(name)}`);
 					}
@@ -63,6 +81,12 @@ const koffiMock = vi.hoisted(() => {
 });
 
 vi.mock("koffi", () => koffiMock.module);
+
+function nativeFunctionName(name: string | number): string {
+	const source = String(name);
+	const prototypeMatch = source.match(/\s([A-Za-z_][A-Za-z0-9_]*)\(/);
+	return prototypeMatch?.[1] ?? source;
+}
 
 describe("#given Accessibility AXUIElement koffi bindings", () => {
 	describe("#when creating an app element and performing AX operations", () => {

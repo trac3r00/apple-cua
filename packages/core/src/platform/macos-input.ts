@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
+import { openWindows } from "get-windows";
 import type { DragOptions, KeyOptions, Point, ScrollOptions } from "../types/index.js";
 import {
 	K_CG_EVENT_FLAG_MASK_ALTERNATE,
@@ -12,11 +13,10 @@ import {
 	postScrollEvent,
 	postUnicodeText,
 } from "./macos-ffi/coregraphics.js";
-import { MacOSCuaHelper } from "./macos-helper.js";
+import { type SkyLightTargetWindow, activateWindowWithoutRaise } from "./macos-ffi/skylight.js";
 
 const DEFAULT_DRAG_FRAME_MILLISECONDS = 16;
 const MAX_DRAG_STEPS = 60;
-const TARGET_TEXT_EVENT_DELAY_MILLISECONDS = 12;
 
 const VIRTUAL_KEY_CODES = new Map<string, number>([
 	["a", 0],
@@ -126,7 +126,8 @@ const VIRTUAL_KEY_CODES = new Map<string, number>([
 
 export class MacOSInputController {
 	private targetPid: number | undefined;
-	private readonly helper = new MacOSCuaHelper();
+	private lastTargetWindow: SkyLightTargetWindow | undefined;
+	private readonly targetWindowsByPid = new Map<number, SkyLightTargetWindow>();
 
 	constructor(targetPid?: number) {
 		this.setTarget(targetPid);
@@ -137,101 +138,133 @@ export class MacOSInputController {
 			throw new Error("target pid must be a positive integer");
 		}
 		this.targetPid = pid;
+		this.lastTargetWindow = pid === undefined ? undefined : this.targetWindowsByPid.get(pid);
+	}
+
+	async rememberTargetWindow(pid: number): Promise<void> {
+		if (!Number.isSafeInteger(pid) || pid <= 0) {
+			throw new Error("target pid must be a positive integer");
+		}
+		const targetWindow = await this.visibleWindowForPid(pid);
+		if (targetWindow !== undefined) {
+			this.targetWindowsByPid.set(pid, targetWindow);
+			if (this.targetPid === pid) {
+				this.lastTargetWindow = targetWindow;
+			}
+		}
 	}
 
 	async move(position: Point): Promise<void> {
-		if (this.targetPid !== undefined) {
-			await this.helper.movePid(this.targetPid, position);
-			return;
-		}
-		this.postMouse("move", position, "left", undefined);
+		await this.postMouse("move", position, "left", undefined, await this.targetWindow(position));
 	}
 
 	async click(position: Point, button: MouseButton = "left"): Promise<void> {
-		if (this.targetPid !== undefined) {
-			await this.clickPid(this.targetPid, position, button);
-			return;
+		const targetWindow = await this.targetWindow(position);
+		this.requirePointerWindow(targetWindow);
+		this.lastTargetWindow = targetWindow;
+		if (button === "left" && targetWindow !== undefined) {
+			activateWindowWithoutRaise(targetWindow);
+			await sleep(50);
+			await this.postMouse("move", position, "left", undefined, targetWindow);
+			await sleep(15);
 		}
-		await this.move(position);
-		this.postMouse("down", position, button, 1);
-		this.postMouse("up", position, button, 1);
+		if (this.targetPid === undefined) {
+			await this.move(position);
+		}
+		await this.postMouse("down", position, button, 1, targetWindow);
+		await this.postMouse("up", position, button, 1, targetWindow);
 	}
 
 	async doubleClick(position: Point): Promise<void> {
-		if (this.targetPid !== undefined) {
-			await this.helper.doubleClickPid(this.targetPid, position);
-			return;
+		const targetWindow = await this.targetWindow(position);
+		this.requirePointerWindow(targetWindow);
+		this.lastTargetWindow = targetWindow;
+		if (targetWindow !== undefined) {
+			activateWindowWithoutRaise(targetWindow);
+			await sleep(50);
 		}
-		await this.move(position);
-		this.postMouse("down", position, "left", 1);
-		this.postMouse("up", position, "left", 1);
-		this.postMouse("down", position, "left", 2);
-		this.postMouse("up", position, "left", 2);
+		if (this.targetPid === undefined) {
+			await this.move(position);
+		}
+		await this.postMouse("down", position, "left", 1, targetWindow);
+		await this.postMouse("up", position, "left", 1, targetWindow);
+		await this.postMouse("down", position, "left", 2, targetWindow);
+		await this.postMouse("up", position, "left", 2, targetWindow);
 	}
 
 	async typeText(text: string): Promise<void> {
-		if (this.targetPid !== undefined) {
-			await this.helper.typeTextPid(this.targetPid, text);
-			return;
-		}
+		const targetWindow = await this.requireSessionWindow("keyboard");
 		for (const segment of Array.from(text)) {
-			postUnicodeText(segment, undefined);
+			postUnicodeText(segment, this.targetPid, targetWindow);
 		}
 	}
 
 	async pressKey(key: string, options?: KeyOptions): Promise<void> {
-		if (this.targetPid !== undefined) {
-			await this.helper.keyPid(this.targetPid, key, options);
-			return;
-		}
 		const keyCode = virtualKeyCodeFor(key);
 		const flags = modifierFlags(options?.modifiers ?? []);
-		postKeyboardEvent({ keyCode, keyDown: true, flags, text: undefined, targetPid: undefined });
-		postKeyboardEvent({ keyCode, keyDown: false, flags, text: undefined, targetPid: undefined });
+		const targetWindow = await this.requireSessionWindow("keyboard");
+		postKeyboardEvent({
+			keyCode,
+			keyDown: true,
+			flags,
+			text: undefined,
+			targetPid: this.targetPid,
+			targetWindow,
+		});
+		postKeyboardEvent({
+			keyCode,
+			keyDown: false,
+			flags,
+			text: undefined,
+			targetPid: this.targetPid,
+			targetWindow,
+		});
 	}
 
 	async scroll(options: ScrollOptions): Promise<void> {
 		const amount = Math.trunc(options.amount);
-		if (this.targetPid !== undefined) {
-			await this.scrollPid(this.targetPid, options.direction, amount);
-			return;
-		}
+		const targetWindow = await this.requireSessionWindow("scroll");
 		switch (options.direction) {
 			case "up":
-				postScrollEvent({ deltaX: 0, deltaY: amount, targetPid: undefined });
+				postScrollEvent({ deltaX: 0, deltaY: amount, targetPid: this.targetPid, targetWindow });
 				return;
 			case "down":
-				postScrollEvent({ deltaX: 0, deltaY: -amount, targetPid: undefined });
+				postScrollEvent({ deltaX: 0, deltaY: -amount, targetPid: this.targetPid, targetWindow });
 				return;
 			case "left":
-				postScrollEvent({ deltaX: -amount, deltaY: 0, targetPid: undefined });
+				postScrollEvent({ deltaX: -amount, deltaY: 0, targetPid: this.targetPid, targetWindow });
 				return;
 			case "right":
-				postScrollEvent({ deltaX: amount, deltaY: 0, targetPid: undefined });
+				postScrollEvent({ deltaX: amount, deltaY: 0, targetPid: this.targetPid, targetWindow });
 				return;
 		}
 	}
 
 	async drag(options: DragOptions): Promise<void> {
-		if (this.targetPid !== undefined) {
-			await this.helper.dragPid(this.targetPid, options);
-			return;
+		const targetWindow = await this.targetWindow(options.from);
+		this.requirePointerWindow(targetWindow);
+		this.lastTargetWindow = targetWindow;
+		if (targetWindow !== undefined) {
+			activateWindowWithoutRaise(targetWindow);
+			await sleep(50);
 		}
-		await this.move(options.from);
-		this.postMouse("down", options.from, "left", 1);
+		if (this.targetPid === undefined) {
+			await this.move(options.from);
+		}
+		await this.postMouse("down", options.from, "left", 1, targetWindow);
 
 		const duration = options.duration ?? 0;
 		const steps = dragSteps(duration);
 		const delay = steps <= 1 ? 0 : duration / steps;
 		for (let step = 1; step <= steps; step += 1) {
 			const position = interpolatePoint(options.from, options.to, step / steps);
-			this.postMouse("drag", position, "left", 1);
+			await this.postMouse("drag", position, "left", 1, targetWindow);
 			if (delay > 0 && step < steps) {
 				await sleep(delay);
 			}
 		}
 
-		this.postMouse("up", options.to, "left", 1);
+		await this.postMouse("up", options.to, "left", 1, targetWindow);
 	}
 
 	getCursorPosition(): Point {
@@ -239,52 +272,84 @@ export class MacOSInputController {
 		return { x: Math.round(position.x), y: Math.round(position.y) };
 	}
 
-	close(): void {
-		this.helper.close();
-	}
+	close(): void {}
 
-	private postMouse(
+	private async postMouse(
 		kind: "move" | "down" | "up" | "drag",
 		position: Point,
 		button: MouseButton,
 		clickState: number | undefined,
-	): void {
-		postMouseEvent({ kind, position, button, clickState, targetPid: undefined });
+		targetWindow: SkyLightTargetWindow | undefined,
+	): Promise<void> {
+		postMouseEvent({ kind, position, button, clickState, targetPid: this.targetPid, targetWindow });
 	}
 
-	private async clickPid(pid: number, position: Point, button: MouseButton): Promise<void> {
-		switch (button) {
-			case "left":
-				await this.helper.clickPid(pid, position);
-				return;
-			case "right":
-				await this.helper.rightClickPid(pid, position);
-				return;
-			case "middle":
-				await this.helper.middleClickPid(pid, position);
-				return;
+	private async targetWindow(position: Point): Promise<SkyLightTargetWindow | undefined> {
+		if (this.targetPid === undefined) {
+			return undefined;
+		}
+		const targetWindow = await this.visibleWindowForPid(this.targetPid, position);
+		if (targetWindow !== undefined) {
+			this.targetWindowsByPid.set(this.targetPid, targetWindow);
+		}
+		return targetWindow;
+	}
+
+	private async visibleWindowForPid(pid: number, position?: Point): Promise<SkyLightTargetWindow | undefined> {
+		const windows = await openWindows();
+		const match = windows.find(
+			(window) => window.owner.processId === pid && window.bounds.width > 0 && window.bounds.height > 0,
+		);
+		const containingMatch =
+			position === undefined
+				? undefined
+				: windows.find(
+						(window) =>
+							window.owner.processId === pid &&
+							window.bounds.width > 0 &&
+							window.bounds.height > 0 &&
+							position.x >= window.bounds.x &&
+							position.x <= window.bounds.x + window.bounds.width &&
+							position.y >= window.bounds.y &&
+							position.y <= window.bounds.y + window.bounds.height,
+					);
+		const target = containingMatch ?? match;
+		if (target === undefined) {
+			return undefined;
+		}
+		return {
+			id: target.id,
+			bounds: {
+				x: target.bounds.x,
+				y: target.bounds.y,
+				width: target.bounds.width,
+				height: target.bounds.height,
+			},
+		};
+	}
+
+	private requirePointerWindow(targetWindow: SkyLightTargetWindow | undefined): void {
+		if (this.targetPid !== undefined && targetWindow === undefined) {
+			throw new Error("targeted pointer input requires get_app_state or a visible target window");
 		}
 	}
 
-	private async scrollPid(pid: number, direction: ScrollOptions["direction"], amount: number): Promise<void> {
-		const key = scrollKeyFor(direction);
-		for (let index = 0; index < Math.max(0, amount); index += 1) {
-			await this.helper.keyPid(pid, key, { modifiers: [] });
-			await sleep(TARGET_TEXT_EVENT_DELAY_MILLISECONDS);
+	private async requireSessionWindow(action: "keyboard" | "scroll"): Promise<SkyLightTargetWindow | undefined> {
+		if (this.targetPid === undefined) {
+			return undefined;
 		}
-	}
-}
-
-function scrollKeyFor(direction: ScrollOptions["direction"]): string {
-	switch (direction) {
-		case "up":
-			return "pageup";
-		case "down":
-			return "pagedown";
-		case "left":
-			return "left";
-		case "right":
-			return "right";
+		if (this.lastTargetWindow !== undefined) {
+			return this.lastTargetWindow;
+		}
+		const targetWindow = await this.visibleWindowForPid(this.targetPid);
+		if (targetWindow === undefined) {
+			throw new Error(
+				`targeted ${action} input requires get_app_state, a visible target window, or a prior pointer action`,
+			);
+		}
+		this.targetWindowsByPid.set(this.targetPid, targetWindow);
+		this.lastTargetWindow = targetWindow;
+		return this.lastTargetWindow;
 	}
 }
 

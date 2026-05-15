@@ -1,5 +1,6 @@
 import type { AppInfo, AppState } from "../accessibility/types.js";
 import type {
+	AppStateOptions,
 	ComputerCapabilities,
 	DragOptions,
 	KeyOptions,
@@ -19,6 +20,7 @@ export interface ComputerInterface {
 	readonly capabilities: ComputerCapabilities;
 
 	screenshot(options?: ScreenshotOptions): Promise<ScreenshotResult>;
+	setTarget(pid?: number): void;
 	move(position: Point): Promise<void>;
 	click(position: Point): Promise<void>;
 	rightClick(position: Point): Promise<void>;
@@ -30,7 +32,9 @@ export interface ComputerInterface {
 	drag(options: DragOptions): Promise<void>;
 	getCursorPosition(): Promise<Point>;
 	getScreenSize(): Promise<{ width: number; height: number }>;
-	getAppState(targetPid?: number): Promise<AppState>;
+	getAppState(targetPid?: number, options?: AppStateOptions): Promise<AppState>;
 	listApps(): Promise<AppInfo[]>;
+	setValue(targetPid: number, elementIndex: number, value: string): Promise<void>;
+	performAction(targetPid: number, elementIndex: number, action: string): Promise<void>;
 	close(): Promise<void>;
 }

@@ -17,8 +17,15 @@ export interface Rect {
 
 export interface ScreenshotOptions {
 	region?: Rect;
+	targetSize?: Size;
 	format?: "png" | "jpeg";
 	quality?: number;
+}
+
+export interface AppStateOptions {
+	screenshotSize?: Size;
+	timeoutMs?: number;
+	settleMs?: number;
 }
 
 export interface KeyOptions {

@@ -1,6 +1,15 @@
 import type { KoffiFunc } from "koffi";
+import { createNSEventBackedMouseEvent } from "./appkit.js";
 import { type CFTypeRef, cfRelease } from "./corefoundation.js";
 import { koffi } from "./koffi.js";
+import {
+	type SkyLightTargetWindow,
+	postAuthenticatedSkyLightEventToPid,
+	postCoreGraphicsEventToWindowOwner,
+	postSkyLightEventToPid,
+	setSkyLightIntegerField,
+	setSkyLightWindowLocation,
+} from "./skylight.js";
 
 export type CGEventRef = CFTypeRef;
 export type CGEventSourceRef = CFTypeRef;
@@ -19,6 +28,7 @@ export type MouseEventOptions = {
 	readonly button: MouseButton;
 	readonly clickState: number | undefined;
 	readonly targetPid: number | undefined;
+	readonly targetWindow?: SkyLightTargetWindow | undefined;
 };
 
 export type KeyboardEventOptions = {
@@ -27,12 +37,14 @@ export type KeyboardEventOptions = {
 	readonly flags: number;
 	readonly text: string | undefined;
 	readonly targetPid: number | undefined;
+	readonly targetWindow?: SkyLightTargetWindow | undefined;
 };
 
 export type ScrollEventOptions = {
 	readonly deltaX: number;
 	readonly deltaY: number;
 	readonly targetPid: number | undefined;
+	readonly targetWindow?: SkyLightTargetWindow | undefined;
 };
 
 export const K_CG_EVENT_SOURCE_STATE_HID_SYSTEM_STATE = 1;
@@ -40,6 +52,9 @@ export const K_CG_HID_EVENT_TAP = 0;
 export const K_CG_SCROLL_EVENT_UNIT_LINE = 1;
 export const K_CG_MOUSE_EVENT_CLICK_STATE = 1;
 export const K_CG_MOUSE_EVENT_BUTTON_NUMBER = 3;
+export const K_CG_MOUSE_EVENT_SUBTYPE = 7;
+export const K_CG_MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER = 91;
+export const K_CG_MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER_THAT_CAN_HANDLE_THIS_EVENT = 92;
 export const K_CG_EVENT_FLAG_MASK_SHIFT = 0x00020000;
 export const K_CG_EVENT_FLAG_MASK_CONTROL = 0x00040000;
 export const K_CG_EVENT_FLAG_MASK_ALTERNATE = 0x00080000;
@@ -104,16 +119,16 @@ const CGEventSetTimestamp = coreGraphics.func("CGEventSetTimestamp", "void", [CG
 	(event: CGEventRef, timestamp: bigint) => void
 >;
 
+const CGEventSetLocation = coreGraphics.func("CGEventSetLocation", "void", [CG_EVENT_REF, CG_POINT]) as KoffiFunc<
+	(event: CGEventRef, location: CGPoint) => void
+>;
+
 const CGEventGetLocation = coreGraphics.func("CGEventGetLocation", CG_POINT, [CG_EVENT_REF]) as KoffiFunc<
 	(event: CGEventRef) => CGPoint
 >;
 
 const CGEventPost = coreGraphics.func("CGEventPost", "void", ["uint32_t", CG_EVENT_REF]) as KoffiFunc<
 	(tap: number, event: CGEventRef) => void
->;
-
-const CGEventPostToPid = coreGraphics.func("CGEventPostToPid", "void", ["int32_t", CG_EVENT_REF]) as KoffiFunc<
-	(pid: number, event: CGEventRef) => void
 >;
 
 const clockGetTimeNanoseconds = systemLibrary.func("clock_gettime_nsec_np", "uint64_t", ["int"]) as KoffiFunc<
@@ -125,13 +140,16 @@ export function currentUptimeNanoseconds(): bigint {
 }
 
 export function postMouseEvent(options: MouseEventOptions): void {
-	const event = createMouseEvent(options.kind, options.position, options.button);
+	const event = createMouseEvent(options.kind, options.position, options.button, options.targetWindow);
 	try {
 		CGEventSetIntegerValueField(event, K_CG_MOUSE_EVENT_BUTTON_NUMBER, mouseButtonNumber(options.button));
 		if (options.clickState !== undefined) {
 			CGEventSetIntegerValueField(event, K_CG_MOUSE_EVENT_CLICK_STATE, options.clickState);
 		}
-		postEvent(event, options.targetPid);
+		if (options.targetPid !== undefined) {
+			stampTargetedMouseEvent(event, options.targetPid, options.position, options.targetWindow);
+		}
+		postMouse(event, options.targetPid, options.targetWindow);
 	} finally {
 		cfRelease(event);
 	}
@@ -144,23 +162,27 @@ export function postKeyboardEvent(options: KeyboardEventOptions): void {
 		if (options.text !== undefined) {
 			CGEventKeyboardSetUnicodeString(event, options.text.length, options.text);
 		}
-		postEvent(event, options.targetPid);
+		postKeyboard(event, options.targetPid, options.targetWindow);
 	} finally {
 		cfRelease(event);
 	}
 }
 
-export function postUnicodeText(text: string, targetPid: number | undefined): void {
+export function postUnicodeText(
+	text: string,
+	targetPid: number | undefined,
+	targetWindow?: SkyLightTargetWindow | undefined,
+): void {
 	for (const segment of Array.from(text)) {
-		postKeyboardEvent({ keyCode: 0, keyDown: true, flags: 0, text: segment, targetPid });
-		postKeyboardEvent({ keyCode: 0, keyDown: false, flags: 0, text: segment, targetPid });
+		postKeyboardEvent({ keyCode: 0, keyDown: true, flags: 0, text: segment, targetPid, targetWindow });
+		postKeyboardEvent({ keyCode: 0, keyDown: false, flags: 0, text: segment, targetPid, targetWindow });
 	}
 }
 
 export function postScrollEvent(options: ScrollEventOptions): void {
 	const event = createScrollEvent(options.deltaX, options.deltaY);
 	try {
-		postEvent(event, options.targetPid);
+		postScroll(event, options.targetPid, options.targetWindow);
 	} finally {
 		cfRelease(event);
 	}
@@ -187,13 +209,28 @@ function createEventSource(): CGEventSourceRef {
 	return source;
 }
 
-function createMouseEvent(kind: MouseEventKind, position: CGPoint, button: MouseButton): CGEventRef {
+function createMouseEvent(
+	kind: MouseEventKind,
+	position: CGPoint,
+	button: MouseButton,
+	targetWindow: SkyLightTargetWindow | undefined,
+): CGEventRef {
 	const source = createEventSource();
 	try {
-		const event = CGEventCreateMouseEvent(source, mouseEventType(kind, button), position, mouseButtonNumber(button));
+		const event =
+			targetWindow === undefined
+				? CGEventCreateMouseEvent(source, mouseEventType(kind, button), position, mouseButtonNumber(button))
+				: createNSEventBackedMouseEvent(
+						mouseEventType(kind, button),
+						position,
+						0,
+						targetWindow.id,
+						kind === "move" ? 0 : 1,
+					);
 		if (event === null) {
 			throw new Error("CGEventCreateMouseEvent returned null");
 		}
+		CGEventSetLocation(event, position);
 		stampEvent(event);
 		return event;
 	} finally {
@@ -233,13 +270,78 @@ function stampEvent(event: CGEventRef): void {
 	CGEventSetTimestamp(event, currentUptimeNanoseconds());
 }
 
-function postEvent(event: CGEventRef, targetPid: number | undefined): void {
+function postMouse(
+	event: CGEventRef,
+	targetPid: number | undefined,
+	targetWindow: SkyLightTargetWindow | undefined,
+): void {
 	if (targetPid === undefined) {
 		CGEventPost(K_CG_HID_EVENT_TAP, event);
 		return;
 	}
+	if (targetWindow === undefined) {
+		throw new Error("targeted mouse input requires a target window from get_app_state or a visible app window");
+	}
+	postSkyLightEventToPid(targetPid, event);
+	postCoreGraphicsEventToWindowOwner(targetWindow, event);
+}
 
-	CGEventPostToPid(targetPid, event);
+function postKeyboard(
+	event: CGEventRef,
+	targetPid: number | undefined,
+	targetWindow: SkyLightTargetWindow | undefined,
+): void {
+	if (targetPid === undefined) {
+		CGEventPost(K_CG_HID_EVENT_TAP, event);
+		return;
+	}
+	if (targetWindow === undefined) {
+		throw new Error("targeted keyboard input requires a target window from get_app_state or a prior pointer action");
+	}
+	if (postAuthenticatedSkyLightEventToPid(targetPid, event)) {
+		return;
+	}
+	throw new Error("failed to build authenticated targeted keyboard event");
+}
+
+function postScroll(
+	event: CGEventRef,
+	targetPid: number | undefined,
+	targetWindow: SkyLightTargetWindow | undefined,
+): void {
+	if (targetPid === undefined) {
+		CGEventPost(K_CG_HID_EVENT_TAP, event);
+		return;
+	}
+	if (targetWindow === undefined) {
+		throw new Error("targeted scroll input requires a target window from get_app_state or a prior pointer action");
+	}
+	postSkyLightEventToPid(targetPid, event);
+	postCoreGraphicsEventToWindowOwner(targetWindow, event);
+}
+
+function stampTargetedMouseEvent(
+	event: CGEventRef,
+	targetPid: number,
+	position: CGPoint,
+	targetWindow: SkyLightTargetWindow | undefined,
+): void {
+	CGEventSetIntegerValueField(event, K_CG_MOUSE_EVENT_SUBTYPE, 3);
+	if (targetWindow !== undefined) {
+		CGEventSetIntegerValueField(event, K_CG_MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER, targetWindow.id);
+		CGEventSetIntegerValueField(
+			event,
+			K_CG_MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER_THAT_CAN_HANDLE_THIS_EVENT,
+			targetWindow.id,
+		);
+		setSkyLightWindowLocation(event, {
+			x: position.x - targetWindow.bounds.x,
+			y: position.y - targetWindow.bounds.y,
+		});
+	} else {
+		setSkyLightWindowLocation(event, position);
+	}
+	setSkyLightIntegerField(event, 40, targetPid);
 }
 
 function mouseButtonNumber(button: MouseButton): number {

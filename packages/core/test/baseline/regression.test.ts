@@ -1,23 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const helperMock = vi.hoisted(() => {
-	const instance = {
-		clickPid: vi.fn(() => Promise.resolve()),
-		rightClickPid: vi.fn(() => Promise.resolve()),
-		middleClickPid: vi.fn(() => Promise.resolve()),
-		doubleClickPid: vi.fn(() => Promise.resolve()),
-		movePid: vi.fn(() => Promise.resolve()),
-		dragPid: vi.fn(() => Promise.resolve()),
-		keyPid: vi.fn(() => Promise.resolve()),
-		typeTextPid: vi.fn(() => Promise.resolve()),
-		close: vi.fn(),
-	};
-	return {
-		instance,
-		constructor: vi.fn(() => instance),
-	};
-});
-
 const coreGraphicsMock = vi.hoisted(() => ({
 	getCurrentCursorPosition: vi.fn(() => ({ x: 1, y: 2 })),
 	postKeyboardEvent: vi.fn(),
@@ -26,7 +8,18 @@ const coreGraphicsMock = vi.hoisted(() => ({
 	postUnicodeText: vi.fn(),
 }));
 
-vi.mock("../../src/platform/macos-helper.js", () => ({ MacOSCuaHelper: helperMock.constructor }));
+const windowMock = vi.hoisted(() => ({
+	openWindows: vi.fn(() => Promise.resolve([])),
+}));
+
+const skyLightMock = vi.hoisted(() => ({
+	activateWindowWithoutRaise: vi.fn(() => true),
+}));
+
+vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
+vi.mock("../../src/platform/macos-ffi/skylight.js", () => ({
+	activateWindowWithoutRaise: skyLightMock.activateWindowWithoutRaise,
+}));
 vi.mock("../../src/platform/macos-ffi/coregraphics.js", () => ({
 	K_CG_EVENT_FLAG_MASK_ALTERNATE: 0x00080000,
 	K_CG_EVENT_FLAG_MASK_COMMAND: 0x00100000,
@@ -42,6 +35,7 @@ vi.mock("../../src/platform/macos-ffi/coregraphics.js", () => ({
 describe("#given baseline CGEvent regression suite #when MacOSInputController dispatches without target pid #then CoreGraphics path is exercised", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		windowMock.openWindows.mockResolvedValue([]);
 	});
 
 	it("click dispatches move + down + up via postMouseEvent", async () => {
@@ -71,7 +65,6 @@ describe("#given baseline CGEvent regression suite #when MacOSInputController di
 			clickState: 1,
 			targetPid: undefined,
 		});
-		expect(helperMock.instance.clickPid).not.toHaveBeenCalled();
 		controller.close();
 	});
 
@@ -82,9 +75,8 @@ describe("#given baseline CGEvent regression suite #when MacOSInputController di
 		await controller.typeText("안녕하세요");
 
 		expect(coreGraphicsMock.postUnicodeText).toHaveBeenCalledTimes(5);
-		expect(coreGraphicsMock.postUnicodeText).toHaveBeenNthCalledWith(1, "안", undefined);
-		expect(coreGraphicsMock.postUnicodeText).toHaveBeenNthCalledWith(5, "요", undefined);
-		expect(helperMock.instance.typeTextPid).not.toHaveBeenCalled();
+		expect(coreGraphicsMock.postUnicodeText).toHaveBeenNthCalledWith(1, "안", undefined, undefined);
+		expect(coreGraphicsMock.postUnicodeText).toHaveBeenNthCalledWith(5, "요", undefined, undefined);
 		controller.close();
 	});
 

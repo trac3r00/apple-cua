@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-type ExecFileCallback = (error: Error | null, stdout: string, stderr: string) => void;
+type ExecFileCallback = (error: Error | null, stdout: string | Buffer, stderr: string) => void;
 type ExecFileMock = (
 	file: string,
 	args: readonly string[],
@@ -16,7 +16,13 @@ vi.mock("node:child_process", () => ({
 	execFile: childProcessMock.execFile,
 }));
 
-import { getMacOSLogicalScreenSize, parsePngDimensions, parseSystemProfilerLogicalScreenSize } from "./macos.js";
+import {
+	captureMacOSScreenshot,
+	getMacOSLogicalScreenSize,
+	parsePngDimensions,
+	parseRunningApps,
+	parseSystemProfilerLogicalScreenSize,
+} from "./macos.js";
 
 function createFakePng(): Buffer {
 	const data = globalThis.Buffer.alloc(24);
@@ -31,6 +37,15 @@ beforeEach(() => {
 });
 
 function mockExecFileStdout(stdout: string): void {
+	childProcessMock.execFile.mockImplementationOnce((file, args, options, callback) => {
+		void file;
+		void args;
+		void options;
+		callback(null, stdout, "");
+	});
+}
+
+function mockExecFileBuffer(stdout: Buffer): void {
 	childProcessMock.execFile.mockImplementationOnce((file, args, options, callback) => {
 		void file;
 		void args;
@@ -58,6 +73,23 @@ describe("#given macos screenshot capture returns a png buffer", () => {
 			expect(result.width).toBe(1920);
 			expect(result.height).toBe(1080);
 		});
+	});
+});
+
+describe("#given helper-free screenshot capture #when a target size is requested #then screencapture and sips run in-process", () => {
+	it("returns the captured png bytes and parsed dimensions", async () => {
+		const fakePng = createFakePng();
+		mockExecFileBuffer(fakePng);
+
+		const result = await captureMacOSScreenshot({ width: 1920, height: 1080 });
+
+		expect(result).toBe(fakePng);
+		expect(childProcessMock.execFile).toHaveBeenCalledWith(
+			"sh",
+			expect.arrayContaining(["macos-cua-screenshot", "1920", "1080"]),
+			expect.objectContaining({ encoding: "buffer" }),
+			expect.any(Function),
+		);
 	});
 });
 
@@ -118,5 +150,21 @@ describe("#given a non-Retina system_profiler resolution #when parsing logical s
 		const size = parseSystemProfilerLogicalScreenSize("Resolution: 1920 x 1080\n");
 
 		expect(size).toEqual({ width: 1920, height: 1080 });
+	});
+});
+
+describe("#given JXA application process output #when parsing running apps #then maps app metadata", () => {
+	it("returns sorted running app records", () => {
+		const apps = parseRunningApps(
+			JSON.stringify([
+				{ name: "Safari", bundleId: "com.apple.Safari", pid: 42, isActive: true },
+				{ name: "Finder", bundleId: "com.apple.finder", pid: 7, isActive: false },
+			]),
+		);
+
+		expect(apps).toEqual([
+			{ name: "Finder", bundleId: "com.apple.finder", pid: 7, isActive: false, isRunning: true },
+			{ name: "Safari", bundleId: "com.apple.Safari", pid: 42, isActive: true, isRunning: true },
+		]);
 	});
 });

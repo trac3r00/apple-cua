@@ -1,11 +1,7 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.4.4/schema.json",
-	"assist": {
-		"actions": {
-			"source": {
-				"organizeImports": "on"
-			}
-		}
+	"organizeImports": {
+		"enabled": true
 	},
 	"formatter": {
 		"enabled": true,
@@ -38,15 +34,6 @@
 		}
 	},
 	"files": {
-		"includes": [
-			"**",
-			"!dist",
-			"!.sisyphus",
-			"!node_modules",
-			"!.build",
-			"!Package.resolved",
-			"!packages/cua-helper/.build",
-			"!packages/cua-helper/Package.resolved"
-		]
+		"ignore": ["dist", ".sisyphus", "node_modules", ".build", "Package.resolved"]
 	}
 }

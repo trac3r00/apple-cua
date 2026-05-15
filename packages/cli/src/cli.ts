@@ -72,12 +72,12 @@ const program = new Command();
 
 program
 	.name("macos-cua")
-	.description("Native macOS computer-use control. Per-PID mouse/scroll uses the Swift cua-helper SkyLight bridge.")
+	.description("Native macOS computer-use control with Codex-style app-targeted tools.")
 	.version(packageJson.version)
 	.option("--json", "print machine-readable JSON output")
 	.option(
 		"--target-pid <pid>",
-		"deliver input to a target process id without focusing it (requires built cua-helper for mouse/scroll)",
+		"deliver input to a target process id using the cached app window session from get_app_state",
 		parsePositiveInteger,
 	)
 	.option("--target-bundle-id <id>", "deliver input to the running app with this bundle identifier");
@@ -120,7 +120,7 @@ program
 
 program
 	.command("click")
-	.description("Click. With --target-pid, posts through cua-helper without cursor movement or focus steal.")
+	.description("Click. With --target-pid, routes through the cached app window session.")
 	.argument("[x]", "x coordinate")
 	.argument("[y]", "y coordinate")
 	.option("-x, --x <x>", "x coordinate", parseXCoordinate)
@@ -138,7 +138,7 @@ program
 
 program
 	.command("right-click")
-	.description("Right-click. With --target-pid, posts through cua-helper without cursor movement or focus steal.")
+	.description("Right-click. With --target-pid, routes through the cached app window session.")
 	.argument("[x]", "x coordinate")
 	.argument("[y]", "y coordinate")
 	.option("-x, --x <x>", "x coordinate", parseXCoordinate)
@@ -151,7 +151,7 @@ program
 
 program
 	.command("middle-click")
-	.description("Middle-click. With --target-pid, posts through cua-helper without cursor movement or focus steal.")
+	.description("Middle-click. With --target-pid, routes through the cached app window session.")
 	.argument("[x]", "x coordinate")
 	.argument("[y]", "y coordinate")
 	.option("-x, --x <x>", "x coordinate", parseXCoordinate)
@@ -164,7 +164,7 @@ program
 
 program
 	.command("double-click")
-	.description("Double-click. With --target-pid, posts through cua-helper without cursor movement or focus steal.")
+	.description("Double-click. With --target-pid, routes through the cached app window session.")
 	.argument("[x]", "x coordinate")
 	.argument("[y]", "y coordinate")
 	.option("-x, --x <x>", "x coordinate", parseXCoordinate)
@@ -190,7 +190,7 @@ program
 
 program
 	.command("drag")
-	.description("Drag. With --target-pid, posts through cua-helper without cursor movement or focus steal.")
+	.description("Drag. With --target-pid, routes through the cached app window session.")
 	.argument("[fromX]", "start x coordinate")
 	.argument("[fromY]", "start y coordinate")
 	.argument("[toX]", "end x coordinate")
@@ -222,7 +222,7 @@ program
 
 program
 	.command("scroll")
-	.description("Scroll globally with a wheel event, or scroll --target-pid via helper PageUp/PageDown/arrow keys.")
+	.description("Scroll globally with a wheel event, or scroll --target-pid through the cached app window session.")
 	.requiredOption("-d, --direction <direction>", "direction: up, down, left, or right", parseScrollDirection)
 	.option("-a, --amount <n>", "scroll amount", parsePositiveInteger, 3)
 	.action(async (options: ScrollCommandOptions) => {

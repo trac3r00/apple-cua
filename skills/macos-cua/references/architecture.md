@@ -9,7 +9,7 @@ macos-cua is designed for the same OpenAI computer-use action vocabulary that Co
 The key trade-off:
 
 - **Sandbox path** (trycua/cua style): strong isolation via Docker/QEMU/Lume, but pays for VM boot, guest services, HTTP/JSON transport, PIL screenshot encoding, base64 serialization, and a default 500 ms post-action delay.
-- **Host-native path** (macos-cua style): no VM boundary, no transport hops, no repeated base64 cycles. Screenshots go straight from `screencapture` (and eventually ScreenCaptureKit) to disk. Global input goes through `koffi`-bound CoreGraphics CGEvent, while background per-PID input goes through a persistent Swift SkyLight helper.
+- **Host-native path** (macos-cua style): no VM boundary, no transport hops, no repeated base64 cycles. Screenshots currently use the system `screencapture` + `sips` fallback. Global input goes through `koffi`-bound CoreGraphics CGEvent, while targeted app input goes through TypeScript-owned SkyLight/AppKit FFI and a cached visible window session.
 
 The result is lower latency and real-app fidelity. The cost is weaker environmental isolation, so the agent must never auto-drive destructive UI without user confirmation.
 
@@ -28,10 +28,10 @@ The result is lower latency and real-app fidelity. The cost is weaker environmen
 ├─────────────────────────────────────────────────────────┤
 │  Platform implementations                                │
 │  MacOSHostComputer (implemented)                         │
-│    screencapture → PNG buffer                            │
+│    screencapture/sips → PNG buffer                       │
 │    koffi/CGEvent → global mouse/keyboard/scroll          │
-│    Swift cua-helper → per-PID SkyLight mouse/keyboard    │
-│    Swift cua-helper → logical screen size                │
+│    SkyLight/AppKit FFI → targeted app sessions           │
+│    Finder/system_profiler → logical screen size          │
 │  VMComputer (interface only)                             │
 │  CloudComputer (interface only)                            │
 └─────────────────────────────────────────────────────────┘
@@ -41,10 +41,10 @@ The result is lower latency and real-app fidelity. The cost is weaker environmen
 
 `MacOSHostComputer` lives in `packages/core/src/platform/macos.ts`. It implements the full `ComputerInterface` contract using macOS-native APIs:
 
-- **Screenshots**: `screencapture -x -` (captures to stdout as PNG bytes). Region capture is supported via `-R x,y,w,h`.
+- **Screenshots**: `screencapture` captures the primary display and `sips` resizes the PNG to the requested target dimensions.
 - **Global input**: `koffi`-bound CoreGraphics CGEvent for click, double-click, type, key chords, scroll, and drag. Events are posted globally via `CGEventPost` by default, preserving the original behavior.
-- **Per-PID input**: `packages/cua-helper` is a Swift executable managed by `MacOSCuaHelper`. It speaks line-delimited JSON over stdio and posts mouse/key/text events to a target PID through SkyLight `SLEventPostToPid`.
-- **Queries**: `cua-helper` reports logical screen size through AppKit `NSScreen.frame`, with `system_profiler SPDisplaysDataType` as a cold fallback when the helper is unavailable. `CGEventGetLocation(CGEventCreate(NULL))` reports the current cursor position.
+- **Targeted input**: `MacOSInputController` resolves visible windows with `get-windows`, remembers the target window after `get_app_state` or pointer routing, and posts through SkyLight/AppKit FFI. It refuses targeted keyboard, text, mouse, and scroll when no target window is known.
+- **Queries**: Finder desktop bounds provide logical screen size, with `system_profiler SPDisplaysDataType` as a cold fallback. `CGEventGetLocation(CGEventCreate(NULL))` reports the current cursor position.
 
 ## Computer-use coordinate scaling
 
@@ -68,23 +68,19 @@ Two platform implementations exist as stubs:
 
 These are placeholders for future expansion. The `ComputerInterface` contract is intentionally platform-agnostic so that a single automation script can switch from `MacOSHostComputer` to `VMComputer` by changing one import.
 
-## Per-PID mouse / scroll / keyboard (Implemented)
+## Targeted mouse / scroll / keyboard (Implemented)
 
-Per-PID input goes through `packages/cua-helper`, a Swift binary that talks JSON over stdin/stdout. The TypeScript wrapper (`MacOSCuaHelper`) lazily spawns it on first use, matches replies on uuid id, and auto-restarts on subprocess crash. Recipes:
+Targeted input is helper-free and stays inside the TypeScript process:
 
-- **Mouse left-click**: `FocusWithoutRaise.activateWithoutRaise` (yabai-style 248-byte PSN defocus + focus event records via `SLPSPostEventRecordTo`) → 50 ms settle → `mouseMoved` at target → 15 ms → off-screen `(-1, -1)` primer down/up (opens Chromium's user-activation gate) → 100 ms → target down/up pair. Each event is built via `NSEvent.mouseEvent(...).cgEvent` (raw `CGEventCreateMouseEvent` is filtered by Chromium), stamped with `mouseEventSubtype = 3`, `mouseEventClickState`, target window IDs, `CGEventSetWindowLocation` for window-local coords, and SkyLight raw field 40 = pid. Posted via `SLEventPostToPid` without auth message.
-- **Mouse right / middle / modifier-held**: skip the primer, NSEvent-bridged `rightMouseDown/Up` / `otherMouseDown/Up` / modified `leftMouseDown/Up` posted via `postBoth` (SkyLight + public `CGEvent.postToPid`).
-- **Drag**: NSEvent-bridged down + linearly-interpolated `mouseDragged` events + up, all stamped + posted via `postBoth`.
-- **Keyboard**: standard `CGEventCreateKeyboardEvent`, then `SLEventSetAuthenticationMessage` via `+[SLSEventAuthenticationMessage messageWithEventRecord:pid:version:]` (Chromium omnibox accepts these as trusted), posted via `SLEventPostToPid`.
-- **Type text**: per-character `CGEvent` with `keyboardSetUnicodeString` (UTF-16), no auth message, posted via `SLEventPostToPid`.
-- **Scroll**: keyboard `PageUp` / `PageDown` / arrows repeated `amount` times. Wheel events posted per-PID are silently dropped by Chromium (no SkyLight scroll auth subclass).
-
-The Swift helper is built by `bash packages/cua-helper/build.sh` (also invoked automatically by `pnpm --filter @macos-cua/core build`) and copied to `packages/core/dist/bin/cua-helper`. Non-Darwin hosts and missing Swift toolchain skip cleanly.
+- **Mouse left-click**: resolve a visible target window, activate it without raising via PSN focus records, create AppKit-backed mouse `CGEvent`s when a window is known, stamp `mouseEventSubtype = 3`, `mouseEventClickState`, target window IDs, `CGEventSetWindowLocation` for window-local coords, and SkyLight raw field 40 = pid. Events post through `SLEventPostToPid` plus the window owner's process serial number.
+- **Mouse right / middle / drag**: use the same target-window stamping and SkyLight/window-owner delivery, without the global `CGEventPostToPid` fallback.
+- **Keyboard**: standard `CGEventCreateKeyboardEvent`, then `SLEventSetAuthenticationMessage` via `+[SLSEventAuthenticationMessage messageWithEventRecord:pid:version:]`, posted via `SLEventPostToPid`.
+- **Type text**: per-character `CGEvent` with `CGEventKeyboardSetUnicodeString` routed through the remembered app session.
+- **Scroll**: wheel events require the remembered app window and use SkyLight/window-owner delivery; without a remembered session the call fails before any event is posted.
 
 ## Future work
 
 The current architecture is fully functional. Planned improvements:
 
-1. **ScreenCaptureKit / IOSurface** — replace `screencapture` with a native addon that uses `SCStream` for GPU-backed, low-latency capture. Removes the subprocess spawn overhead and enables streaming frames instead of one-shot files.
-2. **AXUIElement semantic targeting** — add `AXUIElementPerformAction(kAXPressAction)` paths for buttons / links / toolbar items so the agent can click named elements without coordinates. Falls back to the helper pixel-click path for canvas / WebGL surfaces.
-3. **Display selection** — support `--display` for multi-monitor setups.
+1. **Display selection** — support `--display` for multi-monitor setups.
+2. **Streaming frames** — add an IOSurface/SCStream path for higher frame-rate observation when one-shot screenshots are not enough.

@@ -9,7 +9,7 @@ Native macOS computer-use control, designed for the OpenAI computer-use action v
 
 OpenAI Codex Computer Use is fast because it runs on the host with macOS-native APIs (ScreenCaptureKit, CoreGraphics, local MCP stdio). By contrast, [trycua/cua](https://github.com/trycua/cua) is portable but slow because of the multi-hop VM/HTTP/PIL pipeline: Python agent loop, 500 ms post-action screenshot delay, HTTP/WebSocket JSON to a guest FastAPI server, PIL encode, base64 SSE, client decode/re-encode. Codex removes the VM boundary and repeated image serialization; cua keeps it for sandbox isolation.
 
-`macos-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same `screenshot / click / type / key / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs — `screencapture` for screen capture, `koffi`-bound CoreGraphics `CGEventPost` for global input, and a small Swift `cua-helper` SkyLight bridge for background per-PID mouse/keyboard delivery. No Docker, no QEMU, no VNC, no cloud API key.
+`macos-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same app-oriented `list_apps / get_app_state / click / type_text / press_key / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs: `screencapture`/`sips` for screenshot capture, `koffi`-bound CoreGraphics for global input, Accessibility for app state/actions, and SkyLight/AppKit FFI for app-targeted window sessions. No Docker, no QEMU, no VNC, no helper binary, no cloud API key.
 
 The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-comparison.md). If you need strong VM isolation, use cua. If you need low-latency host-native control, use this.
 
@@ -18,8 +18,8 @@ The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-co
 | Runs on | Host Mac | VM / container / cloud | Host Mac |
 | Needs VM | No | Yes (default) | No |
 | Needs API key | OpenAI only | Optional `CUA_API_KEY` for cloud | No |
-| Screenshot path | Native ScreenCaptureKit / IOSurface | PIL `ImageGrab` in guest | `screencapture` CLI (ScreenCaptureKit FFI planned) |
-| Input path | Native CGEvent / Apple Events | `pynput` in guest | Native CoreGraphics CGEvent via koffi + Swift SkyLight helper for per-PID mouse/keyboard |
+| Screenshot path | Native ScreenCaptureKit / IOSurface | PIL `ImageGrab` in guest | Native `screencapture` + `sips` fallback |
+| Input path | Native CGEvent / Apple Events | `pynput` in guest | CoreGraphics CGEvent via koffi + SkyLight/AppKit FFI for app-targeted windows |
 | Transport | Local MCP stdio | HTTP/WebSocket JSON + SSE | Local process / MCP stdio / pi extension |
 | Post-action delay | None reported | 500 ms default | None |
 | Isolation | macOS permissions + app scoping | VM / container sandbox | macOS permissions only |
@@ -81,7 +81,7 @@ Pressed: command+shift+cmd
 
 ### Per-PID targeting
 
-By default, input events go to the globally focused application. If you want the agent to drive a specific app while you keep focus elsewhere, pass `--target-pid <pid>` or `--target-bundle-id <id>` to any CLI call. Per-PID mouse, drag, and keyboard events are delivered through `packages/cua-helper`, a persistent Swift helper that posts NSEvent-bridged CGEvents via SkyLight without moving the real cursor or raising the target window. Per-PID scroll maps to authenticated helper key events (`PageUp` / `PageDown` / arrows) because Chromium drops private scroll-wheel posts.
+By default, input events go to the globally focused application. If you want the agent to drive a specific app, call `get_app_state` for that app first or pass `--target-pid <pid>` after the app has a visible window. The host implementation caches the app window session and routes mouse, drag, keyboard, text, and scroll events through CoreGraphics plus SkyLight/AppKit FFI. If no visible target window is known, targeted input fails loudly instead of falling back to global cursor-moving input.
 
 Example: send a URL to Safari while Terminal stays focused:
 
@@ -89,7 +89,8 @@ Example: send a URL to Safari while Terminal stays focused:
 # 1. get Safari's PID
 SAFARI_PID=$(pgrep -x Safari)
 
-# 2. focus Safari's address bar, type the URL, and press Return — all while Terminal keeps focus
+# 2. focus Safari's address bar, type the URL, and press Return
+# each CLI call primes the visible target window before dispatch
 macos-cua --target-pid "$SAFARI_PID" key l -m cmd
 macos-cua --target-pid "$SAFARI_PID" type "https://example.com"
 macos-cua --target-pid "$SAFARI_PID" key Return
@@ -100,15 +101,15 @@ macos-cua --target-pid "$SAFARI_PID" scroll --direction down --amount 5
 macos-cua --target-pid "$SAFARI_PID" drag --from-x 100 --from-y 100 --to-x 300 --to-y 300
 ```
 
-If `--target-pid` is used before the helper is built, the command fails with a clear build instruction instead of falling back to the global path. That preserves the no-focus-steal contract.
+If `--target-pid` is used before a target window has been discovered, the command fails with a clear app-session error instead of falling back to the global path.
 
 ### Per-PID mouse/scroll/keyboard architecture
 
-- **Global input** (no `--target-pid`) stays on the existing koffi CoreGraphics HID-tap path and remains backward compatible.
-- **Per-PID mouse** uses the Swift helper. It creates AppKit `NSEvent.mouseEvent(...)` objects, bridges them to `CGEvent`, stamps target-window fields plus SkyLight field 40, and posts through `SLEventPostToPid`; left-clicks include the focus-without-raise + off-screen primer recipe Chromium/WebKit require.
-- **Per-PID keyboard** uses SkyLight `SLSEventAuthenticationMessage` so Chromium omniboxes accept shortcuts and typed keys natively.
-- **Per-PID text** uses Unicode CGEvent payloads so background text fields receive literal characters.
-- **Per-PID scroll** is intentionally keyboard-backed (`PageUp`/`PageDown`/arrows), because Chromium silently drops private scroll-wheel events.
+- **Global input** (no `--target-pid`) stays on the koffi CoreGraphics HID-tap path and remains backward compatible.
+- **Targeted mouse/drag** resolves a visible app window, creates AppKit-backed `CGEvent`s when a window is known, stamps target-window fields plus SkyLight field 40, activates the window without raising it, and posts through SkyLight plus the window owner's process serial number.
+- **Targeted keyboard** requires a remembered app window and uses SkyLight `SLSEventAuthenticationMessage` before `SLEventPostToPid`.
+- **Targeted text** uses per-character Unicode CGEvent payloads routed through the remembered app session.
+- **Targeted scroll** requires the same remembered app window and refuses to fall back to the global event tap.
 
 ### MCP server
 
@@ -149,7 +150,7 @@ VS Code `settings.json` (MCP extension):
 }
 ```
 
-The server exposes 9 tools matching the OpenAI computer-use vocabulary. See the [Action surface](#action-surface) table below.
+The server exposes 9 Codex Computer Use tools. See the [Action surface](#action-surface) table below.
 
 ### pi-extension
 
@@ -161,23 +162,23 @@ pi install file://./packages/pi-extension
 
 Loading the extension auto-enables native computer-use for Anthropic Messages and OpenAI Responses models. Anthropic requests receive the `computer-use-2025-01-24` native `computer` tool plus the required beta header/body fields and a short system prompt. OpenAI Responses requests receive only `{ "type": "computer" }` in `payload.tools` — no headers, no `extra_body`, and no extra system prompt. No configuration is required; advanced users can opt out of both providers with `MACOS_CUA_DISABLE_COMPUTER_USE_BETA=1` (`true`, `yes`, and `on` also work).
 
-The extension resolves the host display in logical macOS points, downscales the model-facing screenshot to a 1280px long edge (1280x720 on 16:9 displays), declares those downscaled dimensions to Anthropic, and unscales returned model coordinates back to logical points before dispatching clicks, moves, and drags. OpenAI Responses uses the same resized screenshot invariant: model coordinates are always in the image space the model received, while `MacOSHostComputer` still receives logical points.
+The extension resolves the host display in logical macOS points, captures model-facing screenshots at a 1280px long edge (1280x720 on 16:9 displays), declares those dimensions to Anthropic, and unscales returned model coordinates back to logical points before dispatching clicks, moves, and drags. OpenAI Responses uses the same screenshot invariant: model coordinates are always in the image space the model received, while `MacOSHostComputer` still receives logical points.
 
-The extension also registers 9 tools with the `macos_cua_` prefix:
+The extension also registers Codex-compatible Computer Use tools:
 
 | Tool | Purpose |
 |---|---|
-| `macos_cua_screenshot` | Capture PNG screenshot (full or region) |
-| `macos_cua_click` | Click at (x, y) |
-| `macos_cua_double_click` | Double-click at (x, y) |
-| `macos_cua_type` | Type text |
-| `macos_cua_key` | Press key with modifiers |
-| `macos_cua_scroll` | Scroll direction + amount |
-| `macos_cua_drag` | Drag from (fromX, fromY) to (toX, toY) |
-| `macos_cua_cursor_position` | Get cursor coordinates |
-| `macos_cua_screen_size` | Get display dimensions |
+| `list_apps` | List running apps |
+| `get_app_state` | Capture screenshot + accessibility tree for an app |
+| `click` | Click by element index or screenshot coordinate |
+| `perform_secondary_action` | Invoke an accessibility action by element index |
+| `set_value` | Set a settable accessibility element value |
+| `drag` | Drag between screenshot coordinates |
+| `scroll` | Scroll an app by pages |
+| `type_text` | Type literal text |
+| `press_key` | Press a key or key chord |
 
-The extension default-exports a pi extension factory and keeps the prefixed tools available even when native computer-use auto-activation is disabled.
+The extension default-exports a pi extension factory and keeps these tools available even when native computer-use auto-activation is disabled.
 
 ### Programmatic API
 
@@ -209,7 +210,7 @@ Every tool/action exposed by CLI, MCP, and pi-extension:
 
 | Action | Parameters | Returns | What it does |
 |---|---|---|---|
-| `screenshot` | `region?: { x, y, width, height }` | PNG `Buffer` + dimensions | Full-screen or region capture via `screencapture` |
+| `screenshot` | `targetSize?: { width, height }` | PNG `Buffer` + dimensions | Full-screen capture via `screencapture` and `sips` |
 | `click` | `x: number`, `y: number` | void | Single click via CoreGraphics `CGEventCreateMouseEvent` / `CGEventPost` |
 | `double_click` | `x: number`, `y: number` | void | Double click via CoreGraphics `CGEventCreateMouseEvent` / `CGEventPost` |
 | `type` | `text: string` | void | Type literal text via CoreGraphics `CGEventCreateKeyboardEvent` |
@@ -217,7 +218,7 @@ Every tool/action exposed by CLI, MCP, and pi-extension:
 | `scroll` | `direction: "up" \| "down" \| "left" \| "right"`, `amount: number` | void | Scroll wheel event via CoreGraphics `CGEventCreateScrollWheelEvent` |
 | `drag` | `fromX, fromY, toX, toY` | void | Mouse down, move, up via CoreGraphics `CGEventCreateMouseEvent` |
 | `cursor_position` | none | `{ x, y }` | Current mouse coordinates via `CGEventGetLocation` |
-| `screen_size` | none | `{ width, height }` | Logical desktop bounds via Swift helper, with `system_profiler` fallback |
+| `screen_size` | none | `{ width, height }` | Logical desktop bounds via Finder, with `system_profiler` fallback |
 
 ## Permissions
 
@@ -226,8 +227,7 @@ macOS gates screen capture, input synthesis, and app lookup behind separate perm
 1. **System Settings → Privacy & Security → Screen Recording** — toggle your terminal/IDE ON.
 2. **System Settings → Privacy & Security → Accessibility** — toggle the same terminal/IDE ON.
 3. **System Settings → Privacy & Security → Apple Events** — allow the terminal/IDE if you use `--target-bundle-id` or permission helpers that query System Events.
-4. Build and run `packages/core/dist/bin/cua-helper` once, then grant **Accessibility** to that helper binary too.
-5. Restart the terminal (some apps cache the permission state at launch).
+4. Restart the terminal (some apps cache the permission state at launch).
 
 Permission is per-binary. If you switch from iTerm2 to Ghostty, you must re-grant for the new app.
 
@@ -255,33 +255,32 @@ Full walkthrough: [`skills/macos-cua/references/installation.md`](./skills/macos
 |  +----------------+------------------+                 |
 |                    |                                     |
 |  v                 v                  v                  |
-|  screencapture   koffi/CGEvent     Swift cua-helper      |
-|  (screenshots)   (global input)    (per-PID SkyLight)    |
+|  screencapture    koffi/CGEvent    SkyLight/AppKit FFI   |
+|  (screenshots)    (global input)   (targeted sessions)   |
 +----------------------------------------------------------+
 ```
 
 | Package | Path | Role |
 |---|---|---|
 | `@macos-cua/core` | [`packages/core`](./packages/core) | `ComputerInterface` + platform abstractions (`HostComputer`, `VMComputer`, `CloudComputer`) + `MacOSHostComputer` implementation |
-| `cua-helper` | [`packages/cua-helper`](./packages/cua-helper) | Swift Package Manager executable for SkyLight per-PID mouse/keyboard delivery (not a pnpm package) |
 | `@macos-cua/cli` | [`packages/cli`](./packages/cli) | `commander.js` binary (`macos-cua`) |
-| `@macos-cua/mcp` | [`packages/mcp`](./packages/mcp) | MCP stdio server (`macos-cua-mcp`) exposing 9 tools |
-| `@macos-cua/pi-extension` | [`packages/pi-extension`](./packages/pi-extension) | Pi coding-agent extension with `macos_cua_*` tool prefix |
+| `@macos-cua/mcp` | [`packages/mcp`](./packages/mcp) | MCP stdio server (`macos-cua-mcp`) exposing Codex Computer Use tools |
+| `@macos-cua/pi-extension` | [`packages/pi-extension`](./packages/pi-extension) | Pi coding-agent extension with Codex-compatible Computer Use tools |
 | `skills/macos-cua` | [`skills/macos-cua`](./skills/macos-cua) | OpenCode-style skill definition + installation reference |
 
 ## Roadmap
 
 | Feature | Status | Notes |
 |---|---|---|
-| macOS host-native screenshot | Implemented | `screencapture` CLI fallback |
-| macOS host-native input | Implemented | Native CoreGraphics CGEvent via koffi for global input; Swift SkyLight helper for per-PID mouse/keyboard |
+| macOS host-native screenshot | Implemented | `screencapture` + `sips` capture and resize |
+| macOS host-native input | Implemented | Native CoreGraphics CGEvent via koffi for global input; SkyLight/AppKit FFI for targeted app windows |
 | QEMU runtime | Interface stub | [`packages/core/src/platform/vm.ts`](./packages/core/src/platform/vm.ts) |
 | Lume runtime | Interface stub | Apple Virtualization.Framework VM |
 | VirtualBox / Parallels runtime | Interface stub | Planned |
 | Cloud provider runtime | Interface stub | [`packages/core/src/platform/cloud.ts`](./packages/core/src/platform/cloud.ts) |
-| ScreenCaptureKit direct FFI | Future | Replace `screencapture` with `SCStream` / IOSurface for 60 fps capture |
-| SkyLight authenticated per-PID mouse | Implemented | Swift `packages/cua-helper` uses `SLEventPostToPid`, focus-without-raise, NSEvent bridging, and keyboard auth messages. |
-| Accessibility API queries | Future | `AXUIElement` for element-level targeting instead of coordinate-only |
+| ScreenCaptureKit capture | Planned | Current implementation uses the system screenshot fallback while the TypeScript FFI path stays helper-free |
+| SkyLight authenticated targeted input | Implemented | TypeScript FFI uses `SLEventPostToPid`, focus-without-raise, AppKit-backed mouse events, and keyboard auth messages |
+| Accessibility API queries | Implemented | `AXUIElement` tree extraction, `set_value`, and secondary actions |
 
 ## Development
 
@@ -316,7 +315,7 @@ Standards: ultra-strict TypeScript, ESM with `.js` imports, Biome formatting, Vi
 |---|---|---|---|
 | Language | Python | Rust + proprietary plugin | TypeScript |
 | Sandbox | VM / container / cloud | Host macOS (permission-scoped) | Host macOS (permission-scoped) |
-| Screenshot latency | ~500 ms + encode + transport | Native frame interval + local IPC | `screencapture` CLI (FFI planned) |
+| Screenshot latency | ~500 ms + encode + transport | Native frame interval + local IPC | Native one-shot screenshot fallback |
 | Input latency | HTTP → guest → pynput | Native CGEvent / Apple Events | Native CoreGraphics CGEvent via koffi (~microseconds per event) |
 | Portability | Linux, macOS, Windows, Android, cloud | macOS only | macOS only (stubs for VM/cloud) |
 | Open source | Full SDK | Plugin host OSS, Computer Use plugin proprietary | Fully open source |

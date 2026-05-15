@@ -5,7 +5,7 @@ description: "MUST USE whenever the user wants to automate the local macOS deskt
 
 # macos-cua
 
-`macos-cua` is a TypeScript-native computer-use automation framework for macOS. It drives the mouse, keyboard, and screen through native macOS APIs (CoreGraphics CGEvent, a Swift SkyLight per-PID helper, ScreenCaptureKit/screencapture, and Accessibility) without requiring Python or a VM sandbox. This skill teaches you how to invoke it directly from pi's built-in bash. No custom extension tools are registered, so every action is shell-mediated.
+`macos-cua` is a TypeScript-native computer-use automation framework for macOS. It drives the mouse, keyboard, screen, and accessibility tree through native macOS APIs (CoreGraphics CGEvent, AXUIElement, `screencapture`/`sips`, and SkyLight/AppKit FFI) without requiring Python, a VM sandbox, or a helper binary.
 
 ## When to reach for macos-cua
 
@@ -27,13 +27,13 @@ macos-cua has three entry points. Pick the one that matches the host's setup.
 |---|---|---|
 | **CLI** (default) | `macos-cua <verb>` directly in pi's bash | The `@macos-cua/cli` package is built and on PATH. This is the simplest path. |
 | **MCP server** | `macos-cua-mcp` over stdio | The host loads MCP servers automatically. The server exposes the same verbs as tools. |
-| **pi-extension** | `pi install file://...` then restart pi | The host uses pi's extension system. Registers `macos_cua_*` tools inside pi. |
+| **pi-extension** | `pi install file://...` then restart pi | The host uses pi's extension system. Registers Codex-compatible `list_apps`, `get_app_state`, `click`, `drag`, `scroll`, `type_text`, `press_key`, `set_value`, and `perform_secondary_action` tools. |
 
 All three modes share the same underlying `MacOSHostComputer` implementation. The CLI mode is preferred for ad-hoc automation because it requires no host configuration beyond building the package.
 
-When the `@macos-cua/pi-extension` is loaded, Anthropic Messages and OpenAI Responses models automatically receive native computer-use. Anthropic gets the `computer-use-2025-01-24` beta tool plus header/body fields; OpenAI Responses gets `{ type: "computer" }` in the provider payload. `gpt-5.*` Responses API models get the GA `computer` tool with zero token overhead from extension prompt scaffolding. Both flows keep the existing `macos_cua_*` per-PID tools available and both are disabled only by `MACOS_CUA_DISABLE_COMPUTER_USE_BETA=1` (`true`, `yes`, and `on` also work).
+When the `@macos-cua/pi-extension` is loaded, Anthropic Messages and OpenAI Responses models automatically receive native computer-use. Anthropic gets the `computer-use-2025-01-24` beta tool plus header/body fields; OpenAI Responses gets `{ type: "computer" }` in the provider payload. `gpt-5.*` Responses API models get the GA `computer` tool with zero token overhead from extension prompt scaffolding. Both flows keep the Codex-compatible app tools available and both are disabled only by `MACOS_CUA_DISABLE_COMPUTER_USE_BETA=1` (`true`, `yes`, and `on` also work).
 
-The extension sends model-facing screenshots downscaled to a 1280x720 maximum. Coordinates returned by the model are interpreted in that downscaled image space, then unscaled back to macOS logical points before `click`, `move`, or `drag` dispatch.
+The extension sends model-facing screenshots captured at a 1280px long edge. Coordinates returned by the model are interpreted in that image space, then unscaled back to macOS logical points before `click`, `move`, or `drag` dispatch.
 
 ## First-time host consent
 
@@ -47,15 +47,14 @@ Grant both manually in **System Settings → Privacy & Security**:
 
 - **Screen Recording** → enable for the terminal/IDE that launches `macos-cua`.
 - **Accessibility** → enable for the same terminal/IDE.
-- **Accessibility** → also enable `packages/core/dist/bin/cua-helper` after building it; it is a separate binary from Node.
 
 If either permission is missing, `screenshot` returns a black image and input verbs silently do nothing. Permission is per-binary, so switching from iTerm to Ghostty (or VS Code's integrated terminal) requires re-granting for the new app.
 
 Full installation walkthrough: [`references/installation.md`](references/installation.md).
 
-## Per-PID targeting
+## App targeting
 
-When you want the agent to drive a specific app without stealing the user's focus, pass `--target-pid` (or `--target-bundle-id`) to every CLI call. Mouse clicks, right/middle/double-clicks, drags, moves, key chords, and text are delivered through the persistent Swift `cua-helper` SkyLight bridge. Scroll uses helper key events (`PageUp`/`PageDown`/arrows), because Chromium drops pid-routed wheel events. If the helper is missing, per-PID input fails loudly rather than falling back to global cursor-moving input.
+When you want the agent to drive a specific app, call `get_app_state` first in MCP/pi-extension mode, or pass `--target-pid`/`--target-bundle-id` in CLI mode. Targeted input uses a remembered visible app window and routes through CoreGraphics plus SkyLight/AppKit FFI. If no target window is known, targeted input fails loudly rather than falling back to global cursor-moving input.
 
 ## Core surface — `macos-cua <verb>`
 
@@ -120,7 +119,7 @@ Before executing any irreversible UI action (deleting files in Finder, confirmin
 
 ### One screenshot per decision, not per turn
 
-Don't take a screenshot after every single micro-action. Capture once, decide the next action based on the image, execute it, then capture again only if the state might have changed. This keeps token usage low and latency reasonable.
+Don't take a screenshot after every single micro-action. In MCP or pi-extension mode, call `get_app_state` once at the start of a turn, act with `click`/`type_text`/`press_key`/`scroll`/`drag`/`set_value`, then call `get_app_state` again only when you need to verify changed UI.
 
 ## Validation reminder
 

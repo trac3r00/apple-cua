@@ -22,12 +22,6 @@ Specific errors and their fixes. Most macos-cua failures come from OS-permission
 
 Permission is per-binary. If you switch from iTerm to Ghostty, you must grant Ghostty too. The same applies to VS Code's integrated terminal.
 
-## pi-extension screenshot downscale warning mentions `sips`
-
-**Cause:** native computer-use screenshot resizing calls macOS `sips` before returning screenshots to Anthropic or OpenAI. `sips` ships with macOS, but the resize can fail if the input PNG is malformed or the command is unavailable.
-
-**Fix:** confirm `/usr/bin/sips --version` works. The extension falls back to the original PNG base64 with a warning, so the model still gets an image; it is just larger and can reintroduce provider image-size limits.
-
 ## Click doesn't work in Chrome or Firefox
 
 **Cause:** Accessibility permission is granted, but the browser's trusted-event policy rejects synthetic clicks on certain elements (e.g., file inputs, permission prompts).
@@ -66,7 +60,7 @@ pnpm macos-cua-mcp --version
 
 **Cause:** Retina screenshots can be physical pixels (for example 5120x2880) while macOS input and `MacOSHostComputer.getScreenSize()` use logical points (for example 2560x1440). Clicks landing at half the intended position usually mean a physical screenshot coordinate was sent as a logical input coordinate, or a model saw physical pixels but returned coordinates for a downscaled/logical space.
 
-**Fix:** for the pi-extension, keep the built-in pipeline intact: logical screen size → `sips` downscale to a 1280px long edge → model coordinate → unscaled logical click. For direct CLI use, convert physical screenshot pixels to logical points before clicking on Retina displays.
+**Fix:** for the pi-extension, keep the built-in pipeline intact: logical screen size → 1280px-long-edge screenshot → model coordinate → unscaled logical click. For direct CLI use, convert physical screenshot pixels to logical points before clicking on Retina displays.
 
 ## Multiple monitors
 
@@ -74,25 +68,22 @@ pnpm macos-cua-mcp --version
 
 **Fix:** move the target window to the primary display before automating it. Future versions may add `--display` selection.
 
-## Per-PID command says the helper binary is missing
+## Targeted command says no app window is known
 
-**Cause:** `--target-pid` mouse/scroll/text/key routes use `packages/core/dist/bin/cua-helper`, but the core package has not been built or Swift was unavailable when the build hook ran.
+**Cause:** targeted mouse/scroll/text/key routes require a visible app window. In MCP or pi-extension mode, `get_app_state` primes that window session. In CLI mode, the command primes from the current visible windows before dispatching.
 
 **Fix:**
 
-```bash
-pnpm --filter @macos-cua/core build
-# or directly:
-bash packages/cua-helper/build.sh
-```
+1. Confirm the app is running and has at least one visible, non-minimized window.
+2. In MCP/pi-extension mode, call `get_app_state` for that app before `press_key`, `type_text`, or `scroll`.
+3. In CLI mode, pass the correct `--target-pid` or `--target-bundle-id`.
+4. Do not work around this by omitting the target unless global cursor movement is acceptable.
 
-Then grant Accessibility to `packages/core/dist/bin/cua-helper`. Do not work around this by omitting `--target-pid` unless focus stealing and real cursor movement are acceptable.
+## Targeted click/scroll does nothing in Safari/Chrome
 
-## Per-PID click/scroll does nothing in Safari/Chrome
+**Cause:** the controlling terminal/IDE may not have Accessibility permission, or the app window session is stale.
 
-**Cause:** the Swift helper is built, but macOS has not granted Accessibility to the helper binary itself. Permission is per-binary; granting your terminal or Node is not enough.
-
-**Fix:** run `packages/core/dist/bin/cua-helper` once, stop it with Ctrl-C, then add that exact binary in **System Settings → Privacy & Security → Accessibility**. Restart the terminal/agent afterwards.
+**Fix:** grant Accessibility to the terminal/IDE that launches `macos-cua`, then refresh the app session with `get_app_state` or retry the CLI command after ensuring the target window is visible.
 
 ## Still stuck
 

@@ -14,7 +14,7 @@ Prerequisites: [`installation.md`](installation.md) completed, OS-level permissi
 | `double-click` / `drag` / `move` | Mouse gestures | `macos-cua drag --from-x 100 --from-y 100 --to-x 300 --to-y 300` |
 | `type` | Type literal text | `macos-cua type "Hello, world"` |
 | `key` | Press a key with modifiers | `macos-cua key s -m cmd,shift` |
-| `scroll` | Scroll wheel globally or helper keys per-PID | `macos-cua scroll --direction down --amount 5` |
+| `scroll` | Scroll globally or through a targeted app window session | `macos-cua scroll --direction down --amount 5` |
 | `cursor` | Get cursor position | `macos-cua cursor` |
 | `screen` | Get screen size | `macos-cua screen` |
 
@@ -56,24 +56,24 @@ Start the MCP server over stdio:
 pnpm macos-cua-mcp
 ```
 
-The server exposes these tools:
+The server exposes Codex-compatible app tools:
 
-- `screenshot` — capture the screen, optionally with a region.
-- `click` — click at (x, y).
-- `double_click` — double-click at (x, y).
-- `type` — type text.
-- `key` — press a key with optional modifiers.
-- `scroll` — scroll in a direction (up, down, left, right) by an amount.
+- `list_apps` — list visible running apps.
+- `get_app_state` — start or refresh an app session and return a screenshot plus accessibility tree.
+- `click` — click an element or coordinate in the app session.
+- `perform_secondary_action` — invoke an AX action on an element.
+- `set_value` — set an editable AX element value.
 - `drag` — drag from one point to another.
-- `cursor_position` — get the current cursor position.
-- `screen_size` — get the screen dimensions.
+- `scroll` — scroll in a direction.
+- `type_text` — type literal text.
+- `press_key` — press a key or key chord.
 
 A typical MCP `tools/call` request for a screenshot:
 
 ```json
 {
-  "name": "screenshot",
-  "arguments": {}
+  "name": "get_app_state",
+  "arguments": { "app": "Safari" }
 }
 ```
 
@@ -85,7 +85,17 @@ Install the extension into pi:
 pi install file:///Users/<you>/local-workspaces/macos-cua/packages/pi-extension
 ```
 
-Restart pi. The extension registers `macos_cua_*` tools (screenshot, click, double_click, type, key, scroll, drag, cursor_position, screen_size) directly inside pi's tool surface.
+Restart pi. The extension registers Codex-compatible Computer Use tools directly inside pi's tool surface:
+
+- `list_apps`
+- `get_app_state`
+- `click`
+- `perform_secondary_action`
+- `set_value`
+- `drag`
+- `scroll`
+- `type_text`
+- `press_key`
 
 ## Programmatic usage
 
@@ -136,9 +146,9 @@ sleep 1   # give the app a moment to focus
 macos-cua key s -m cmd,shift   # cmd+shift+s (save as)
 ```
 
-### Per-PID targeting (drive a background app)
+### App targeting
 
-Send input to a specific app without stealing focus from the frontmost app:
+Send input to a specific running app:
 
 ```bash
 # 1. open Safari (or ensure it is running)
@@ -147,7 +157,7 @@ open -a Safari
 # 2. get its PID
 SAFARI_PID=$(pgrep -x Safari)
 
-# 3. while Slack (or Terminal) is frontmost, send input to Safari
+# 3. each target-pid CLI call primes Safari's visible target window before dispatch
 macos-cua --target-pid "$SAFARI_PID" key l -m cmd
 macos-cua --target-pid "$SAFARI_PID" type "https://example.com"
 macos-cua --target-pid "$SAFARI_PID" key Return
@@ -156,7 +166,7 @@ macos-cua --target-pid "$SAFARI_PID" scroll --direction down --amount 5
 macos-cua --target-pid "$SAFARI_PID" drag --from-x 100 --from-y 100 --to-x 300 --to-y 300
 ```
 
-Safari navigates, clicks, scrolls, and drags without becoming frontmost. The no-focus-steal path requires `packages/core/dist/bin/cua-helper`; build it with `pnpm --filter @macos-cua/core build` and grant that helper binary Accessibility permission. Global input (no `--target-pid`) still uses the original koffi CoreGraphics path.
+The targeted path is helper-free. It requires a visible target window and fails loudly if one cannot be found, instead of falling back to the global cursor-moving path.
 
 ## Concurrency and serialization
 

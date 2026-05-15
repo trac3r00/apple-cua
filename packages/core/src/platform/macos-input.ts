@@ -141,7 +141,7 @@ export class MacOSInputController {
 		this.lastTargetWindow = pid === undefined ? undefined : this.targetWindowsByPid.get(pid);
 	}
 
-	async rememberTargetWindow(pid: number): Promise<void> {
+	async rememberTargetWindow(pid: number): Promise<SkyLightTargetWindow | undefined> {
 		if (!Number.isSafeInteger(pid) || pid <= 0) {
 			throw new Error("target pid must be a positive integer");
 		}
@@ -152,6 +152,7 @@ export class MacOSInputController {
 				this.lastTargetWindow = targetWindow;
 			}
 		}
+		return targetWindow;
 	}
 
 	async move(position: Point): Promise<void> {

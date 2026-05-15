@@ -67,11 +67,15 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async screenshot(options?: ScreenshotOptions): Promise<ScreenshotResult> {
+		return this.captureScreenshot(options);
+	}
+
+	private async captureScreenshot(options?: ScreenshotOptions, windowId?: number): Promise<ScreenshotResult> {
 		if (options?.region) {
 			throw new Error("Region screenshots are not supported by the macOS screenshot fallback yet");
 		}
 		const size = options?.targetSize ?? (await this.getScreenSize());
-		const data = await captureMacOSScreenshot(size);
+		const data = await captureMacOSScreenshot(size, windowId);
 		const dimensions = parsePngDimensions(data);
 		return {
 			data,
@@ -133,8 +137,8 @@ export class MacOSHostComputer extends HostComputer {
 		}
 		const apps = await getRunningMacOSApps();
 		const app = resolveTargetApp(apps, targetPid);
-		await this.input.rememberTargetWindow(app.pid);
-		const screenshot = await this.screenshot({ targetSize: size });
+		const targetWindow = await this.input.rememberTargetWindow(app.pid);
+		const screenshot = await this.captureScreenshot({ targetSize: size }, targetWindow?.id);
 		const tree = extractAccessibilityTree(app.pid);
 		return {
 			app: app.name,
@@ -208,24 +212,32 @@ export async function getMacOSLogicalScreenSize(): Promise<{ width: number; heig
 	return systemProfilerSize;
 }
 
-export async function captureMacOSScreenshot(targetSize: {
-	readonly width: number;
-	readonly height: number;
-}): Promise<Buffer> {
+export async function captureMacOSScreenshot(
+	targetSize: {
+		readonly width: number;
+		readonly height: number;
+	},
+	windowId?: number,
+): Promise<Buffer> {
 	if (!Number.isSafeInteger(targetSize.width) || !Number.isSafeInteger(targetSize.height)) {
 		throw new Error("requested screenshot dimensions must be integers");
 	}
 	if (targetSize.width <= 0 || targetSize.height <= 0) {
 		throw new Error("requested screenshot dimensions must be positive");
 	}
+	if (windowId !== undefined && (!Number.isSafeInteger(windowId) || windowId <= 0)) {
+		throw new Error("windowId must be a positive integer");
+	}
 
+	const captureCommand =
+		windowId === undefined ? 'screencapture -x -t png "$tmp"' : `screencapture -x -o -l ${windowId} -t png "$tmp"`;
 	const script = [
 		"set -eu",
 		'tmp=$(mktemp "${TMPDIR:-/tmp}/macos-cua-shot.XXXXXX.png")',
 		'out=""',
 		'cleanup() { rm -f "$tmp"; if [ -n "$out" ]; then rm -f "$out"; fi; }',
 		"trap cleanup EXIT",
-		'screencapture -x -t png "$tmp"',
+		captureCommand,
 		'out=$(mktemp "${TMPDIR:-/tmp}/macos-cua-shot-resized.XXXXXX.png")',
 		'sips -z "$2" "$1" "$tmp" --out "$out" >/dev/null',
 		'cat "$out"',

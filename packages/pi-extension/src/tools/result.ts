@@ -1,5 +1,7 @@
 import type { AgentToolResult } from "../pi/index.js";
 
+const ACTION_COMPLETE_TEXT = "Action completed. Call `get_app_state` to fetch the updated UI state.";
+
 export function textResult<TDetails = undefined>(
 	text: string,
 	details?: TDetails,
@@ -8,6 +10,10 @@ export function textResult<TDetails = undefined>(
 		content: [{ type: "text", text }],
 		details: details as TDetails | undefined,
 	};
+}
+
+export function actionCompleteResult(): AgentToolResult<undefined> {
+	return textResult(ACTION_COMPLETE_TEXT);
 }
 
 export function imageResult<TDetails = undefined>(

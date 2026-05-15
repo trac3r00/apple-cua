@@ -2,14 +2,14 @@ import type { ComputerInterface } from "@macos-cua/core";
 import type { ExtensionAPI, ToolDefinition } from "../pi/index.js";
 
 import { createClickTool } from "./click.js";
-import { createCursorPositionTool } from "./cursor.js";
-import { createDoubleClickTool } from "./doubleClick.js";
 import { createDragTool } from "./drag.js";
-import { createKeyTool } from "./key.js";
-import { createScreenSizeTool } from "./screen.js";
-import { createScreenshotTool } from "./screenshot.js";
+import { createGetAppStateTool } from "./get-app-state.js";
+import { createListAppsTool } from "./list-apps.js";
+import { createPerformSecondaryActionTool } from "./perform-secondary-action.js";
+import { createPressKeyTool } from "./press-key.js";
 import { createScrollTool } from "./scroll.js";
-import { createTypeTool } from "./type.js";
+import { createSetValueTool } from "./set-value.js";
+import { createTypeTextTool } from "./type-text.js";
 
 export interface ToolRegistrationOptions {
 	readonly computer: ComputerInterface;
@@ -18,15 +18,15 @@ export interface ToolRegistrationOptions {
 export function buildAllTools(options: ToolRegistrationOptions): ReadonlyArray<ToolDefinition> {
 	const { computer } = options;
 	return [
-		createScreenshotTool(computer),
+		createListAppsTool(computer),
+		createGetAppStateTool(computer),
 		createClickTool(computer),
-		createTypeTool(computer),
-		createKeyTool(computer),
-		createScrollTool(computer),
-		createDoubleClickTool(computer),
+		createPerformSecondaryActionTool(computer),
+		createSetValueTool(computer),
 		createDragTool(computer),
-		createCursorPositionTool(computer),
-		createScreenSizeTool(computer),
+		createScrollTool(computer),
+		createTypeTextTool(computer),
+		createPressKeyTool(computer),
 	];
 }
 

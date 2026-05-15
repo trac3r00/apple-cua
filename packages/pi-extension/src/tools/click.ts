@@ -1,18 +1,26 @@
-import type { ComputerInterface } from "@macos-cua/core";
+import {
+	type ComputerInterface,
+	clickPoint,
+	parseElementIndex,
+	resolveAppPid,
+	resolvePointForElement,
+	withTargetedApp,
+} from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
-import { textResult } from "./result.js";
+import { actionCompleteResult } from "./result.js";
 
-const MouseButton = Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("middle")], {
-	description: "Mouse button. macos-cua currently maps all buttons to the host click primitive.",
-});
+const MouseButton = Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("middle")]);
 
 export const ClickParams = Type.Object(
 	{
-		x: Type.Integer({ description: "X coordinate in pixels." }),
-		y: Type.Integer({ description: "Y coordinate in pixels." }),
-		button: Type.Optional(MouseButton),
+		app: Type.String({ description: "App name or bundle identifier." }),
+		element_index: Type.Optional(Type.String({ description: "Element index from get_app_state." })),
+		x: Type.Optional(Type.Number({ description: "X coordinate in screenshot pixel coordinates." })),
+		y: Type.Optional(Type.Number({ description: "Y coordinate in screenshot pixel coordinates." })),
+		click_count: Type.Optional(Type.Integer({ minimum: 1, description: "Number of clicks. Defaults to 1." })),
+		mouse_button: Type.Optional(MouseButton),
 	},
 	{ additionalProperties: false },
 );
@@ -21,13 +29,27 @@ export type ClickInput = Static<typeof ClickParams>;
 
 export function createClickTool(computer: ComputerInterface): ToolDefinition {
 	return defineTool({
-		name: "macos_cua_click",
-		label: "macOS CUA: click",
-		description: "Click at the given (x, y) coordinate on the macOS screen.",
+		name: "click",
+		label: "Computer Use: click",
+		description: "Click an element by index or pixel coordinates from screenshot.",
 		parameters: ClickParams,
 		async execute(_toolCallId, params) {
-			await computer.click({ x: params.x, y: params.y });
-			return textResult(`Clicked at (${params.x}, ${params.y}).`);
+			const targetPid = await resolveAppPid(computer, params.app);
+			const point =
+				params.element_index === undefined
+					? parseCoordinate(params.x, params.y)
+					: await resolvePointForElement(computer, targetPid, parseElementIndex(params.element_index));
+			await withTargetedApp(computer, targetPid, async () => {
+				await clickPoint(computer, point, params.mouse_button ?? "left", params.click_count ?? 1);
+			});
+			return actionCompleteResult();
 		},
 	});
+}
+
+function parseCoordinate(x: number | undefined, y: number | undefined): { x: number; y: number } {
+	if (x === undefined || y === undefined || !Number.isFinite(x) || !Number.isFinite(y)) {
+		throw new Error("click requires either element_index or finite x and y coordinates");
+	}
+	return { x, y };
 }

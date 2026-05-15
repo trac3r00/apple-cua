@@ -2,10 +2,10 @@ import type { ComputerInterface } from "@macos-cua/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionContext } from "../../src/pi/index.js";
 import { createClickTool } from "../../src/tools/click.js";
-import { createKeyTool } from "../../src/tools/key.js";
-import { createScreenshotTool } from "../../src/tools/screenshot.js";
+import { createGetAppStateTool } from "../../src/tools/get-app-state.js";
+import { createPressKeyTool } from "../../src/tools/press-key.js";
 import { createScrollTool } from "../../src/tools/scroll.js";
-import { createTypeTool } from "../../src/tools/type.js";
+import { createTypeTextTool } from "../../src/tools/type-text.js";
 
 function createFakeComputer(): ComputerInterface {
 	return {
@@ -21,6 +21,7 @@ function createFakeComputer(): ComputerInterface {
 			width: 100,
 			height: 80,
 		}),
+		setTarget: vi.fn<ComputerInterface["setTarget"]>(),
 		move: vi.fn<ComputerInterface["move"]>().mockResolvedValue(undefined),
 		click: vi.fn<ComputerInterface["click"]>().mockResolvedValue(undefined),
 		rightClick: vi.fn<ComputerInterface["rightClick"]>().mockResolvedValue(undefined),
@@ -39,11 +40,15 @@ function createFakeComputer(): ComputerInterface {
 			frontmost: true,
 			axAvailable: true,
 			elements: [],
-			screenshotBase64: "",
+			screenshotBase64: Buffer.from("89504e470d0a1a0a", "hex").toString("base64"),
 			screenshotWidth: 100,
 			screenshotHeight: 80,
 		}),
-		listApps: vi.fn<ComputerInterface["listApps"]>().mockResolvedValue([]),
+		listApps: vi
+			.fn<ComputerInterface["listApps"]>()
+			.mockResolvedValue([{ name: "TestApp", bundleId: "com.test.app", pid: 1234, isRunning: true }]),
+		setValue: vi.fn<ComputerInterface["setValue"]>().mockResolvedValue(undefined),
+		performAction: vi.fn<ComputerInterface["performAction"]>().mockResolvedValue(undefined),
 		close: vi.fn<ComputerInterface["close"]>().mockResolvedValue(undefined),
 	};
 }
@@ -58,12 +63,12 @@ describe("#given baseline regression suite #when exercising computer interface #
 		vi.clearAllMocks();
 	});
 
-	describe("screenshot", () => {
-		it("returns a PNG buffer with valid header", async () => {
-			const tool = createScreenshotTool(computer);
-			const result = await tool.execute("tc", {}, undefined, undefined, context);
+	describe("get_app_state", () => {
+		it("returns PNG image content with app state text", async () => {
+			const tool = createGetAppStateTool(computer);
+			const result = await tool.execute("tc", { app: "TestApp" }, undefined, undefined, context);
 
-			expect(computer.screenshot).toHaveBeenCalledTimes(1);
+			expect(computer.getAppState).toHaveBeenCalledTimes(1);
 			expect(result.content).toHaveLength(2);
 			expect(result.content[0]).toMatchObject({ type: "image", mimeType: "image/png" });
 		});
@@ -72,7 +77,7 @@ describe("#given baseline regression suite #when exercising computer interface #
 	describe("click", () => {
 		it("dispatches click to the computer with coordinates", async () => {
 			const tool = createClickTool(computer);
-			await tool.execute("tc", { x: 100, y: 200, button: "left" }, undefined, undefined, context);
+			await tool.execute("tc", { app: "TestApp", x: 100, y: 200 }, undefined, undefined, context);
 
 			expect(computer.click).toHaveBeenCalledTimes(1);
 			expect(computer.click).toHaveBeenCalledWith({ x: 100, y: 200 });
@@ -81,16 +86,16 @@ describe("#given baseline regression suite #when exercising computer interface #
 
 	describe("type", () => {
 		it("types ASCII text without error", async () => {
-			const tool = createTypeTool(computer);
-			await tool.execute("tc", { text: "Hello, world!" }, undefined, undefined, context);
+			const tool = createTypeTextTool(computer);
+			await tool.execute("tc", { app: "TestApp", text: "Hello, world!" }, undefined, undefined, context);
 
 			expect(computer.type).toHaveBeenCalledTimes(1);
 			expect(computer.type).toHaveBeenCalledWith("Hello, world!");
 		});
 
 		it("types Korean IME text '안녕하세요' without error", async () => {
-			const tool = createTypeTool(computer);
-			await tool.execute("tc", { text: "안녕하세요" }, undefined, undefined, context);
+			const tool = createTypeTextTool(computer);
+			await tool.execute("tc", { app: "TestApp", text: "안녕하세요" }, undefined, undefined, context);
 
 			expect(computer.type).toHaveBeenCalledTimes(1);
 			expect(computer.type).toHaveBeenCalledWith("안녕하세요");
@@ -99,16 +104,16 @@ describe("#given baseline regression suite #when exercising computer interface #
 
 	describe("key with modifiers", () => {
 		it("presses a key with command modifier", async () => {
-			const tool = createKeyTool(computer);
-			await tool.execute("tc", { key: "c", modifiers: ["command"] }, undefined, undefined, context);
+			const tool = createPressKeyTool(computer);
+			await tool.execute("tc", { app: "TestApp", key: "command+c" }, undefined, undefined, context);
 
 			expect(computer.key).toHaveBeenCalledTimes(1);
 			expect(computer.key).toHaveBeenCalledWith("c", { modifiers: ["command"] });
 		});
 
 		it("presses a key with multiple modifiers", async () => {
-			const tool = createKeyTool(computer);
-			await tool.execute("tc", { key: "t", modifiers: ["cmd", "shift"] }, undefined, undefined, context);
+			const tool = createPressKeyTool(computer);
+			await tool.execute("tc", { app: "TestApp", key: "cmd+shift+t" }, undefined, undefined, context);
 
 			expect(computer.key).toHaveBeenCalledTimes(1);
 			expect(computer.key).toHaveBeenCalledWith("t", { modifiers: ["command", "shift"] });
@@ -118,7 +123,7 @@ describe("#given baseline regression suite #when exercising computer interface #
 	describe("scroll", () => {
 		it("scrolls down by the requested amount", async () => {
 			const tool = createScrollTool(computer);
-			await tool.execute("tc", { direction: "down", amount: 5 }, undefined, undefined, context);
+			await tool.execute("tc", { app: "TestApp", direction: "down", pages: 5 }, undefined, undefined, context);
 
 			expect(computer.scroll).toHaveBeenCalledTimes(1);
 			expect(computer.scroll).toHaveBeenCalledWith({ direction: "down", amount: 5 });

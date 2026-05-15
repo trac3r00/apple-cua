@@ -1,15 +1,16 @@
-import type { ComputerInterface } from "@macos-cua/core";
+import { type ComputerInterface, resolveAppPid, withTargetedApp } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
-import { textResult } from "./result.js";
+import { actionCompleteResult } from "./result.js";
 
 export const DragParams = Type.Object(
 	{
-		fromX: Type.Integer({ description: "Starting X coordinate in pixels." }),
-		fromY: Type.Integer({ description: "Starting Y coordinate in pixels." }),
-		toX: Type.Integer({ description: "Ending X coordinate in pixels." }),
-		toY: Type.Integer({ description: "Ending Y coordinate in pixels." }),
+		app: Type.String({ description: "App name or bundle identifier." }),
+		from_x: Type.Number({ description: "Start X coordinate." }),
+		from_y: Type.Number({ description: "Start Y coordinate." }),
+		to_x: Type.Number({ description: "End X coordinate." }),
+		to_y: Type.Number({ description: "End Y coordinate." }),
 	},
 	{ additionalProperties: false },
 );
@@ -18,16 +19,19 @@ export type DragInput = Static<typeof DragParams>;
 
 export function createDragTool(computer: ComputerInterface): ToolDefinition {
 	return defineTool({
-		name: "macos_cua_drag",
-		label: "macOS CUA: drag",
-		description: "Drag from one macOS screen coordinate to another.",
+		name: "drag",
+		label: "Computer Use: drag",
+		description: "Drag from one point to another using pixel coordinates.",
 		parameters: DragParams,
 		async execute(_toolCallId, params) {
-			await computer.drag({
-				from: { x: params.fromX, y: params.fromY },
-				to: { x: params.toX, y: params.toY },
+			const targetPid = await resolveAppPid(computer, params.app);
+			await withTargetedApp(computer, targetPid, async () => {
+				await computer.drag({
+					from: { x: params.from_x, y: params.from_y },
+					to: { x: params.to_x, y: params.to_y },
+				});
 			});
-			return textResult(`Dragged from (${params.fromX}, ${params.fromY}) to (${params.toX}, ${params.toY}).`);
+			return actionCompleteResult();
 		},
 	});
 }

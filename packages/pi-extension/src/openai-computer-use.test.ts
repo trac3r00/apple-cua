@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { type ComputerActionDriver, ComputerUseError } from "./anthropic-computer-use.js";
 import type { DisplayConfig } from "./computer-use/coords.js";
@@ -8,17 +8,6 @@ import {
 	normalizeOpenAIKeys,
 	sanitizeOpenAIComputerUsePayload,
 } from "./openai-computer-use.js";
-
-const coordsMock = vi.hoisted(() => ({
-	resizeScreenshotPng: vi.fn<(rawPng: Buffer, targetWidth: number, targetHeight: number) => Promise<Buffer>>(
-		async (rawPng) => rawPng,
-	),
-}));
-
-vi.mock("./computer-use/coords.js", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("./computer-use/coords.js")>();
-	return { ...actual, resizeScreenshotPng: coordsMock.resizeScreenshotPng };
-});
 
 const DISPLAY = {
 	logicalWidth: 200,
@@ -41,6 +30,7 @@ function createComputer(): ComputerActionDriver {
 			width: 100,
 			height: 100,
 		}),
+		setTarget: vi.fn<ComputerActionDriver["setTarget"]>(),
 		move: vi.fn<ComputerActionDriver["move"]>().mockResolvedValue(undefined),
 		click: vi.fn<ComputerActionDriver["click"]>().mockResolvedValue(undefined),
 		rightClick: vi.fn<ComputerActionDriver["rightClick"]>().mockResolvedValue(undefined),
@@ -52,13 +42,23 @@ function createComputer(): ComputerActionDriver {
 		drag: vi.fn<ComputerActionDriver["drag"]>().mockResolvedValue(undefined),
 		getCursorPosition: vi.fn<ComputerActionDriver["getCursorPosition"]>().mockResolvedValue({ x: 7, y: 9 }),
 		getScreenSize: vi.fn<ComputerActionDriver["getScreenSize"]>().mockResolvedValue({ width: 100, height: 100 }),
+		getAppState: vi.fn<ComputerActionDriver["getAppState"]>().mockResolvedValue({
+			app: "TestApp",
+			bundleId: "com.test.app",
+			pid: 1234,
+			frontmost: true,
+			axAvailable: true,
+			elements: [],
+			screenshotBase64: "",
+			screenshotWidth: 100,
+			screenshotHeight: 100,
+		}),
+		listApps: vi.fn<ComputerActionDriver["listApps"]>().mockResolvedValue([]),
+		setValue: vi.fn<ComputerActionDriver["setValue"]>().mockResolvedValue(undefined),
+		performAction: vi.fn<ComputerActionDriver["performAction"]>().mockResolvedValue(undefined),
 		close: vi.fn<ComputerActionDriver["close"]>().mockResolvedValue(undefined),
 	};
 }
-
-beforeEach(() => {
-	coordsMock.resizeScreenshotPng.mockImplementation(async (rawPng) => rawPng);
-});
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -136,8 +136,8 @@ describe("#given OpenAI drag and keypress actions #when executed #then paths and
 	});
 });
 
-describe("#given OpenAI scroll and screenshot actions #when executed #then direction and resize are correct", () => {
-	it("handles both axes and returns resized screenshot payloads", async () => {
+describe("#given OpenAI scroll and screenshot actions #when executed #then direction and explicit screenshot are correct", () => {
+	it("handles both axes and requests model-sized screenshot payloads", async () => {
 		const rawPng = Buffer.alloc(100, 1);
 		const computer = createComputer();
 		vi.mocked(computer.screenshot).mockResolvedValue({
@@ -146,10 +146,13 @@ describe("#given OpenAI scroll and screenshot actions #when executed #then direc
 			width: 100,
 			height: 100,
 		});
-		coordsMock.resizeScreenshotPng.mockResolvedValue(Buffer.from("small"));
 
-		await executeOpenAIComputerAction({ type: "scroll", scroll_x: 5, scroll_y: 30, x: 10, y: 20 }, computer, DISPLAY);
-		await executeOpenAIComputerAction(
+		const firstScroll = await executeOpenAIComputerAction(
+			{ type: "scroll", scroll_x: 5, scroll_y: 30, x: 10, y: 20 },
+			computer,
+			DISPLAY,
+		);
+		const secondScroll = await executeOpenAIComputerAction(
 			{ type: "scroll", scroll_x: -50, scroll_y: 10, x: 15, y: 25 },
 			computer,
 			DISPLAY,
@@ -158,8 +161,10 @@ describe("#given OpenAI scroll and screenshot actions #when executed #then direc
 
 		expect(computer.scroll).toHaveBeenNthCalledWith(1, { direction: "down", amount: 30 });
 		expect(computer.scroll).toHaveBeenNthCalledWith(2, { direction: "left", amount: 50 });
-		const image = result.content[0];
-		expect(image?.type === "image" ? image.data.length : rawPng.byteLength).toBeLessThan(rawPng.byteLength);
+		expect(firstScroll.content).toEqual([{ type: "text", text: JSON.stringify({ ok: true, type: "scroll" }) }]);
+		expect(secondScroll.content).toEqual([{ type: "text", text: JSON.stringify({ ok: true, type: "scroll" }) }]);
+		expect(computer.screenshot).toHaveBeenCalledWith({ targetSize: { width: 100, height: 100 } });
+		expect(result.content).toEqual([{ type: "image", data: rawPng.toString("base64"), mimeType: "image/png" }]);
 	});
 });
 

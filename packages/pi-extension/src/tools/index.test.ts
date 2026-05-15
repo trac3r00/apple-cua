@@ -56,6 +56,7 @@ function createComputer(): ComputerInterface {
 			supportsClipboard: true,
 		},
 		screenshot: vi.fn(),
+		setTarget: vi.fn(),
 		move: vi.fn(),
 		click: vi.fn(),
 		rightClick: vi.fn(),
@@ -67,24 +68,28 @@ function createComputer(): ComputerInterface {
 		drag: vi.fn(),
 		getCursorPosition: vi.fn(),
 		getScreenSize: vi.fn(),
+		getAppState: vi.fn(),
+		listApps: vi.fn(),
+		setValue: vi.fn(),
+		performAction: vi.fn(),
 		close: vi.fn(),
 	};
 }
 
-describe("#given all tool factories #when built #then every macOS CUA tool is present", () => {
+describe("#given all tool factories #when built #then every Codex Computer Use tool is present", () => {
 	it("builds the expected tool names", () => {
 		const tools = buildAllTools({ computer: createComputer() });
 
 		expect(tools.map((tool) => tool.name)).toEqual([
-			"macos_cua_screenshot",
-			"macos_cua_click",
-			"macos_cua_type",
-			"macos_cua_key",
-			"macos_cua_scroll",
-			"macos_cua_double_click",
-			"macos_cua_drag",
-			"macos_cua_cursor_position",
-			"macos_cua_screen_size",
+			"list_apps",
+			"get_app_state",
+			"click",
+			"perform_secondary_action",
+			"set_value",
+			"drag",
+			"scroll",
+			"type_text",
+			"press_key",
 		]);
 	});
 });

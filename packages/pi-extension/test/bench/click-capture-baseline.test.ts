@@ -1,28 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ComputerActionDriver } from "../../src/anthropic-computer-use.js";
-import { type DisplayConfig, resizeScreenshotPng } from "../../src/computer-use/coords.js";
 
 const BASELINE_LIVE = process.env["BASELINE_LIVE"] === "1";
 const ITERATION_COUNT = 50;
-
-const coordsMock = vi.hoisted(() => ({
-	resizeScreenshotPng: vi.fn<(rawPng: Buffer, targetWidth: number, targetHeight: number) => Promise<Buffer>>(
-		async (rawPng) => rawPng,
-	),
-}));
-
-vi.mock("../../src/computer-use/coords.js", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../../src/computer-use/coords.js")>();
-	return { ...actual, resizeScreenshotPng: coordsMock.resizeScreenshotPng };
-});
-
-const DEFAULT_DOWNSCALE = {
-	logicalWidth: 2560,
-	logicalHeight: 1440,
-	modelWidth: 1280,
-	modelHeight: 720,
-} satisfies DisplayConfig;
 
 function createComputer(): ComputerActionDriver {
 	return {
@@ -38,6 +19,7 @@ function createComputer(): ComputerActionDriver {
 			width: 100,
 			height: 80,
 		}),
+		setTarget: vi.fn<ComputerActionDriver["setTarget"]>(),
 		move: vi.fn<ComputerActionDriver["move"]>().mockResolvedValue(undefined),
 		click: vi.fn<ComputerActionDriver["click"]>().mockResolvedValue(undefined),
 		rightClick: vi.fn<ComputerActionDriver["rightClick"]>().mockResolvedValue(undefined),
@@ -61,6 +43,8 @@ function createComputer(): ComputerActionDriver {
 			screenshotHeight: 80,
 		}),
 		listApps: vi.fn<ComputerActionDriver["listApps"]>().mockResolvedValue([]),
+		setValue: vi.fn<ComputerActionDriver["setValue"]>().mockResolvedValue(undefined),
+		performAction: vi.fn<ComputerActionDriver["performAction"]>().mockResolvedValue(undefined),
 		close: vi.fn<ComputerActionDriver["close"]>().mockResolvedValue(undefined),
 	};
 }
@@ -70,31 +54,18 @@ function percentile(sortedMilliseconds: readonly number[], fraction: number): nu
 	return sortedMilliseconds[Math.max(0, Math.min(index, sortedMilliseconds.length - 1))] ?? 0;
 }
 
-beforeEach(() => {
-	coordsMock.resizeScreenshotPng.mockImplementation(async (rawPng) => rawPng);
-});
-
-afterEach(() => {
-	vi.restoreAllMocks();
-});
-
-describe("#given click + screenshotResult cycle benchmark #when executed 50 times #then percentiles are recorded", () => {
-	it("captures p50/p95 latency for click + screenshot + resize pipeline", async () => {
+describe("#given click + app-state cycle benchmark #when executed 50 times #then percentiles are recorded", () => {
+	it("captures p50/p95 latency for click + explicit screenshot pipeline", async () => {
 		const computer = createComputer();
 		const timings: number[] = [];
 
 		for (let iteration = 0; iteration < ITERATION_COUNT; iteration += 1) {
 			const start = performance.now();
 			await computer.click({ x: 100, y: 200 });
-			const rawScreenshot = await computer.screenshot();
-			const resized = await resizeScreenshotPng(
-				rawScreenshot.data,
-				DEFAULT_DOWNSCALE.modelWidth,
-				DEFAULT_DOWNSCALE.modelHeight,
-			);
+			const screenshot = await computer.screenshot({ targetSize: { width: 1280, height: 720 } });
 			const end = performance.now();
 
-			expect(resized.byteLength).toBeGreaterThan(0);
+			expect(screenshot.data.byteLength).toBeGreaterThan(0);
 
 			timings.push(end - start);
 		}

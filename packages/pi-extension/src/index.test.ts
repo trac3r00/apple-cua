@@ -9,6 +9,7 @@ const macOSHostComputerMock = vi.hoisted(() => {
 			supportsClipboard: true,
 		},
 		screenshot: vi.fn(),
+		setTarget: vi.fn(),
 		move: vi.fn(),
 		click: vi.fn(),
 		rightClick: vi.fn(),
@@ -20,6 +21,22 @@ const macOSHostComputerMock = vi.hoisted(() => {
 		drag: vi.fn(),
 		getCursorPosition: vi.fn(),
 		getScreenSize: vi.fn().mockResolvedValue({ width: 2560, height: 1440 }),
+		getAppState: vi.fn().mockResolvedValue({
+			app: "Finder",
+			bundleId: "com.apple.finder",
+			pid: 1234,
+			frontmost: true,
+			axAvailable: true,
+			elements: [],
+			screenshotBase64: "",
+			screenshotWidth: 1280,
+			screenshotHeight: 720,
+		}),
+		listApps: vi
+			.fn()
+			.mockResolvedValue([{ name: "Finder", bundleId: "com.apple.finder", pid: 1234, isRunning: true }]),
+		setValue: vi.fn().mockResolvedValue(undefined),
+		performAction: vi.fn().mockResolvedValue(undefined),
 		close: vi.fn().mockResolvedValue(undefined),
 	};
 	return {
@@ -158,30 +175,30 @@ describe("#given a pi API #when extension factory runs #then lifecycle handlers 
 	});
 });
 
-describe("#given default-on session_start #when invoked #then native computer and macos_cua tools are registered", () => {
-	it("registers computer alongside the nine prefixed tools", async () => {
+describe("#given default-on session_start #when invoked #then native computer and Codex tools are registered", () => {
+	it("registers computer alongside the nine Codex-compatible tools", async () => {
 		const pi = createMockPi();
 		macosCuaExtension(pi);
 
 		await runSessionStart(pi);
 
 		expect(pi.registeredTools.map((tool) => tool.name)).toEqual([
-			"macos_cua_screenshot",
-			"macos_cua_click",
-			"macos_cua_type",
-			"macos_cua_key",
-			"macos_cua_scroll",
-			"macos_cua_double_click",
-			"macos_cua_drag",
-			"macos_cua_cursor_position",
-			"macos_cua_screen_size",
+			"list_apps",
+			"get_app_state",
+			"click",
+			"perform_secondary_action",
+			"set_value",
+			"drag",
+			"scroll",
+			"type_text",
+			"press_key",
 			"computer",
 		]);
 	});
 });
 
 describe("#given opt-out env var #when session_start runs #then native computer tool is not registered", () => {
-	it("keeps only the nine prefixed tools", async () => {
+	it("keeps only the nine Codex-compatible tools", async () => {
 		process.env["MACOS_CUA_DISABLE_COMPUTER_USE_BETA"] = "1";
 		const pi = createMockPi();
 		macosCuaExtension(pi);
@@ -189,15 +206,15 @@ describe("#given opt-out env var #when session_start runs #then native computer 
 		await runSessionStart(pi);
 
 		expect(pi.registeredTools.map((tool) => tool.name)).toEqual([
-			"macos_cua_screenshot",
-			"macos_cua_click",
-			"macos_cua_type",
-			"macos_cua_key",
-			"macos_cua_scroll",
-			"macos_cua_double_click",
-			"macos_cua_drag",
-			"macos_cua_cursor_position",
-			"macos_cua_screen_size",
+			"list_apps",
+			"get_app_state",
+			"click",
+			"perform_secondary_action",
+			"set_value",
+			"drag",
+			"scroll",
+			"type_text",
+			"press_key",
 		]);
 	});
 });
@@ -247,12 +264,12 @@ describe("#given enabled session and OpenAI Responses #when provider payload hoo
 		expect(result).toEqual({ tools: [shellTool, { type: "computer" }] });
 	});
 
-	it("leaves OpenAI-compatible proxy payloads on prefixed macos_cua tools", async () => {
+	it("leaves OpenAI-compatible proxy payloads on Codex-style tools", async () => {
 		const pi = createMockPi();
 		macosCuaExtension(pi);
 		await runSessionStart(pi);
-		const screenshotTool = { type: "function", name: "macos_cua_screenshot" };
-		const payload = { tools: [{ type: "function", name: "computer", parameters: { anyOf: [] } }, screenshotTool] };
+		const getStateTool = { type: "function", name: "get_app_state" };
+		const payload = { tools: [{ type: "function", name: "computer", parameters: { anyOf: [] } }, getStateTool] };
 
 		const result = runBeforeProviderRequest(
 			pi,
@@ -260,7 +277,7 @@ describe("#given enabled session and OpenAI Responses #when provider payload hoo
 			payload,
 		);
 
-		expect(result).toEqual({ tools: [screenshotTool] });
+		expect(result).toEqual({ tools: [getStateTool] });
 	});
 });
 
@@ -296,7 +313,7 @@ describe("#given enabled session #when agent prompt hook runs #then native compu
 		const result = await runBeforeAgentStart(pi, "anthropic-messages");
 
 		expect(result).toEqual({
-			systemPrompt: expect.stringContaining("Native `computer` tool available (1280x720)"),
+			systemPrompt: expect.stringContaining("Call `get_app_state` each turn"),
 		});
 	});
 

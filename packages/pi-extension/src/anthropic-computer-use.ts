@@ -1,7 +1,7 @@
 import type { ComputerInterface, Point } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
-import { type DisplayConfig, resizeScreenshotPng, unscaleCoord } from "./computer-use/coords.js";
+import { type DisplayConfig, unscaleCoord } from "./computer-use/coords.js";
 import type { AgentToolResult } from "./pi/index.js";
 
 export const ANTHROPIC_COMPUTER_USE_BETA = "computer-use-2025-01-24";
@@ -154,7 +154,7 @@ export function addAnthropicComputerUseToPayload(
 }
 
 export function buildComputerUseSection(width: number, height: number): string {
-	return `## Computer Use\nNative \`computer\` tool available (${width}x${height}); prefer it for GUI. \`macos_cua_*\` tools remain for per-PID background delivery.\n`;
+	return `## Computer Use\nCall \`get_app_state\` each turn. Use \`computer\` for mouse/keyboard (${width}x${height}); AX: \`set_value\`, \`perform_secondary_action\`. Actions return {ok:true}.\n`;
 }
 
 export async function executeNativeComputerAction(
@@ -168,29 +168,29 @@ export async function executeNativeComputerAction(
 				return await screenshotResult(computer, display);
 			case "mouse_move":
 				await computer.move(unscaleCoord(parseCoordinate(input.coordinate, "mouse_move"), display));
-				return await screenshotResult(computer, display);
+				return okResult(input.action);
 			case "left_click":
 				await computer.click(unscaleCoord(parseCoordinate(input.coordinate, "left_click"), display));
-				return await screenshotResult(computer, display);
+				return okResult(input.action);
 			case "right_click":
 				await computer.rightClick(unscaleCoord(parseCoordinate(input.coordinate, "right_click"), display));
-				return await screenshotResult(computer, display);
+				return okResult(input.action);
 			case "middle_click":
 				await computer.middleClick(unscaleCoord(parseCoordinate(input.coordinate, "middle_click"), display));
-				return await screenshotResult(computer, display);
+				return okResult(input.action);
 			case "double_click":
 				await computer.doubleClick(unscaleCoord(parseCoordinate(input.coordinate, "double_click"), display));
-				return await screenshotResult(computer, display);
+				return okResult(input.action);
 			case "triple_click":
 				await tripleClick(computer, unscaleCoord(parseCoordinate(input.coordinate, "triple_click"), display));
-				return await screenshotResult(computer, display);
+				return okResult(input.action);
 			case "left_click_drag":
 				await computer.drag({
 					from: unscaleCoord(parseCoordinate(input.start_coordinate, "left_click_drag.start_coordinate"), display),
 					to: unscaleCoord(parseCoordinate(input.coordinate, "left_click_drag.coordinate"), display),
 					duration: DEFAULT_DRAG_DURATION_MILLISECONDS,
 				});
-				return await screenshotResult(computer, display);
+				return okResult(input.action);
 			case "cursor_position": {
 				const position = scaleCoord(await computer.getCursorPosition(), display);
 				return textResult(`${position.x},${position.y}`);
@@ -198,14 +198,14 @@ export async function executeNativeComputerAction(
 			case "key": {
 				const combo = parseKeyCombo(input.text ?? input.key);
 				await computer.key(combo.key, combo.modifiers.length === 0 ? undefined : { modifiers: combo.modifiers });
-				return await screenshotResult(computer, display);
+				return okResult(input.action);
 			}
 			case "type":
 				await computer.type(parseText(input.text, "type"));
-				return await screenshotResult(computer, display);
+				return okResult(input.action);
 			case "scroll":
 				await computer.scroll(parseScroll(input.scroll_direction, input.scroll_amount));
-				return await screenshotResult(computer, display);
+				return okResult(input.action);
 			case "wait":
 				await sleep(parseWaitDurationMilliseconds(input.duration));
 				return textResult("wait complete");
@@ -230,10 +230,15 @@ function textResult(text: string): ComputerUseResult {
 	return { content: [{ type: "text", text }], details: undefined };
 }
 
+function okResult(action: string): ComputerUseResult {
+	return textResult(JSON.stringify({ ok: true, action }));
+}
+
 async function screenshotResult(computer: ComputerActionDriver, display: DisplayConfig): Promise<ComputerUseResult> {
-	const screenshot = await computer.screenshot();
-	const resized = await resizeScreenshotPng(screenshot.data, display.modelWidth, display.modelHeight);
-	return imageResult(resized.toString("base64"));
+	const screenshot = await computer.screenshot({
+		targetSize: { width: display.modelWidth, height: display.modelHeight },
+	});
+	return imageResult(screenshot.data.toString("base64"));
 }
 
 function scaleCoord(point: Point, display: DisplayConfig): Point {
@@ -318,7 +323,9 @@ async function tripleClick(computer: ComputerActionDriver, position: Point): Pro
 }
 
 function throwUnsupportedAction(action: "left_mouse_down" | "left_mouse_up" | "hold_key"): never {
-	throw new ComputerUseError("unsupported_action", "Use macos_cua_* tools for fine-grained mouse phases", { action });
+	throw new ComputerUseError("unsupported_action", "Use click or drag tools for fine-grained mouse phases", {
+		action,
+	});
 }
 
 function errorMessage(error: unknown): string {

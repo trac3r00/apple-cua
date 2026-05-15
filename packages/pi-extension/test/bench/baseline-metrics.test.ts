@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { MacOSHostComputer } from "@macos-cua/core";
+import { type ComputerInterface, MacOSHostComputer } from "@macos-cua/core";
 import { describe, expect, it } from "vitest";
 
 import { anthropicComputerToolSchema } from "../../src/anthropic-computer-use.js";
@@ -21,7 +21,7 @@ function estimateTokens(byteLength: number): number {
 
 describe("#given baseline benchmark suite #when all benchmarks run #then combined metrics are written to evidence", () => {
 	it("populates baseline-metrics.json with all required fields", async () => {
-		const computer = new MacOSHostComputer();
+		const computer: ComputerInterface = BASELINE_LIVE ? new MacOSHostComputer() : createBenchmarkComputer();
 		const screenshotTimings: number[] = [];
 		const clickCaptureTimings: number[] = [];
 
@@ -49,41 +49,7 @@ describe("#given baseline benchmark suite #when all benchmarks run #then combine
 		screenshotTimings.sort((a, b) => a - b);
 		clickCaptureTimings.sort((a, b) => a - b);
 
-		const fakeComputer = {
-			capabilities: {
-				supportsScreenshot: true,
-				supportsInput: true,
-				supportsAccessibility: true,
-				supportsClipboard: true,
-			},
-			screenshot: async () => ({ data: Buffer.from("png"), mimeType: "image/png" as const, width: 100, height: 80 }),
-			move: async () => undefined,
-			click: async () => undefined,
-			rightClick: async () => undefined,
-			middleClick: async () => undefined,
-			doubleClick: async () => undefined,
-			type: async () => undefined,
-			key: async () => undefined,
-			scroll: async () => undefined,
-			drag: async () => undefined,
-			getCursorPosition: async () => ({ x: 0, y: 0 }),
-			getScreenSize: async () => ({ width: 100, height: 80 }),
-			getAppState: async () => ({
-				app: "TestApp",
-				bundleId: "com.test.app",
-				pid: 1234,
-				frontmost: true,
-				axAvailable: true,
-				elements: [],
-				screenshotBase64: "",
-				screenshotWidth: 100,
-				screenshotHeight: 80,
-			}),
-			listApps: async () => [],
-			close: async () => undefined,
-		};
-
-		const tools = buildAllTools({ computer: fakeComputer });
+		const tools = buildAllTools({ computer: createBenchmarkComputer() });
 		let totalBytes = 0;
 		for (const tool of tools) {
 			const schemaJson = JSON.stringify(tool.parameters);
@@ -121,3 +87,42 @@ describe("#given baseline benchmark suite #when all benchmarks run #then combine
 		expect(metrics.tool_descriptor_estimated_tokens).toBeGreaterThan(0);
 	}, 120_000);
 });
+
+function createBenchmarkComputer(): ComputerInterface {
+	return {
+		capabilities: {
+			supportsScreenshot: true,
+			supportsInput: true,
+			supportsAccessibility: true,
+			supportsClipboard: true,
+		},
+		screenshot: async () => ({ data: Buffer.from("png"), mimeType: "image/png" as const, width: 100, height: 80 }),
+		setTarget: () => undefined,
+		move: async () => undefined,
+		click: async () => undefined,
+		rightClick: async () => undefined,
+		middleClick: async () => undefined,
+		doubleClick: async () => undefined,
+		type: async () => undefined,
+		key: async () => undefined,
+		scroll: async () => undefined,
+		drag: async () => undefined,
+		getCursorPosition: async () => ({ x: 0, y: 0 }),
+		getScreenSize: async () => ({ width: 100, height: 80 }),
+		getAppState: async () => ({
+			app: "TestApp",
+			bundleId: "com.test.app",
+			pid: 1234,
+			frontmost: true,
+			axAvailable: true,
+			elements: [],
+			screenshotBase64: "",
+			screenshotWidth: 100,
+			screenshotHeight: 80,
+		}),
+		listApps: async () => [{ name: "TestApp", bundleId: "com.test.app", pid: 1234, isRunning: true }],
+		setValue: async () => undefined,
+		performAction: async () => undefined,
+		close: async () => undefined,
+	};
+}

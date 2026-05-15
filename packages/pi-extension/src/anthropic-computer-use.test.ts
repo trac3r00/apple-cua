@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
 	ANTHROPIC_COMPUTER_USE_BETA,
@@ -10,17 +10,6 @@ import {
 	executeNativeComputerAction,
 } from "./anthropic-computer-use.js";
 import type { DisplayConfig } from "./computer-use/coords.js";
-
-const coordsMock = vi.hoisted(() => ({
-	resizeScreenshotPng: vi.fn<(rawPng: Buffer, targetWidth: number, targetHeight: number) => Promise<Buffer>>(
-		async (rawPng) => rawPng,
-	),
-}));
-
-vi.mock("./computer-use/coords.js", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("./computer-use/coords.js")>();
-	return { ...actual, resizeScreenshotPng: coordsMock.resizeScreenshotPng };
-});
 
 const DEFAULT_DOWNSCALE = {
 	logicalWidth: 2560,
@@ -50,6 +39,7 @@ function createComputer(): ComputerActionDriver {
 			width: 100,
 			height: 80,
 		}),
+		setTarget: vi.fn<ComputerActionDriver["setTarget"]>(),
 		move: vi.fn<ComputerActionDriver["move"]>().mockResolvedValue(undefined),
 		click: vi.fn<ComputerActionDriver["click"]>().mockResolvedValue(undefined),
 		rightClick: vi.fn<ComputerActionDriver["rightClick"]>().mockResolvedValue(undefined),
@@ -73,13 +63,11 @@ function createComputer(): ComputerActionDriver {
 			screenshotHeight: 80,
 		}),
 		listApps: vi.fn<ComputerActionDriver["listApps"]>().mockResolvedValue([]),
+		setValue: vi.fn<ComputerActionDriver["setValue"]>().mockResolvedValue(undefined),
+		performAction: vi.fn<ComputerActionDriver["performAction"]>().mockResolvedValue(undefined),
 		close: vi.fn<ComputerActionDriver["close"]>().mockResolvedValue(undefined),
 	};
 }
-
-beforeEach(() => {
-	coordsMock.resizeScreenshotPng.mockImplementation(async (rawPng) => rawPng);
-});
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -212,7 +200,7 @@ describe("#given screenshot action #when executed #then image content is returne
 	});
 });
 
-describe("#given left_click action #when executed #then click runs once and screenshot is returned", () => {
+describe("#given left_click action #when executed #then click runs once and lightweight result is returned", () => {
 	it("dispatches click to the computer", async () => {
 		const computer = createComputer();
 
@@ -224,9 +212,7 @@ describe("#given left_click action #when executed #then click runs once and scre
 
 		expect(computer.click).toHaveBeenCalledTimes(1);
 		expect(computer.click).toHaveBeenCalledWith({ x: 10, y: 20 });
-		expect(result.content).toEqual([
-			{ type: "image", data: Buffer.from("png").toString("base64"), mimeType: "image/png" },
-		]);
+		expect(result.content).toEqual([{ type: "text", text: JSON.stringify({ ok: true, action: "left_click" }) }]);
 	});
 });
 
@@ -285,7 +271,7 @@ describe("#given unsupported mouse phase action #when executed #then tagged erro
 		).rejects.toMatchObject({
 			action: "left_mouse_down",
 			kind: "unsupported_action",
-			message: "Use macos_cua_* tools for fine-grained mouse phases",
+			message: "Use click or drag tools for fine-grained mouse phases",
 		});
 	});
 });
@@ -300,12 +286,12 @@ describe("#given scaled Anthropic coordinates #when left click executes #then lo
 	});
 });
 
-describe("#given a screenshot action #when screenshot action executes #then returned image is downscaled", () => {
-	it("passes target dimensions into the resize wrapper", async () => {
+describe("#given a screenshot action #when screenshot action executes #then requested model dimensions are captured", () => {
+	it("passes target dimensions into the screenshot call", async () => {
 		const computer = createComputer();
 
 		await executeNativeComputerAction({ action: "screenshot" }, computer, DEFAULT_DOWNSCALE);
 
-		expect(coordsMock.resizeScreenshotPng).toHaveBeenCalledWith(Buffer.from("png"), 1280, 720);
+		expect(computer.screenshot).toHaveBeenCalledWith({ targetSize: { width: 1280, height: 720 } });
 	});
 });

@@ -2,7 +2,7 @@ import type { ComputerInterface, Point, ScrollOptions } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { ComputerUseError, type ComputerUseResult } from "./anthropic-computer-use.js";
-import { type DisplayConfig, resizeScreenshotPng, unscaleCoord } from "./computer-use/coords.js";
+import { type DisplayConfig, unscaleCoord } from "./computer-use/coords.js";
 
 export const OPENAI_COMPUTER_TOOL_TYPE = "computer";
 const OPENAI_COMPUTER_TOOL_NAME = "computer";
@@ -134,33 +134,34 @@ export async function executeOpenAIComputerAction(
 	try {
 		switch (input.type) {
 			case "click":
-				return await click(input, computer, display);
+				await click(input, computer, display);
+				return okResult(input.type);
 			case "double_click":
 				await computer.doubleClick(parsePosition(input.x, input.y, "double_click", display));
-				return await screenshotResult(computer, display);
+				return okResult(input.type);
 			case "drag":
 				await computer.drag(parseDrag(input.path, display));
-				return await screenshotResult(computer, display);
+				return okResult(input.type);
 			case "keypress": {
 				const keypress = normalizeOpenAIKeys(input.keys ?? []);
 				await computer.key(
 					keypress.key,
 					keypress.modifiers.length === 0 ? undefined : { modifiers: keypress.modifiers },
 				);
-				return await screenshotResult(computer, display);
+				return okResult(input.type);
 			}
 			case "move":
 				await computer.move(parsePosition(input.x, input.y, "move", display));
-				return await screenshotResult(computer, display);
+				return okResult(input.type);
 			case "screenshot":
 				return await screenshotResult(computer, display);
 			case "scroll":
 				await computer.move(parsePosition(input.x, input.y, "scroll", display));
 				await computer.scroll(parseScroll(input.scroll_x, input.scroll_y));
-				return await screenshotResult(computer, display);
+				return okResult(input.type);
 			case "type":
 				await computer.type(parseText(input.text, "type"));
-				return await screenshotResult(computer, display);
+				return okResult(input.type);
 			case "wait":
 				await sleep(parseWaitDurationMilliseconds(input.duration));
 				return textResult("wait complete");
@@ -177,7 +178,7 @@ async function click(
 	input: OpenAIComputerToolInput,
 	computer: ComputerInterface,
 	display: DisplayConfig,
-): Promise<ComputerUseResult> {
+): Promise<void> {
 	const position = parsePosition(input.x, input.y, "click", display);
 	for (const modifier of parseModifierKeys(input.keys ?? [])) {
 		await computer.key(modifier);
@@ -185,13 +186,13 @@ async function click(
 	switch (input.button ?? "left") {
 		case "left":
 			await computer.click(position);
-			return await screenshotResult(computer, display);
+			return;
 		case "right":
 			await computer.rightClick(position);
-			return await screenshotResult(computer, display);
+			return;
 		case "wheel":
 			await computer.middleClick(position);
-			return await screenshotResult(computer, display);
+			return;
 		case "back":
 		case "forward":
 			throw new ComputerUseError("unsupported_action", "browser nav buttons not supported on macOS native", {
@@ -317,9 +318,14 @@ function parseWaitDurationMilliseconds(duration: number | undefined): number {
 }
 
 async function screenshotResult(computer: ComputerInterface, display: DisplayConfig): Promise<ComputerUseResult> {
-	const screenshot = await computer.screenshot();
-	const resized = await resizeScreenshotPng(screenshot.data, display.modelWidth, display.modelHeight);
-	return imageResult(resized.toString("base64"));
+	const screenshot = await computer.screenshot({
+		targetSize: { width: display.modelWidth, height: display.modelHeight },
+	});
+	return imageResult(screenshot.data.toString("base64"));
+}
+
+function okResult(type: string): ComputerUseResult {
+	return textResult(JSON.stringify({ ok: true, type }));
 }
 
 function imageResult(pngBase64: string): ComputerUseResult {

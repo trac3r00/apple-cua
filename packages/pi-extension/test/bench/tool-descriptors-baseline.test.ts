@@ -22,6 +22,7 @@ function createFakeComputer(): ComputerInterface {
 			width: 100,
 			height: 80,
 		}),
+		setTarget: vi.fn<ComputerInterface["setTarget"]>(),
 		move: vi.fn<ComputerInterface["move"]>().mockResolvedValue(undefined),
 		click: vi.fn<ComputerInterface["click"]>().mockResolvedValue(undefined),
 		rightClick: vi.fn<ComputerInterface["rightClick"]>().mockResolvedValue(undefined),
@@ -45,12 +46,14 @@ function createFakeComputer(): ComputerInterface {
 			screenshotHeight: 80,
 		}),
 		listApps: vi.fn<ComputerInterface["listApps"]>().mockResolvedValue([]),
+		setValue: vi.fn<ComputerInterface["setValue"]>().mockResolvedValue(undefined),
+		performAction: vi.fn<ComputerInterface["performAction"]>().mockResolvedValue(undefined),
 		close: vi.fn<ComputerInterface["close"]>().mockResolvedValue(undefined),
 	};
 }
 
 describe("#given all registered tools #when schemas are serialized #then byte and token counts are recorded", () => {
-	it("counts macos_cua_* tools and native computer tool descriptors", () => {
+	it("counts Codex-compatible tools and native computer tool descriptors", () => {
 		const fakeComputer = createFakeComputer();
 
 		const tools = buildAllTools({ computer: fakeComputer });
@@ -71,7 +74,7 @@ describe("#given all registered tools #when schemas are serialized #then byte an
 			tool_descriptor_bytes: totalBytes,
 			tool_descriptor_estimated_tokens: estimatedTokens,
 			tool_count: tools.length + 1,
-			macos_cua_tool_count: tools.length,
+			computer_use_tool_count: tools.length,
 			native_computer_tool_bytes: Buffer.byteLength(nativeSchemaJson, "utf8"),
 		};
 

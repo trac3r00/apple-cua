@@ -43,6 +43,7 @@ struct HelperResponse: Encodable {
 	let error: String?
 	let x: Double?
 	let y: Double?
+	let pid: Int32?
 	let version: String?
 	let settled: Bool?
 	let data: String?
@@ -50,18 +51,27 @@ struct HelperResponse: Encodable {
 	let height: Int?
 	let axAvailable: Bool?
 	let elements: [AXElementJSON]?
+	let app: String?
+	let bundleId: String?
+	let frontmost: Bool?
+	let apps: [AppInfoJSON]?
 
 	static func success(
 		id: String,
 		x: Double? = nil,
 		y: Double? = nil,
+		pid: Int32? = nil,
 		version: String? = nil,
 		settled: Bool? = nil,
 		data: String? = nil,
 		width: Int? = nil,
 		height: Int? = nil,
 		axAvailable: Bool? = nil,
-		elements: [AXElementJSON]? = nil
+		elements: [AXElementJSON]? = nil,
+		app: String? = nil,
+		bundleId: String? = nil,
+		frontmost: Bool? = nil,
+		apps: [AppInfoJSON]? = nil
 	) -> HelperResponse {
 		HelperResponse(
 			id: id,
@@ -69,13 +79,18 @@ struct HelperResponse: Encodable {
 			error: nil,
 			x: x,
 			y: y,
+			pid: pid,
 			version: version,
 			settled: settled,
 			data: data,
 			width: width,
 			height: height,
 			axAvailable: axAvailable,
-			elements: elements
+			elements: elements,
+			app: app,
+			bundleId: bundleId,
+			frontmost: frontmost,
+			apps: apps
 		)
 	}
 
@@ -86,15 +101,27 @@ struct HelperResponse: Encodable {
 			error: error,
 			x: nil,
 			y: nil,
+			pid: nil,
 			version: nil,
 			settled: nil,
 			data: nil,
 			width: nil,
 			height: nil,
 			axAvailable: nil,
-			elements: nil
+			elements: nil,
+			app: nil,
+			bundleId: nil,
+			frontmost: nil,
+			apps: nil
 		)
 	}
+}
+
+struct AppInfoJSON: Codable {
+	let name: String
+	let bundleId: String?
+	let pid: Int32
+	let isActive: Bool
 }
 
 enum HelperFailure: Error, CustomStringConvertible {

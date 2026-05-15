@@ -85,6 +85,18 @@ pnpm macos-cua-mcp --version
 
 **Fix:** grant Accessibility to the terminal/IDE that launches `macos-cua`, then refresh the app session with `get_app_state` or retry the CLI command after ensuring the target window is visible.
 
+## My active app loses focus or my keystrokes get redirected mid-task
+
+**Cause:** raw coordinate `click`/`drag` (calls without `element_index`) post synthetic mouse events to the target window, which forces the target app to gain SkyLight focus. While the action is in flight, anything you type goes to the target app.
+
+**Fix:** prefer the AX-indexed path. Call `get_app_state` first, then pass `element_index` to `click` and `scroll`. The indexed path uses `AXPress` and `AXScroll{Up,Down,Left,Right}ByPage` and never moves the cursor or steals focus. Only fall back to raw coordinates when the target element is not exposed in the accessibility tree.
+
+## set_value silently does nothing on a web text field
+
+**Cause:** Safari/Chrome content-process AXTextFields accept `AXUIElementSetAttributeValue(AXValue, ...)` calls without raising an error, but ignore the write. The macos-cua port keeps strict AX-only semantics — it never falls back to typing the value into whatever has focus, because that would type into the user's other app.
+
+**Fix:** confirm the target really is settable via AX. If not, use `click` (with `element_index`) followed by `type_text` to compose the value yourself. Avoid passing raw cursor coordinates unless the element has no AX representation.
+
 ## Still stuck
 
 1. Capture the full error output (stderr + stdout).

@@ -35,9 +35,9 @@ export function createClickTool(computer: ComputerInterface): ToolDefinition {
 		parameters: ClickParams,
 		async execute(_toolCallId, params) {
 			const targetPid = await resolveAppPid(computer, params.app);
+			const pressCount = Math.max(1, Math.trunc(params.click_count ?? 1));
 			if (params.element_index !== undefined) {
 				const index = parseElementIndex(params.element_index);
-				const pressCount = Math.max(1, Math.trunc(params.click_count ?? 1));
 				for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
 					await pressElement(computer, targetPid, index);
 				}
@@ -45,8 +45,20 @@ export function createClickTool(computer: ComputerInterface): ToolDefinition {
 				return actionCompleteResult();
 			}
 			const point = parseCoordinate(params.x, params.y);
+			if ((params.mouse_button ?? "left") === "left") {
+				let pressedAll = true;
+				for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
+					if (!(await computer.pressAtPosition(targetPid, point))) {
+						pressedAll = false;
+						break;
+					}
+				}
+				if (pressedAll) {
+					return actionCompleteResult();
+				}
+			}
 			await withTargetedApp(computer, targetPid, async () => {
-				await clickPoint(computer, point, params.mouse_button ?? "left", params.click_count ?? 1);
+				await clickPoint(computer, point, params.mouse_button ?? "left", pressCount);
 			});
 			return actionCompleteResult();
 		},

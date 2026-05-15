@@ -49,6 +49,7 @@ function createFakeComputer(): ComputerInterface {
 			.mockResolvedValue([{ name: "TestApp", bundleId: "com.test.app", pid: 1234, isRunning: true }]),
 		setValue: vi.fn<ComputerInterface["setValue"]>().mockResolvedValue(undefined),
 		performAction: vi.fn<ComputerInterface["performAction"]>().mockResolvedValue(undefined),
+		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>().mockResolvedValue(false),
 		close: vi.fn<ComputerInterface["close"]>().mockResolvedValue(undefined),
 	};
 }

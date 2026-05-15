@@ -30,5 +30,6 @@ export abstract class CloudComputer implements ComputerInterface {
 	abstract listApps(): Promise<import("../accessibility/types.js").AppInfo[]>;
 	abstract setValue(targetPid: number, elementIndex: number, value: string): Promise<void>;
 	abstract performAction(targetPid: number, elementIndex: number, action: string): Promise<void>;
+	abstract pressAtPosition(targetPid: number, position: import("../types/index.js").Point): Promise<boolean>;
 	abstract close(): Promise<void>;
 }

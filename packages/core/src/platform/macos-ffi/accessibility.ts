@@ -63,6 +63,20 @@ const AXUIElementCreateApplication = applicationServices.func("AXUIElementCreate
 	"int32_t",
 ]) as KoffiFunc<(pid: number) => AXUIElementRef | null>;
 
+const AXUIElementCreateSystemWide = applicationServices.func(
+	"AXUIElementCreateSystemWide",
+	AX_UI_ELEMENT_REF,
+	[],
+) as KoffiFunc<() => AXUIElementRef | null>;
+
+const AXUIElementCopyElementAtPosition = applicationServices.func(
+	"int32_t AXUIElementCopyElementAtPosition(void *element, float x, float y, _Out_ void **target)",
+) as KoffiFunc<(application: AXUIElementRef, x: number, y: number, target: Array<AXUIElementRef | null>) => number>;
+
+const AXUIElementGetPid = applicationServices.func(
+	"int32_t AXUIElementGetPid(void *element, _Out_ int32_t *pid)",
+) as KoffiFunc<(element: AXUIElementRef, pidOut: Int32Array) => number>;
+
 const AXUIElementPerformAction = applicationServices.func("AXUIElementPerformAction", "int32_t", [
 	AX_UI_ELEMENT_REF,
 	"void *",
@@ -155,6 +169,44 @@ export function performActionByIndex(pid: number, elementIndex: number, action: 
 		performAction(element, action);
 	} finally {
 		releaseAXElement(element);
+	}
+}
+
+export function pressElementAtScreenPoint(targetPid: number, x: number, y: number): boolean {
+	if (!AXIsProcessTrusted() || !isRunning(targetPid)) {
+		return false;
+	}
+	const systemwide = AXUIElementCreateSystemWide();
+	if (systemwide === null) {
+		return false;
+	}
+	try {
+		const out: Array<AXUIElementRef | null> = [null];
+		const error = AXUIElementCopyElementAtPosition(systemwide, x, y, out);
+		if (error !== AX_SUCCESS) {
+			return false;
+		}
+		const element = out[0];
+		if (element === null || element === undefined) {
+			return false;
+		}
+		try {
+			const pidBuffer = new Int32Array(1);
+			const pidError = AXUIElementGetPid(element, pidBuffer);
+			if (pidError !== AX_SUCCESS || pidBuffer[0] !== targetPid) {
+				return false;
+			}
+			const actions = copyActionNames(element);
+			if (!actions.includes(K_AX_PRESS_ACTION)) {
+				return false;
+			}
+			performAction(element, K_AX_PRESS_ACTION);
+			return true;
+		} finally {
+			releaseAXElement(element);
+		}
+	} finally {
+		releaseAXElement(systemwide);
 	}
 }
 

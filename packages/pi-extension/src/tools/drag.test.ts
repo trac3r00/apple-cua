@@ -31,6 +31,7 @@ function createComputer(): ComputerInterface {
 			.mockResolvedValue([{ name: "Finder", bundleId: "com.apple.finder", pid: 1234, isRunning: true }]),
 		setValue: vi.fn<ComputerInterface["setValue"]>(),
 		performAction: vi.fn<ComputerInterface["performAction"]>(),
+		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>(),
 		close: vi.fn<ComputerInterface["close"]>(),
 	};
 }

@@ -28,6 +28,7 @@ const mockedComputer = vi.hoisted(() => ({
 	listApps: vi.fn(),
 	setValue: vi.fn(),
 	performAction: vi.fn(),
+	pressAtPosition: vi.fn(),
 	close: vi.fn(),
 }));
 
@@ -132,6 +133,7 @@ beforeEach(() => {
 	]);
 	mockedComputer.setValue.mockResolvedValue(undefined);
 	mockedComputer.performAction.mockResolvedValue(undefined);
+	mockedComputer.pressAtPosition.mockResolvedValue(false);
 });
 
 afterEach(async () => {

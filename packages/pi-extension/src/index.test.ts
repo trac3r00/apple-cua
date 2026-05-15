@@ -37,6 +37,7 @@ const macOSHostComputerMock = vi.hoisted(() => {
 			.mockResolvedValue([{ name: "Finder", bundleId: "com.apple.finder", pid: 1234, isRunning: true }]),
 		setValue: vi.fn().mockResolvedValue(undefined),
 		performAction: vi.fn().mockResolvedValue(undefined),
+		pressAtPosition: vi.fn().mockResolvedValue(false),
 		close: vi.fn().mockResolvedValue(undefined),
 	};
 	return {

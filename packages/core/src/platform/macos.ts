@@ -11,7 +11,12 @@ import type {
 	ScrollOptions,
 } from "../types/index.js";
 import { HostComputer, type HostComputerOptions } from "./host.js";
-import { extractAccessibilityTree, performActionByIndex, setValueByIndex } from "./macos-ffi/accessibility.js";
+import {
+	extractAccessibilityTree,
+	performActionByIndex,
+	pressElementAtScreenPoint,
+	setValueByIndex,
+} from "./macos-ffi/accessibility.js";
 import { MacOSInputController } from "./macos-input.js";
 
 const execFileAsync = promisify(execFile);
@@ -158,6 +163,10 @@ export class MacOSHostComputer extends HostComputer {
 
 	async performAction(targetPid: number, elementIndex: number, action: string): Promise<void> {
 		performActionByIndex(targetPid, elementIndex, action);
+	}
+
+	async pressAtPosition(targetPid: number, position: Point): Promise<boolean> {
+		return pressElementAtScreenPoint(targetPid, position.x, position.y);
 	}
 
 	async close(): Promise<void> {

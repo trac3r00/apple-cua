@@ -29,6 +29,9 @@ const koffiMock = vi.hoisted(() => {
 	const accessibilityFunctions = {
 		AXIsProcessTrusted: vi.fn(() => true),
 		AXUIElementCreateApplication: vi.fn(() => applicationElement),
+		AXUIElementCreateSystemWide: vi.fn(() => ({ type: "ax-systemwide" })),
+		AXUIElementCopyElementAtPosition: vi.fn(() => 0),
+		AXUIElementGetPid: vi.fn(() => 0),
 		AXUIElementGetTypeID: vi.fn(() => 4),
 		AXValueGetTypeID: vi.fn(() => 5),
 		AXValueGetType: vi.fn(),

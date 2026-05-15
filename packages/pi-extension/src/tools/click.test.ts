@@ -50,7 +50,8 @@ function createComputer(): ComputerInterface {
 			.fn<ComputerInterface["listApps"]>()
 			.mockResolvedValue([{ name: "Finder", bundleId: "com.apple.finder", pid: 1234, isRunning: true }]),
 		setValue: vi.fn<ComputerInterface["setValue"]>(),
-		performAction: vi.fn<ComputerInterface["performAction"]>(),
+		performAction: vi.fn<ComputerInterface["performAction"]>().mockResolvedValue(undefined),
+		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>().mockResolvedValue(false),
 		close: vi.fn<ComputerInterface["close"]>(),
 	};
 }
@@ -65,15 +66,29 @@ describe("#given click tool factory #when built #then tool name is Codex-compati
 });
 
 describe("#given click tool #when executed #then target app receives coordinates", () => {
-	it("clicks the requested point in the resolved app", async () => {
+	it("falls back to the synthetic mouse only when AX hit-test cannot press the element", async () => {
 		const computer = createComputer();
+		const pressAtPosition = vi.spyOn(computer, "pressAtPosition").mockResolvedValue(false);
 		const tool = createClickTool(computer);
 
 		await tool.execute("tool-call", { app: "Finder", x: 10, y: 20 }, undefined, undefined, {} as ExtensionContext);
 
+		expect(pressAtPosition).toHaveBeenCalledWith(1234, { x: 10, y: 20 });
 		expect(computer.setTarget).toHaveBeenNthCalledWith(1, 1234);
 		expect(computer.click).toHaveBeenCalledWith({ x: 10, y: 20 });
 		expect(computer.setTarget).toHaveBeenLastCalledWith(undefined);
+	});
+
+	it("presses the element under the cursor via AX without moving the mouse when AX accepts", async () => {
+		const computer = createComputer();
+		const pressAtPosition = vi.spyOn(computer, "pressAtPosition").mockResolvedValue(true);
+		const tool = createClickTool(computer);
+
+		await tool.execute("tool-call", { app: "Finder", x: 10, y: 20 }, undefined, undefined, {} as ExtensionContext);
+
+		expect(pressAtPosition).toHaveBeenCalledWith(1234, { x: 10, y: 20 });
+		expect(computer.click).not.toHaveBeenCalled();
+		expect(computer.setTarget).not.toHaveBeenCalled();
 	});
 
 	it("presses the accessibility element via AXPress instead of moving the cursor", async () => {

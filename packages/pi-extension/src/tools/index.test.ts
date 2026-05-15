@@ -72,6 +72,7 @@ function createComputer(): ComputerInterface {
 		listApps: vi.fn(),
 		setValue: vi.fn(),
 		performAction: vi.fn(),
+		pressAtPosition: vi.fn(),
 		close: vi.fn(),
 	};
 }

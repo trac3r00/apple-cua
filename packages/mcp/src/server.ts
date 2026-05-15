@@ -145,9 +145,9 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 		},
 		async ({ app, element_index, x, y, click_count, mouse_button }): Promise<ToolResult> => {
 			const targetPid = await resolveAppPid(computer, app);
+			const pressCount = Math.max(1, Math.trunc(click_count ?? 1));
 			if (element_index !== undefined) {
 				const index = parseElementIndex(element_index);
-				const pressCount = Math.max(1, Math.trunc(click_count ?? 1));
 				for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
 					await pressElement(computer, targetPid, index);
 				}
@@ -155,8 +155,20 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 				return actionComplete();
 			}
 			const point = parseCoordinate(x, y);
+			if ((mouse_button ?? "left") === "left") {
+				let pressedAll = true;
+				for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
+					if (!(await computer.pressAtPosition(targetPid, point))) {
+						pressedAll = false;
+						break;
+					}
+				}
+				if (pressedAll) {
+					return actionComplete();
+				}
+			}
 			await withTargetedApp(computer, targetPid, async () => {
-				await clickPoint(computer, point, mouse_button ?? "left", click_count ?? 1);
+				await clickPoint(computer, point, mouse_button ?? "left", pressCount);
 			});
 			return actionComplete();
 		},

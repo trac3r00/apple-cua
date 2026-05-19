@@ -33,6 +33,12 @@ interface ExtensionState {
 
 type ComputerFallbackInput = ComputerToolInput | OpenAIComputerAction | OpenAIComputerActionBatch;
 
+interface ComputerUseModel {
+	readonly api?: string;
+	readonly provider?: string;
+	readonly baseUrl?: string;
+}
+
 const DISABLE_COMPUTER_USE_BETA_ENV = "MACOS_CUA_DISABLE_COMPUTER_USE_BETA";
 
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -51,7 +57,7 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 		return { skillPaths: [skillPath] };
 	});
 
-	pi.on("session_start", async () => {
+	pi.on("session_start", async (_event, ctx) => {
 		const computer = new MacOSHostComputer();
 		const display = resolveDisplayConfig(await computer.getScreenSize());
 		const enabled = !isOptedOut(process.env[DISABLE_COMPUTER_USE_BETA_ENV]);
@@ -74,6 +80,11 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 				},
 			}),
 		);
+		syncComputerToolActivation(pi, ctx.model);
+	});
+
+	pi.on("model_select", (event) => {
+		syncComputerToolActivation(pi, event.model);
 	});
 
 	pi.on("before_provider_request", (event, ctx) => {
@@ -91,7 +102,7 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 			}
 			return payload;
 		}
-		return event.payload;
+		return sanitizeOpenAIComputerUsePayload(api, event.payload);
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
@@ -122,9 +133,26 @@ function isOptedOut(value: string | undefined): boolean {
 	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
-function shouldInjectOpenAINativeComputerUse(
-	model: { readonly provider?: string; readonly baseUrl?: string } | undefined,
-): boolean {
+function syncComputerToolActivation(pi: ExtensionAPI, model: ComputerUseModel | undefined): void {
+	if (state === undefined || !state.enabled) {
+		return;
+	}
+	const activeTools = pi.getActiveTools();
+	const shouldActivate =
+		model?.api === "anthropic-messages" ||
+		(model?.api === "openai-responses" && shouldInjectOpenAINativeComputerUse(model));
+	if (shouldActivate) {
+		if (!activeTools.includes(ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME)) {
+			pi.setActiveTools([...activeTools, ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME]);
+		}
+		return;
+	}
+	if (activeTools.includes(ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME)) {
+		pi.setActiveTools(activeTools.filter((toolName) => toolName !== ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME));
+	}
+}
+
+function shouldInjectOpenAINativeComputerUse(model: ComputerUseModel | undefined): boolean {
 	if (model?.provider !== "openai") {
 		return false;
 	}

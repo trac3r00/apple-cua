@@ -64,6 +64,7 @@ interface MockPi extends ExtensionAPI {
 function createMockPi(): MockPi {
 	const handlers = new Map<string, EventHandler>();
 	const registeredTools: Array<{ readonly name: string }> = [];
+	const activeTools: string[] = [];
 	const on = ((eventName: string, handler: EventHandler) => {
 		handlers.set(eventName, handler as EventHandler);
 	}) as ExtensionAPI["on"];
@@ -73,6 +74,7 @@ function createMockPi(): MockPi {
 		on,
 		registerTool(tool) {
 			registeredTools.push({ name: tool.name });
+			activeTools.push(tool.name);
 		},
 		registerCommand() {},
 		registerShortcut() {},
@@ -91,12 +93,14 @@ function createMockPi(): MockPi {
 		setLabel() {},
 		exec: vi.fn<ExtensionAPI["exec"]>(),
 		getActiveTools() {
-			return [];
+			return [...activeTools];
 		},
 		getAllTools() {
 			return [];
 		},
-		setActiveTools() {},
+		setActiveTools(toolNames) {
+			activeTools.splice(0, activeTools.length, ...toolNames);
+		},
 		getCommands() {
 			return [];
 		},
@@ -116,18 +120,26 @@ beforeEach(() => {
 	macOSHostComputerMock.instance.close.mockResolvedValue(undefined);
 });
 
-async function runSessionStart(pi: MockPi): Promise<void> {
+async function runSessionStart(pi: MockPi, model?: TestModel): Promise<void> {
 	const sessionStart = pi.handlers.get("session_start");
 	if (sessionStart === undefined) {
 		throw new Error("session_start handler missing");
 	}
-	await sessionStart();
+	await sessionStart({ reason: "startup" }, { model });
 }
 
 interface TestModel {
 	readonly api: string;
 	readonly baseUrl?: string;
 	readonly provider?: string;
+}
+
+async function runModelSelect(pi: MockPi, model: TestModel): Promise<void> {
+	const modelSelect = pi.handlers.get("model_select");
+	if (modelSelect === undefined) {
+		throw new Error("model_select handler missing");
+	}
+	await modelSelect({ model, previousModel: undefined, source: "set" }, { model });
 }
 
 function runBeforeProviderRequest(pi: MockPi, model: string | TestModel, payload: unknown): unknown {
@@ -155,7 +167,7 @@ describe("#given macosCuaExtension #when imported #then default export is a name
 });
 
 describe("#given a pi API #when extension factory runs #then lifecycle handlers are registered", () => {
-	it("registers resources_discover, session_start, request, prompt, and session_shutdown handlers", () => {
+	it("registers resources_discover, session_start, model_select, request, prompt, and session_shutdown handlers", () => {
 		const pi = createMockPi();
 		const onSpy = vi.spyOn(pi, "on");
 
@@ -163,13 +175,15 @@ describe("#given a pi API #when extension factory runs #then lifecycle handlers 
 
 		expect(onSpy).toHaveBeenCalledWith("resources_discover", expect.any(Function));
 		expect(onSpy).toHaveBeenCalledWith("session_start", expect.any(Function));
+		expect(onSpy).toHaveBeenCalledWith("model_select", expect.any(Function));
 		expect(onSpy).toHaveBeenCalledWith("before_provider_request", expect.any(Function));
 		expect(onSpy).toHaveBeenCalledWith("before_agent_start", expect.any(Function));
 		expect(onSpy).toHaveBeenCalledWith("session_shutdown", expect.any(Function));
-		expect(onSpy).toHaveBeenCalledTimes(5);
+		expect(onSpy).toHaveBeenCalledTimes(6);
 		expect([...pi.handlers.keys()]).toEqual([
 			"resources_discover",
 			"session_start",
+			"model_select",
 			"before_provider_request",
 			"before_agent_start",
 			"session_shutdown",
@@ -221,6 +235,94 @@ describe("#given opt-out env var #when session_start runs #then native computer 
 	});
 });
 
+describe("#given enabled OpenAI Chat session #when session_start runs #then fallback computer tool is inactive", () => {
+	it("keeps computer registered for execution but not active for Chat Completions providers", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+
+		await runSessionStart(pi, {
+			api: "openai-completions",
+			provider: "opengateway-dev",
+			baseUrl: "https://dev-asmr-v2.sionic.im/v1",
+		});
+
+		expect(pi.registeredTools.map((tool) => tool.name)).toContain("computer");
+		expect(pi.getActiveTools()).not.toContain("computer");
+	});
+});
+
+describe("#given enabled Anthropic session #when session_start runs #then fallback computer tool stays active", () => {
+	it("keeps computer active for Anthropic native computer-use payloads", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+
+		await runSessionStart(pi, { api: "anthropic-messages", provider: "anthropic" });
+
+		expect(pi.getActiveTools()).toContain("computer");
+	});
+});
+
+describe("#given enabled OpenAI proxy Responses session #when session_start runs #then fallback computer tool is inactive", () => {
+	it("does not activate computer for OpenAI-compatible Responses proxies", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+
+		await runSessionStart(pi, {
+			api: "openai-responses",
+			provider: "openai",
+			baseUrl: "https://quotio.mengmota.com/v1",
+		});
+
+		expect(pi.getActiveTools()).not.toContain("computer");
+	});
+});
+
+describe("#given enabled session #when model changes from native computer-use to OpenAI Chat #then computer is deactivated", () => {
+	it("removes computer from active tools while preserving other macOS tools", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+		await runSessionStart(pi, { api: "anthropic-messages", provider: "anthropic" });
+
+		await runModelSelect(pi, {
+			api: "openai-completions",
+			provider: "opengateway-dev",
+			baseUrl: "https://dev-asmr-v2.sionic.im/v1",
+		});
+
+		expect(pi.getActiveTools()).toEqual([
+			"list_apps",
+			"get_app_state",
+			"click",
+			"perform_secondary_action",
+			"set_value",
+			"drag",
+			"scroll",
+			"type_text",
+			"press_key",
+		]);
+	});
+});
+
+describe("#given enabled session #when model changes to direct OpenAI Responses #then computer is activated", () => {
+	it("adds computer back only for direct OpenAI native computer-use", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+		await runSessionStart(pi, {
+			api: "openai-completions",
+			provider: "opengateway-dev",
+			baseUrl: "https://dev-asmr-v2.sionic.im/v1",
+		});
+
+		await runModelSelect(pi, {
+			api: "openai-responses",
+			provider: "openai",
+			baseUrl: "https://api.openai.com/v1",
+		});
+
+		expect(pi.getActiveTools()).toContain("computer");
+	});
+});
+
 describe("#given resources_discover #when invoked #then macOS skill path is returned", () => {
 	it("returns the macos-cua skill path", async () => {
 		const pi = createMockPi();
@@ -246,6 +348,22 @@ describe("#given enabled session and non-computer provider #when provider payloa
 		const result = runBeforeProviderRequest(pi, "google-generative-ai", payload);
 
 		expect(result).toBe(payload);
+	});
+});
+
+describe("#given enabled session and OpenAI Chat Completions #when provider payload hook runs #then fallback computer function is stripped", () => {
+	it("removes the computer function before OpenAI-compatible Chat providers see it", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+		await runSessionStart(pi);
+		const shellTool = { type: "function", function: { name: "shell", parameters: { type: "object" } } };
+		const payload = {
+			tools: [{ type: "function", function: { name: "computer", parameters: { type: null } } }, shellTool],
+		};
+
+		const result = runBeforeProviderRequest(pi, "openai-completions", payload);
+
+		expect(result).toEqual({ tools: [shellTool] });
 	});
 });
 

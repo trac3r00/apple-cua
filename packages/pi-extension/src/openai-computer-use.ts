@@ -66,7 +66,7 @@ export const openaiComputerActionBatchSchema = Type.Object(
 export type OpenAIComputerActionBatch = Static<typeof openaiComputerActionBatchSchema>;
 
 export function sanitizeOpenAIComputerUsePayload(api: string | undefined, payload: unknown): unknown {
-	if (api !== "openai-responses" || !isRecord(payload)) {
+	if ((api !== "openai-responses" && api !== "openai-completions") || !isRecord(payload)) {
 		return payload;
 	}
 	const tools = Array.isArray(payload["tools"]) ? payload["tools"] : [];

@@ -233,12 +233,12 @@ export async function captureMacOSScreenshot(
 		windowId === undefined ? 'screencapture -x -t png "$tmp"' : `screencapture -x -o -l ${windowId} -t png "$tmp"`;
 	const script = [
 		"set -eu",
-		'tmp=$(mktemp "${TMPDIR:-/tmp}/macos-cua-shot.XXXXXX.png")',
+		'tmp=$(mktemp "${TMPDIR:-/tmp}/macos-cua-shot.XXXXXX")',
 		'out=""',
 		'cleanup() { rm -f "$tmp"; if [ -n "$out" ]; then rm -f "$out"; fi; }',
 		"trap cleanup EXIT",
 		captureCommand,
-		'out=$(mktemp "${TMPDIR:-/tmp}/macos-cua-shot-resized.XXXXXX.png")',
+		'out=$(mktemp "${TMPDIR:-/tmp}/macos-cua-shot-resized.XXXXXX")',
 		'sips -z "$2" "$1" "$tmp" --out "$out" >/dev/null',
 		'cat "$out"',
 	].join("\n");

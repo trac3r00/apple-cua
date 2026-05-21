@@ -18,6 +18,12 @@ export type { PermissionInterface, PermissionKind, PermissionStatus } from "./pe
 export { MacOSPermissions } from "./permission/macos.js";
 export { CloudComputer, type CloudComputerOptions } from "./platform/cloud.js";
 export { HostComputer, type HostComputerOptions } from "./platform/host.js";
+export {
+	MacOSCuaHelper,
+	MacOSCuaHelperError,
+	resolveHelperBinaryPath,
+	type MacOSCuaHelperOptions,
+} from "./platform/macos-helper.js";
 export { MacOSHostComputer, type MacOSHostComputerOptions } from "./platform/macos.js";
 export { VMComputer, type VMComputerOptions } from "./platform/vm.js";
 export type {

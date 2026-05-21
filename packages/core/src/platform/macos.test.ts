@@ -76,12 +76,12 @@ describe("#given macos screenshot capture returns a png buffer", () => {
 	});
 });
 
-describe("#given helper-free screenshot capture #when a target size is requested #then screencapture and sips run in-process", () => {
-	it("returns the captured png bytes and parsed dimensions", async () => {
+describe("#given window-targeted screenshot capture #when a windowId is provided #then screencapture -l runs via shell", () => {
+	it("returns the captured png bytes and routes through the CLI shell script", async () => {
 		const fakePng = createFakePng();
 		mockExecFileBuffer(fakePng);
 
-		const result = await captureMacOSScreenshot({ width: 1920, height: 1080 });
+		const result = await captureMacOSScreenshot({ width: 1920, height: 1080 }, 42);
 
 		expect(result).toBe(fakePng);
 		expect(childProcessMock.execFile).toHaveBeenCalledWith(
@@ -90,6 +90,10 @@ describe("#given helper-free screenshot capture #when a target size is requested
 			expect.objectContaining({ encoding: "buffer" }),
 			expect.any(Function),
 		);
+		const shellArgs = childProcessMock.execFile.mock.calls[0]?.[1];
+		expect(Array.isArray(shellArgs)).toBe(true);
+		const script = (shellArgs as readonly string[])[1];
+		expect(script).toContain("screencapture -x -o -l 42");
 	});
 });
 

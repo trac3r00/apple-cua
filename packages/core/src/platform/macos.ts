@@ -18,6 +18,7 @@ import {
 	setValueByIndex,
 	typeIntoFocusedAXElement,
 } from "./macos-ffi/accessibility.js";
+import { captureMainDisplayPng, getMainDisplayLogicalSize } from "./macos-ffi/screenshot.js";
 import { MacOSInputController } from "./macos-input.js";
 
 const execFileAsync = promisify(execFile);
@@ -126,7 +127,11 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async getScreenSize(): Promise<{ width: number; height: number }> {
-		return await getMacOSLogicalScreenSize();
+		try {
+			return getMainDisplayLogicalSize();
+		} catch {
+			return await getMacOSLogicalScreenSize();
+		}
 	}
 
 	async getAppState(targetPid?: number, options?: AppStateOptions): Promise<AppState> {
@@ -229,8 +234,20 @@ export async function captureMacOSScreenshot(
 		throw new Error("windowId must be a positive integer");
 	}
 
-	const captureCommand =
-		windowId === undefined ? 'screencapture -x -t png "$tmp"' : `screencapture -x -o -l ${windowId} -t png "$tmp"`;
+	if (windowId === undefined) {
+		const captured = captureMainDisplayPng(targetSize.width, targetSize.height);
+		parsePngDimensions(captured.data);
+		return captured.data;
+	}
+
+	return captureWindowScreenshotViaCli(targetSize, windowId);
+}
+
+async function captureWindowScreenshotViaCli(
+	targetSize: { readonly width: number; readonly height: number },
+	windowId: number,
+): Promise<Buffer> {
+	const captureCommand = `screencapture -x -o -l ${windowId} -t png "$tmp"`;
 	const script = [
 		"set -eu",
 		'tmp=$(mktemp "${TMPDIR:-/tmp}/macos-cua-shot.XXXXXX")',

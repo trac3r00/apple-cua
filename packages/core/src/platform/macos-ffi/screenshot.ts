@@ -1,6 +1,7 @@
 import type { KoffiFunc } from "koffi";
 import { type CFTypeRef, cfRelease, withCFString } from "./corefoundation.js";
 import { koffi } from "./koffi.js";
+import { captureMainDisplayPngViaSck, isSckitAvailable } from "./sckit.js";
 
 type CGImageRef = CFTypeRef;
 type CGImageDestinationRef = CFTypeRef;
@@ -115,6 +116,16 @@ export function captureMainDisplayPng(targetWidth: number, targetHeight: number)
 	}
 
 	const maxPixelSize = Math.max(Math.round(targetWidth), Math.round(targetHeight));
+
+	if (isSckitAvailable()) {
+		try {
+			const captured = captureMainDisplayPngViaSck(targetWidth, targetHeight);
+			if (captured !== null) {
+				return captured;
+			}
+		} catch {}
+	}
+
 	const sourceImage = CGDisplayCreateImage(CGMainDisplayID());
 	if (sourceImage === null) {
 		throw new Error("CGDisplayCreateImage returned null (Screen Recording permission may be missing)");

@@ -6,6 +6,7 @@ import { anthropicComputerToolSchema } from "../../src/anthropic-computer-use.js
 import { buildAllTools } from "../../src/tools/index.js";
 
 const BASELINE_LIVE = process.env["BASELINE_LIVE"] === "1";
+const BASELINE_WRITE = process.env["BASELINE_WRITE"] === "1";
 const SCREENSHOT_ITERATIONS = BASELINE_LIVE ? 100 : 1;
 const CLICK_CAPTURE_ITERATIONS = BASELINE_LIVE ? 50 : 10;
 const METRICS_PATH = ".sisyphus/evidence/baseline-metrics.json";
@@ -19,8 +20,8 @@ function estimateTokens(byteLength: number): number {
 	return Math.ceil(byteLength / 4);
 }
 
-describe("#given baseline benchmark suite #when all benchmarks run #then combined metrics are written to evidence", () => {
-	it("populates baseline-metrics.json with all required fields", async () => {
+describe("#given baseline benchmark suite #when all benchmarks run #then combined metrics are valid", () => {
+	it("computes baseline metrics without mutating tracked evidence by default", async () => {
 		const computer: ComputerInterface = BASELINE_LIVE ? new MacOSHostComputer() : createBenchmarkComputer();
 		const screenshotTimings: number[] = [];
 		const clickCaptureTimings: number[] = [];
@@ -77,7 +78,9 @@ describe("#given baseline benchmark suite #when all benchmarks run #then combine
 			},
 		};
 
-		writeFileSync(METRICS_PATH, JSON.stringify(metrics, null, 2));
+		if (BASELINE_WRITE) {
+			writeFileSync(METRICS_PATH, JSON.stringify(metrics, null, 2));
+		}
 
 		expect(metrics.screenshot_p50_ms).toBeGreaterThan(0);
 		expect(metrics.screenshot_p95_ms).toBeGreaterThanOrEqual(metrics.screenshot_p50_ms);

@@ -87,9 +87,9 @@ pnpm macos-cua-mcp --version
 
 ## My active app loses focus or my keystrokes get redirected mid-task
 
-**Cause:** raw coordinate `click`/`drag` (calls without `element_index`) post synthetic mouse events to the target window, which forces the target app to gain SkyLight focus. While the action is in flight, anything you type goes to the target app.
+**Cause:** on older builds, raw coordinate `click`/`drag` (calls without `element_index`) activated the target app before posting synthetic mouse events. Current builds route through the remembered visible target window without intentionally promoting the app to frontmost.
 
-**Fix:** prefer the AX-indexed path. Call `get_app_state` first, then pass `element_index` to `click` and `scroll`. The indexed path uses `AXPress` and `AXScroll{Up,Down,Left,Right}ByPage` and never moves the cursor or steals focus. Only fall back to raw coordinates when the target element is not exposed in the accessibility tree.
+**Fix:** update to a build with focus-preserving targeted input, then refresh the target app session with `get_app_state`. Prefer the AX-indexed path when an element is exposed in the accessibility tree; use raw coordinates only when the element has no AX representation.
 
 ## set_value silently does nothing on a web text field
 

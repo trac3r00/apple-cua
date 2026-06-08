@@ -1,5 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+interface TestWindow {
+	readonly id: number;
+	readonly owner: {
+		readonly processId: number;
+	};
+	readonly bounds: {
+		readonly x: number;
+		readonly y: number;
+		readonly width: number;
+		readonly height: number;
+	};
+}
+
 const coreGraphicsMock = vi.hoisted(() => ({
 	getCurrentCursorPosition: vi.fn(() => ({ x: 1, y: 2 })),
 	postKeyboardEvent: vi.fn(),
@@ -9,7 +22,7 @@ const coreGraphicsMock = vi.hoisted(() => ({
 }));
 
 const windowMock = vi.hoisted(() => ({
-	openWindows: vi.fn(() => Promise.resolve([])),
+	openWindows: vi.fn<() => Promise<readonly TestWindow[]>>(() => Promise.resolve([])),
 }));
 
 const skyLightMock = vi.hoisted(() => ({
@@ -52,7 +65,7 @@ describe("#given MacOSInputController target routing", () => {
 		controller.close();
 	});
 
-	it("#when clicking a target pid with a known window #then activates and routes through that window without raising it", async () => {
+	it("#when clicking a target pid with a known window #then routes through that window without activating the app", async () => {
 		// given
 		windowMock.openWindows.mockResolvedValue([
 			{
@@ -69,18 +82,7 @@ describe("#given MacOSInputController target routing", () => {
 		await controller.pressKey("t");
 
 		// then
-		expect(skyLightMock.activateWindowWithoutRaise).toHaveBeenCalledWith({
-			id: 99,
-			bounds: { x: 10, y: 20, width: 300, height: 200 },
-		});
-		expect(coreGraphicsMock.postMouseEvent).toHaveBeenCalledWith({
-			kind: "move",
-			position: { x: 50, y: 70 },
-			button: "left",
-			clickState: undefined,
-			targetPid: 1234,
-			targetWindow: { id: 99, bounds: { x: 10, y: 20, width: 300, height: 200 } },
-		});
+		expect(skyLightMock.activateWindowWithoutRaise).not.toHaveBeenCalled();
 		expect(coreGraphicsMock.postMouseEvent).toHaveBeenCalledWith({
 			kind: "down",
 			position: { x: 50, y: 70 },

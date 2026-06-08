@@ -72,7 +72,7 @@ These are placeholders for future expansion. The `ComputerInterface` contract is
 
 Targeted input is helper-free and stays inside the TypeScript process:
 
-- **Mouse left-click**: resolve a visible target window, activate it without raising via PSN focus records, create AppKit-backed mouse `CGEvent`s when a window is known, stamp `mouseEventSubtype = 3`, `mouseEventClickState`, target window IDs, `CGEventSetWindowLocation` for window-local coords, and SkyLight raw field 40 = pid. Events post through `SLEventPostToPid` plus the window owner's process serial number.
+- **Mouse left-click**: resolve a visible target window, create AppKit-backed mouse `CGEvent`s when a window is known, stamp `mouseEventSubtype = 3`, `mouseEventClickState`, target window IDs, `CGEventSetWindowLocation` for window-local coords, and SkyLight raw field 40 = pid. Events post through `SLEventPostToPid` plus the window owner's process serial number without intentionally promoting the app to frontmost.
 - **Mouse right / middle / drag**: use the same target-window stamping and SkyLight/window-owner delivery, without the global `CGEventPostToPid` fallback.
 - **Keyboard**: standard `CGEventCreateKeyboardEvent`, then `SLEventSetAuthenticationMessage` via `+[SLSEventAuthenticationMessage messageWithEventRecord:pid:version:]`, posted via `SLEventPostToPid`.
 - **Type text**: per-character `CGEvent` with `CGEventKeyboardSetUnicodeString` routed through the remembered app session.

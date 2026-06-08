@@ -6,6 +6,7 @@ dist/
 .env.local
 coverage/
 *.tsbuildinfo
+.omo/
 packages/cua-helper/.build/
 packages/cua-helper/.swiftpm/
 .build/

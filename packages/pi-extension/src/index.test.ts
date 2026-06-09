@@ -423,7 +423,6 @@ describe("#given enabled session and OpenAI Responses #when provider payload hoo
 	});
 });
 
-
 describe("#given unsupported Anthropic model #when provider payload hook runs #then native computer tool is not injected", () => {
 	it.each(["claude-opus-4-8", "claude-opus-4-6", "claude-future-9-0", undefined])(
 		"leaves the payload untouched for %s",

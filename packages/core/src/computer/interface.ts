@@ -8,6 +8,7 @@ import type {
 	ScreenshotOptions,
 	ScrollOptions,
 } from "../types/index.js";
+import type { ScreenshotViewport } from "./viewport.js";
 
 export interface ScreenshotResult {
 	data: Buffer;
@@ -33,6 +34,12 @@ export interface ComputerInterface {
 	getCursorPosition(): Promise<Point>;
 	getScreenSize(): Promise<{ width: number; height: number }>;
 	getAppState(targetPid?: number, options?: AppStateOptions): Promise<AppState>;
+	/**
+	 * Viewport that maps the most recent `get_app_state` window screenshot for
+	 * `targetPid` onto global logical screen coordinates, or undefined when no
+	 * window-scoped screenshot is available.
+	 */
+	getScreenshotViewport(targetPid: number): Promise<ScreenshotViewport | undefined>;
 	listApps(): Promise<AppInfo[]>;
 	setValue(targetPid: number, elementIndex: number, value: string): Promise<void>;
 	performAction(targetPid: number, elementIndex: number, action: string): Promise<void>;

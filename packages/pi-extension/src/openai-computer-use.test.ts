@@ -42,6 +42,7 @@ function createComputer(): ComputerActionDriver {
 		drag: vi.fn<ComputerActionDriver["drag"]>().mockResolvedValue(undefined),
 		getCursorPosition: vi.fn<ComputerActionDriver["getCursorPosition"]>().mockResolvedValue({ x: 7, y: 9 }),
 		getScreenSize: vi.fn<ComputerActionDriver["getScreenSize"]>().mockResolvedValue({ width: 100, height: 100 }),
+		getScreenshotViewport: vi.fn<ComputerActionDriver["getScreenshotViewport"]>().mockResolvedValue(undefined),
 		getAppState: vi.fn<ComputerActionDriver["getAppState"]>().mockResolvedValue({
 			app: "TestApp",
 			bundleId: "com.test.app",

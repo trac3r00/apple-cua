@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { AppInfo, AppState } from "../accessibility/types.js";
+import type { AXTreeElement, AppInfo, AppState } from "../accessibility/types.js";
 import type { ComputerInterface, ScreenshotResult } from "../computer/interface.js";
+import { type ScreenshotViewport, resolveWindowScreenshotSize, screenRectToScreenshot } from "../computer/viewport.js";
 import type {
 	AppStateOptions,
 	DragOptions,
@@ -51,6 +52,7 @@ export class MacOSHostComputer extends HostComputer {
 	};
 
 	private readonly input: MacOSInputController;
+	private readonly lastViewportByPid = new Map<number, ScreenshotViewport>();
 
 	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
@@ -135,7 +137,6 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async getAppState(targetPid?: number, options?: AppStateOptions): Promise<AppState> {
-		const size = options?.screenshotSize ?? (await this.getScreenSize());
 		const settleMs = options?.settleMs ?? DEFAULT_APP_STATE_SETTLE_MILLISECONDS;
 		if (settleMs > 0) {
 			await new Promise((resolve) => setTimeout(resolve, settleMs));
@@ -143,18 +144,60 @@ export class MacOSHostComputer extends HostComputer {
 		const apps = await getRunningMacOSApps();
 		const app = resolveTargetApp(apps, targetPid);
 		const targetWindow = await this.input.rememberTargetWindow(app.pid);
+		// Scope the screenshot to the target window at its own aspect ratio (capped),
+		// so the model sees an undistorted window image and coordinates invert cleanly.
+		// Without a target window, fall back to the full display.
+		const size =
+			options?.screenshotSize ??
+			(targetWindow !== undefined ? resolveWindowScreenshotSize(targetWindow.bounds) : await this.getScreenSize());
 		const screenshot = await this.captureScreenshot({ targetSize: size }, targetWindow?.id);
 		const tree = extractAccessibilityTree(app.pid);
+
+		let elements = tree.elements;
+		let windowBounds: ScreenshotViewport["windowBounds"] | undefined;
+		if (targetWindow !== undefined) {
+			const viewport: ScreenshotViewport = {
+				windowBounds: { ...targetWindow.bounds },
+				screenshotWidth: screenshot.width,
+				screenshotHeight: screenshot.height,
+			};
+			this.lastViewportByPid.set(app.pid, viewport);
+			windowBounds = viewport.windowBounds;
+			elements = remapElementFramesToScreenshot(tree.elements, viewport);
+		} else {
+			this.lastViewportByPid.delete(app.pid);
+		}
+
 		return {
 			app: app.name,
 			bundleId: app.bundleId,
 			pid: app.pid,
 			frontmost: app.isActive,
 			axAvailable: tree.axAvailable,
-			elements: tree.elements,
+			elements,
 			screenshotBase64: screenshot.data.toString("base64"),
 			screenshotWidth: screenshot.width,
 			screenshotHeight: screenshot.height,
+			...(windowBounds !== undefined ? { windowBounds } : {}),
+		};
+	}
+
+	async getScreenshotViewport(targetPid: number): Promise<ScreenshotViewport | undefined> {
+		const stored = this.lastViewportByPid.get(targetPid);
+		if (stored !== undefined) {
+			return stored;
+		}
+		// No prior get_app_state this session: derive a viewport from the current
+		// target window so a click still maps onto the right screen region.
+		const targetWindow = await this.input.rememberTargetWindow(targetPid);
+		if (targetWindow === undefined) {
+			return undefined;
+		}
+		const size = resolveWindowScreenshotSize(targetWindow.bounds);
+		return {
+			windowBounds: { ...targetWindow.bounds },
+			screenshotWidth: size.width,
+			screenshotHeight: size.height,
 		};
 	}
 
@@ -414,6 +457,16 @@ function execFileStdoutBuffer(result: { readonly stdout: string | Buffer } | str
 		return Buffer.from(result, "binary");
 	}
 	return Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout, "binary");
+}
+
+function remapElementFramesToScreenshot(
+	elements: readonly AXTreeElement[],
+	viewport: ScreenshotViewport,
+): AXTreeElement[] {
+	return elements.map((element) => ({
+		...element,
+		frame: screenRectToScreenshot(element.frame, viewport),
+	}));
 }
 
 function resolveTargetApp(apps: readonly RunningAppInfo[], targetPid: number | undefined): RunningAppInfo {

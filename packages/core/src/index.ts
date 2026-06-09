@@ -13,7 +13,15 @@ export {
 	withTargetedApp,
 	type ComputerUseMouseButton,
 } from "./computer/actions.js";
+export { resolveScreenPoint } from "./computer/coordinate.js";
 export type { ComputerInterface, ScreenshotResult } from "./computer/interface.js";
+export {
+	MAX_SCREENSHOT_LONG_EDGE,
+	type ScreenshotViewport,
+	resolveWindowScreenshotSize,
+	screenRectToScreenshot,
+	screenshotPointToScreen,
+} from "./computer/viewport.js";
 export type { PermissionInterface, PermissionKind, PermissionStatus } from "./permission/interface.js";
 export { MacOSPermissions } from "./permission/macos.js";
 export { CloudComputer, type CloudComputerOptions } from "./platform/cloud.js";

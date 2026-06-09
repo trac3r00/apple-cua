@@ -3,6 +3,12 @@ export interface AXTreeElement {
 	role: string;
 	label: string | null;
 	value: string | null;
+	/**
+	 * Element bounds. When the screenshot is scoped to a single window
+	 * ({@link AppState.windowBounds} is set), the frame is in that window
+	 * screenshot's pixel space so it shares one coordinate system with the
+	 * screenshot. Otherwise it is in global logical screen points.
+	 */
 	frame: { x: number; y: number; width: number; height: number };
 	actions: string[];
 	children: number[];
@@ -18,6 +24,12 @@ export interface AppState {
 	screenshotBase64: string;
 	screenshotWidth: number;
 	screenshotHeight: number;
+	/**
+	 * Target window rect in global logical screen points, present when the
+	 * screenshot is scoped to a single app window. Screenshot pixel coordinates
+	 * map onto the screen through this rect.
+	 */
+	windowBounds?: { x: number; y: number; width: number; height: number };
 }
 
 export interface SkyshotResult {

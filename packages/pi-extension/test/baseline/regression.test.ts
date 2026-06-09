@@ -33,6 +33,7 @@ function createFakeComputer(): ComputerInterface {
 		drag: vi.fn<ComputerInterface["drag"]>().mockResolvedValue(undefined),
 		getCursorPosition: vi.fn<ComputerInterface["getCursorPosition"]>().mockResolvedValue({ x: 0, y: 0 }),
 		getScreenSize: vi.fn<ComputerInterface["getScreenSize"]>().mockResolvedValue({ width: 100, height: 80 }),
+		getScreenshotViewport: vi.fn<ComputerInterface["getScreenshotViewport"]>().mockResolvedValue(undefined),
 		getAppState: vi.fn<ComputerInterface["getAppState"]>().mockResolvedValue({
 			app: "TestApp",
 			bundleId: "com.test.app",

@@ -25,6 +25,7 @@ const mockedComputer = vi.hoisted(() => ({
 	getCursorPosition: vi.fn(),
 	getScreenSize: vi.fn(),
 	getAppState: vi.fn(),
+	getScreenshotViewport: vi.fn(),
 	listApps: vi.fn(),
 	setValue: vi.fn(),
 	performAction: vi.fn(),
@@ -136,6 +137,7 @@ beforeEach(() => {
 	mockedComputer.performAction.mockResolvedValue(undefined);
 	mockedComputer.pressAtPosition.mockResolvedValue(false);
 	mockedComputer.typeIntoFocused.mockResolvedValue(false);
+	mockedComputer.getScreenshotViewport.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -193,6 +195,41 @@ describe("MCP server tools #given #when #then", () => {
 		expect(mockedComputer.click).toHaveBeenCalledWith({ x: 123, y: 456 });
 		expect(mockedComputer.setTarget).toHaveBeenNthCalledWith(1, 1234);
 		expect(mockedComputer.setTarget).toHaveBeenLastCalledWith(undefined);
+	});
+
+	it("maps screenshot pixel coordinates onto the window before clicking", async () => {
+		// given
+		mockedComputer.getScreenshotViewport.mockResolvedValue({
+			windowBounds: { x: 300, y: 150, width: 1000, height: 800 },
+			screenshotWidth: 500,
+			screenshotHeight: 400,
+		});
+		const { client, close } = await createHarness();
+		closeHarness = close;
+
+		// when
+		await client.callTool({ name: "click", arguments: { app: "Finder", x: 250, y: 200 } });
+
+		// then
+		expect(mockedComputer.pressAtPosition).toHaveBeenCalledWith(1234, { x: 800, y: 550 });
+		expect(mockedComputer.click).toHaveBeenCalledWith({ x: 800, y: 550 });
+	});
+
+	it("maps both drag endpoints onto the window before dragging", async () => {
+		// given
+		mockedComputer.getScreenshotViewport.mockResolvedValue({
+			windowBounds: { x: 300, y: 150, width: 1000, height: 800 },
+			screenshotWidth: 500,
+			screenshotHeight: 400,
+		});
+		const { client, close } = await createHarness();
+		closeHarness = close;
+
+		// when
+		await client.callTool({ name: "drag", arguments: { app: "Finder", from_x: 0, from_y: 0, to_x: 250, to_y: 200 } });
+
+		// then
+		expect(mockedComputer.drag).toHaveBeenCalledWith({ from: { x: 300, y: 150 }, to: { x: 800, y: 550 } });
 	});
 
 	it("maps a press_key chord to a computer key call", async () => {

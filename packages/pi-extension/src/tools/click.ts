@@ -4,6 +4,7 @@ import {
 	parseElementIndex,
 	pressElement,
 	resolveAppPid,
+	resolveScreenPoint,
 	withTargetedApp,
 } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
@@ -44,7 +45,7 @@ export function createClickTool(computer: ComputerInterface): ToolDefinition {
 				void params.mouse_button;
 				return actionCompleteResult();
 			}
-			const point = parseCoordinate(params.x, params.y);
+			const point = await resolveScreenPoint(computer, targetPid, parseCoordinate(params.x, params.y));
 			if ((params.mouse_button ?? "left") === "left") {
 				let pressedAll = true;
 				for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {

@@ -52,6 +52,7 @@ function createComputer(): ComputerActionDriver {
 		drag: vi.fn<ComputerActionDriver["drag"]>().mockResolvedValue(undefined),
 		getCursorPosition: vi.fn<ComputerActionDriver["getCursorPosition"]>().mockResolvedValue({ x: 7, y: 9 }),
 		getScreenSize: vi.fn<ComputerActionDriver["getScreenSize"]>().mockResolvedValue({ width: 100, height: 80 }),
+		getScreenshotViewport: vi.fn<ComputerActionDriver["getScreenshotViewport"]>().mockResolvedValue(undefined),
 		getAppState: vi.fn<ComputerActionDriver["getAppState"]>().mockResolvedValue({
 			app: "TestApp",
 			bundleId: "com.test.app",
@@ -97,7 +98,6 @@ describe("#given a non-record payload #when adding computer use #then payload is
 	});
 });
 
-
 describe("#given unknown or unsupported model #when adding computer use #then payload is untouched (safe default)", () => {
 	it.each([undefined, "claude-opus-4-6", "claude-opus-4-8", "claude-future-9-0", "some-unknown-model"])(
 		"skips native injection for %s",
@@ -122,7 +122,12 @@ describe("#given a fresh Anthropic payload #when adding computer use #then beta 
 	it("adds headers, extra_body betas, and downscaled computer tool dimensions", () => {
 		const payload = { messages: [] };
 
-		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, DEFAULT_DOWNSCALE, "claude-sonnet-4-5");
+		const result = addAnthropicComputerUseToPayload(
+			"anthropic-messages",
+			payload,
+			DEFAULT_DOWNSCALE,
+			"claude-sonnet-4-5",
+		);
 
 		expect(result).toEqual({
 			messages: [],
@@ -144,7 +149,12 @@ describe("#given an existing Anthropic beta header #when adding computer use #th
 	it("does not duplicate the computer-use beta header", () => {
 		const payload = { headers: { "anthropic-beta": `foo, ${ANTHROPIC_COMPUTER_USE_BETA}` } };
 
-		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, DEFAULT_DOWNSCALE, "claude-sonnet-4-5");
+		const result = addAnthropicComputerUseToPayload(
+			"anthropic-messages",
+			payload,
+			DEFAULT_DOWNSCALE,
+			"claude-sonnet-4-5",
+		);
 
 		expect(result).toMatchObject({
 			headers: { "anthropic-beta": `foo,${ANTHROPIC_COMPUTER_USE_BETA}` },
@@ -156,7 +166,12 @@ describe("#given an existing extra_body beta #when adding computer use #then bet
 	it("does not duplicate the computer-use beta entry", () => {
 		const payload = { extra_body: { betas: [ANTHROPIC_COMPUTER_USE_BETA] } };
 
-		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, DEFAULT_DOWNSCALE, "claude-sonnet-4-5");
+		const result = addAnthropicComputerUseToPayload(
+			"anthropic-messages",
+			payload,
+			DEFAULT_DOWNSCALE,
+			"claude-sonnet-4-5",
+		);
 
 		expect(result).toMatchObject({ extra_body: { betas: [ANTHROPIC_COMPUTER_USE_BETA] } });
 	});
@@ -169,7 +184,12 @@ describe("#given a function-shaped computer tool #when adding computer use #then
 			tools: [{ name: "computer", input_schema: {} }, unrelatedTool],
 		};
 
-		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, DEFAULT_DOWNSCALE, "claude-sonnet-4-5");
+		const result = addAnthropicComputerUseToPayload(
+			"anthropic-messages",
+			payload,
+			DEFAULT_DOWNSCALE,
+			"claude-sonnet-4-5",
+		);
 
 		expect(result).toMatchObject({
 			tools: [
@@ -194,7 +214,12 @@ describe("#given unrelated payload fields #when adding computer use #then existi
 			extra_body: { temperature: 0.2, betas: ["other-beta"] },
 		};
 
-		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, ONE_TO_ONE_DOWNSCALE, "claude-sonnet-4-5");
+		const result = addAnthropicComputerUseToPayload(
+			"anthropic-messages",
+			payload,
+			ONE_TO_ONE_DOWNSCALE,
+			"claude-sonnet-4-5",
+		);
 
 		expect(result).toMatchObject({
 			tools: [

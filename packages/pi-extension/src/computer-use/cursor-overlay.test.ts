@@ -57,6 +57,7 @@ function createComputer(cursor: { readonly x: number; readonly y: number }): Com
 			height: DISPLAY.logicalHeight,
 		}),
 		getAppState: vi.fn<ComputerActionDriver["getAppState"]>(),
+		getScreenshotViewport: vi.fn<ComputerActionDriver["getScreenshotViewport"]>().mockResolvedValue(undefined),
 		listApps: vi.fn<ComputerActionDriver["listApps"]>(),
 		setValue: vi.fn<ComputerActionDriver["setValue"]>(),
 		performAction: vi.fn<ComputerActionDriver["performAction"]>(),

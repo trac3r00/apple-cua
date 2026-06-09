@@ -10,9 +10,9 @@ import {
 	addAnthropicComputerUseToPayload,
 	buildCodexComputerUseSection,
 	buildComputerUseSection,
-	supportsAnthropicNativeComputerUse,
 	computerToolSchema,
 	executeNativeComputerAction,
+	supportsAnthropicNativeComputerUse,
 } from "./anthropic-computer-use.js";
 import { type DisplayConfig, resolveDisplayConfig } from "./computer-use/coords.js";
 import {

@@ -10,6 +10,7 @@ import {
 	parseKeyChord,
 	pressElement,
 	resolveAppPid,
+	resolveScreenPoint,
 	scrollElement,
 	withTargetedApp,
 } from "@macos-cua/core";
@@ -154,7 +155,7 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 				void mouse_button;
 				return actionComplete();
 			}
-			const point = parseCoordinate(x, y);
+			const point = await resolveScreenPoint(computer, targetPid, parseCoordinate(x, y));
 			if ((mouse_button ?? "left") === "left") {
 				let pressedAll = true;
 				for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
@@ -206,7 +207,9 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 		},
 		async ({ app, from_x, from_y, to_x, to_y }): Promise<ToolResult> => {
 			const targetPid = await resolveAppPid(computer, app);
-			const dragOptions: DragOptions = { from: { x: from_x, y: from_y }, to: { x: to_x, y: to_y } };
+			const from = await resolveScreenPoint(computer, targetPid, { x: from_x, y: from_y });
+			const to = await resolveScreenPoint(computer, targetPid, { x: to_x, y: to_y });
+			const dragOptions: DragOptions = { from, to };
 			await withTargetedApp(computer, targetPid, async () => {
 				await computer.drag(dragOptions);
 			});

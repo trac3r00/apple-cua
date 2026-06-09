@@ -46,6 +46,14 @@ function createComputer(): ComputerInterface {
 			screenshotWidth: 100,
 			screenshotHeight: 80,
 		}),
+		getScreenshotViewport: vi
+			.fn<ComputerInterface["getScreenshotViewport"]>()
+			// Identity viewport: a 100x80 screenshot of a window at the screen origin.
+			.mockResolvedValue({
+				windowBounds: { x: 0, y: 0, width: 100, height: 80 },
+				screenshotWidth: 100,
+				screenshotHeight: 80,
+			}),
 		listApps: vi
 			.fn<ComputerInterface["listApps"]>()
 			.mockResolvedValue([{ name: "Finder", bundleId: "com.apple.finder", pid: 1234, isRunning: true }]),
@@ -107,6 +115,36 @@ describe("#given click tool #when executed #then target app receives coordinates
 		expect(computer.performAction).toHaveBeenCalledWith(1234, 5, "AXPress");
 		expect(computer.click).not.toHaveBeenCalled();
 		expect(computer.setTarget).not.toHaveBeenCalled();
+	});
+
+	it("maps screenshot pixel coordinates onto the window's screen position before dispatch", async () => {
+		const computer = createComputer();
+		vi.spyOn(computer, "getScreenshotViewport").mockResolvedValue({
+			windowBounds: { x: 300, y: 150, width: 1000, height: 800 },
+			screenshotWidth: 500,
+			screenshotHeight: 400,
+		});
+		const getScreenshotViewport = vi.spyOn(computer, "getScreenshotViewport");
+		const pressAtPosition = vi.spyOn(computer, "pressAtPosition").mockResolvedValue(false);
+		const tool = createClickTool(computer);
+
+		await tool.execute("tool-call", { app: "Finder", x: 250, y: 200 }, undefined, undefined, {} as ExtensionContext);
+
+		expect(getScreenshotViewport).toHaveBeenCalledWith(1234);
+		expect(pressAtPosition).toHaveBeenCalledWith(1234, { x: 800, y: 550 });
+		expect(computer.click).toHaveBeenCalledWith({ x: 800, y: 550 });
+	});
+
+	it("passes raw coordinates through every dispatch path when no screenshot viewport is known", async () => {
+		const computer = createComputer();
+		vi.spyOn(computer, "getScreenshotViewport").mockResolvedValue(undefined);
+		const pressAtPosition = vi.spyOn(computer, "pressAtPosition").mockResolvedValue(false);
+		const tool = createClickTool(computer);
+
+		await tool.execute("tool-call", { app: "Finder", x: 42, y: 17 }, undefined, undefined, {} as ExtensionContext);
+
+		expect(pressAtPosition).toHaveBeenCalledWith(1234, { x: 42, y: 17 });
+		expect(computer.click).toHaveBeenCalledWith({ x: 42, y: 17 });
 	});
 
 	it("presses the AX element click_count times for repeated activations", async () => {

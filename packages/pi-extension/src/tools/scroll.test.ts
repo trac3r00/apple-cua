@@ -26,6 +26,7 @@ function createComputer(): ComputerInterface {
 		getCursorPosition: vi.fn<ComputerInterface["getCursorPosition"]>(),
 		getScreenSize: vi.fn<ComputerInterface["getScreenSize"]>(),
 		getAppState: vi.fn<ComputerInterface["getAppState"]>(),
+		getScreenshotViewport: vi.fn<ComputerInterface["getScreenshotViewport"]>().mockResolvedValue(undefined),
 		listApps: vi
 			.fn<ComputerInterface["listApps"]>()
 			.mockResolvedValue([{ name: "Finder", bundleId: "com.apple.finder", pid: 1234, isRunning: true }]),

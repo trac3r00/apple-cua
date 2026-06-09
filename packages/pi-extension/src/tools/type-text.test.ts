@@ -26,6 +26,7 @@ function createComputer(): ComputerInterface {
 		getCursorPosition: vi.fn<ComputerInterface["getCursorPosition"]>(),
 		getScreenSize: vi.fn<ComputerInterface["getScreenSize"]>(),
 		getAppState: vi.fn<ComputerInterface["getAppState"]>(),
+		getScreenshotViewport: vi.fn<ComputerInterface["getScreenshotViewport"]>().mockResolvedValue(undefined),
 		listApps: vi
 			.fn<ComputerInterface["listApps"]>()
 			.mockResolvedValue([{ name: "TextEdit", bundleId: "com.apple.TextEdit", pid: 9001, isRunning: true }]),

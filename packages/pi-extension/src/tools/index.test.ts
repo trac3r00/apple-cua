@@ -69,6 +69,7 @@ function createComputer(): ComputerInterface {
 		getCursorPosition: vi.fn(),
 		getScreenSize: vi.fn(),
 		getAppState: vi.fn(),
+		getScreenshotViewport: vi.fn().mockResolvedValue(undefined),
 		listApps: vi.fn(),
 		setValue: vi.fn(),
 		performAction: vi.fn(),

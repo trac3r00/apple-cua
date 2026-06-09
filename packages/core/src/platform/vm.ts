@@ -26,6 +26,9 @@ export abstract class VMComputer implements ComputerInterface {
 		targetPid?: number,
 		options?: import("../types/index.js").AppStateOptions,
 	): Promise<import("../accessibility/types.js").AppState>;
+	abstract getScreenshotViewport(
+		targetPid: number,
+	): Promise<import("../computer/viewport.js").ScreenshotViewport | undefined>;
 	abstract listApps(): Promise<import("../accessibility/types.js").AppInfo[]>;
 	abstract setValue(targetPid: number, elementIndex: number, value: string): Promise<void>;
 	abstract performAction(targetPid: number, elementIndex: number, action: string): Promise<void>;

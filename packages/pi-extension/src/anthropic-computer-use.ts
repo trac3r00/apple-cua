@@ -1,27 +1,22 @@
 import type { ComputerInterface, Point } from "@macos-cua/core";
-import { type Static, Type } from "typebox";
 
+import type { ComputerToolInput } from "./anthropic-payload.js";
+export {
+	ANTHROPIC_COMPUTER_USE_BETA,
+	ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
+	ANTHROPIC_NATIVE_COMPUTER_TOOL_TYPE,
+	addAnthropicComputerUseToPayload,
+	anthropicComputerToolSchema,
+	computerToolSchema,
+	mergeBetaHeader,
+	sanitizeTools,
+	supportsAnthropicNativeComputerUse,
+} from "./anthropic-payload.js";
+export type { ComputerToolInput } from "./anthropic-payload.js";
 import { type DisplayConfig, unscaleCoord } from "./computer-use/coords.js";
+import { screenshotResultWithCursor } from "./computer-use/screenshot-result.js";
 import type { AgentToolResult } from "./pi/index.js";
 
-export const ANTHROPIC_COMPUTER_USE_BETA = "computer-use-2025-01-24";
-export const ANTHROPIC_NATIVE_COMPUTER_TOOL_TYPE = "computer_20250124";
-export const ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME = "computer";
-
-/**
- * Models known to accept the native `computer_20250124` tool type.
- * Default is safe: unknown models get Codex tools only, never a 400.
- */
-const SUPPORTS_NATIVE_COMPUTER_MODEL_MARKERS = [
-	"sonnet-4-5",
-	"sonnet-4.5",
-	"sonnet-3-5",
-	"sonnet-3.5",
-	"3-5-sonnet",
-	"3.5-sonnet",
-] as const;
-
-type ToolDefinition = Record<string, unknown>;
 type ComputerUseErrorKind = "unsupported_action" | "invalid_arguments" | "execution_failed";
 export type ComputerUseResult = AgentToolResult<undefined>;
 type KeyModifier = "command" | "option" | "control" | "shift" | "cmd" | "alt" | "ctrl";
@@ -52,130 +47,6 @@ export class ComputerUseError extends Error {
 	}
 }
 
-const coordinateSchema = Type.Array(Type.Number(), { minItems: 2, maxItems: 2 });
-
-export const anthropicComputerToolSchema = Type.Object(
-	{
-		action: Type.Union([
-			Type.Literal("screenshot"),
-			Type.Literal("key"),
-			Type.Literal("type"),
-			Type.Literal("mouse_move"),
-			Type.Literal("left_click"),
-			Type.Literal("right_click"),
-			Type.Literal("middle_click"),
-			Type.Literal("double_click"),
-			Type.Literal("triple_click"),
-			Type.Literal("left_click_drag"),
-			Type.Literal("cursor_position"),
-			Type.Literal("left_mouse_down"),
-			Type.Literal("left_mouse_up"),
-			Type.Literal("scroll"),
-			Type.Literal("hold_key"),
-			Type.Literal("wait"),
-		]),
-		coordinate: Type.Optional(coordinateSchema),
-		start_coordinate: Type.Optional(coordinateSchema),
-		text: Type.Optional(Type.String()),
-		key: Type.Optional(Type.String()),
-		scroll_direction: Type.Optional(
-			Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")]),
-		),
-		scroll_amount: Type.Optional(Type.Number()),
-		duration: Type.Optional(Type.Number()),
-	},
-	{ additionalProperties: false },
-);
-
-export const computerToolSchema = anthropicComputerToolSchema;
-export type ComputerToolInput = Static<typeof anthropicComputerToolSchema>;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
-function isComputerToolType(value: unknown): value is string {
-	return typeof value === "string" && value.startsWith("computer_");
-}
-
-
-export function supportsAnthropicNativeComputerUse(modelId: string | undefined): boolean {
-	if (modelId === undefined) {
-		return false;
-	}
-	const normalized = modelId.toLowerCase();
-	return SUPPORTS_NATIVE_COMPUTER_MODEL_MARKERS.some((marker) => normalized.includes(marker));
-}
-
-export function sanitizeTools(tools: readonly unknown[]): ToolDefinition[] {
-	const sanitizedTools: ToolDefinition[] = [];
-	for (const tool of tools) {
-		if (!isRecord(tool)) {
-			continue;
-		}
-		const shouldStripFunctionVariant =
-			tool["name"] === ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME && !isComputerToolType(tool["type"]);
-		if (!shouldStripFunctionVariant) {
-			sanitizedTools.push(tool);
-		}
-	}
-	return sanitizedTools;
-}
-
-export function mergeBetaHeader(existing: unknown): string {
-	const existingParts =
-		typeof existing === "string"
-			? existing
-					.split(",")
-					.map((part) => part.trim())
-					.filter(Boolean)
-			: [];
-	if (existingParts.includes(ANTHROPIC_COMPUTER_USE_BETA)) {
-		return existingParts.join(",");
-	}
-	return [...existingParts, ANTHROPIC_COMPUTER_USE_BETA].join(",");
-}
-
-export function addAnthropicComputerUseToPayload(
-	api: string | undefined,
-	payload: unknown,
-	display: DisplayConfig,
-	modelId?: string,
-): unknown {
-	if (api !== "anthropic-messages" || !isRecord(payload) || !supportsAnthropicNativeComputerUse(modelId)) {
-		return payload;
-	}
-
-	const tools = Array.isArray(payload["tools"]) ? payload["tools"] : [];
-	const sanitizedTools = sanitizeTools(tools);
-	const hasNativeComputer = sanitizedTools.some((tool) => isComputerToolType(tool["type"]));
-	if (!hasNativeComputer) {
-		sanitizedTools.push({
-			type: ANTHROPIC_NATIVE_COMPUTER_TOOL_TYPE,
-			name: ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
-			display_width_px: display.modelWidth,
-			display_height_px: display.modelHeight,
-		});
-	}
-
-	const extraBody = payload["extra_body"];
-	const existingBetas = isRecord(extraBody) ? extraBody["betas"] : undefined;
-	const mergedBetas = Array.isArray(existingBetas)
-		? existingBetas.includes(ANTHROPIC_COMPUTER_USE_BETA)
-			? existingBetas
-			: [...existingBetas, ANTHROPIC_COMPUTER_USE_BETA]
-		: [ANTHROPIC_COMPUTER_USE_BETA];
-	const headers = payload["headers"];
-	const headerRecord = isRecord(headers) ? headers : {};
-
-	return {
-		...payload,
-		tools: sanitizedTools,
-		headers: { ...headerRecord, "anthropic-beta": mergeBetaHeader(headerRecord["anthropic-beta"]) },
-		extra_body: { ...(isRecord(extraBody) ? extraBody : {}), betas: mergedBetas },
-	};
-}
-
 export function buildCodexComputerUseSection(): string {
 	return "## Computer Use\nCall `get_app_state` each turn. Use Codex tools (`click`, `set_value`, `perform_secondary_action`, `scroll`, `type_text`, `press_key`) for macOS control. Actions return {ok:true}.\n";
 }
@@ -192,7 +63,7 @@ export async function executeNativeComputerAction(
 	try {
 		switch (input.action) {
 			case "screenshot":
-				return await screenshotResult(computer, display);
+				return await screenshotResultWithCursor(computer, display);
 			case "mouse_move":
 				await computer.move(unscaleCoord(parseCoordinate(input.coordinate, "mouse_move"), display));
 				return okResult(input.action);
@@ -249,23 +120,12 @@ export async function executeNativeComputerAction(
 	}
 }
 
-function imageResult(pngBase64: string): ComputerUseResult {
-	return { content: [{ type: "image", data: pngBase64, mimeType: "image/png" }], details: undefined };
-}
-
 function textResult(text: string): ComputerUseResult {
 	return { content: [{ type: "text", text }], details: undefined };
 }
 
 function okResult(action: string): ComputerUseResult {
 	return textResult(JSON.stringify({ ok: true, action }));
-}
-
-async function screenshotResult(computer: ComputerActionDriver, display: DisplayConfig): Promise<ComputerUseResult> {
-	const screenshot = await computer.screenshot({
-		targetSize: { width: display.modelWidth, height: display.modelHeight },
-	});
-	return imageResult(screenshot.data.toString("base64"));
 }
 
 function scaleCoord(point: Point, display: DisplayConfig): Point {

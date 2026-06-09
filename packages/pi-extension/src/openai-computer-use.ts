@@ -1,122 +1,20 @@
 import type { ComputerInterface, Point, ScrollOptions } from "@macos-cua/core";
-import { type Static, Type } from "typebox";
 
 import { ComputerUseError, type ComputerUseResult } from "./anthropic-computer-use.js";
 import { type DisplayConfig, unscaleCoord } from "./computer-use/coords.js";
-
-export const OPENAI_COMPUTER_TOOL_TYPE = "computer";
-const OPENAI_COMPUTER_TOOL_NAME = "computer";
+import { screenshotResultWithCursor } from "./computer-use/screenshot-result.js";
+import type { OpenAIComputerAction, OpenAIComputerToolInput } from "./openai-payload.js";
+export {
+	OPENAI_COMPUTER_TOOL_TYPE,
+	addOpenAIComputerUseToPayload,
+	openaiComputerActionBatchSchema,
+	openaiComputerToolSchema,
+	sanitizeOpenAIComputerUsePayload,
+} from "./openai-payload.js";
+export type { OpenAIComputerAction, OpenAIComputerActionBatch, OpenAIComputerToolInput } from "./openai-payload.js";
 
 type KeyModifier = "command" | "option" | "control" | "shift";
 type ScrollDirection = ScrollOptions["direction"];
-
-const actionPointSchema = Type.Object({ x: Type.Number(), y: Type.Number() }, { additionalProperties: false });
-const safetyCheckSchema = Type.Object(
-	{
-		id: Type.Optional(Type.String()),
-		code: Type.Optional(Type.String()),
-		message: Type.Optional(Type.String()),
-	},
-	{ additionalProperties: true },
-);
-
-export const openaiComputerToolSchema = Type.Object(
-	{
-		type: Type.Union([
-			Type.Literal("click"),
-			Type.Literal("double_click"),
-			Type.Literal("drag"),
-			Type.Literal("keypress"),
-			Type.Literal("move"),
-			Type.Literal("screenshot"),
-			Type.Literal("scroll"),
-			Type.Literal("type"),
-			Type.Literal("wait"),
-		]),
-		x: Type.Optional(Type.Number()),
-		y: Type.Optional(Type.Number()),
-		button: Type.Optional(
-			Type.Union([
-				Type.Literal("left"),
-				Type.Literal("right"),
-				Type.Literal("wheel"),
-				Type.Literal("back"),
-				Type.Literal("forward"),
-			]),
-		),
-		keys: Type.Optional(Type.Array(Type.String())),
-		path: Type.Optional(Type.Array(actionPointSchema)),
-		scroll_x: Type.Optional(Type.Number()),
-		scroll_y: Type.Optional(Type.Number()),
-		text: Type.Optional(Type.String()),
-		duration: Type.Optional(Type.Number()),
-		pending_safety_checks: Type.Optional(Type.Array(safetyCheckSchema)),
-	},
-	{ additionalProperties: false },
-);
-
-export type OpenAIComputerToolInput = Static<typeof openaiComputerToolSchema>;
-export type OpenAIComputerAction = OpenAIComputerToolInput;
-
-export const openaiComputerActionBatchSchema = Type.Object(
-	{ actions: Type.Array(openaiComputerToolSchema, { minItems: 1 }) },
-	{ additionalProperties: false },
-);
-
-export type OpenAIComputerActionBatch = Static<typeof openaiComputerActionBatchSchema>;
-
-export function sanitizeOpenAIComputerUsePayload(api: string | undefined, payload: unknown): unknown {
-	if ((api !== "openai-responses" && api !== "openai-completions") || !isRecord(payload)) {
-		return payload;
-	}
-	const tools = Array.isArray(payload["tools"]) ? payload["tools"] : [];
-	const sanitizedTools = sanitizeOpenAITools(tools);
-	if (sanitizedTools.length === tools.length) {
-		return payload;
-	}
-	return { ...payload, tools: sanitizedTools };
-}
-
-export function addOpenAIComputerUseToPayload(
-	api: string | undefined,
-	payload: unknown,
-	display: DisplayConfig,
-): unknown {
-	void display;
-	if (api !== "openai-responses") {
-		return payload;
-	}
-	if (!isRecord(payload)) {
-		return payload;
-	}
-
-	const existingTools = Array.isArray(payload["tools"]) ? payload["tools"] : [];
-	const sanitizedTools = sanitizeOpenAITools(existingTools);
-	const hasComputerTool = sanitizedTools.some((tool) => isRecord(tool) && tool["type"] === OPENAI_COMPUTER_TOOL_TYPE);
-	const tools = hasComputerTool ? sanitizedTools : [...sanitizedTools, { type: OPENAI_COMPUTER_TOOL_TYPE }];
-	return { ...payload, tools };
-}
-
-function sanitizeOpenAITools(tools: readonly unknown[]): unknown[] {
-	const sanitizedTools: unknown[] = [];
-	for (const tool of tools) {
-		if (!isOpenAIComputerFunctionTool(tool)) {
-			sanitizedTools.push(tool);
-		}
-	}
-	return sanitizedTools;
-}
-
-function isOpenAIComputerFunctionTool(tool: unknown): boolean {
-	if (!isRecord(tool) || tool["type"] !== "function") {
-		return false;
-	}
-	if (tool["name"] === OPENAI_COMPUTER_TOOL_NAME) {
-		return true;
-	}
-	const nestedFunction = tool["function"];
-	return isRecord(nestedFunction) && nestedFunction["name"] === OPENAI_COMPUTER_TOOL_NAME;
-}
 
 export async function executeOpenAINativeComputerAction(
 	input: OpenAIComputerToolInput,
@@ -154,7 +52,7 @@ export async function executeOpenAIComputerAction(
 				await computer.move(parsePosition(input.x, input.y, "move", display));
 				return okResult(input.type);
 			case "screenshot":
-				return await screenshotResult(computer, display);
+				return await screenshotResultWithCursor(computer, display);
 			case "scroll":
 				await computer.move(parsePosition(input.x, input.y, "scroll", display));
 				await computer.scroll(parseScroll(input.scroll_x, input.scroll_y));
@@ -317,22 +215,8 @@ function parseWaitDurationMilliseconds(duration: number | undefined): number {
 	return Math.min(10, Math.max(0, seconds)) * 1000;
 }
 
-async function screenshotResult(computer: ComputerInterface, display: DisplayConfig): Promise<ComputerUseResult> {
-	const screenshot = await computer.screenshot({
-		targetSize: { width: display.modelWidth, height: display.modelHeight },
-	});
-	return imageResult(screenshot.data.toString("base64"));
-}
-
 function okResult(type: string): ComputerUseResult {
 	return textResult(JSON.stringify({ ok: true, type }));
-}
-
-function imageResult(pngBase64: string): ComputerUseResult {
-	return {
-		content: [{ type: "image", data: pngBase64, mimeType: "image/png" }],
-		details: undefined,
-	};
 }
 
 function textResult(text: string): ComputerUseResult {
@@ -340,10 +224,6 @@ function textResult(text: string): ComputerUseResult {
 		content: [{ type: "text", text }],
 		details: undefined,
 	};
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
 }
 
 function errorMessage(error: unknown): string {

@@ -132,6 +132,7 @@ interface TestModel {
 	readonly api: string;
 	readonly baseUrl?: string;
 	readonly provider?: string;
+	readonly id?: string;
 }
 
 async function runModelSelect(pi: MockPi, model: TestModel): Promise<void> {
@@ -151,12 +152,13 @@ function runBeforeProviderRequest(pi: MockPi, model: string | TestModel, payload
 	return beforeProviderRequest({ payload }, { model: resolvedModel });
 }
 
-async function runBeforeAgentStart(pi: MockPi, api: string): Promise<unknown> {
+async function runBeforeAgentStart(pi: MockPi, model: string | TestModel): Promise<unknown> {
 	const beforeAgentStart = pi.handlers.get("before_agent_start");
 	if (beforeAgentStart === undefined) {
 		throw new Error("before_agent_start handler missing");
 	}
-	return beforeAgentStart({ systemPrompt: "base prompt" }, { model: { api } });
+	const resolvedModel = typeof model === "string" ? { api: model } : model;
+	return beforeAgentStart({ systemPrompt: "base prompt" }, { model: resolvedModel });
 }
 
 describe("#given macosCuaExtension #when imported #then default export is a named function", () => {
@@ -251,14 +253,34 @@ describe("#given enabled OpenAI Chat session #when session_start runs #then fall
 	});
 });
 
-describe("#given enabled Anthropic session #when session_start runs #then fallback computer tool stays active", () => {
-	it("keeps computer active for Anthropic native computer-use payloads", async () => {
+describe("#given supported Anthropic sonnet session #when session_start runs #then fallback computer tool stays active", () => {
+	it("keeps computer active for sonnet native computer-use payloads", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+
+		await runSessionStart(pi, { api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-4-5" });
+
+		expect(pi.getActiveTools()).toContain("computer");
+	});
+});
+
+describe("#given unsupported Anthropic model session #when session_start runs #then fallback computer tool is inactive", () => {
+	it("does not activate computer for models without native computer-use support", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+
+		await runSessionStart(pi, { api: "anthropic-messages", provider: "anthropic", id: "claude-opus-4-8" });
+
+		expect(pi.getActiveTools()).not.toContain("computer");
+	});
+
+	it("does not activate computer when model id is unknown", async () => {
 		const pi = createMockPi();
 		macosCuaExtension(pi);
 
 		await runSessionStart(pi, { api: "anthropic-messages", provider: "anthropic" });
 
-		expect(pi.getActiveTools()).toContain("computer");
+		expect(pi.getActiveTools()).not.toContain("computer");
 	});
 });
 
@@ -281,7 +303,7 @@ describe("#given enabled session #when model changes from native computer-use to
 	it("removes computer from active tools while preserving other macOS tools", async () => {
 		const pi = createMockPi();
 		macosCuaExtension(pi);
-		await runSessionStart(pi, { api: "anthropic-messages", provider: "anthropic" });
+		await runSessionStart(pi, { api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-4-5" });
 
 		await runModelSelect(pi, {
 			api: "openai-completions",
@@ -401,13 +423,59 @@ describe("#given enabled session and OpenAI Responses #when provider payload hoo
 	});
 });
 
-describe("#given enabled session and Anthropic Messages #when provider payload hook runs #then downscaled native computer tool is added", () => {
+
+describe("#given unsupported Anthropic model #when provider payload hook runs #then native computer tool is not injected", () => {
+	it.each(["claude-opus-4-8", "claude-opus-4-6", "claude-future-9-0", undefined])(
+		"leaves the payload untouched for %s",
+		async (modelId) => {
+			const pi = createMockPi();
+			macosCuaExtension(pi);
+			await runSessionStart(pi, { api: "anthropic-messages", provider: "anthropic", id: modelId });
+
+			const payload = { messages: [] };
+			const result = runBeforeProviderRequest(
+				pi,
+				{ api: "anthropic-messages", provider: "anthropic", id: modelId },
+				payload,
+			);
+
+			expect(result).toBe(payload);
+		},
+	);
+});
+
+describe("#given unsupported Anthropic model #when agent prompt hook runs #then Codex computer guidance is used", () => {
+	it("adds Codex tool guidance without native computer dimensions", async () => {
+		const pi = createMockPi();
+		macosCuaExtension(pi);
+		await runSessionStart(pi, { api: "anthropic-messages", provider: "anthropic", id: "claude-opus-4-8" });
+
+		const result = await runBeforeAgentStart(pi, {
+			api: "anthropic-messages",
+			provider: "anthropic",
+			id: "claude-opus-4-8",
+		});
+
+		expect(result).toEqual({
+			systemPrompt: expect.stringContaining("Use Codex tools"),
+		});
+		expect(result).toEqual({
+			systemPrompt: expect.not.stringContaining("1280x720"),
+		});
+	});
+});
+
+describe("#given supported sonnet session #when provider payload hook runs #then downscaled native computer tool is added", () => {
 	it("injects Anthropic computer use with 1280x720 display dimensions", async () => {
 		const pi = createMockPi();
 		macosCuaExtension(pi);
-		await runSessionStart(pi);
+		await runSessionStart(pi, { api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-4-5" });
 
-		const result = runBeforeProviderRequest(pi, "anthropic-messages", { messages: [] });
+		const result = runBeforeProviderRequest(
+			pi,
+			{ api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-4-5" },
+			{ messages: [] },
+		);
 
 		expect(result).toMatchObject({
 			tools: [
@@ -425,15 +493,19 @@ describe("#given enabled session and Anthropic Messages #when provider payload h
 });
 
 describe("#given enabled session #when agent prompt hook runs #then native computer scaffolds match provider", () => {
-	it("adds Anthropic computer prompt with downscaled dimensions", async () => {
+	it("adds Anthropic native computer prompt for supported sonnet model", async () => {
 		const pi = createMockPi();
 		macosCuaExtension(pi);
-		await runSessionStart(pi);
+		await runSessionStart(pi, { api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-4-5" });
 
-		const result = await runBeforeAgentStart(pi, "anthropic-messages");
+		const result = await runBeforeAgentStart(pi, {
+			api: "anthropic-messages",
+			provider: "anthropic",
+			id: "claude-sonnet-4-5",
+		});
 
 		expect(result).toEqual({
-			systemPrompt: expect.stringContaining("Call `get_app_state` each turn"),
+			systemPrompt: expect.stringContaining("1280x720"),
 		});
 	});
 

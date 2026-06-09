@@ -8,6 +8,19 @@ export const ANTHROPIC_COMPUTER_USE_BETA = "computer-use-2025-01-24";
 export const ANTHROPIC_NATIVE_COMPUTER_TOOL_TYPE = "computer_20250124";
 export const ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME = "computer";
 
+/**
+ * Models known to accept the native `computer_20250124` tool type.
+ * Default is safe: unknown models get Codex tools only, never a 400.
+ */
+const SUPPORTS_NATIVE_COMPUTER_MODEL_MARKERS = [
+	"sonnet-4-5",
+	"sonnet-4.5",
+	"sonnet-3-5",
+	"sonnet-3.5",
+	"3-5-sonnet",
+	"3.5-sonnet",
+] as const;
+
 type ToolDefinition = Record<string, unknown>;
 type ComputerUseErrorKind = "unsupported_action" | "invalid_arguments" | "execution_failed";
 export type ComputerUseResult = AgentToolResult<undefined>;
@@ -85,6 +98,15 @@ function isComputerToolType(value: unknown): value is string {
 	return typeof value === "string" && value.startsWith("computer_");
 }
 
+
+export function supportsAnthropicNativeComputerUse(modelId: string | undefined): boolean {
+	if (modelId === undefined) {
+		return false;
+	}
+	const normalized = modelId.toLowerCase();
+	return SUPPORTS_NATIVE_COMPUTER_MODEL_MARKERS.some((marker) => normalized.includes(marker));
+}
+
 export function sanitizeTools(tools: readonly unknown[]): ToolDefinition[] {
 	const sanitizedTools: ToolDefinition[] = [];
 	for (const tool of tools) {
@@ -118,8 +140,9 @@ export function addAnthropicComputerUseToPayload(
 	api: string | undefined,
 	payload: unknown,
 	display: DisplayConfig,
+	modelId?: string,
 ): unknown {
-	if (api !== "anthropic-messages" || !isRecord(payload)) {
+	if (api !== "anthropic-messages" || !isRecord(payload) || !supportsAnthropicNativeComputerUse(modelId)) {
 		return payload;
 	}
 
@@ -151,6 +174,10 @@ export function addAnthropicComputerUseToPayload(
 		headers: { ...headerRecord, "anthropic-beta": mergeBetaHeader(headerRecord["anthropic-beta"]) },
 		extra_body: { ...(isRecord(extraBody) ? extraBody : {}), betas: mergedBetas },
 	};
+}
+
+export function buildCodexComputerUseSection(): string {
+	return "## Computer Use\nCall `get_app_state` each turn. Use Codex tools (`click`, `set_value`, `perform_secondary_action`, `scroll`, `type_text`, `press_key`) for macOS control. Actions return {ok:true}.\n";
 }
 
 export function buildComputerUseSection(width: number, height: number): string {

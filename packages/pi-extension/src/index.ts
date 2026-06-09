@@ -8,7 +8,9 @@ import {
 	ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
 	type ComputerToolInput,
 	addAnthropicComputerUseToPayload,
+	buildCodexComputerUseSection,
 	buildComputerUseSection,
+	supportsAnthropicNativeComputerUse,
 	computerToolSchema,
 	executeNativeComputerAction,
 } from "./anthropic-computer-use.js";
@@ -37,6 +39,7 @@ interface ComputerUseModel {
 	readonly api?: string;
 	readonly provider?: string;
 	readonly baseUrl?: string;
+	readonly id?: string;
 }
 
 const DISABLE_COMPUTER_USE_BETA_ENV = "MACOS_CUA_DISABLE_COMPUTER_USE_BETA";
@@ -93,7 +96,7 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 		}
 		const api = ctx.model?.api;
 		if (api === "anthropic-messages") {
-			return addAnthropicComputerUseToPayload(api, event.payload, state.display);
+			return addAnthropicComputerUseToPayload(api, event.payload, state.display, ctx.model?.id);
 		}
 		if (api === "openai-responses") {
 			const payload = sanitizeOpenAIComputerUsePayload(api, event.payload);
@@ -112,8 +115,11 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 		if (ctx.model?.api !== "anthropic-messages") {
 			return undefined;
 		}
+		const computerPrompt = supportsAnthropicNativeComputerUse(ctx.model.id)
+			? buildComputerUseSection(state.display.modelWidth, state.display.modelHeight)
+			: buildCodexComputerUseSection();
 		return {
-			systemPrompt: `${event.systemPrompt}\n${buildComputerUseSection(state.display.modelWidth, state.display.modelHeight)}`,
+			systemPrompt: `${event.systemPrompt}\n${computerPrompt}`,
 		};
 	});
 
@@ -139,7 +145,7 @@ function syncComputerToolActivation(pi: ExtensionAPI, model: ComputerUseModel | 
 	}
 	const activeTools = pi.getActiveTools();
 	const shouldActivate =
-		model?.api === "anthropic-messages" ||
+		(model?.api === "anthropic-messages" && supportsAnthropicNativeComputerUse(model.id)) ||
 		(model?.api === "openai-responses" && shouldInjectOpenAINativeComputerUse(model));
 	if (shouldActivate) {
 		if (!activeTools.includes(ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME)) {

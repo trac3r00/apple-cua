@@ -14,6 +14,12 @@ export interface AXTreeElement {
 	children: number[];
 }
 
+export interface DisplayInfo {
+	width: number;
+	height: number;
+	scaleFactor: number;
+}
+
 export interface AppState {
 	app: string;
 	bundleId: string;
@@ -24,6 +30,7 @@ export interface AppState {
 	screenshotBase64: string;
 	screenshotWidth: number;
 	screenshotHeight: number;
+	display: DisplayInfo;
 	/**
 	 * Target window rect in global logical screen points, present when the
 	 * screenshot is scoped to a single app window. Screenshot pixel coordinates

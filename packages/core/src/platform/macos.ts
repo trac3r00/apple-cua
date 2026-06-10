@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { AXTreeElement, AppInfo, AppState } from "../accessibility/types.js";
+import type { AXTreeElement, AppInfo, AppState, DisplayInfo } from "../accessibility/types.js";
+import { resolveDisplayMetadata } from "../computer/display-metadata.js";
 import type { ComputerInterface, ScreenshotResult } from "../computer/interface.js";
 import { type ScreenshotViewport, resolveWindowScreenshotSize, screenRectToScreenshot } from "../computer/viewport.js";
 import type {
@@ -19,7 +20,11 @@ import {
 	setValueByIndex,
 	typeIntoFocusedAXElement,
 } from "./macos-ffi/accessibility.js";
-import { captureMainDisplayPng, getMainDisplayLogicalSize } from "./macos-ffi/screenshot.js";
+import {
+	captureMainDisplayPng,
+	getMainDisplayLogicalSize,
+	getMainDisplayNativePixelSize,
+} from "./macos-ffi/screenshot.js";
 import { MacOSInputController } from "./macos-input.js";
 
 const execFileAsync = promisify(execFile);
@@ -152,6 +157,7 @@ export class MacOSHostComputer extends HostComputer {
 			(targetWindow !== undefined ? resolveWindowScreenshotSize(targetWindow.bounds) : await this.getScreenSize());
 		const screenshot = await this.captureScreenshot({ targetSize: size }, targetWindow?.id);
 		const tree = extractAccessibilityTree(app.pid);
+		const display = resolveDisplayInfo();
 
 		let elements = tree.elements;
 		let windowBounds: ScreenshotViewport["windowBounds"] | undefined;
@@ -178,6 +184,7 @@ export class MacOSHostComputer extends HostComputer {
 			screenshotBase64: screenshot.data.toString("base64"),
 			screenshotWidth: screenshot.width,
 			screenshotHeight: screenshot.height,
+			display,
 			...(windowBounds !== undefined ? { windowBounds } : {}),
 		};
 	}
@@ -467,6 +474,17 @@ function remapElementFramesToScreenshot(
 		...element,
 		frame: screenRectToScreenshot(element.frame, viewport),
 	}));
+}
+
+function resolveDisplayInfo(): DisplayInfo {
+	const logical = getMainDisplayLogicalSize();
+	let nativePixel: { width: number; height: number } | undefined;
+	try {
+		nativePixel = getMainDisplayNativePixelSize();
+	} catch {
+		nativePixel = undefined;
+	}
+	return resolveDisplayMetadata(nativePixel === undefined ? { logical } : { logical, nativePixel });
 }
 
 function resolveTargetApp(apps: readonly RunningAppInfo[], targetPid: number | undefined): RunningAppInfo {

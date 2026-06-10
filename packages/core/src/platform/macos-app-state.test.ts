@@ -32,6 +32,7 @@ const accessibilityMock = vi.hoisted(() => ({
 const screenshotMock = vi.hoisted(() => ({
 	captureMainDisplayPng: vi.fn(),
 	getMainDisplayLogicalSize: vi.fn(),
+	getMainDisplayNativePixelSize: vi.fn(),
 }));
 vi.mock("./macos-ffi/screenshot.js", () => screenshotMock);
 vi.mock("./macos-ffi/accessibility.js", () => accessibilityMock);
@@ -55,7 +56,9 @@ beforeEach(() => {
 	accessibilityMock.extractAccessibilityTree.mockReset();
 	screenshotMock.captureMainDisplayPng.mockReset();
 	screenshotMock.getMainDisplayLogicalSize.mockReset();
+	screenshotMock.getMainDisplayNativePixelSize.mockReset();
 	screenshotMock.getMainDisplayLogicalSize.mockReturnValue({ width: 1920, height: 1080 });
+	screenshotMock.getMainDisplayNativePixelSize.mockReturnValue({ width: 3840, height: 2160 });
 	screenshotMock.captureMainDisplayPng.mockReturnValue({ data: fakePng(1920, 1080), width: 1920, height: 1080 });
 
 	windowMock.openWindows.mockResolvedValue([{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
@@ -98,6 +101,16 @@ describe("#given a target window #when get_app_state captures it #then the scree
 		expect(state.screenshotWidth).toBe(1280);
 		expect(state.screenshotHeight).toBe(800);
 		expect(state.windowBounds).toEqual(WINDOW_BOUNDS);
+	});
+});
+
+describe("#given a Retina display #when get_app_state runs #then it reports display geometry and backing scale", () => {
+	it("includes the logical display size and scale factor", async () => {
+		const computer = new MacOSHostComputer();
+
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+		expect(state.display).toEqual({ width: 1920, height: 1080, scaleFactor: 2 });
 	});
 });
 

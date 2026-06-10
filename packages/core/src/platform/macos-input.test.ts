@@ -237,4 +237,33 @@ describe("#given MacOSInputController target routing", () => {
 		expect(coreGraphicsMock.postUnicodeText).not.toHaveBeenCalled();
 		controller.close();
 	});
+
+	it("#when clicking #then the virtual pointer overlay tracks the click and getCursorPosition reports it", async () => {
+		// given
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
+		]);
+		const overlay = { set: vi.fn(), hide: vi.fn(), close: vi.fn() };
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(1234, overlay);
+
+		// when
+		await controller.click({ x: 50, y: 70 });
+
+		// then
+		expect(overlay.set).toHaveBeenCalledWith({ x: 50, y: 70 });
+		expect(controller.getCursorPosition()).toEqual({ x: 50, y: 70 });
+		controller.close();
+		expect(overlay.close).toHaveBeenCalledOnce();
+	});
+
+	it("#when no action has happened #then getCursorPosition seeds from the real cursor", async () => {
+		// given
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(1234, { set: vi.fn(), hide: vi.fn(), close: vi.fn() });
+
+		// when/then
+		expect(controller.getCursorPosition()).toEqual({ x: 1, y: 2 });
+		controller.close();
+	});
 });

@@ -36,3 +36,23 @@ clang \
 	-o "${output_path}"
 
 echo "built ${output_path}"
+
+overlay_source_path="${native_dir}/cursor-overlay.m"
+overlay_output_path="${native_dir}/cursor-overlay"
+
+if [ ! -f "${overlay_source_path}" ]; then
+	echo "error: missing ${overlay_source_path}" >&2
+	exit 1
+fi
+
+clang \
+	-arch arm64 \
+	-O2 \
+	-fobjc-arc \
+	-mmacosx-version-min=11.0 \
+	-framework Cocoa \
+	-framework Foundation \
+	"${overlay_source_path}" \
+	-o "${overlay_output_path}"
+
+echo "built ${overlay_output_path}"

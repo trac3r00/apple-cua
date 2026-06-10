@@ -21,6 +21,7 @@ import {
 	setValueByIndex,
 	typeIntoFocusedAXElement,
 } from "./macos-ffi/accessibility.js";
+import { type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
 import {
 	captureMainDisplayPng,
 	getMainDisplayLogicalSize,
@@ -48,6 +49,7 @@ export interface RunningAppInfo extends AppInfo {
 
 export interface MacOSHostComputerOptions extends HostComputerOptions {
 	defaultTargetPid?: number;
+	overlay?: PointerOverlay;
 }
 
 export class MacOSHostComputer extends HostComputer {
@@ -63,7 +65,7 @@ export class MacOSHostComputer extends HostComputer {
 
 	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
-		this.input = new MacOSInputController(options.defaultTargetPid);
+		this.input = new MacOSInputController(options.defaultTargetPid, options.overlay ?? createCursorOverlay());
 		// TODO: use options for display selection
 		void options.display;
 	}

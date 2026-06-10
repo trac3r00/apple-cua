@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { openWindows } from "get-windows";
+import { VirtualPointer } from "../computer/virtual-pointer.js";
 import type { DragOptions, KeyOptions, Point, ScrollOptions } from "../types/index.js";
 import {
 	type MouseButton,
@@ -9,6 +10,7 @@ import {
 	postScrollEvent,
 	postUnicodeText,
 } from "./macos-ffi/coregraphics.js";
+import { NOOP_POINTER_OVERLAY, type PointerOverlay } from "./macos-ffi/cursor-overlay.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
 import { modifierFlags, virtualKeyCodeFor } from "./macos-keycodes.js";
 import { selectVisibleTargetWindow } from "./macos-window-target.js";
@@ -20,8 +22,12 @@ export class MacOSInputController {
 	private targetPid: number | undefined;
 	private lastTargetWindow: SkyLightTargetWindow | undefined;
 	private readonly targetWindowsByPid = new Map<number, SkyLightTargetWindow>();
+	private readonly overlay: PointerOverlay;
+	private readonly pointer: VirtualPointer;
 
-	constructor(targetPid?: number) {
+	constructor(targetPid?: number, overlay: PointerOverlay = NOOP_POINTER_OVERLAY) {
+		this.overlay = overlay;
+		this.pointer = new VirtualPointer(readRealCursorPosition());
 		this.setTarget(targetPid);
 	}
 
@@ -49,6 +55,7 @@ export class MacOSInputController {
 
 	async move(position: Point): Promise<void> {
 		await this.postMouse("move", position, "left", undefined, await this.targetWindow(position));
+		this.markPointer(position);
 	}
 
 	async click(position: Point, button: MouseButton = "left"): Promise<void> {
@@ -60,6 +67,7 @@ export class MacOSInputController {
 		}
 		await this.postMouse("down", position, button, 1, targetWindow);
 		await this.postMouse("up", position, button, 1, targetWindow);
+		this.markPointer(position);
 	}
 
 	async doubleClick(position: Point): Promise<void> {
@@ -73,6 +81,7 @@ export class MacOSInputController {
 		await this.postMouse("up", position, "left", 1, targetWindow);
 		await this.postMouse("down", position, "left", 2, targetWindow);
 		await this.postMouse("up", position, "left", 2, targetWindow);
+		this.markPointer(position);
 	}
 
 	async typeText(text: string): Promise<void> {
@@ -144,14 +153,21 @@ export class MacOSInputController {
 		}
 
 		await this.postMouse("up", options.to, "left", 1, targetWindow);
+		this.markPointer(options.to);
 	}
 
 	getCursorPosition(): Point {
-		const position = getCurrentCursorPosition();
-		return { x: Math.round(position.x), y: Math.round(position.y) };
+		return this.pointer.position();
 	}
 
-	close(): void {}
+	close(): void {
+		this.overlay.close();
+	}
+
+	private markPointer(position: Point): void {
+		this.pointer.moveTo(position);
+		this.overlay.set(position);
+	}
 
 	private async postMouse(
 		kind: "move" | "down" | "up" | "drag",
@@ -201,6 +217,15 @@ export class MacOSInputController {
 		this.targetWindowsByPid.set(this.targetPid, targetWindow);
 		this.lastTargetWindow = targetWindow;
 		return this.lastTargetWindow;
+	}
+}
+
+function readRealCursorPosition(): Point {
+	try {
+		const position = getCurrentCursorPosition();
+		return { x: Math.round(position.x), y: Math.round(position.y) };
+	} catch {
+		return { x: 0, y: 0 };
 	}
 }
 

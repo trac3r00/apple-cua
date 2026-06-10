@@ -2,17 +2,21 @@
 #import <pthread.h>
 
 static NSWindow *gWindow = nil;
+static NSView *gPointerView = nil;
 static BOOL gShown = NO;
 static NSTimer *gScootTimer = nil;
 static NSPoint gScootFrom;
 static NSPoint gScootTo;
 static NSTimeInterval gScootStart;
+static CGFloat gStretch = 1.0;
+static CGFloat gAngle = 0.0;
 
 static const CGFloat kOverlaySize = 40.0;
 static const NSTimeInterval kFadeInDuration = 0.18;
 static const NSTimeInterval kScootDuration = 0.16;
 static const CGFloat kRingRadius = 9.0;
 static const CGFloat kCoreRadius = 6.0;
+static const CGFloat kMaxStretch = 0.38;
 
 @interface OverlayPointerView : NSView
 @end
@@ -26,6 +30,13 @@ static const CGFloat kCoreRadius = 6.0;
 	NSRect bounds = self.bounds;
 	CGFloat cx = NSWidth(bounds) / 2.0;
 	CGFloat cy = NSHeight(bounds) / 2.0;
+	CGContextRef ctx = NSGraphicsContext.currentContext.CGContext;
+	CGContextSaveGState(ctx);
+	CGContextTranslateCTM(ctx, cx, cy);
+	CGContextRotateCTM(ctx, gAngle);
+	CGContextScaleCTM(ctx, gStretch, 1.0 / gStretch);
+	CGContextRotateCTM(ctx, -gAngle);
+	CGContextTranslateCTM(ctx, -cx, -cy);
 	NSBezierPath *ring = [NSBezierPath
 		bezierPathWithOvalInRect:NSMakeRect(cx - kRingRadius, cy - kRingRadius, kRingRadius * 2, kRingRadius * 2)];
 	[[NSColor colorWithSRGBRed:1.0 green:1.0 blue:1.0 alpha:1.0] setFill];
@@ -34,6 +45,7 @@ static const CGFloat kCoreRadius = 6.0;
 		bezierPathWithOvalInRect:NSMakeRect(cx - kCoreRadius, cy - kCoreRadius, kCoreRadius * 2, kCoreRadius * 2)];
 	[[NSColor colorWithSRGBRed:1.0 green:0.231 blue:0.188 alpha:1.0] setFill];
 	[core fill];
+	CGContextRestoreGState(ctx);
 }
 @end
 
@@ -71,6 +83,7 @@ static void apply_set(double x, double y) {
 	gScootFrom = gWindow.frame.origin;
 	gScootTo = target;
 	gScootStart = [NSDate timeIntervalSinceReferenceDate];
+	gAngle = atan2(gScootTo.y - gScootFrom.y, gScootTo.x - gScootFrom.x);
 	gScootTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 60.0
 												  repeats:YES
 													block:^(NSTimer *timer) {
@@ -85,7 +98,12 @@ static void apply_set(double x, double y) {
 														[gWindow setFrameOrigin:NSMakePoint(
 																				   gScootFrom.x + (gScootTo.x - gScootFrom.x) * eased,
 																				   gScootFrom.y + (gScootTo.y - gScootFrom.y) * eased)];
+														gStretch = 1.0 + kMaxStretch * sin(progress * M_PI);
+														[gPointerView setNeedsDisplay:YES];
 														if (progress >= 1.0) {
+															gStretch = 1.0;
+															gAngle = 0.0;
+															[gPointerView setNeedsDisplay:YES];
 															[timer invalidate];
 															if (gScootTimer == timer) {
 																gScootTimer = nil;
@@ -148,7 +166,8 @@ int main(int argc, const char *argv[]) {
 		[gWindow setLevel:NSScreenSaverWindowLevel];
 		[gWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
 									   NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle];
-		[gWindow setContentView:[[OverlayPointerView alloc] initWithFrame:frame]];
+		gPointerView = [[OverlayPointerView alloc] initWithFrame:frame];
+		[gWindow setContentView:gPointerView];
 
 		pthread_t thread;
 		pthread_create(&thread, NULL, stdin_reader, NULL);

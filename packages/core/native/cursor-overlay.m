@@ -2,8 +2,15 @@
 #import <pthread.h>
 
 static NSWindow *gWindow = nil;
+static BOOL gShown = NO;
+static NSTimer *gScootTimer = nil;
+static NSPoint gScootFrom;
+static NSPoint gScootTo;
+static NSTimeInterval gScootStart;
 
 static const CGFloat kOverlaySize = 40.0;
+static const NSTimeInterval kFadeInDuration = 0.18;
+static const NSTimeInterval kScootDuration = 0.16;
 static const CGFloat kRingRadius = 9.0;
 static const CGFloat kCoreRadius = 6.0;
 
@@ -43,15 +50,58 @@ static void apply_set(double x, double y) {
 		return;
 	}
 	CGFloat screenHeight = primary_screen_height();
-	CGFloat originX = x - kOverlaySize / 2.0;
-	CGFloat originY = screenHeight - y - kOverlaySize / 2.0;
-	[gWindow setFrameOrigin:NSMakePoint(originX, originY)];
+	NSPoint target = NSMakePoint(x - kOverlaySize / 2.0, screenHeight - y - kOverlaySize / 2.0);
+	if (!gShown) {
+		gShown = YES;
+		[gWindow setAlphaValue:0.0];
+		[gWindow setFrameOrigin:target];
+		[gWindow orderFrontRegardless];
+		[NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+			context.duration = kFadeInDuration;
+			[[gWindow animator] setAlphaValue:1.0];
+		}
+							completionHandler:nil];
+		return;
+	}
 	[gWindow orderFrontRegardless];
+	if (gScootTimer != nil) {
+		[gScootTimer invalidate];
+		gScootTimer = nil;
+	}
+	gScootFrom = gWindow.frame.origin;
+	gScootTo = target;
+	gScootStart = [NSDate timeIntervalSinceReferenceDate];
+	gScootTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 60.0
+												  repeats:YES
+													block:^(NSTimer *timer) {
+														double progress =
+															([NSDate timeIntervalSinceReferenceDate] - gScootStart) / kScootDuration;
+														if (progress > 1.0) {
+															progress = 1.0;
+														}
+														double eased = progress < 0.5
+																		   ? 2.0 * progress * progress
+																		   : 1.0 - pow(-2.0 * progress + 2.0, 2.0) / 2.0;
+														[gWindow setFrameOrigin:NSMakePoint(
+																				   gScootFrom.x + (gScootTo.x - gScootFrom.x) * eased,
+																				   gScootFrom.y + (gScootTo.y - gScootFrom.y) * eased)];
+														if (progress >= 1.0) {
+															[timer invalidate];
+															if (gScootTimer == timer) {
+																gScootTimer = nil;
+															}
+														}
+													}];
 }
 
 static void apply_hide(void) {
+	if (gScootTimer != nil) {
+		[gScootTimer invalidate];
+		gScootTimer = nil;
+	}
 	if (gWindow != nil) {
 		[gWindow orderOut:nil];
+		gShown = NO;
 	}
 }
 

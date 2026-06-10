@@ -38,6 +38,7 @@ const koffiMock = vi.hoisted(() => {
 		CGEventGetLocation: vi.fn(() => ({ x: 10.4, y: 20.6 })),
 		CGEventPost: vi.fn(),
 		CGEventPostToPid: vi.fn(),
+		CGWarpMouseCursorPosition: vi.fn(() => 0),
 	};
 
 	const systemFunctions = {
@@ -209,6 +210,31 @@ describe("#given CoreGraphics koffi bindings", () => {
 				koffiMock.mouseEvent,
 			);
 			expect(koffiMock.coreGraphicsFunctions.CGEventPostToPid).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("#when posting a targeted mouse event #then the real cursor is saved and restored", () => {
+		it("warps the cursor back to its pre-post position for targeted events", async () => {
+			const { postMouseEvent } = await import("./coregraphics.js");
+
+			postMouseEvent({
+				kind: "down",
+				position: { x: 100, y: 200 },
+				button: "left",
+				clickState: 1,
+				targetPid: 4321,
+				targetWindow: { id: 99, bounds: { x: 80, y: 170, width: 400, height: 300 } },
+			});
+
+			expect(koffiMock.coreGraphicsFunctions.CGWarpMouseCursorPosition).toHaveBeenCalledWith({ x: 10.4, y: 20.6 });
+		});
+
+		it("does not warp the cursor for untargeted events", async () => {
+			const { postMouseEvent } = await import("./coregraphics.js");
+
+			postMouseEvent({ kind: "down", position: { x: 100, y: 200 }, button: "left", clickState: 1, targetPid: undefined });
+
+			expect(koffiMock.coreGraphicsFunctions.CGWarpMouseCursorPosition).not.toHaveBeenCalled();
 		});
 	});
 

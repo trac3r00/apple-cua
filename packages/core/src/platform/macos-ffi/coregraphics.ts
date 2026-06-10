@@ -131,6 +131,10 @@ const CGEventPost = coreGraphics.func("CGEventPost", "void", ["uint32_t", CG_EVE
 	(tap: number, event: CGEventRef) => void
 >;
 
+const CGWarpMouseCursorPosition = coreGraphics.func("CGWarpMouseCursorPosition", "int32_t", [CG_POINT]) as KoffiFunc<
+	(position: CGPoint) => number
+>;
+
 const clockGetTimeNanoseconds = systemLibrary.func("clock_gettime_nsec_np", "uint64_t", ["int"]) as KoffiFunc<
 	(clockId: number) => bigint
 >;
@@ -146,10 +150,12 @@ export function postMouseEvent(options: MouseEventOptions): void {
 		if (options.clickState !== undefined) {
 			CGEventSetIntegerValueField(event, K_CG_MOUSE_EVENT_CLICK_STATE, options.clickState);
 		}
-		if (options.targetPid !== undefined) {
-			stampTargetedMouseEvent(event, options.targetPid, options.position, options.targetWindow);
+		if (options.targetPid === undefined) {
+			postMouse(event, undefined, options.targetWindow);
+			return;
 		}
-		postMouse(event, options.targetPid, options.targetWindow);
+		stampTargetedMouseEvent(event, options.targetPid, options.position, options.targetWindow);
+		postTargetedMouseWithoutWarpingRealCursor(event, options.targetPid, options.targetWindow);
 	} finally {
 		cfRelease(event);
 	}
@@ -268,6 +274,19 @@ function createScrollEvent(deltaX: number, deltaY: number): CGEventRef {
 
 function stampEvent(event: CGEventRef): void {
 	CGEventSetTimestamp(event, currentUptimeNanoseconds());
+}
+
+function postTargetedMouseWithoutWarpingRealCursor(
+	event: CGEventRef,
+	targetPid: number,
+	targetWindow: SkyLightTargetWindow | undefined,
+): void {
+	const savedCursor = getCurrentCursorPosition();
+	try {
+		postMouse(event, targetPid, targetWindow);
+	} finally {
+		CGWarpMouseCursorPosition(savedCursor);
+	}
 }
 
 function postMouse(

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { diffAxTrees } from "../accessibility/diff.js";
 import { normalizeAxTree } from "../accessibility/normalize.js";
 import type { AXTreeElement, AppInfo, AppState, DisplayInfo } from "../accessibility/types.js";
 import { resolveAppInstructions } from "../app-instructions/index.js";
@@ -67,6 +68,7 @@ export class MacOSHostComputer extends HostComputer {
 
 	private readonly input: MacOSInputController;
 	private readonly lastViewportByPid = new Map<number, ScreenshotViewport>();
+	private readonly lastAxTreeByPid = new Map<number, AXTreeElement[]>();
 
 	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
@@ -189,6 +191,9 @@ export class MacOSHostComputer extends HostComputer {
 			this.lastViewportByPid.delete(app.pid);
 		}
 		elements = normalizeAxTree(elements);
+		const previousTree = this.lastAxTreeByPid.get(app.pid);
+		const axChangeSummary = previousTree === undefined ? undefined : diffAxTrees(previousTree, elements);
+		this.lastAxTreeByPid.set(app.pid, elements);
 
 		return {
 			app: app.name,
@@ -202,6 +207,7 @@ export class MacOSHostComputer extends HostComputer {
 			screenshotHeight: screenshot.height,
 			screenshotMimeType: screenshot.mimeType,
 			display,
+			...(axChangeSummary !== undefined ? { axChangeSummary } : {}),
 			...(appInstructions !== undefined ? { appInstructions } : {}),
 			...(windowBounds !== undefined ? { windowBounds } : {}),
 		};

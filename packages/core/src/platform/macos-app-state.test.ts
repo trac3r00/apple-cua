@@ -104,6 +104,31 @@ describe("#given a target window #when get_app_state captures it #then the scree
 	});
 });
 
+describe("#given two get_app_state calls #when the second runs #then it reports an AX change summary", () => {
+	it("omits the summary on the first call and includes it on the second", async () => {
+		childProcessMock.execFile.mockReset();
+		for (let call = 0; call < 2; call += 1) {
+			childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
+				callback(
+					null,
+					JSON.stringify([{ name: "Finder", bundleId: "com.apple.finder", pid: TARGET_PID, isActive: true }]),
+					"",
+				);
+			});
+			childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
+				callback(null, fakePng(1280, 800), "");
+			});
+		}
+		const computer = new MacOSHostComputer();
+
+		const first = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+		const second = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+		expect(first.axChangeSummary).toBeUndefined();
+		expect(second.axChangeSummary).toEqual({ added: 0, removed: 0, changed: 0 });
+	});
+});
+
 describe("#given a noisy accessibility tree #when get_app_state runs #then non-descriptive nodes are pruned", () => {
 	it("drops AXUnknown noise while keeping descriptive elements", async () => {
 		accessibilityMock.extractAccessibilityTree.mockReturnValue({
@@ -141,7 +166,11 @@ describe("#given a known app #when get_app_state runs #then it includes the app-
 	it("attaches Clock instructions for com.apple.clock", async () => {
 		childProcessMock.execFile.mockReset();
 		childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
-			callback(null, JSON.stringify([{ name: "Clock", bundleId: "com.apple.clock", pid: TARGET_PID, isActive: true }]), "");
+			callback(
+				null,
+				JSON.stringify([{ name: "Clock", bundleId: "com.apple.clock", pid: TARGET_PID, isActive: true }]),
+				"",
+			);
 		});
 		childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
 			callback(null, fakePng(1280, 800), "");

@@ -20,6 +20,12 @@ export interface DisplayInfo {
 	scaleFactor: number;
 }
 
+export interface AxTreeChangeSummary {
+	added: number;
+	removed: number;
+	changed: number;
+}
+
 export interface AppState {
 	app: string;
 	bundleId: string;
@@ -32,6 +38,7 @@ export interface AppState {
 	screenshotHeight: number;
 	screenshotMimeType?: "image/png" | "image/jpeg";
 	display: DisplayInfo;
+	axChangeSummary?: AxTreeChangeSummary;
 	appInstructions?: string;
 	/**
 	 * Target window rect in global logical screen points, present when the

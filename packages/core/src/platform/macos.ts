@@ -18,7 +18,8 @@ import type {
 	ScrollOptions,
 	SelectTextOptions,
 } from "../types/index.js";
-import { type AppUsage, parseAppUsageBlocks } from "./app-usage.js";
+import { type RunningAppInfo, collectAppUsage, getRunningMacOSApps } from "./app-list.js";
+import { execFileStdout, execFileStdoutBuffer } from "./exec-util.js";
 import { HostComputer, type HostComputerOptions } from "./host.js";
 import { parseImageDimensions, parsePngDimensions, sniffImageMimeType } from "./image-format.js";
 import {
@@ -43,14 +44,8 @@ const execFileAsync = promisify(execFile);
 const FINDER_DESKTOP_BOUNDS_TIMEOUT_MILLISECONDS = 2_000;
 const SYSTEM_PROFILER_TIMEOUT_MILLISECONDS = 10_000;
 const SCREENSHOT_TIMEOUT_MILLISECONDS = 10_000;
-const LIST_APPS_TIMEOUT_MILLISECONDS = 20_000;
 const SCREENSHOT_MAX_BUFFER_BYTES = 100 * 1024 * 1024;
 const DEFAULT_APP_STATE_SETTLE_MILLISECONDS = 300;
-
-export interface RunningAppInfo extends AppInfo {
-	readonly isActive: boolean;
-	readonly path: string;
-}
 
 export interface MacOSHostComputerOptions extends HostComputerOptions {
 	defaultTargetPid?: number;
@@ -407,38 +402,6 @@ async function captureWindowScreenshotViaCli(
 	return data;
 }
 
-async function collectAppUsage(paths: readonly string[]): Promise<Map<string, AppUsage>> {
-	if (paths.length === 0) {
-		return new Map();
-	}
-	try {
-		const result = await execFileAsync(
-			"mdls",
-			["-name", "kMDItemLastUsedDate", "-name", "kMDItemUseCount", ...paths],
-			{ encoding: "utf8", timeout: LIST_APPS_TIMEOUT_MILLISECONDS },
-		);
-		return parseAppUsageBlocks(execFileStdout(result), paths);
-	} catch {
-		return new Map(paths.map((path) => [path, {}]));
-	}
-}
-
-export async function getRunningMacOSApps(): Promise<RunningAppInfo[]> {
-	const result = await execFileAsync("osascript", ["-l", "JavaScript", "-e", LIST_APPS_JXA], {
-		encoding: "utf8",
-		timeout: LIST_APPS_TIMEOUT_MILLISECONDS,
-	});
-	return parseRunningApps(execFileStdout(result));
-}
-
-export function parseRunningApps(output: string): RunningAppInfo[] {
-	const parsed: unknown = JSON.parse(output);
-	if (!Array.isArray(parsed)) {
-		throw new Error("list apps output must be a JSON array");
-	}
-	return parsed.map(parseRunningApp).sort((left, right) => left.name.localeCompare(right.name));
-}
-
 async function getFinderDesktopBounds(): Promise<{ width: number; height: number }> {
 	const result = await execFileAsync(
 		"osascript",
@@ -546,26 +509,6 @@ function positiveSize(width: number, height: number): { width: number; height: n
 	return { width: Math.round(width), height: Math.round(height) };
 }
 
-function execFileStdout(result: { readonly stdout: string | Buffer } | string | Buffer): string {
-	if (typeof result === "string") {
-		return result;
-	}
-	if (Buffer.isBuffer(result)) {
-		return result.toString("utf8");
-	}
-	return Buffer.isBuffer(result.stdout) ? result.stdout.toString("utf8") : result.stdout;
-}
-
-function execFileStdoutBuffer(result: { readonly stdout: string | Buffer } | string | Buffer): Buffer {
-	if (Buffer.isBuffer(result)) {
-		return result;
-	}
-	if (typeof result === "string") {
-		return Buffer.from(result, "binary");
-	}
-	return Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout, "binary");
-}
-
 function remapElementFramesToScreenshot(
 	elements: readonly AXTreeElement[],
 	viewport: ScreenshotViewport,
@@ -601,81 +544,6 @@ function resolveTargetApp(apps: readonly RunningAppInfo[], targetPid: number | u
 	}
 	return frontmost;
 }
-
-function parseRunningApp(value: unknown): RunningAppInfo {
-	if (!isRecord(value)) {
-		throw new Error("running app entry must be an object");
-	}
-	const name = stringField(value, "name");
-	const pid = numberField(value, "pid");
-	const bundleId = stringField(value, "bundleId");
-	const isActive = booleanField(value, "isActive");
-	const path = optionalStringField(value, "path");
-	return { name, pid, bundleId, isActive, isRunning: true, path };
-}
-
-function optionalStringField(record: Record<string, unknown>, key: string): string {
-	const value = record[key];
-	return typeof value === "string" ? value : "";
-}
-
-function stringField(record: Record<string, unknown>, key: string): string {
-	const value = record[key];
-	if (typeof value !== "string") {
-		throw new Error(`running app ${key} must be a string`);
-	}
-	return value;
-}
-
-function numberField(record: Record<string, unknown>, key: string): number {
-	const value = record[key];
-	if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
-		throw new Error(`running app ${key} must be a positive integer`);
-	}
-	return value;
-}
-
-function booleanField(record: Record<string, unknown>, key: string): boolean {
-	const value = record[key];
-	if (typeof value !== "boolean") {
-		throw new Error(`running app ${key} must be a boolean`);
-	}
-	return value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
-const LIST_APPS_JXA = `
-const systemEvents = Application("System Events");
-function readString(value) {
-	try {
-		const result = value();
-		return typeof result === "string" ? result : "";
-	} catch {
-		return "";
-	}
-}
-function readPath(process) {
-	try {
-		return process.file().posixPath();
-	} catch {
-		return "";
-	}
-}
-JSON.stringify(
-	systemEvents.applicationProcesses.whose({ backgroundOnly: false })()
-		.map((process) => ({
-			name: readString(process.name),
-			bundleId: readString(process.bundleIdentifier),
-			pid: process.unixId(),
-			isActive: process.frontmost(),
-			path: readPath(process),
-		}))
-		.filter((app) => app.name.length > 0 && Number.isInteger(app.pid) && app.pid > 0 && app.bundleId.length > 0),
-);
-`;
 
 function smallestScreenSize(
 	sizes: ReadonlyArray<{ readonly width: number; readonly height: number }>,

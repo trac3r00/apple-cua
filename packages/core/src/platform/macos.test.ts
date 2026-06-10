@@ -16,13 +16,9 @@ vi.mock("node:child_process", () => ({
 	execFile: childProcessMock.execFile,
 }));
 
+import { parseRunningApps } from "./app-list.js";
 import { parseImageDimensions, parsePngDimensions } from "./image-format.js";
-import {
-	captureMacOSScreenshot,
-	getMacOSLogicalScreenSize,
-	parseRunningApps,
-	parseSystemProfilerLogicalScreenSize,
-} from "./macos.js";
+import { captureMacOSScreenshot, getMacOSLogicalScreenSize, parseSystemProfilerLogicalScreenSize } from "./macos.js";
 
 function createFakePng(): Buffer {
 	const data = globalThis.Buffer.alloc(24);

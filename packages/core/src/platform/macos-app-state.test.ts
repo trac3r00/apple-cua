@@ -177,6 +177,31 @@ describe("#given a URL blocklist #when a browser is on a blocked URL #then get_a
 	});
 });
 
+describe("#given a fresh app session #when get_app_state runs #then it highlights the window once", () => {
+	it("fires the capture-start highlight on the first windowed call only", async () => {
+		const overlay = { set: vi.fn(), highlight: vi.fn(), hide: vi.fn(), close: vi.fn() };
+		const appsJson = JSON.stringify([
+			{ name: "Finder", bundleId: "com.apple.finder", pid: TARGET_PID, isActive: true },
+		]);
+		childProcessMock.execFile.mockReset();
+		for (let call = 0; call < 2; call += 1) {
+			childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) =>
+				callback(null, appsJson, ""),
+			);
+			childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) =>
+				callback(null, fakePng(1280, 800), ""),
+			);
+		}
+		const computer = new MacOSHostComputer({ overlay });
+
+		await computer.getAppState(TARGET_PID, { settleMs: 0 });
+		await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+		expect(overlay.highlight).toHaveBeenCalledTimes(1);
+		expect(overlay.highlight).toHaveBeenCalledWith(WINDOW_BOUNDS);
+	});
+});
+
 describe("#given a noisy accessibility tree #when get_app_state runs #then non-descriptive nodes are pruned", () => {
 	it("drops AXUnknown noise while keeping descriptive elements", async () => {
 		accessibilityMock.extractAccessibilityTree.mockReturnValue({

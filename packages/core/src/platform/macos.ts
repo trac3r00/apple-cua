@@ -67,14 +67,17 @@ export class MacOSHostComputer extends HostComputer {
 	private readonly lastAxTreeByPid = new Map<number, AXTreeElement[]>();
 	private readonly appApproval: AppApprovalStore | undefined;
 	private readonly urlBlocklist: readonly string[];
+	private readonly overlay: PointerOverlay;
+	private readonly highlightedApps = new Set<number>();
 
 	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
 		this.appApproval = options.appApproval;
 		this.urlBlocklist = options.urlBlocklist ?? [];
+		this.overlay = options.overlay ?? createCursorOverlay();
 		this.input = new MacOSInputController(
 			options.defaultTargetPid,
-			options.overlay ?? createCursorOverlay(),
+			this.overlay,
 			undefined,
 			createDisplaySleepAssertion(),
 		);
@@ -189,6 +192,10 @@ export class MacOSHostComputer extends HostComputer {
 			this.lastViewportByPid.set(app.pid, viewport);
 			windowBounds = viewport.windowBounds;
 			elements = remapElementFramesToScreenshot(tree.elements, viewport);
+			if (!this.highlightedApps.has(app.pid)) {
+				this.highlightedApps.add(app.pid);
+				this.overlay.highlight(viewport.windowBounds);
+			}
 		} else {
 			this.lastViewportByPid.delete(app.pid);
 		}

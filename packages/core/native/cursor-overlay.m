@@ -3,6 +3,8 @@
 
 static NSWindow *gWindow = nil;
 static NSView *gPointerView = nil;
+static NSWindow *gHighlightWindow = nil;
+static NSTimer *gHighlightTimer = nil;
 static BOOL gShown = NO;
 static NSTimer *gScootTimer = nil;
 static NSPoint gScootFrom;
@@ -46,6 +48,20 @@ static const CGFloat kMaxStretch = 0.38;
 	[[NSColor colorWithSRGBRed:1.0 green:0.231 blue:0.188 alpha:1.0] setFill];
 	[core fill];
 	CGContextRestoreGState(ctx);
+}
+@end
+
+@interface HighlightView : NSView
+@end
+
+@implementation HighlightView
+- (void)drawRect:(NSRect)dirtyRect {
+	(void)dirtyRect;
+	NSRect inset = NSInsetRect(self.bounds, 3.0, 3.0);
+	NSBezierPath *outline = [NSBezierPath bezierPathWithRoundedRect:inset xRadius:12.0 yRadius:12.0];
+	[outline setLineWidth:5.0];
+	[[NSColor colorWithSRGBRed:0.39 green:0.78 blue:1.0 alpha:0.9] setStroke];
+	[outline stroke];
 }
 @end
 
@@ -112,6 +128,38 @@ static void apply_set(double x, double y) {
 													}];
 }
 
+static void apply_highlight(double x, double y, double w, double h) {
+	if (gHighlightWindow == nil || w <= 0.0 || h <= 0.0) {
+		return;
+	}
+	CGFloat screenHeight = primary_screen_height();
+	[gHighlightWindow setFrame:NSMakeRect(x, screenHeight - y - h, w, h) display:YES];
+	[gHighlightWindow.contentView setNeedsDisplay:YES];
+	[gHighlightWindow setAlphaValue:1.0];
+	[gHighlightWindow orderFrontRegardless];
+	if (gHighlightTimer != nil) {
+		[gHighlightTimer invalidate];
+		gHighlightTimer = nil;
+	}
+	NSTimeInterval start = [NSDate timeIntervalSinceReferenceDate];
+	gHighlightTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 60.0
+													  repeats:YES
+														block:^(NSTimer *timer) {
+															double progress =
+																([NSDate timeIntervalSinceReferenceDate] - start) / 0.5;
+															if (progress >= 1.0) {
+																[gHighlightWindow setAlphaValue:0.0];
+																[gHighlightWindow orderOut:nil];
+																[timer invalidate];
+																if (gHighlightTimer == timer) {
+																	gHighlightTimer = nil;
+																}
+																return;
+															}
+															[gHighlightWindow setAlphaValue:1.0 - progress];
+														}];
+}
+
 static void apply_hide(void) {
 	if (gScootTimer != nil) {
 		[gScootTimer invalidate];
@@ -129,9 +177,15 @@ static void *stdin_reader(void *arg) {
 	while (fgets(line, sizeof(line), stdin) != NULL) {
 		double x = 0.0;
 		double y = 0.0;
+		double w = 0.0;
+		double h = 0.0;
 		if (sscanf(line, "set %lf %lf", &x, &y) == 2) {
 			dispatch_async(dispatch_get_main_queue(), ^{
 				apply_set(x, y);
+			});
+		} else if (sscanf(line, "highlight %lf %lf %lf %lf", &x, &y, &w, &h) == 4) {
+			dispatch_async(dispatch_get_main_queue(), ^{
+				apply_highlight(x, y, w, h);
 			});
 		} else if (strncmp(line, "hide", 4) == 0) {
 			dispatch_async(dispatch_get_main_queue(), ^{
@@ -168,6 +222,19 @@ int main(int argc, const char *argv[]) {
 									   NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle];
 		gPointerView = [[OverlayPointerView alloc] initWithFrame:frame];
 		[gWindow setContentView:gPointerView];
+
+		gHighlightWindow = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 100, 100)
+													   styleMask:NSWindowStyleMaskBorderless
+														 backing:NSBackingStoreBuffered
+														   defer:NO];
+		[gHighlightWindow setOpaque:NO];
+		[gHighlightWindow setBackgroundColor:[NSColor clearColor]];
+		[gHighlightWindow setHasShadow:NO];
+		[gHighlightWindow setIgnoresMouseEvents:YES];
+		[gHighlightWindow setLevel:NSScreenSaverWindowLevel];
+		[gHighlightWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
+											  NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle];
+		[gHighlightWindow setContentView:[[HighlightView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)]];
 
 		pthread_t thread;
 		pthread_create(&thread, NULL, stdin_reader, NULL);

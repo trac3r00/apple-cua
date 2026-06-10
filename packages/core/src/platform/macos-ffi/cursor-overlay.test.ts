@@ -45,6 +45,17 @@ describe("#given a spawnable overlay #when driven #then it streams set/hide/quit
 	});
 });
 
+describe("#given a spawnable overlay #when highlighting a window #then it streams a highlight command", () => {
+	it("sends rounded window bounds to the helper", () => {
+		const handle = fakeHandle();
+		const overlay = createCursorOverlay(() => handle);
+
+		overlay.highlight({ x: 100, y: 200, width: 800, height: 600 });
+
+		expect(handle.writes).toEqual(["highlight 100 200 800 600\n"]);
+	});
+});
+
 describe("#given no overlay binary #when driven #then every call is a safe no-op", () => {
 	it("never throws when the spawner yields nothing", () => {
 		const overlay = createCursorOverlay(() => undefined);

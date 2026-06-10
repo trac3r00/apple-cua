@@ -244,7 +244,7 @@ describe("#given MacOSInputController target routing", () => {
 		windowMock.openWindows.mockResolvedValue([
 			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
 		]);
-		const overlay = { set: vi.fn(), hide: vi.fn(), close: vi.fn() };
+		const overlay = { set: vi.fn(), highlight: vi.fn(), hide: vi.fn(), close: vi.fn() };
 		const { MacOSInputController } = await import("./macos-input.js");
 		const controller = new MacOSInputController(1234, overlay);
 
@@ -267,7 +267,7 @@ describe("#given MacOSInputController target routing", () => {
 		const { MacOSInputController } = await import("./macos-input.js");
 		const controller = new MacOSInputController(
 			1234,
-			{ set: vi.fn(), hide: vi.fn(), close: vi.fn() },
+			{ set: vi.fn(), highlight: vi.fn(), hide: vi.fn(), close: vi.fn() },
 			() => false,
 			displaySleep,
 		);
@@ -287,7 +287,7 @@ describe("#given MacOSInputController target routing", () => {
 			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
 		]);
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController(1234, { set: vi.fn(), hide: vi.fn(), close: vi.fn() }, () => true);
+		const controller = new MacOSInputController(1234, { set: vi.fn(), highlight: vi.fn(), hide: vi.fn(), close: vi.fn() }, () => true);
 
 		// when/then
 		await expect(controller.click({ x: 50, y: 70 })).rejects.toThrow(/Mac is locked/);
@@ -298,7 +298,7 @@ describe("#given MacOSInputController target routing", () => {
 	it("#when no action has happened #then getCursorPosition seeds from the real cursor", async () => {
 		// given
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController(1234, { set: vi.fn(), hide: vi.fn(), close: vi.fn() });
+		const controller = new MacOSInputController(1234, { set: vi.fn(), highlight: vi.fn(), hide: vi.fn(), close: vi.fn() });
 
 		// when/then
 		expect(controller.getCursorPosition()).toEqual({ x: 1, y: 2 });

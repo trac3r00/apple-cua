@@ -72,6 +72,7 @@ function createComputer(): ComputerInterface {
 		getScreenshotViewport: vi.fn().mockResolvedValue(undefined),
 		listApps: vi.fn(),
 		setValue: vi.fn(),
+		selectText: vi.fn(),
 		performAction: vi.fn(),
 		pressAtPosition: vi.fn(),
 		typeIntoFocused: vi.fn(),
@@ -89,6 +90,7 @@ describe("#given all tool factories #when built #then every Codex Computer Use t
 			"click",
 			"perform_secondary_action",
 			"set_value",
+			"select_text",
 			"drag",
 			"scroll",
 			"type_text",
@@ -104,6 +106,6 @@ describe("#given all tools #when registered #then pi.registerTool is called for 
 
 		registerAllTools(pi, { computer: createComputer() });
 
-		expect(registerToolSpy).toHaveBeenCalledTimes(9);
+		expect(registerToolSpy).toHaveBeenCalledTimes(10);
 	});
 });

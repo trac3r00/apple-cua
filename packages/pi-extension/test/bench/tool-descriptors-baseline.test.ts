@@ -44,9 +44,12 @@ function createFakeComputer(): ComputerInterface {
 			screenshotBase64: "",
 			screenshotWidth: 100,
 			screenshotHeight: 80,
+			display: { width: 100, height: 80, scaleFactor: 1 },
 		}),
+		getScreenshotViewport: vi.fn<ComputerInterface["getScreenshotViewport"]>().mockResolvedValue(undefined),
 		listApps: vi.fn<ComputerInterface["listApps"]>().mockResolvedValue([]),
 		setValue: vi.fn<ComputerInterface["setValue"]>().mockResolvedValue(undefined),
+		selectText: vi.fn<ComputerInterface["selectText"]>().mockResolvedValue(undefined),
 		performAction: vi.fn<ComputerInterface["performAction"]>().mockResolvedValue(undefined),
 		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>().mockResolvedValue(false),
 		typeIntoFocused: vi.fn<ComputerInterface["typeIntoFocused"]>().mockResolvedValue(false),
@@ -59,7 +62,7 @@ describe("#given all registered tools #when schemas are serialized #then byte an
 		const fakeComputer = createFakeComputer();
 
 		const tools = buildAllTools({ computer: fakeComputer });
-		expect(tools.length).toBe(9);
+		expect(tools.length).toBe(10);
 
 		let totalBytes = 0;
 		for (const tool of tools) {
@@ -82,6 +85,6 @@ describe("#given all registered tools #when schemas are serialized #then byte an
 
 		expect(metrics.tool_descriptor_bytes).toBeGreaterThan(0);
 		expect(metrics.tool_descriptor_estimated_tokens).toBeGreaterThan(0);
-		expect(metrics.tool_count).toBe(10);
+		expect(metrics.tool_count).toBe(11);
 	});
 });

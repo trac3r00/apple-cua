@@ -37,6 +37,7 @@ export const TOOL_NAMES = [
 	"click",
 	"perform_secondary_action",
 	"set_value",
+	"select_text",
 	"drag",
 	"scroll",
 	"type_text",
@@ -68,6 +69,15 @@ const setValueSchema = z.object({
 	app: appSchema,
 	element_index: z.string(),
 	value: z.string(),
+});
+
+const selectTextSchema = z.object({
+	app: appSchema,
+	element_index: z.string(),
+	text: z.string().optional(),
+	prefix: z.string().optional(),
+	suffix: z.string().optional(),
+	selection: z.enum(["text", "before", "after"]).optional(),
 });
 
 const dragSchema = z.object({
@@ -195,6 +205,24 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 		},
 		async ({ app, element_index, value }): Promise<ToolResult> => {
 			await computer.setValue(await resolveAppPid(computer, app), parseElementIndex(element_index), value);
+			return actionComplete();
+		},
+	);
+
+	server.registerTool(
+		"select_text",
+		{
+			description:
+				"Select text inside a text element, or place the text cursor before or after it. Use prefix or suffix to disambiguate repeated matches.",
+			inputSchema: selectTextSchema,
+		},
+		async ({ app, element_index, text, prefix, suffix, selection }): Promise<ToolResult> => {
+			await computer.selectText(await resolveAppPid(computer, app), parseElementIndex(element_index), {
+				selection: selection ?? "text",
+				...(text !== undefined ? { text } : {}),
+				...(prefix !== undefined ? { prefix } : {}),
+				...(suffix !== undefined ? { suffix } : {}),
+			});
 			return actionComplete();
 		},
 	);

@@ -37,6 +37,13 @@ export interface ScrollOptions {
 	amount: number;
 }
 
+export interface SelectTextOptions {
+	selection: "text" | "before" | "after";
+	text?: string;
+	prefix?: string;
+	suffix?: string;
+}
+
 export interface DragOptions {
 	from: Point;
 	to: Point;

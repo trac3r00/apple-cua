@@ -30,6 +30,11 @@ export abstract class HostComputer implements ComputerInterface {
 	): Promise<import("../computer/viewport.js").ScreenshotViewport | undefined>;
 	abstract listApps(): Promise<import("../accessibility/types.js").AppInfo[]>;
 	abstract setValue(targetPid: number, elementIndex: number, value: string): Promise<void>;
+	abstract selectText(
+		targetPid: number,
+		elementIndex: number,
+		options: import("../types/index.js").SelectTextOptions,
+	): Promise<void>;
 	abstract performAction(targetPid: number, elementIndex: number, action: string): Promise<void>;
 	abstract pressAtPosition(targetPid: number, position: import("../types/index.js").Point): Promise<boolean>;
 	abstract typeIntoFocused(targetPid: number, text: string): Promise<boolean>;

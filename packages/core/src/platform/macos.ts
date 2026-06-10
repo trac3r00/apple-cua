@@ -11,6 +11,7 @@ import type {
 	Point,
 	ScreenshotOptions,
 	ScrollOptions,
+	SelectTextOptions,
 } from "../types/index.js";
 import { HostComputer, type HostComputerOptions } from "./host.js";
 import {
@@ -25,6 +26,7 @@ import {
 	getMainDisplayLogicalSize,
 	getMainDisplayNativePixelSize,
 } from "./macos-ffi/screenshot.js";
+import { selectTextByIndex } from "./macos-ffi/select-text.js";
 import { MacOSInputController } from "./macos-input.js";
 
 const execFileAsync = promisify(execFile);
@@ -219,6 +221,10 @@ export class MacOSHostComputer extends HostComputer {
 
 	async setValue(targetPid: number, elementIndex: number, value: string): Promise<void> {
 		setValueByIndex(targetPid, elementIndex, value);
+	}
+
+	async selectText(targetPid: number, elementIndex: number, options: SelectTextOptions): Promise<void> {
+		selectTextByIndex(targetPid, elementIndex, options);
 	}
 
 	async performAction(targetPid: number, elementIndex: number, action: string): Promise<void> {

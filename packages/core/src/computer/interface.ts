@@ -7,6 +7,7 @@ import type {
 	Point,
 	ScreenshotOptions,
 	ScrollOptions,
+	SelectTextOptions,
 } from "../types/index.js";
 import type { ScreenshotViewport } from "./viewport.js";
 
@@ -42,6 +43,7 @@ export interface ComputerInterface {
 	getScreenshotViewport(targetPid: number): Promise<ScreenshotViewport | undefined>;
 	listApps(): Promise<AppInfo[]>;
 	setValue(targetPid: number, elementIndex: number, value: string): Promise<void>;
+	selectText(targetPid: number, elementIndex: number, options: SelectTextOptions): Promise<void>;
 	performAction(targetPid: number, elementIndex: number, action: string): Promise<void>;
 	pressAtPosition(targetPid: number, position: Point): Promise<boolean>;
 	typeIntoFocused(targetPid: number, text: string): Promise<boolean>;

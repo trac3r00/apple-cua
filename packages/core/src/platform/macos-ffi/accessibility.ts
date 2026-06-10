@@ -267,7 +267,7 @@ export function setValueByIndex(pid: number, elementIndex: number, value: string
 	}
 }
 
-function refetchElement(pid: number, elementIndex: number, maxDepth = 10, maxElements = 2_000): AXUIElementRef {
+export function refetchElement(pid: number, elementIndex: number, maxDepth = 10, maxElements = 2_000): AXUIElementRef {
 	if (!AXIsProcessTrusted()) {
 		throw new Error("accessibility permission denied");
 	}

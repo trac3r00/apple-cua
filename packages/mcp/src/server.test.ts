@@ -28,6 +28,7 @@ const mockedComputer = vi.hoisted(() => ({
 	getScreenshotViewport: vi.fn(),
 	listApps: vi.fn(),
 	setValue: vi.fn(),
+	selectText: vi.fn(),
 	performAction: vi.fn(),
 	pressAtPosition: vi.fn(),
 	typeIntoFocused: vi.fn(),
@@ -259,5 +260,24 @@ describe("MCP server tools #given #when #then", () => {
 		// then
 		expect(mockedComputer.setValue).toHaveBeenCalledWith(1234, 9, "abc");
 		expect(mockedComputer.performAction).toHaveBeenCalledWith(1234, 9, "AXPress");
+	});
+
+	it("routes select_text with a default selection mode and disambiguating suffix", async () => {
+		// given
+		const { client, close } = await createHarness();
+		closeHarness = close;
+
+		// when
+		await client.callTool({
+			name: "select_text",
+			arguments: { app: "Finder", element_index: "9", text: "foo", suffix: " baz" },
+		});
+
+		// then
+		expect(mockedComputer.selectText).toHaveBeenCalledWith(1234, 9, {
+			selection: "text",
+			text: "foo",
+			suffix: " baz",
+		});
 	});
 });

@@ -14,6 +14,12 @@ export {
 	type ComputerUseMouseButton,
 } from "./computer/actions.js";
 export { resolveScreenPoint } from "./computer/coordinate.js";
+export {
+	type SelectionMode,
+	type SelectionRange,
+	type SelectionRangeInput,
+	resolveSelectionRange,
+} from "./computer/select-text.js";
 export type { ComputerInterface, ScreenshotResult } from "./computer/interface.js";
 export {
 	MAX_SCREENSHOT_LONG_EDGE,
@@ -37,6 +43,7 @@ export type {
 	Rect,
 	ScreenshotOptions,
 	ScrollOptions,
+	SelectTextOptions,
 	Size,
 } from "./types/index.js";
 export type { WindowInfo, WindowInterface } from "./window/interface.js";

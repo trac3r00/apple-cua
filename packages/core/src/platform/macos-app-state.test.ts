@@ -104,6 +104,39 @@ describe("#given a target window #when get_app_state captures it #then the scree
 	});
 });
 
+describe("#given a noisy accessibility tree #when get_app_state runs #then non-descriptive nodes are pruned", () => {
+	it("drops AXUnknown noise while keeping descriptive elements", async () => {
+		accessibilityMock.extractAccessibilityTree.mockReturnValue({
+			axAvailable: true,
+			elements: [
+				{
+					id: 5,
+					role: "AXButton",
+					label: "Open",
+					value: null,
+					frame: { x: 800, y: 550, width: 200, height: 160 },
+					actions: ["AXPress"],
+					children: [],
+				},
+				{
+					id: 6,
+					role: "AXUnknown",
+					label: null,
+					value: null,
+					frame: { x: 0, y: 0, width: 0, height: 0 },
+					actions: [],
+					children: [],
+				},
+			],
+		});
+		const computer = new MacOSHostComputer();
+
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+		expect(state.elements.map((element) => element.id)).toEqual([5]);
+	});
+});
+
 describe("#given a known app #when get_app_state runs #then it includes the app-specific instruction playbook", () => {
 	it("attaches Clock instructions for com.apple.clock", async () => {
 		childProcessMock.execFile.mockReset();

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { normalizeAxTree } from "../accessibility/normalize.js";
 import type { AXTreeElement, AppInfo, AppState, DisplayInfo } from "../accessibility/types.js";
 import { resolveAppInstructions } from "../app-instructions/index.js";
 import { resolveDisplayMetadata } from "../computer/display-metadata.js";
@@ -179,6 +180,7 @@ export class MacOSHostComputer extends HostComputer {
 		} else {
 			this.lastViewportByPid.delete(app.pid);
 		}
+		elements = normalizeAxTree(elements);
 
 		return {
 			app: app.name,

@@ -139,12 +139,17 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 		},
 		async ({ app }): Promise<ToolResult> => {
 			const state = await getAppStateForApp(computer, app);
-			return {
-				content: [
-					{ type: "image", data: state.screenshotBase64, mimeType: "image/png" },
-					{ type: "text", text: JSON.stringify({ ...state, screenshotBase64: undefined }, null, 2) },
-				],
-			};
+			const content: ToolContent[] = [
+				{ type: "image", data: state.screenshotBase64, mimeType: "image/png" },
+				{ type: "text", text: JSON.stringify({ ...state, screenshotBase64: undefined }, null, 2) },
+			];
+			if (state.appInstructions !== undefined) {
+				content.push({
+					type: "text",
+					text: `<app_specific_instructions>\n${state.appInstructions}\n</app_specific_instructions>`,
+				});
+			}
+			return { content };
 		},
 	);
 

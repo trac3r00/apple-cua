@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { AXTreeElement, AppInfo, AppState, DisplayInfo } from "../accessibility/types.js";
+import { resolveAppInstructions } from "../app-instructions/index.js";
 import { resolveDisplayMetadata } from "../computer/display-metadata.js";
 import type { ComputerInterface, ScreenshotResult } from "../computer/interface.js";
 import { type ScreenshotViewport, resolveWindowScreenshotSize, screenRectToScreenshot } from "../computer/viewport.js";
@@ -162,6 +163,7 @@ export class MacOSHostComputer extends HostComputer {
 		const screenshot = await this.captureScreenshot({ targetSize: size }, targetWindow?.id);
 		const tree = extractAccessibilityTree(app.pid);
 		const display = resolveDisplayInfo();
+		const appInstructions = resolveAppInstructions(app.name, app.bundleId);
 
 		let elements = tree.elements;
 		let windowBounds: ScreenshotViewport["windowBounds"] | undefined;
@@ -189,6 +191,7 @@ export class MacOSHostComputer extends HostComputer {
 			screenshotWidth: screenshot.width,
 			screenshotHeight: screenshot.height,
 			display,
+			...(appInstructions !== undefined ? { appInstructions } : {}),
 			...(windowBounds !== undefined ? { windowBounds } : {}),
 		};
 	}

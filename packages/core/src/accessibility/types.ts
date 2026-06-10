@@ -31,6 +31,7 @@ export interface AppState {
 	screenshotWidth: number;
 	screenshotHeight: number;
 	display: DisplayInfo;
+	appInstructions?: string;
 	/**
 	 * Target window rect in global logical screen points, present when the
 	 * screenshot is scoped to a single app window. Screenshot pixel coordinates

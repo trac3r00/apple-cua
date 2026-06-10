@@ -104,6 +104,23 @@ describe("#given a target window #when get_app_state captures it #then the scree
 	});
 });
 
+describe("#given a known app #when get_app_state runs #then it includes the app-specific instruction playbook", () => {
+	it("attaches Clock instructions for com.apple.clock", async () => {
+		childProcessMock.execFile.mockReset();
+		childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
+			callback(null, JSON.stringify([{ name: "Clock", bundleId: "com.apple.clock", pid: TARGET_PID, isActive: true }]), "");
+		});
+		childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
+			callback(null, fakePng(1280, 800), "");
+		});
+		const computer = new MacOSHostComputer();
+
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+		expect(state.appInstructions).toContain("World Clock");
+	});
+});
+
 describe("#given a Retina display #when get_app_state runs #then it reports display geometry and backing scale", () => {
 	it("includes the logical display size and scale factor", async () => {
 		const computer = new MacOSHostComputer();

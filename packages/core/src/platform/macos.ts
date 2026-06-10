@@ -7,6 +7,7 @@ import { resolveAppInstructions } from "../app-instructions/index.js";
 import { resolveDisplayMetadata } from "../computer/display-metadata.js";
 import type { ComputerInterface, ScreenshotResult } from "../computer/interface.js";
 import { type ScreenshotViewport, resolveWindowScreenshotSize, screenRectToScreenshot } from "../computer/viewport.js";
+import type { AppApprovalStore } from "../permission/app-approval.js";
 import type {
 	AppStateOptions,
 	DragOptions,
@@ -56,6 +57,7 @@ export interface RunningAppInfo extends AppInfo {
 export interface MacOSHostComputerOptions extends HostComputerOptions {
 	defaultTargetPid?: number;
 	overlay?: PointerOverlay;
+	appApproval?: AppApprovalStore;
 }
 
 export class MacOSHostComputer extends HostComputer {
@@ -69,9 +71,11 @@ export class MacOSHostComputer extends HostComputer {
 	private readonly input: MacOSInputController;
 	private readonly lastViewportByPid = new Map<number, ScreenshotViewport>();
 	private readonly lastAxTreeByPid = new Map<number, AXTreeElement[]>();
+	private readonly appApproval: AppApprovalStore | undefined;
 
 	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
+		this.appApproval = options.appApproval;
 		this.input = new MacOSInputController(
 			options.defaultTargetPid,
 			options.overlay ?? createCursorOverlay(),
@@ -164,6 +168,7 @@ export class MacOSHostComputer extends HostComputer {
 		}
 		const apps = await getRunningMacOSApps();
 		const app = resolveTargetApp(apps, targetPid);
+		this.assertAppApproved(app);
 		const targetWindow = await this.input.rememberTargetWindow(app.pid);
 		// Scope the screenshot to the target window at its own aspect ratio (capped),
 		// so the model sees an undistorted window image and coordinates invert cleanly.
@@ -211,6 +216,19 @@ export class MacOSHostComputer extends HostComputer {
 			...(appInstructions !== undefined ? { appInstructions } : {}),
 			...(windowBounds !== undefined ? { windowBounds } : {}),
 		};
+	}
+
+	private assertAppApproved(app: RunningAppInfo): void {
+		if (this.appApproval === undefined) {
+			return;
+		}
+		const decision = this.appApproval.decide(app.bundleId);
+		if (decision === "denied") {
+			throw new Error(`Computer Use is not allowed to use the app '${app.name}'.`);
+		}
+		if (decision === "needs-approval") {
+			throw new Error(`Computer Use needs your approval to use '${app.name}'. Approve the app and try again.`);
+		}
 	}
 
 	async getScreenshotViewport(targetPid: number): Promise<ScreenshotViewport | undefined> {

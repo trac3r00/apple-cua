@@ -37,6 +37,7 @@ const screenshotMock = vi.hoisted(() => ({
 vi.mock("./macos-ffi/screenshot.js", () => screenshotMock);
 vi.mock("./macos-ffi/accessibility.js", () => accessibilityMock);
 
+import { AppApprovalStore } from "../permission/app-approval.js";
 import { MacOSHostComputer } from "./macos.js";
 
 const TARGET_PID = 1234;
@@ -126,6 +127,32 @@ describe("#given two get_app_state calls #when the second runs #then it reports 
 
 		expect(first.axChangeSummary).toBeUndefined();
 		expect(second.axChangeSummary).toEqual({ added: 0, removed: 0, changed: 0 });
+	});
+});
+
+describe("#given an app-approval store #when an app is not approved #then get_app_state is refused until approved", () => {
+	it("refuses an unapproved app and proceeds once approved for the session", async () => {
+		const appsJson = JSON.stringify([
+			{ name: "Finder", bundleId: "com.apple.finder", pid: TARGET_PID, isActive: true },
+		]);
+		childProcessMock.execFile.mockReset();
+		childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) =>
+			callback(null, appsJson, ""),
+		);
+		childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) =>
+			callback(null, appsJson, ""),
+		);
+		childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) =>
+			callback(null, fakePng(1280, 800), ""),
+		);
+		const approval = new AppApprovalStore();
+		const computer = new MacOSHostComputer({ appApproval: approval });
+
+		await expect(computer.getAppState(TARGET_PID, { settleMs: 0 })).rejects.toThrow(/needs your approval/);
+
+		approval.approveForSession("com.apple.finder");
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+		expect(state.app).toBe("Finder");
 	});
 });
 

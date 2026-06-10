@@ -16,11 +16,10 @@ vi.mock("node:child_process", () => ({
 	execFile: childProcessMock.execFile,
 }));
 
+import { parseImageDimensions, parsePngDimensions } from "./image-format.js";
 import {
 	captureMacOSScreenshot,
 	getMacOSLogicalScreenSize,
-	parseImageDimensions,
-	parsePngDimensions,
 	parseRunningApps,
 	parseSystemProfilerLogicalScreenSize,
 } from "./macos.js";

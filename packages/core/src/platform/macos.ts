@@ -24,6 +24,7 @@ import {
 	typeIntoFocusedAXElement,
 } from "./macos-ffi/accessibility.js";
 import { type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
+import { createDisplaySleepAssertion } from "./macos-ffi/power.js";
 import {
 	captureMainDisplayPng,
 	getMainDisplayLogicalSize,
@@ -67,7 +68,12 @@ export class MacOSHostComputer extends HostComputer {
 
 	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
-		this.input = new MacOSInputController(options.defaultTargetPid, options.overlay ?? createCursorOverlay());
+		this.input = new MacOSInputController(
+			options.defaultTargetPid,
+			options.overlay ?? createCursorOverlay(),
+			undefined,
+			createDisplaySleepAssertion(),
+		);
 		// TODO: use options for display selection
 		void options.display;
 	}

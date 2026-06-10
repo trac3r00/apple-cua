@@ -13,6 +13,7 @@ import {
 } from "./macos-ffi/coregraphics.js";
 import { NOOP_POINTER_OVERLAY, type PointerOverlay } from "./macos-ffi/cursor-overlay.js";
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";
+import { type DisplaySleepAssertion, NOOP_DISPLAY_SLEEP } from "./macos-ffi/power.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
 import { modifierFlags, virtualKeyCodeFor } from "./macos-keycodes.js";
 import { selectVisibleTargetWindow } from "./macos-window-target.js";
@@ -27,20 +28,24 @@ export class MacOSInputController {
 	private readonly overlay: PointerOverlay;
 	private readonly pointer: VirtualPointer;
 	private readonly isLocked: () => boolean;
+	private readonly displaySleep: DisplaySleepAssertion;
 
 	constructor(
 		targetPid?: number,
 		overlay: PointerOverlay = NOOP_POINTER_OVERLAY,
 		isLocked: () => boolean = isScreenLocked,
+		displaySleep: DisplaySleepAssertion = NOOP_DISPLAY_SLEEP,
 	) {
 		this.overlay = overlay;
 		this.isLocked = isLocked;
+		this.displaySleep = displaySleep;
 		this.pointer = new VirtualPointer(readRealCursorPosition());
 		this.setTarget(targetPid);
 	}
 
-	private ensureUnlocked(): void {
+	private beforeInput(): void {
 		assertScreenUnlocked(this.isLocked());
+		this.displaySleep.acquire();
 	}
 
 	setTarget(pid?: number): void {
@@ -66,13 +71,13 @@ export class MacOSInputController {
 	}
 
 	async move(position: Point): Promise<void> {
-		this.ensureUnlocked();
+		this.beforeInput();
 		await this.postMouse("move", position, "left", undefined, await this.targetWindow(position));
 		this.markPointer(position);
 	}
 
 	async click(position: Point, button: MouseButton = "left"): Promise<void> {
-		this.ensureUnlocked();
+		this.beforeInput();
 		const targetWindow = await this.targetWindow(position);
 		this.requirePointerWindow(targetWindow);
 		this.lastTargetWindow = targetWindow;
@@ -85,7 +90,7 @@ export class MacOSInputController {
 	}
 
 	async doubleClick(position: Point): Promise<void> {
-		this.ensureUnlocked();
+		this.beforeInput();
 		const targetWindow = await this.targetWindow(position);
 		this.requirePointerWindow(targetWindow);
 		this.lastTargetWindow = targetWindow;
@@ -100,7 +105,7 @@ export class MacOSInputController {
 	}
 
 	async typeText(text: string): Promise<void> {
-		this.ensureUnlocked();
+		this.beforeInput();
 		const targetWindow = await this.requireSessionWindow("keyboard");
 		for (const segment of Array.from(text)) {
 			postUnicodeText(segment, this.targetPid, targetWindow);
@@ -108,7 +113,7 @@ export class MacOSInputController {
 	}
 
 	async pressKey(key: string, options?: KeyOptions): Promise<void> {
-		this.ensureUnlocked();
+		this.beforeInput();
 		const keyCode = virtualKeyCodeFor(key);
 		const flags = modifierFlags(options?.modifiers ?? []);
 		const targetWindow = await this.requireSessionWindow("keyboard");
@@ -131,7 +136,7 @@ export class MacOSInputController {
 	}
 
 	async scroll(options: ScrollOptions): Promise<void> {
-		this.ensureUnlocked();
+		this.beforeInput();
 		const amount = Math.trunc(options.amount);
 		const targetWindow = await this.requireSessionWindow("scroll");
 		switch (options.direction) {
@@ -151,7 +156,7 @@ export class MacOSInputController {
 	}
 
 	async drag(options: DragOptions): Promise<void> {
-		this.ensureUnlocked();
+		this.beforeInput();
 		const targetWindow = await this.targetWindow(options.from);
 		this.requirePointerWindow(targetWindow);
 		this.lastTargetWindow = targetWindow;
@@ -180,6 +185,7 @@ export class MacOSInputController {
 	}
 
 	close(): void {
+		this.displaySleep.release();
 		this.overlay.close();
 	}
 

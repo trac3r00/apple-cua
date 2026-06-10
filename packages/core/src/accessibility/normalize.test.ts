@@ -32,10 +32,7 @@ describe("#given a tree with non-descriptive noise #when normalized #then noise 
 
 describe("#given a container whose only child is noise #when normalized #then the empty container is dropped too", () => {
 	it("drops a group that has no kept descendants", () => {
-		const tree: AXTreeElement[] = [
-			el({ id: 0, role: "AXGroup", children: [1] }),
-			el({ id: 1, role: "AXUnknown" }),
-		];
+		const tree: AXTreeElement[] = [el({ id: 0, role: "AXGroup", children: [1] }), el({ id: 1, role: "AXUnknown" })];
 
 		expect(normalizeAxTree(tree)).toEqual([]);
 	});

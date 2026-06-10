@@ -41,15 +41,15 @@ describe("#given target text inside the value #when resolving a selection #then 
 
 describe("#given a repeated target #when a suffix disambiguates it #then the disambiguated match range is used", () => {
 	it("selects the occurrence identified by the suffix", () => {
-		expect(resolveSelectionRange({ value: "foo bar foo baz", text: "foo", suffix: " baz", selection: "text" })).toEqual(
-			{ location: 8, length: 3 },
-		);
+		expect(
+			resolveSelectionRange({ value: "foo bar foo baz", text: "foo", suffix: " baz", selection: "text" }),
+		).toEqual({ location: 8, length: 3 });
 	});
 
 	it("selects the occurrence identified by the prefix", () => {
-		expect(resolveSelectionRange({ value: "foo bar foo baz", text: "foo", prefix: "bar ", selection: "text" })).toEqual(
-			{ location: 8, length: 3 },
-		);
+		expect(
+			resolveSelectionRange({ value: "foo bar foo baz", text: "foo", prefix: "bar ", selection: "text" }),
+		).toEqual({ location: 8, length: 3 });
 	});
 });
 

@@ -51,7 +51,9 @@ export function createCursorOverlay(spawner: OverlaySpawner = defaultSpawner): P
 			send(`set ${Math.round(point.x)} ${Math.round(point.y)}\n`);
 		},
 		highlight(rect: Rect): void {
-			send(`highlight ${Math.round(rect.x)} ${Math.round(rect.y)} ${Math.round(rect.width)} ${Math.round(rect.height)}\n`);
+			send(
+				`highlight ${Math.round(rect.x)} ${Math.round(rect.y)} ${Math.round(rect.width)} ${Math.round(rect.height)}\n`,
+			);
 		},
 		hide(): void {
 			send("hide\n");

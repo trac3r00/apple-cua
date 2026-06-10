@@ -232,7 +232,13 @@ describe("#given CoreGraphics koffi bindings", () => {
 		it("does not warp the cursor for untargeted events", async () => {
 			const { postMouseEvent } = await import("./coregraphics.js");
 
-			postMouseEvent({ kind: "down", position: { x: 100, y: 200 }, button: "left", clickState: 1, targetPid: undefined });
+			postMouseEvent({
+				kind: "down",
+				position: { x: 100, y: 200 },
+				button: "left",
+				clickState: 1,
+				targetPid: undefined,
+			});
 
 			expect(koffiMock.coreGraphicsFunctions.CGWarpMouseCursorPosition).not.toHaveBeenCalled();
 		});

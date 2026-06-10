@@ -28,8 +28,8 @@ describe("#given different identity #when keyed #then the keys differ", () => {
 		const base = el({ id: 0, role: "AXButton", label: "Save" });
 		expect(stableElementKey(el({ id: 0, role: "AXTextField", label: "Save" }))).not.toBe(stableElementKey(base));
 		expect(stableElementKey(el({ id: 0, role: "AXButton", label: "Cancel" }))).not.toBe(stableElementKey(base));
-		expect(stableElementKey(el({ id: 0, role: "AXButton", label: "Save", frame: { x: 5, y: 0, width: 10, height: 10 } }))).not.toBe(
-			stableElementKey(base),
-		);
+		expect(
+			stableElementKey(el({ id: 0, role: "AXButton", label: "Save", frame: { x: 5, y: 0, width: 10, height: 10 } })),
+		).not.toBe(stableElementKey(base));
 	});
 });

@@ -140,7 +140,7 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 		async ({ app }): Promise<ToolResult> => {
 			const state = await getAppStateForApp(computer, app);
 			const content: ToolContent[] = [
-				{ type: "image", data: state.screenshotBase64, mimeType: "image/png" },
+				{ type: "image", data: state.screenshotBase64, mimeType: state.screenshotMimeType ?? "image/png" },
 				{ type: "text", text: JSON.stringify({ ...state, screenshotBase64: undefined }, null, 2) },
 			];
 			if (state.appInstructions !== undefined) {

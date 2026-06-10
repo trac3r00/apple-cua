@@ -22,7 +22,7 @@ export function createGetAppStateTool(computer: ComputerInterface): ToolDefiniti
 		async execute(_toolCallId, params) {
 			const state = await getAppStateForApp(computer, params.app);
 			const content = [
-				{ type: "image" as const, data: state.screenshotBase64, mimeType: "image/png" as const },
+				{ type: "image" as const, data: state.screenshotBase64, mimeType: state.screenshotMimeType ?? "image/png" },
 				{ type: "text" as const, text: JSON.stringify({ ...state, screenshotBase64: undefined }, null, 2) },
 			];
 			if (state.appInstructions !== undefined) {

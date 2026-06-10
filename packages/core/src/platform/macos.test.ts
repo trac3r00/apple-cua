@@ -19,6 +19,7 @@ vi.mock("node:child_process", () => ({
 import {
 	captureMacOSScreenshot,
 	getMacOSLogicalScreenSize,
+	parseImageDimensions,
 	parsePngDimensions,
 	parseRunningApps,
 	parseSystemProfilerLogicalScreenSize,
@@ -154,6 +155,19 @@ describe("#given a non-Retina system_profiler resolution #when parsing logical s
 		const size = parseSystemProfilerLogicalScreenSize("Resolution: 1920 x 1080\n");
 
 		expect(size).toEqual({ width: 1920, height: 1080 });
+	});
+});
+
+describe("#given image bytes #when parsing dimensions by format #then PNG and JPEG are both handled", () => {
+	it("reads PNG IHDR dimensions", () => {
+		expect(parseImageDimensions(createFakePng())).toEqual({ width: 1920, height: 1080 });
+	});
+
+	it("reads JPEG start-of-frame dimensions", () => {
+		const jpeg = globalThis.Buffer.from([
+			0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x02, 0x58, 0x03, 0x20, 0x03,
+		]);
+		expect(parseImageDimensions(jpeg)).toEqual({ width: 800, height: 600 });
 	});
 });
 

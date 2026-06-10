@@ -30,6 +30,7 @@ export interface AppState {
 	screenshotBase64: string;
 	screenshotWidth: number;
 	screenshotHeight: number;
+	screenshotMimeType?: "image/png" | "image/jpeg";
 	display: DisplayInfo;
 	appInstructions?: string;
 	/**

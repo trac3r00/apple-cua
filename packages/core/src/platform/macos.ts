@@ -97,11 +97,11 @@ export class MacOSHostComputer extends HostComputer {
 			throw new Error("Region screenshots are not supported by the macOS screenshot fallback yet");
 		}
 		const size = options?.targetSize ?? (await this.getScreenSize());
-		const data = await captureMacOSScreenshot(size, windowId);
-		const dimensions = parsePngDimensions(data);
+		const data = await captureMacOSScreenshot(size, windowId, options?.format ?? "png", options?.quality ?? 72);
+		const dimensions = parseImageDimensions(data);
 		return {
 			data,
-			mimeType: "image/png",
+			mimeType: sniffImageMimeType(data),
 			width: dimensions.width,
 			height: dimensions.height,
 		};
@@ -169,7 +169,7 @@ export class MacOSHostComputer extends HostComputer {
 		const size =
 			options?.screenshotSize ??
 			(targetWindow !== undefined ? resolveWindowScreenshotSize(targetWindow.bounds) : await this.getScreenSize());
-		const screenshot = await this.captureScreenshot({ targetSize: size }, targetWindow?.id);
+		const screenshot = await this.captureScreenshot({ targetSize: size, format: "jpeg" }, targetWindow?.id);
 		const tree = extractAccessibilityTree(app.pid);
 		const display = resolveDisplayInfo();
 		const appInstructions = resolveAppInstructions(app.name, app.bundleId);
@@ -200,6 +200,7 @@ export class MacOSHostComputer extends HostComputer {
 			screenshotBase64: screenshot.data.toString("base64"),
 			screenshotWidth: screenshot.width,
 			screenshotHeight: screenshot.height,
+			screenshotMimeType: screenshot.mimeType,
 			display,
 			...(appInstructions !== undefined ? { appInstructions } : {}),
 			...(windowBounds !== undefined ? { windowBounds } : {}),
@@ -278,6 +279,38 @@ export function parsePngDimensions(data: Buffer): { width: number; height: numbe
 	};
 }
 
+export function sniffImageMimeType(data: Buffer): "image/png" | "image/jpeg" {
+	return data.byteLength >= 2 && data[0] === 0xff && data[1] === 0xd8 ? "image/jpeg" : "image/png";
+}
+
+export function parseImageDimensions(data: Buffer): { width: number; height: number } {
+	if (data.byteLength >= 2 && data[0] === 0xff && data[1] === 0xd8) {
+		return parseJpegDimensions(data);
+	}
+	return parsePngDimensions(data);
+}
+
+function parseJpegDimensions(data: Buffer): { width: number; height: number } {
+	let offset = 2;
+	while (offset + 9 < data.byteLength) {
+		if (data[offset] !== 0xff) {
+			offset += 1;
+			continue;
+		}
+		const marker = data[offset + 1] ?? 0;
+		if (isJpegStartOfFrame(marker)) {
+			return { height: data.readUInt16BE(offset + 5), width: data.readUInt16BE(offset + 7) };
+		}
+		const segmentLength = data.readUInt16BE(offset + 2);
+		offset += 2 + segmentLength;
+	}
+	throw new Error("Failed to parse JPEG dimensions");
+}
+
+function isJpegStartOfFrame(marker: number): boolean {
+	return marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+}
+
 export async function getMacOSLogicalScreenSize(): Promise<{ width: number; height: number }> {
 	const finderSize = await getFinderDesktopBounds().catch(() => undefined);
 	if (finderSize !== undefined) {
@@ -302,6 +335,8 @@ export async function captureMacOSScreenshot(
 		readonly height: number;
 	},
 	windowId?: number,
+	format: "png" | "jpeg" = "png",
+	quality = 72,
 ): Promise<Buffer> {
 	if (!Number.isSafeInteger(targetSize.width) || !Number.isSafeInteger(targetSize.height)) {
 		throw new Error("requested screenshot dimensions must be integers");
@@ -319,14 +354,20 @@ export async function captureMacOSScreenshot(
 		return captured.data;
 	}
 
-	return captureWindowScreenshotViaCli(targetSize, windowId);
+	return captureWindowScreenshotViaCli(targetSize, windowId, format, quality);
 }
 
 async function captureWindowScreenshotViaCli(
 	targetSize: { readonly width: number; readonly height: number },
 	windowId: number,
+	format: "png" | "jpeg",
+	quality: number,
 ): Promise<Buffer> {
 	const captureCommand = `screencapture -x -o -l ${windowId} -t png "$tmp"`;
+	const resizeCommand =
+		format === "jpeg"
+			? 'sips -s format jpeg -s formatOptions "$4" -z "$2" "$1" "$tmp" --out "$out" >/dev/null'
+			: 'sips -z "$2" "$1" "$tmp" --out "$out" >/dev/null';
 	const script = [
 		"set -eu",
 		'tmp=$(mktemp "${TMPDIR:-/tmp}/macos-cua-shot.XXXXXX")',
@@ -335,12 +376,20 @@ async function captureWindowScreenshotViaCli(
 		"trap cleanup EXIT",
 		captureCommand,
 		'out=$(mktemp "${TMPDIR:-/tmp}/macos-cua-shot-resized.XXXXXX")',
-		'sips -z "$2" "$1" "$tmp" --out "$out" >/dev/null',
+		resizeCommand,
 		'cat "$out"',
 	].join("\n");
 	const result = await execFileAsync(
 		"sh",
-		["-c", script, "macos-cua-screenshot", String(targetSize.width), String(targetSize.height)],
+		[
+			"-c",
+			script,
+			"macos-cua-screenshot",
+			String(targetSize.width),
+			String(targetSize.height),
+			format,
+			String(Math.max(1, Math.min(100, Math.round(quality)))),
+		],
 		{
 			encoding: "buffer",
 			maxBuffer: SCREENSHOT_MAX_BUFFER_BYTES,
@@ -348,7 +397,7 @@ async function captureWindowScreenshotViaCli(
 		},
 	);
 	const data = execFileStdoutBuffer(result);
-	parsePngDimensions(data);
+	parseImageDimensions(data);
 	return data;
 }
 

@@ -30,6 +30,7 @@ const skyLightMock = vi.hoisted(() => ({
 }));
 
 vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
+vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/skylight.js", () => ({
 	activateWindowWithoutRaise: skyLightMock.activateWindowWithoutRaise,
 }));

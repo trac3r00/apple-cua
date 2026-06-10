@@ -50,4 +50,7 @@ export interface AppInfo {
 	bundleId: string;
 	pid: number;
 	isRunning: boolean;
+	isFrontmost?: boolean;
+	lastUsedDate?: string;
+	useCount?: number;
 }

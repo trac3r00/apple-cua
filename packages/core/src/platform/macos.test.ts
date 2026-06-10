@@ -167,8 +167,8 @@ describe("#given JXA application process output #when parsing running apps #then
 		);
 
 		expect(apps).toEqual([
-			{ name: "Finder", bundleId: "com.apple.finder", pid: 7, isActive: false, isRunning: true },
-			{ name: "Safari", bundleId: "com.apple.Safari", pid: 42, isActive: true, isRunning: true },
+			{ name: "Finder", bundleId: "com.apple.finder", pid: 7, isActive: false, isRunning: true, path: "" },
+			{ name: "Safari", bundleId: "com.apple.Safari", pid: 42, isActive: true, isRunning: true, path: "" },
 		]);
 	});
 });

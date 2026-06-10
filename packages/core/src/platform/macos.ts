@@ -15,6 +15,7 @@ import type {
 	ScrollOptions,
 	SelectTextOptions,
 } from "../types/index.js";
+import { type AppUsage, parseAppUsageBlocks } from "./app-usage.js";
 import { HostComputer, type HostComputerOptions } from "./host.js";
 import {
 	extractAccessibilityTree,
@@ -48,6 +49,7 @@ const DEFAULT_APP_STATE_SETTLE_MILLISECONDS = 300;
 
 export interface RunningAppInfo extends AppInfo {
 	readonly isActive: boolean;
+	readonly path: string;
 }
 
 export interface MacOSHostComputerOptions extends HostComputerOptions {
@@ -224,12 +226,20 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async listApps(): Promise<AppInfo[]> {
-		return (await getRunningMacOSApps()).map(({ bundleId, name, pid }) => ({
-			bundleId,
-			name,
-			pid,
-			isRunning: true,
-		}));
+		const running = await getRunningMacOSApps();
+		const usage = await collectAppUsage(running.map((app) => app.path).filter((path) => path.length > 0));
+		return running.map((app) => {
+			const appUsage = usage.get(app.path) ?? {};
+			return {
+				bundleId: app.bundleId,
+				name: app.name,
+				pid: app.pid,
+				isRunning: true,
+				isFrontmost: app.isActive,
+				...(appUsage.lastUsedDate !== undefined ? { lastUsedDate: appUsage.lastUsedDate } : {}),
+				...(appUsage.useCount !== undefined ? { useCount: appUsage.useCount } : {}),
+			};
+		});
 	}
 
 	async setValue(targetPid: number, elementIndex: number, value: string): Promise<void> {
@@ -340,6 +350,22 @@ async function captureWindowScreenshotViaCli(
 	const data = execFileStdoutBuffer(result);
 	parsePngDimensions(data);
 	return data;
+}
+
+async function collectAppUsage(paths: readonly string[]): Promise<Map<string, AppUsage>> {
+	if (paths.length === 0) {
+		return new Map();
+	}
+	try {
+		const result = await execFileAsync(
+			"mdls",
+			["-name", "kMDItemLastUsedDate", "-name", "kMDItemUseCount", ...paths],
+			{ encoding: "utf8", timeout: LIST_APPS_TIMEOUT_MILLISECONDS },
+		);
+		return parseAppUsageBlocks(execFileStdout(result), paths);
+	} catch {
+		return new Map(paths.map((path) => [path, {}]));
+	}
 }
 
 export async function getRunningMacOSApps(): Promise<RunningAppInfo[]> {
@@ -529,7 +555,13 @@ function parseRunningApp(value: unknown): RunningAppInfo {
 	const pid = numberField(value, "pid");
 	const bundleId = stringField(value, "bundleId");
 	const isActive = booleanField(value, "isActive");
-	return { name, pid, bundleId, isActive, isRunning: true };
+	const path = optionalStringField(value, "path");
+	return { name, pid, bundleId, isActive, isRunning: true, path };
+}
+
+function optionalStringField(record: Record<string, unknown>, key: string): string {
+	const value = record[key];
+	return typeof value === "string" ? value : "";
 }
 
 function stringField(record: Record<string, unknown>, key: string): string {
@@ -570,6 +602,13 @@ function readString(value) {
 		return "";
 	}
 }
+function readPath(process) {
+	try {
+		return process.file().posixPath();
+	} catch {
+		return "";
+	}
+}
 JSON.stringify(
 	systemEvents.applicationProcesses.whose({ backgroundOnly: false })()
 		.map((process) => ({
@@ -577,6 +616,7 @@ JSON.stringify(
 			bundleId: readString(process.bundleIdentifier),
 			pid: process.unixId(),
 			isActive: process.frontmost(),
+			path: readPath(process),
 		}))
 		.filter((app) => app.name.length > 0 && Number.isInteger(app.pid) && app.pid > 0 && app.bundleId.length > 0),
 );

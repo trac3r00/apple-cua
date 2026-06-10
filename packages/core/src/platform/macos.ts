@@ -8,6 +8,7 @@ import { resolveDisplayMetadata } from "../computer/display-metadata.js";
 import type { ComputerInterface, ScreenshotResult } from "../computer/interface.js";
 import { type ScreenshotViewport, resolveWindowScreenshotSize, screenRectToScreenshot } from "../computer/viewport.js";
 import type { AppApprovalStore } from "../permission/app-approval.js";
+import { blockedUrl, browserUrlScript, isBrowserBundle } from "../permission/url-blocklist.js";
 import type {
 	AppStateOptions,
 	DragOptions,
@@ -58,6 +59,7 @@ export interface MacOSHostComputerOptions extends HostComputerOptions {
 	defaultTargetPid?: number;
 	overlay?: PointerOverlay;
 	appApproval?: AppApprovalStore;
+	urlBlocklist?: readonly string[];
 }
 
 export class MacOSHostComputer extends HostComputer {
@@ -72,10 +74,12 @@ export class MacOSHostComputer extends HostComputer {
 	private readonly lastViewportByPid = new Map<number, ScreenshotViewport>();
 	private readonly lastAxTreeByPid = new Map<number, AXTreeElement[]>();
 	private readonly appApproval: AppApprovalStore | undefined;
+	private readonly urlBlocklist: readonly string[];
 
 	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
 		this.appApproval = options.appApproval;
+		this.urlBlocklist = options.urlBlocklist ?? [];
 		this.input = new MacOSInputController(
 			options.defaultTargetPid,
 			options.overlay ?? createCursorOverlay(),
@@ -169,6 +173,7 @@ export class MacOSHostComputer extends HostComputer {
 		const apps = await getRunningMacOSApps();
 		const app = resolveTargetApp(apps, targetPid);
 		this.assertAppApproved(app);
+		await this.assertBrowserUrlAllowed(app);
 		const targetWindow = await this.input.rememberTargetWindow(app.pid);
 		// Scope the screenshot to the target window at its own aspect ratio (capped),
 		// so the model sees an undistorted window image and coordinates invert cleanly.
@@ -216,6 +221,29 @@ export class MacOSHostComputer extends HostComputer {
 			...(appInstructions !== undefined ? { appInstructions } : {}),
 			...(windowBounds !== undefined ? { windowBounds } : {}),
 		};
+	}
+
+	private async assertBrowserUrlAllowed(app: RunningAppInfo): Promise<void> {
+		if (this.urlBlocklist.length === 0 || !isBrowserBundle(app.bundleId)) {
+			return;
+		}
+		const script = browserUrlScript(app.bundleId);
+		if (script === undefined) {
+			return;
+		}
+		let url: string;
+		try {
+			const result = await execFileAsync("osascript", ["-e", script], {
+				encoding: "utf8",
+				timeout: FINDER_DESKTOP_BOUNDS_TIMEOUT_MILLISECONDS,
+			});
+			url = execFileStdout(result).trim();
+		} catch {
+			return;
+		}
+		if (url.length > 0 && blockedUrl(url, this.urlBlocklist)) {
+			throw new Error(`Computer Use is not allowed on the current browser URL: ${url}`);
+		}
 	}
 
 	private assertAppApproved(app: RunningAppInfo): void {

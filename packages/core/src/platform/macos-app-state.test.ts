@@ -156,6 +156,27 @@ describe("#given an app-approval store #when an app is not approved #then get_ap
 	});
 });
 
+describe("#given a URL blocklist #when a browser is on a blocked URL #then get_app_state is refused", () => {
+	it("refuses Safari on a blocklisted URL", async () => {
+		childProcessMock.execFile.mockReset();
+		childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) =>
+			callback(
+				null,
+				JSON.stringify([{ name: "Safari", bundleId: "com.apple.Safari", pid: TARGET_PID, isActive: true }]),
+				"",
+			),
+		);
+		childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) =>
+			callback(null, "https://banking.example.com/login\n", ""),
+		);
+		const computer = new MacOSHostComputer({ urlBlocklist: ["*banking*"] });
+
+		await expect(computer.getAppState(TARGET_PID, { settleMs: 0 })).rejects.toThrow(
+			/not allowed on the current browser URL/,
+		);
+	});
+});
+
 describe("#given a noisy accessibility tree #when get_app_state runs #then non-descriptive nodes are pruned", () => {
 	it("drops AXUnknown noise while keeping descriptive elements", async () => {
 		accessibilityMock.extractAccessibilityTree.mockReturnValue({

@@ -30,6 +30,16 @@ export {
 } from "./computer/viewport.js";
 export { type AppApprovalDecision, AppApprovalStore } from "./permission/app-approval.js";
 export { type LockScreenMonitorCallbacks, LockScreenMonitor } from "./platform/lock-screen-monitor.js";
+export {
+	type PassiveMemoryConfig,
+	type PassiveMemoryContext,
+	shouldRecord,
+} from "./passive-memory/exclusion-policy.js";
+export {
+	type SegmentSink,
+	PassiveMemorySegmentWriter,
+	fileSegmentSink,
+} from "./passive-memory/segment-writer.js";
 export type { PermissionInterface, PermissionKind, PermissionStatus } from "./permission/interface.js";
 export { MacOSPermissions } from "./permission/macos.js";
 export { CloudComputer, type CloudComputerOptions } from "./platform/cloud.js";

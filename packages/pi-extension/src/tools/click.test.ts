@@ -45,6 +45,8 @@ function createComputer(): ComputerInterface {
 			screenshotBase64: "",
 			screenshotWidth: 100,
 			screenshotHeight: 80,
+			screenshotMimeType: "image/jpeg",
+			display: { width: 100, height: 80, scaleFactor: 1 },
 		}),
 		getScreenshotViewport: vi
 			.fn<ComputerInterface["getScreenshotViewport"]>()
@@ -58,6 +60,7 @@ function createComputer(): ComputerInterface {
 			.fn<ComputerInterface["listApps"]>()
 			.mockResolvedValue([{ name: "Finder", bundleId: "com.apple.finder", pid: 1234, isRunning: true }]),
 		setValue: vi.fn<ComputerInterface["setValue"]>(),
+		selectText: vi.fn<ComputerInterface["selectText"]>().mockResolvedValue(undefined),
 		performAction: vi.fn<ComputerInterface["performAction"]>().mockResolvedValue(undefined),
 		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>().mockResolvedValue(false),
 		typeIntoFocused: vi.fn<ComputerInterface["typeIntoFocused"]>().mockResolvedValue(false),
@@ -145,6 +148,24 @@ describe("#given click tool #when executed #then target app receives coordinates
 
 		expect(pressAtPosition).toHaveBeenCalledWith(1234, { x: 42, y: 17 });
 		expect(computer.click).toHaveBeenCalledWith({ x: 42, y: 17 });
+	});
+
+	it("reports the virtual pointer position before and after the click", async () => {
+		const computer = createComputer();
+		vi.spyOn(computer, "getCursorPosition")
+			.mockResolvedValueOnce({ x: 11, y: 22 })
+			.mockResolvedValueOnce({ x: 33, y: 44 });
+		const tool = createClickTool(computer);
+
+		const result = await tool.execute(
+			"tool-call",
+			{ app: "Finder", element_index: "5" },
+			undefined,
+			undefined,
+			{} as ExtensionContext,
+		);
+
+		expect(result.details).toEqual({ cursorBefore: { x: 11, y: 22 }, cursorAfter: { x: 33, y: 44 } });
 	});
 
 	it("presses the AX element click_count times for repeated activations", async () => {

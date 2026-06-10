@@ -1,5 +1,6 @@
 import {
 	type ComputerInterface,
+	type Point,
 	clickPoint,
 	parseElementIndex,
 	pressElement,
@@ -10,7 +11,7 @@ import {
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
-import { actionCompleteResult } from "./result.js";
+import { actionCompleteResult, actionCompleteWithCursor } from "./result.js";
 
 const MouseButton = Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("middle")]);
 
@@ -37,33 +38,55 @@ export function createClickTool(computer: ComputerInterface): ToolDefinition {
 		async execute(_toolCallId, params) {
 			const targetPid = await resolveAppPid(computer, params.app);
 			const pressCount = Math.max(1, Math.trunc(params.click_count ?? 1));
-			if (params.element_index !== undefined) {
-				const index = parseElementIndex(params.element_index);
-				for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
-					await pressElement(computer, targetPid, index);
-				}
-				void params.mouse_button;
-				return actionCompleteResult();
+			const cursorBefore = await readPointerPosition(computer);
+			await dispatchClick(computer, targetPid, params, pressCount);
+			const cursorAfter = await readPointerPosition(computer);
+			if (cursorBefore !== undefined && cursorAfter !== undefined) {
+				return actionCompleteWithCursor(cursorBefore, cursorAfter);
 			}
-			const point = await resolveScreenPoint(computer, targetPid, parseCoordinate(params.x, params.y));
-			if ((params.mouse_button ?? "left") === "left") {
-				let pressedAll = true;
-				for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
-					if (!(await computer.pressAtPosition(targetPid, point))) {
-						pressedAll = false;
-						break;
-					}
-				}
-				if (pressedAll) {
-					return actionCompleteResult();
-				}
-			}
-			await withTargetedApp(computer, targetPid, async () => {
-				await clickPoint(computer, point, params.mouse_button ?? "left", pressCount);
-			});
 			return actionCompleteResult();
 		},
 	});
+}
+
+async function dispatchClick(
+	computer: ComputerInterface,
+	targetPid: number,
+	params: ClickInput,
+	pressCount: number,
+): Promise<void> {
+	if (params.element_index !== undefined) {
+		const index = parseElementIndex(params.element_index);
+		for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
+			await pressElement(computer, targetPid, index);
+		}
+		void params.mouse_button;
+		return;
+	}
+	const point = await resolveScreenPoint(computer, targetPid, parseCoordinate(params.x, params.y));
+	if ((params.mouse_button ?? "left") === "left") {
+		let pressedAll = true;
+		for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
+			if (!(await computer.pressAtPosition(targetPid, point))) {
+				pressedAll = false;
+				break;
+			}
+		}
+		if (pressedAll) {
+			return;
+		}
+	}
+	await withTargetedApp(computer, targetPid, async () => {
+		await clickPoint(computer, point, params.mouse_button ?? "left", pressCount);
+	});
+}
+
+async function readPointerPosition(computer: Pick<ComputerInterface, "getCursorPosition">): Promise<Point | undefined> {
+	try {
+		return await computer.getCursorPosition();
+	} catch {
+		return undefined;
+	}
 }
 
 function parseCoordinate(x: number | undefined, y: number | undefined): { x: number; y: number } {

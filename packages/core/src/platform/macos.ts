@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { diffAxTrees } from "../accessibility/diff.js";
+import { diffAxTreesByKey } from "../accessibility/diff.js";
 import { normalizeAxTree } from "../accessibility/normalize.js";
 import type { AXTreeElement, AppInfo, AppState, DisplayInfo } from "../accessibility/types.js";
 import { resolveAppInstructions } from "../app-instructions/index.js";
@@ -197,7 +197,7 @@ export class MacOSHostComputer extends HostComputer {
 		}
 		elements = normalizeAxTree(elements);
 		const previousTree = this.lastAxTreeByPid.get(app.pid);
-		const axChangeSummary = previousTree === undefined ? undefined : diffAxTrees(previousTree, elements);
+		const axChangeSummary = previousTree === undefined ? undefined : diffAxTreesByKey(previousTree, elements);
 		this.lastAxTreeByPid.set(app.pid, elements);
 
 		return {

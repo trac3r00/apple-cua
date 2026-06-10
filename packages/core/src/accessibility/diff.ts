@@ -1,6 +1,32 @@
+import { stableElementKey } from "./stable-element-key.js";
 import type { AXTreeElement, AxTreeChangeSummary } from "./types.js";
 
 export type { AxTreeChangeSummary };
+
+export function diffAxTreesByKey(
+	previous: readonly AXTreeElement[],
+	current: readonly AXTreeElement[],
+): AxTreeChangeSummary {
+	const previousByKey = new Map(previous.map((element) => [stableElementKey(element), element]));
+	const currentByKey = new Map(current.map((element) => [stableElementKey(element), element]));
+	let added = 0;
+	let changed = 0;
+	for (const [key, element] of currentByKey) {
+		const prior = previousByKey.get(key);
+		if (prior === undefined) {
+			added += 1;
+		} else if ((prior.value ?? "") !== (element.value ?? "")) {
+			changed += 1;
+		}
+	}
+	let removed = 0;
+	for (const key of previousByKey.keys()) {
+		if (!currentByKey.has(key)) {
+			removed += 1;
+		}
+	}
+	return { added, removed, changed };
+}
 
 export function diffAxTrees(
 	previous: readonly AXTreeElement[],

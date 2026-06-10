@@ -257,6 +257,20 @@ describe("#given MacOSInputController target routing", () => {
 		expect(overlay.close).toHaveBeenCalledOnce();
 	});
 
+	it("#when the screen is locked #then input is refused and no event is posted", async () => {
+		// given
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
+		]);
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(1234, { set: vi.fn(), hide: vi.fn(), close: vi.fn() }, () => true);
+
+		// when/then
+		await expect(controller.click({ x: 50, y: 70 })).rejects.toThrow(/Mac is locked/);
+		expect(coreGraphicsMock.postMouseEvent).not.toHaveBeenCalled();
+		controller.close();
+	});
+
 	it("#when no action has happened #then getCursorPosition seeds from the real cursor", async () => {
 		// given
 		const { MacOSInputController } = await import("./macos-input.js");

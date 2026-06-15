@@ -136,7 +136,7 @@ describe("#given baseline regression suite #when exercising computer interface #
 				context,
 			);
 
-			expect(computer.scroll).not.toHaveBeenCalled();
+			expect(computer.scroll).toHaveBeenCalledWith({ direction: "down", amount: 50 });
 			expect(computer.performAction).toHaveBeenCalledTimes(5);
 			expect(computer.performAction).toHaveBeenNthCalledWith(1, 1234, 3, "AXScrollDownByPage");
 		});

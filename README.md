@@ -9,7 +9,7 @@ Native macOS computer-use control, designed for the OpenAI computer-use action v
 
 OpenAI Codex Computer Use is fast because it runs on the host with macOS-native APIs (ScreenCaptureKit, CoreGraphics, local MCP stdio). By contrast, [trycua/cua](https://github.com/trycua/cua) is portable but slow because of the multi-hop VM/HTTP/PIL pipeline: Python agent loop, 500 ms post-action screenshot delay, HTTP/WebSocket JSON to a guest FastAPI server, PIL encode, base64 SSE, client decode/re-encode. Codex removes the VM boundary and repeated image serialization; cua keeps it for sandbox isolation.
 
-`macos-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same app-oriented `list_apps / get_app_state / click / type_text / press_key / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs: `screencapture`/`sips` for screenshot capture, `koffi`-bound CoreGraphics for global input, Accessibility for app state/actions, and SkyLight/AppKit FFI for app-targeted window sessions. No Docker, no QEMU, no VNC, no helper binary, no cloud API key.
+`macos-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same app-oriented `list_apps / get_app_state / click / type_text / press_keys / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs: `screencapture`/`sips` for screenshot capture, `koffi`-bound CoreGraphics for global input, Accessibility for app state/actions, and SkyLight/AppKit FFI for app-targeted window sessions. No Docker, no QEMU, no VNC, no helper binary, no cloud API key.
 
 The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-comparison.md). If you need strong VM isolation, use cua. If you need low-latency host-native control, use this.
 
@@ -176,7 +176,7 @@ The extension also registers Codex-compatible Computer Use tools:
 | `drag` | Drag between screenshot coordinates |
 | `scroll` | Scroll an app by pages |
 | `type_text` | Type literal text |
-| `press_key` | Press a key or key chord |
+| `press_keys` | Press keys or key chords, with optional hold and interval timing |
 
 The extension default-exports a pi extension factory and keeps these tools available even when native computer-use auto-activation is disabled.
 

@@ -16,6 +16,9 @@ export async function selectSystemEventsTargetWindow(
 	pid: number,
 	position?: Point,
 ): Promise<SkyLightTargetWindow | undefined> {
+	if (windows.length === 0) {
+		return undefined;
+	}
 	const boundsList = await systemEventsWindowBounds(pid);
 	const matchedBounds =
 		position === undefined

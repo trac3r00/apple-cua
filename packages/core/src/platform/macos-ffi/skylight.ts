@@ -12,6 +12,10 @@ export interface SkyLightTargetWindow {
 	};
 }
 
+export interface FocusRestoreToken {
+	readonly previousPsn: Buffer;
+}
+
 const skyLight = koffi.load("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight");
 const coreGraphics = koffi.load("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics");
 const objc = koffi.load("/usr/lib/libobjc.A.dylib");
@@ -46,6 +50,12 @@ const _SLPSGetFrontProcess = skyLight.func("_SLPSGetFrontProcess", "int32_t", ["
 	(psn: Buffer) => number
 >;
 
+const SLPSSetFrontProcessWithOptions = skyLight.func("SLPSSetFrontProcessWithOptions", "int32_t", [
+	"void *",
+	"uint32_t",
+	"uint32_t",
+]) as KoffiFunc<(psn: Buffer, windowId: number, options: number) => number>;
+
 const SLSGetWindowOwner = skyLight.func("SLSGetWindowOwner", "int32_t", [
 	"uint32_t",
 	"uint32_t",
@@ -74,6 +84,7 @@ const objcMsgSendAuthenticationMessage = objc.func("objc_msgSend", "void *", [
 
 const authenticationMessageClass = objcGetClass("SLSEventAuthenticationMessage");
 const authenticationMessageSelector = selRegisterName("messageWithEventRecord:pid:version:");
+const K_CPS_NO_WINDOWS = 0x400;
 
 export function postSkyLightEventToPid(pid: number, event: CGEventRef): void {
 	SLEventPostToPid(pid, event);
@@ -118,6 +129,32 @@ export function activateWindowWithoutRaise(window: SkyLightTargetWindow): boolea
 	record[0x8a] = 0x01;
 	const focused = SLPSPostEventRecordTo(targetPsn, record) === 0;
 	return defocused && focused;
+}
+
+export function beginFocusWithoutRaise(window: SkyLightTargetWindow): FocusRestoreToken | null {
+	const previousPsn = Buffer.alloc(8);
+	if (_SLPSGetFrontProcess(previousPsn) !== 0) {
+		return null;
+	}
+
+	const targetPsn = processSerialNumberForWindow(window.id);
+	if (targetPsn === null) {
+		return null;
+	}
+
+	const record = Buffer.alloc(0xf8);
+	record[0x04] = 0xf8;
+	record[0x08] = 0x0d;
+	record.writeUInt32LE(window.id, 0x3c);
+	record[0x8a] = 0x02;
+	const defocused = SLPSPostEventRecordTo(previousPsn, record) === 0;
+	record[0x8a] = 0x01;
+	const focused = SLPSPostEventRecordTo(targetPsn, record) === 0;
+	return defocused && focused ? { previousPsn } : null;
+}
+
+export function restoreFrontProcessNoWindows(token: FocusRestoreToken): boolean {
+	return SLPSSetFrontProcessWithOptions(token.previousPsn, 0, K_CPS_NO_WINDOWS) === 0;
 }
 
 export function postCoreGraphicsEventToWindowOwner(window: SkyLightTargetWindow, event: CGEventRef): boolean {

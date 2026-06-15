@@ -155,7 +155,7 @@ export function postMouseEvent(options: MouseEventOptions): void {
 			return;
 		}
 		stampTargetedMouseEvent(event, options.targetPid, options.position, options.targetWindow);
-		postTargetedMouseWithoutWarpingRealCursor(event, options.targetPid, options.targetWindow);
+		postMouse(event, options.targetPid, options.targetWindow);
 	} finally {
 		cfRelease(event);
 	}
@@ -205,6 +205,10 @@ export function getCurrentCursorPosition(): CGPoint {
 	} finally {
 		cfRelease(event);
 	}
+}
+
+export function warpCursorPosition(position: CGPoint): void {
+	CGWarpMouseCursorPosition(position);
 }
 
 function createEventSource(): CGEventSourceRef {
@@ -276,19 +280,6 @@ function stampEvent(event: CGEventRef): void {
 	CGEventSetTimestamp(event, currentUptimeNanoseconds());
 }
 
-function postTargetedMouseWithoutWarpingRealCursor(
-	event: CGEventRef,
-	targetPid: number,
-	targetWindow: SkyLightTargetWindow | undefined,
-): void {
-	const savedCursor = getCurrentCursorPosition();
-	try {
-		postMouse(event, targetPid, targetWindow);
-	} finally {
-		CGWarpMouseCursorPosition(savedCursor);
-	}
-}
-
 function postMouse(
 	event: CGEventRef,
 	targetPid: number | undefined,
@@ -302,7 +293,6 @@ function postMouse(
 		throw new Error("targeted mouse input requires a target window from get_app_state or a visible app window");
 	}
 	postSkyLightEventToPid(targetPid, event);
-	postCoreGraphicsEventToWindowOwner(targetWindow, event);
 }
 
 function postKeyboard(

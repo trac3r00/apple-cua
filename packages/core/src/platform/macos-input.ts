@@ -1,4 +1,3 @@
-import { setTimeout as sleep } from "node:timers/promises";
 import { openWindows } from "get-windows";
 import { assertScreenUnlocked } from "../computer/lock-guard.js";
 import { VirtualPointer } from "../computer/virtual-pointer.js";
@@ -15,11 +14,17 @@ import { NOOP_POINTER_OVERLAY, type PointerOverlay } from "./macos-ffi/cursor-ov
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";
 import { type DisplaySleepAssertion, NOOP_DISPLAY_SLEEP } from "./macos-ffi/power.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
+import {
+	type MousePost,
+	postClick,
+	postDoubleClick,
+	postDragSequence,
+	runFocusLeasedClick,
+	runFocusLeasedDoubleClick,
+	runFocusLeasedDrag,
+} from "./macos-input-pointer.js";
 import { modifierFlags, virtualKeyCodeFor } from "./macos-keycodes.js";
 import { selectVisibleTargetWindow } from "./macos-window-target.js";
-
-const DEFAULT_DRAG_FRAME_MILLISECONDS = 16;
-const MAX_DRAG_STEPS = 60;
 
 export class MacOSInputController {
 	private targetPid: number | undefined;
@@ -29,6 +34,10 @@ export class MacOSInputController {
 	private readonly pointer: VirtualPointer;
 	private readonly isLocked: () => boolean;
 	private readonly displaySleep: DisplaySleepAssertion;
+	private gestureChain: Promise<void> = Promise.resolve();
+	private readonly postMouse: MousePost = async (kind, position, button, clickState, targetWindow) => {
+		postMouseEvent({ kind, position, button, clickState, targetPid: this.targetPid, targetWindow });
+	};
 
 	constructor(
 		targetPid?: number,
@@ -46,6 +55,15 @@ export class MacOSInputController {
 	private beforeInput(): void {
 		assertScreenUnlocked(this.isLocked());
 		this.displaySleep.acquire();
+	}
+
+	private serialize<T>(run: () => Promise<T>): Promise<T> {
+		const result = this.gestureChain.then(run, run);
+		this.gestureChain = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		return result;
 	}
 
 	setTarget(pid?: number): void {
@@ -77,31 +95,37 @@ export class MacOSInputController {
 	}
 
 	async click(position: Point, button: MouseButton = "left"): Promise<void> {
-		this.beforeInput();
-		const targetWindow = await this.targetWindow(position);
-		this.requirePointerWindow(targetWindow);
-		this.lastTargetWindow = targetWindow;
-		if (this.targetPid === undefined) {
-			await this.move(position);
-		}
-		await this.postMouse("down", position, button, 1, targetWindow);
-		await this.postMouse("up", position, button, 1, targetWindow);
-		this.markPointer(position);
+		await this.serialize(async () => {
+			this.beforeInput();
+			const targetWindow = await this.targetWindow(position);
+			this.requirePointerWindow(targetWindow);
+			this.lastTargetWindow = targetWindow;
+			if (this.targetPid === undefined) {
+				await this.move(position);
+				await postClick(this.postMouse, position, button, 1, targetWindow);
+				this.markPointer(position);
+			} else if (targetWindow !== undefined) {
+				await runFocusLeasedClick(targetWindow, position, button, this.postMouse);
+				this.markPointer(position);
+			}
+		});
 	}
 
 	async doubleClick(position: Point): Promise<void> {
-		this.beforeInput();
-		const targetWindow = await this.targetWindow(position);
-		this.requirePointerWindow(targetWindow);
-		this.lastTargetWindow = targetWindow;
-		if (this.targetPid === undefined) {
-			await this.move(position);
-		}
-		await this.postMouse("down", position, "left", 1, targetWindow);
-		await this.postMouse("up", position, "left", 1, targetWindow);
-		await this.postMouse("down", position, "left", 2, targetWindow);
-		await this.postMouse("up", position, "left", 2, targetWindow);
-		this.markPointer(position);
+		await this.serialize(async () => {
+			this.beforeInput();
+			const targetWindow = await this.targetWindow(position);
+			this.requirePointerWindow(targetWindow);
+			this.lastTargetWindow = targetWindow;
+			if (this.targetPid === undefined) {
+				await this.move(position);
+				await postDoubleClick(this.postMouse, position, targetWindow);
+				this.markPointer(position);
+			} else if (targetWindow !== undefined) {
+				await runFocusLeasedDoubleClick(targetWindow, position, this.postMouse);
+				this.markPointer(position);
+			}
+		});
 	}
 
 	async typeText(text: string): Promise<void> {
@@ -156,28 +180,20 @@ export class MacOSInputController {
 	}
 
 	async drag(options: DragOptions): Promise<void> {
-		this.beforeInput();
-		const targetWindow = await this.targetWindow(options.from);
-		this.requirePointerWindow(targetWindow);
-		this.lastTargetWindow = targetWindow;
-		if (this.targetPid === undefined) {
-			await this.move(options.from);
-		}
-		await this.postMouse("down", options.from, "left", 1, targetWindow);
-
-		const duration = options.duration ?? 0;
-		const steps = dragSteps(duration);
-		const delay = steps <= 1 ? 0 : duration / steps;
-		for (let step = 1; step <= steps; step += 1) {
-			const position = interpolatePoint(options.from, options.to, step / steps);
-			await this.postMouse("drag", position, "left", 1, targetWindow);
-			if (delay > 0 && step < steps) {
-				await sleep(delay);
+		await this.serialize(async () => {
+			this.beforeInput();
+			const targetWindow = await this.targetWindow(options.from);
+			this.requirePointerWindow(targetWindow);
+			this.lastTargetWindow = targetWindow;
+			if (this.targetPid === undefined) {
+				await this.move(options.from);
+				await postDragSequence(this.postMouse, options, targetWindow);
+				this.markPointer(options.to);
+			} else if (targetWindow !== undefined) {
+				await runFocusLeasedDrag(targetWindow, options, this.postMouse);
+				this.markPointer(options.to);
 			}
-		}
-
-		await this.postMouse("up", options.to, "left", 1, targetWindow);
-		this.markPointer(options.to);
+		});
 	}
 
 	getCursorPosition(): Point {
@@ -192,16 +208,6 @@ export class MacOSInputController {
 	private markPointer(position: Point): void {
 		this.pointer.moveTo(position);
 		this.overlay.set(position);
-	}
-
-	private async postMouse(
-		kind: "move" | "down" | "up" | "drag",
-		position: Point,
-		button: MouseButton,
-		clickState: number | undefined,
-		targetWindow: SkyLightTargetWindow | undefined,
-	): Promise<void> {
-		postMouseEvent({ kind, position, button, clickState, targetPid: this.targetPid, targetWindow });
 	}
 
 	private async targetWindow(position: Point): Promise<SkyLightTargetWindow | undefined> {
@@ -252,18 +258,4 @@ function readRealCursorPosition(): Point {
 	} catch {
 		return { x: 0, y: 0 };
 	}
-}
-
-function dragSteps(duration: number): number {
-	if (duration <= 0) {
-		return 1;
-	}
-	return Math.max(1, Math.min(MAX_DRAG_STEPS, Math.ceil(duration / DEFAULT_DRAG_FRAME_MILLISECONDS)));
-}
-
-function interpolatePoint(from: Point, to: Point, progress: number): Point {
-	return {
-		x: Math.round(from.x + (to.x - from.x) * progress),
-		y: Math.round(from.y + (to.y - from.y) * progress),
-	};
 }

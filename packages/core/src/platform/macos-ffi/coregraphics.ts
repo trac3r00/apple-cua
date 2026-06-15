@@ -155,7 +155,7 @@ export function postMouseEvent(options: MouseEventOptions): void {
 			return;
 		}
 		stampTargetedMouseEvent(event, options.targetPid, options.position, options.targetWindow);
-		postMouse(event, options.targetPid, options.targetWindow);
+		postTargetedMouseWithoutWarpingRealCursor(event, options.targetPid, options.targetWindow);
 	} finally {
 		cfRelease(event);
 	}
@@ -205,10 +205,6 @@ export function getCurrentCursorPosition(): CGPoint {
 	} finally {
 		cfRelease(event);
 	}
-}
-
-export function warpCursorPosition(position: CGPoint): void {
-	CGWarpMouseCursorPosition(position);
 }
 
 function createEventSource(): CGEventSourceRef {
@@ -278,6 +274,19 @@ function createScrollEvent(deltaX: number, deltaY: number): CGEventRef {
 
 function stampEvent(event: CGEventRef): void {
 	CGEventSetTimestamp(event, currentUptimeNanoseconds());
+}
+
+function postTargetedMouseWithoutWarpingRealCursor(
+	event: CGEventRef,
+	targetPid: number,
+	targetWindow: SkyLightTargetWindow | undefined,
+): void {
+	const savedCursor = getCurrentCursorPosition();
+	try {
+		postMouse(event, targetPid, targetWindow);
+	} finally {
+		CGWarpMouseCursorPosition(savedCursor);
+	}
 }
 
 function postMouse(

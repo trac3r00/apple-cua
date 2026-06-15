@@ -10,17 +10,16 @@ import {
 	postMouseEvent,
 	postScrollEvent,
 	postUnicodeText,
-	warpCursorPosition,
 } from "./macos-ffi/coregraphics.js";
 import { NOOP_POINTER_OVERLAY, type PointerOverlay } from "./macos-ffi/cursor-overlay.js";
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";
 import { type DisplaySleepAssertion, NOOP_DISPLAY_SLEEP } from "./macos-ffi/power.js";
-import { type SkyLightTargetWindow, activateWindowWithoutRaise } from "./macos-ffi/skylight.js";
-import { dragSteps, interpolatePoint, readRealCursorPosition } from "./macos-input-drag.js";
+import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
 import { modifierFlags, virtualKeyCodeFor } from "./macos-keycodes.js";
 import { selectVisibleTargetWindow } from "./macos-window-target.js";
 
-const ACTIVATION_SETTLE_MILLISECONDS = 50;
+const DEFAULT_DRAG_FRAME_MILLISECONDS = 16;
+const MAX_DRAG_STEPS = 60;
 
 export class MacOSInputController {
 	private targetPid: number | undefined;
@@ -82,19 +81,11 @@ export class MacOSInputController {
 		const targetWindow = await this.targetWindow(position);
 		this.requirePointerWindow(targetWindow);
 		this.lastTargetWindow = targetWindow;
-		const savedCursor = this.targetPid !== undefined ? getCurrentCursorPosition() : undefined;
 		if (this.targetPid === undefined) {
 			await this.move(position);
-		} else if (targetWindow !== undefined) {
-			activateWindowWithoutRaise(targetWindow);
-			await sleep(ACTIVATION_SETTLE_MILLISECONDS);
-			await this.postMouse("move", position, "left", undefined, targetWindow);
 		}
 		await this.postMouse("down", position, button, 1, targetWindow);
 		await this.postMouse("up", position, button, 1, targetWindow);
-		if (savedCursor !== undefined) {
-			warpCursorPosition(savedCursor);
-		}
 		this.markPointer(position);
 	}
 
@@ -103,21 +94,13 @@ export class MacOSInputController {
 		const targetWindow = await this.targetWindow(position);
 		this.requirePointerWindow(targetWindow);
 		this.lastTargetWindow = targetWindow;
-		const savedCursor = this.targetPid !== undefined ? getCurrentCursorPosition() : undefined;
 		if (this.targetPid === undefined) {
 			await this.move(position);
-		} else if (targetWindow !== undefined) {
-			activateWindowWithoutRaise(targetWindow);
-			await sleep(ACTIVATION_SETTLE_MILLISECONDS);
-			await this.postMouse("move", position, "left", undefined, targetWindow);
 		}
 		await this.postMouse("down", position, "left", 1, targetWindow);
 		await this.postMouse("up", position, "left", 1, targetWindow);
 		await this.postMouse("down", position, "left", 2, targetWindow);
 		await this.postMouse("up", position, "left", 2, targetWindow);
-		if (savedCursor !== undefined) {
-			warpCursorPosition(savedCursor);
-		}
 		this.markPointer(position);
 	}
 
@@ -177,13 +160,8 @@ export class MacOSInputController {
 		const targetWindow = await this.targetWindow(options.from);
 		this.requirePointerWindow(targetWindow);
 		this.lastTargetWindow = targetWindow;
-		const savedCursor = this.targetPid !== undefined ? getCurrentCursorPosition() : undefined;
 		if (this.targetPid === undefined) {
 			await this.move(options.from);
-		} else if (targetWindow !== undefined) {
-			activateWindowWithoutRaise(targetWindow);
-			await sleep(ACTIVATION_SETTLE_MILLISECONDS);
-			await this.postMouse("move", options.from, "left", undefined, targetWindow);
 		}
 		await this.postMouse("down", options.from, "left", 1, targetWindow);
 
@@ -199,9 +177,6 @@ export class MacOSInputController {
 		}
 
 		await this.postMouse("up", options.to, "left", 1, targetWindow);
-		if (savedCursor !== undefined) {
-			warpCursorPosition(savedCursor);
-		}
 		this.markPointer(options.to);
 	}
 
@@ -268,4 +243,27 @@ export class MacOSInputController {
 		this.lastTargetWindow = targetWindow;
 		return this.lastTargetWindow;
 	}
+}
+
+function readRealCursorPosition(): Point {
+	try {
+		const position = getCurrentCursorPosition();
+		return { x: Math.round(position.x), y: Math.round(position.y) };
+	} catch {
+		return { x: 0, y: 0 };
+	}
+}
+
+function dragSteps(duration: number): number {
+	if (duration <= 0) {
+		return 1;
+	}
+	return Math.max(1, Math.min(MAX_DRAG_STEPS, Math.ceil(duration / DEFAULT_DRAG_FRAME_MILLISECONDS)));
+}
+
+function interpolatePoint(from: Point, to: Point, progress: number): Point {
+	return {
+		x: Math.round(from.x + (to.x - from.x) * progress),
+		y: Math.round(from.y + (to.y - from.y) * progress),
+	};
 }

@@ -1,6 +1,6 @@
 import type { KoffiFunc } from "koffi";
 import { cfRetain } from "./corefoundation.js";
-import type { CGEventRef, CGPoint } from "./coregraphics.js";
+import type { CGEventRef, CGPoint } from "./coregraphics-types.js";
 import { koffi } from "./koffi.js";
 
 const appKit = koffi.load("/System/Library/Frameworks/AppKit.framework/AppKit");

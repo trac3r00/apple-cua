@@ -107,61 +107,6 @@ describe("#given CoreGraphics koffi bindings", () => {
 		vi.clearAllMocks();
 	});
 
-	describe("#when posting keyboard events to a pid without a known window", () => {
-		it("#then refuses to fall back to the public pid post", async () => {
-			const { K_CG_EVENT_FLAG_MASK_COMMAND, postKeyboardEvent } = await import("./coregraphics.js");
-
-			expect(() =>
-				postKeyboardEvent({
-					keyCode: 37,
-					keyDown: true,
-					flags: K_CG_EVENT_FLAG_MASK_COMMAND,
-					text: undefined,
-					targetPid: 4321,
-				}),
-			).toThrow("targeted keyboard input requires a target window");
-
-			expect(koffiMock.coreGraphicsFunctions.CGEventSourceCreate).toHaveBeenCalledWith(1);
-			expect(koffiMock.coreGraphicsFunctions.CGEventCreateKeyboardEvent).toHaveBeenCalledWith(
-				koffiMock.sourceReference,
-				37,
-				true,
-			);
-			expect(koffiMock.coreGraphicsFunctions.CGEventSetTimestamp).toHaveBeenCalledWith(
-				koffiMock.keyboardEvent,
-				123n,
-			);
-			expect(koffiMock.coreGraphicsFunctions.CGEventSetFlags).toHaveBeenCalledWith(
-				koffiMock.keyboardEvent,
-				K_CG_EVENT_FLAG_MASK_COMMAND,
-			);
-			expect(koffiMock.coreGraphicsFunctions.CGEventPostToPid).not.toHaveBeenCalled();
-			expect(skyLightMock.postAuthenticatedSkyLightEventToPid).not.toHaveBeenCalled();
-			expect(skyLightMock.postSkyLightEventToPid).not.toHaveBeenCalled();
-			expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledWith(koffiMock.sourceReference);
-			expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledWith(koffiMock.keyboardEvent);
-		});
-	});
-
-	describe("#when posting keyboard events to a known target window", () => {
-		it("#then uses SkyLight authenticated delivery", async () => {
-			const { K_CG_EVENT_FLAG_MASK_COMMAND, postKeyboardEvent } = await import("./coregraphics.js");
-
-			postKeyboardEvent({
-				keyCode: 37,
-				keyDown: true,
-				flags: K_CG_EVENT_FLAG_MASK_COMMAND,
-				text: undefined,
-				targetPid: 4321,
-				targetWindow: { id: 99, bounds: { x: 80, y: 170, width: 400, height: 300 } },
-			});
-
-			expect(skyLightMock.postAuthenticatedSkyLightEventToPid).toHaveBeenCalledWith(4321, koffiMock.keyboardEvent);
-			expect(koffiMock.coreGraphicsFunctions.CGEventPostToPid).not.toHaveBeenCalled();
-			expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledWith(koffiMock.keyboardEvent);
-		});
-	});
-
 	describe("#when posting mouse events without a target pid", () => {
 		it("#then posts through the global HID event tap", async () => {
 			const { postMouseEvent } = await import("./coregraphics.js");

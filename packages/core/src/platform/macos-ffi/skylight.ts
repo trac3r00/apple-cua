@@ -1,5 +1,5 @@
 import type { KoffiFunc } from "koffi";
-import type { CGEventRef, CGPoint } from "./coregraphics.js";
+import type { CGEventRef, CGPoint } from "./coregraphics-types.js";
 import { koffi } from "./koffi.js";
 
 export interface SkyLightTargetWindow {

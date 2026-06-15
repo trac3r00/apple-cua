@@ -115,6 +115,13 @@ function actionComplete(): ToolResult {
 	return textResult("Action completed. Call `get_app_state` to fetch the updated UI state.");
 }
 
+// A dispatched click is fire-and-forget and can silently miss; every click result must instruct the model to verify and retry.
+function clickComplete(): ToolResult {
+	return textResult(
+		"Action completed. Call `get_app_state` to fetch the updated UI state. The click was dispatched but may not have registered on the target. ALWAYS confirm by calling `get_app_state`: if the accessibility tree did not change (axChangeSummary 0/0/0), the click most likely missed — retry it once, or use `element_index` for a reliable accessibility press.",
+	);
+}
+
 export function createMcpServer(computer: ComputerInterface = new MacOSHostComputer()): McpServer {
 	const server = new McpServer(SERVER_INFO);
 
@@ -168,7 +175,7 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 					await pressElement(computer, targetPid, index);
 				}
 				void mouse_button;
-				return actionComplete();
+				return clickComplete();
 			}
 			const point = await resolveScreenPoint(computer, targetPid, parseCoordinate(x, y));
 			if ((mouse_button ?? "left") === "left") {
@@ -180,13 +187,13 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 					}
 				}
 				if (pressedAll) {
-					return actionComplete();
+					return clickComplete();
 				}
 			}
 			await withTargetedApp(computer, targetPid, async () => {
 				await clickPoint(computer, point, mouse_button ?? "left", pressCount);
 			});
-			return actionComplete();
+			return clickComplete();
 		},
 	);
 

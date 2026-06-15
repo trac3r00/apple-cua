@@ -11,7 +11,7 @@ import {
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
-import { actionCompleteResult, actionCompleteWithCursor } from "./result.js";
+import { clickCompleteResult, clickCompleteWithCursor } from "./result.js";
 
 const MouseButton = Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("middle")]);
 
@@ -42,9 +42,9 @@ export function createClickTool(computer: ComputerInterface): ToolDefinition {
 			await dispatchClick(computer, targetPid, params, pressCount);
 			const cursorAfter = await readPointerPosition(computer);
 			if (cursorBefore !== undefined && cursorAfter !== undefined) {
-				return actionCompleteWithCursor(cursorBefore, cursorAfter);
+				return clickCompleteWithCursor(cursorBefore, cursorAfter);
 			}
-			return actionCompleteResult();
+			return clickCompleteResult();
 		},
 	});
 }

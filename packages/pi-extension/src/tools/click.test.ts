@@ -168,6 +168,41 @@ describe("#given click tool #when executed #then target app receives coordinates
 		expect(result.details).toEqual({ cursorBefore: { x: 11, y: 22 }, cursorAfter: { x: 33, y: 44 } });
 	});
 
+	it("always tells the model the click may have missed and to verify with get_app_state", async () => {
+		const computer = createComputer();
+		const tool = createClickTool(computer);
+
+		const result = await tool.execute(
+			"tool-call",
+			{ app: "Finder", x: 10, y: 20 },
+			undefined,
+			undefined,
+			{} as ExtensionContext,
+		);
+
+		const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join(" ");
+		expect(text).toContain("get_app_state");
+		expect(text.toLowerCase()).toContain("may not have registered");
+		expect(text).toContain("axChangeSummary");
+	});
+
+	it("includes the verify-the-click notice on the AX element-index path too", async () => {
+		const computer = createComputer();
+		const tool = createClickTool(computer);
+
+		const result = await tool.execute(
+			"tool-call",
+			{ app: "Finder", element_index: "5" },
+			undefined,
+			undefined,
+			{} as ExtensionContext,
+		);
+
+		const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join(" ");
+		expect(text.toLowerCase()).toContain("may not have registered");
+		expect(text).toContain("get_app_state");
+	});
+
 	it("presses the AX element click_count times for repeated activations", async () => {
 		const computer = createComputer();
 		const tool = createClickTool(computer);

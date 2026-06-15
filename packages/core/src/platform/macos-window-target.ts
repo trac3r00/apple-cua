@@ -4,13 +4,26 @@ import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
 
 type OpenWindowResult = Awaited<ReturnType<typeof openWindows>>[number];
 
+export type MacOSWindowInfo = {
+	readonly id: number;
+	readonly bounds: {
+		readonly x: number;
+		readonly y: number;
+		readonly width: number;
+		readonly height: number;
+	};
+	readonly owner?: {
+		readonly processId?: number;
+	} | null;
+} & OpenWindowResult;
+
 export function selectVisibleTargetWindow(
-	windows: readonly OpenWindowResult[],
+	windows: readonly MacOSWindowInfo[],
 	pid: number,
 	position?: Point,
 ): SkyLightTargetWindow | undefined {
 	const visibleWindows = windows.filter(
-		(window) => window.owner.processId === pid && window.bounds.width > 0 && window.bounds.height > 0,
+		(window) => window.owner?.processId === pid && window.bounds.width > 0 && window.bounds.height > 0,
 	);
 	const containingTarget =
 		position === undefined ? undefined : visibleWindows.find((window) => containsPoint(window, position));
@@ -29,7 +42,7 @@ export function selectVisibleTargetWindow(
 	};
 }
 
-function containsPoint(window: OpenWindowResult, position: Point): boolean {
+function containsPoint(window: MacOSWindowInfo, position: Point): boolean {
 	return (
 		position.x >= window.bounds.x &&
 		position.x <= window.bounds.x + window.bounds.width &&

@@ -1,10 +1,9 @@
-import { openWindows } from "get-windows";
 import { assertScreenUnlocked } from "../computer/lock-guard.js";
 import { VirtualPointer } from "../computer/virtual-pointer.js";
 import type { DragOptions, KeyOptions, Point, ScrollOptions } from "../types/index.js";
+import { readRealCursorPosition } from "./macos-cursor.js";
 import {
 	type MouseButton,
-	getCurrentCursorPosition,
 	postKeyboardEvent,
 	postMouseEvent,
 	postScrollEvent,
@@ -24,6 +23,8 @@ import {
 	runFocusLeasedDrag,
 } from "./macos-input-pointer.js";
 import { modifierFlags, virtualKeyCodeFor } from "./macos-keycodes.js";
+import { openWindowsForTargeting } from "./macos-open-windows.js";
+import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
 import { selectVisibleTargetWindow } from "./macos-window-target.js";
 
 export class MacOSInputController {
@@ -149,6 +150,9 @@ export class MacOSInputController {
 			targetPid: this.targetPid,
 			targetWindow,
 		});
+		if (options?.holdMilliseconds !== undefined) {
+			await delayMilliseconds(options.holdMilliseconds);
+		}
 		postKeyboardEvent({
 			keyCode,
 			keyDown: false,
@@ -222,8 +226,11 @@ export class MacOSInputController {
 	}
 
 	private async visibleWindowForPid(pid: number, position?: Point): Promise<SkyLightTargetWindow | undefined> {
-		const windows = await openWindows();
-		return selectVisibleTargetWindow(windows, pid, position);
+		const windows = await openWindowsForTargeting();
+		return (
+			selectVisibleTargetWindow(windows, pid, position) ??
+			(await selectSystemEventsTargetWindow(windows, pid, position))
+		);
 	}
 
 	private requirePointerWindow(targetWindow: SkyLightTargetWindow | undefined): void {
@@ -251,11 +258,8 @@ export class MacOSInputController {
 	}
 }
 
-function readRealCursorPosition(): Point {
-	try {
-		const position = getCurrentCursorPosition();
-		return { x: Math.round(position.x), y: Math.round(position.y) };
-	} catch {
-		return { x: 0, y: 0 };
-	}
+function delayMilliseconds(milliseconds: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, milliseconds);
+	});
 }

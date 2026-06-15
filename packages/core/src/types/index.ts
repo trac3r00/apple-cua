@@ -29,7 +29,8 @@ export interface AppStateOptions {
 }
 
 export interface KeyOptions {
-	modifiers?: Array<"command" | "option" | "control" | "shift" | "cmd" | "alt" | "ctrl">;
+	readonly modifiers?: ReadonlyArray<"command" | "option" | "control" | "shift" | "cmd" | "alt" | "ctrl">;
+	readonly holdMilliseconds?: number;
 }
 
 export interface ScrollOptions {

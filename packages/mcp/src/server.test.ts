@@ -174,12 +174,17 @@ describe("MCP server tools #given #when #then", () => {
 		const result = await client.callTool({ name: "get_app_state", arguments: { app: "Finder" } });
 
 		// then
-		expect(result.content[0]).toEqual({
+		if (!Array.isArray(result.content)) {
+			throw new Error("get_app_state result content must be an array");
+		}
+		const firstContent = result.content[0];
+		const secondContent = result.content[1];
+		expect(firstContent).toEqual({
 			type: "image",
 			data: Buffer.from("png-bytes").toString("base64"),
 			mimeType: "image/png",
 		});
-		expect(result.content[1]?.type).toBe("text");
+		expect(secondContent?.type).toBe("text");
 		expect(mockedComputer.getAppState).toHaveBeenCalledWith(1234, undefined);
 	});
 
@@ -233,16 +238,33 @@ describe("MCP server tools #given #when #then", () => {
 		expect(mockedComputer.drag).toHaveBeenCalledWith({ from: { x: 300, y: 150 }, to: { x: 800, y: 550 } });
 	});
 
-	it("maps a press_key chord to a computer key call", async () => {
+	it("maps press_keys to timed computer key calls", async () => {
 		// given
+		vi.useFakeTimers();
 		const { client, close } = await createHarness();
 		closeHarness = close;
 
 		// when
-		await client.callTool({ name: "press_key", arguments: { app: "Finder", key: "super+k" } });
+		const call = client.callTool({
+			name: "press_keys",
+			arguments: {
+				app: "Finder",
+				keys: ["super+k", { key: "Return", hold_seconds: 0.25 }],
+				hold_seconds: 0.1,
+				interval_seconds: 0.5,
+			},
+		});
+		await vi.runAllTimersAsync();
+		await call;
 
 		// then
-		expect(mockedComputer.key).toHaveBeenCalledWith("k", { modifiers: ["command"] });
+		expect(mockedComputer.key).toHaveBeenNthCalledWith(1, "k", {
+			modifiers: ["command"],
+			holdMilliseconds: 100,
+		});
+		expect(mockedComputer.key).toHaveBeenNthCalledWith(2, "Return", { holdMilliseconds: 250 });
+		expect(vi.getTimerCount()).toBe(0);
+		vi.useRealTimers();
 	});
 
 	it("routes set_value and perform_secondary_action to accessibility helpers", async () => {

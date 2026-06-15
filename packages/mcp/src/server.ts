@@ -7,7 +7,6 @@ import {
 	clickPoint,
 	getAppStateForApp,
 	parseElementIndex,
-	parseKeyChord,
 	pressElement,
 	resolveAppPid,
 	resolveScreenPoint,
@@ -17,32 +16,11 @@ import {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod/v4";
+import { registerPressKeysTool } from "./press-keys.js";
+import { SERVER_INFO } from "./server-info.js";
+import { type ToolContent, type ToolResult, actionComplete, clickComplete, textResult } from "./tool-result.js";
 
-type ToolContent =
-	| { type: "text"; text: string }
-	| { type: "image"; data: string; mimeType: "image/png" | "image/jpeg" };
-
-type ToolResult = {
-	content: ToolContent[];
-};
-
-const SERVER_INFO = {
-	name: "macos-cua",
-	version: "0.1.0",
-} as const;
-
-export const TOOL_NAMES = [
-	"list_apps",
-	"get_app_state",
-	"click",
-	"perform_secondary_action",
-	"set_value",
-	"select_text",
-	"drag",
-	"scroll",
-	"type_text",
-	"press_key",
-] as const;
+export { TOOL_NAMES } from "./tool-names.js";
 
 const appSchema = z.string().min(1);
 
@@ -100,27 +78,7 @@ const typeTextSchema = z.object({
 	text: z.string(),
 });
 
-const pressKeySchema = z.object({
-	app: appSchema,
-	key: z.string().min(1),
-});
-
 const emptySchema = z.object({});
-
-function textResult(text: string): ToolResult {
-	return { content: [{ type: "text", text }] };
-}
-
-function actionComplete(): ToolResult {
-	return textResult("Action completed. Call `get_app_state` to fetch the updated UI state.");
-}
-
-// A dispatched click is fire-and-forget and can silently miss; every click result must instruct the model to verify and retry.
-function clickComplete(): ToolResult {
-	return textResult(
-		"Action completed. Call `get_app_state` to fetch the updated UI state. The click was dispatched but may not have registered on the target. ALWAYS confirm by calling `get_app_state`: if the accessibility tree did not change (axChangeSummary 0/0/0), the click most likely missed — retry it once, or use `element_index` for a reliable accessibility press. Do NOT fall back to osascript, AppleScript, JXA, Swift, or any shell scripting to perform the click — those bypass this agent's native input path and are NOT allowed. ALWAYS use this `click` tool (with `element_index` when available) and simply retry it when a click does not register.",
-	);
-}
 
 export function createMcpServer(computer: ComputerInterface = new MacOSHostComputer()): McpServer {
 	const server = new McpServer(SERVER_INFO);
@@ -291,24 +249,7 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 		},
 	);
 
-	server.registerTool(
-		"press_key",
-		{
-			description: "Press a key or key-combination on the keyboard, including modifier and navigation keys.",
-			inputSchema: pressKeySchema,
-		},
-		async ({ app, key }): Promise<ToolResult> => {
-			const targetPid = await resolveAppPid(computer, app);
-			const keypress = parseKeyChord(key);
-			await withTargetedApp(computer, targetPid, async () => {
-				await computer.key(
-					keypress.key,
-					keypress.modifiers.length === 0 ? undefined : { modifiers: [...keypress.modifiers] },
-				);
-			});
-			return actionComplete();
-		},
-	);
+	registerPressKeysTool(server, computer, actionComplete);
 
 	return server;
 }

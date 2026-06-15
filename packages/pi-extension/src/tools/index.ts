@@ -6,7 +6,7 @@ import { createDragTool } from "./drag.js";
 import { createGetAppStateTool } from "./get-app-state.js";
 import { createListAppsTool } from "./list-apps.js";
 import { createPerformSecondaryActionTool } from "./perform-secondary-action.js";
-import { createPressKeyTool } from "./press-key.js";
+import { createPressKeysTool } from "./press-key.js";
 import { createScrollTool } from "./scroll.js";
 import { createSelectTextTool } from "./select-text.js";
 import { createSetValueTool } from "./set-value.js";
@@ -28,7 +28,7 @@ export function buildAllTools(options: ToolRegistrationOptions): ReadonlyArray<T
 		createDragTool(computer),
 		createScrollTool(computer),
 		createTypeTextTool(computer),
-		createPressKeyTool(computer),
+		createPressKeysTool(computer),
 	];
 }
 

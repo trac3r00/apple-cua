@@ -94,7 +94,7 @@ describe("#given all tool factories #when built #then every Codex Computer Use t
 			"drag",
 			"scroll",
 			"type_text",
-			"press_key",
+			"press_keys",
 		]);
 	});
 });

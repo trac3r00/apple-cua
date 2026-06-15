@@ -194,7 +194,7 @@ describe("#given a pi API #when extension factory runs #then lifecycle handlers 
 });
 
 describe("#given default-on session_start #when invoked #then native computer and Codex tools are registered", () => {
-	it("registers computer alongside the nine Codex-compatible tools", async () => {
+	it("registers computer alongside the Codex-compatible tools", async () => {
 		const pi = createMockPi();
 		macosCuaExtension(pi);
 
@@ -210,14 +210,14 @@ describe("#given default-on session_start #when invoked #then native computer an
 			"drag",
 			"scroll",
 			"type_text",
-			"press_key",
+			"press_keys",
 			"computer",
 		]);
 	});
 });
 
 describe("#given opt-out env var #when session_start runs #then native computer tool is not registered", () => {
-	it("keeps only the nine Codex-compatible tools", async () => {
+	it("keeps only the Codex-compatible tools", async () => {
 		process.env["MACOS_CUA_DISABLE_COMPUTER_USE_BETA"] = "1";
 		const pi = createMockPi();
 		macosCuaExtension(pi);
@@ -234,7 +234,7 @@ describe("#given opt-out env var #when session_start runs #then native computer 
 			"drag",
 			"scroll",
 			"type_text",
-			"press_key",
+			"press_keys",
 		]);
 	});
 });
@@ -323,7 +323,7 @@ describe("#given enabled session #when model changes from native computer-use to
 			"drag",
 			"scroll",
 			"type_text",
-			"press_key",
+			"press_keys",
 		]);
 	});
 });

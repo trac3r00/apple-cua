@@ -217,9 +217,10 @@ int main(int argc, const char *argv[]) {
 		[gWindow setBackgroundColor:[NSColor clearColor]];
 		[gWindow setHasShadow:NO];
 		[gWindow setIgnoresMouseEvents:YES];
-		[gWindow setLevel:NSScreenSaverWindowLevel];
+		[gWindow setLevel:NSFloatingWindowLevel];
 		[gWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
-									   NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle];
+									   NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle |
+									   NSWindowCollectionBehaviorFullScreenAuxiliary];
 		gPointerView = [[OverlayPointerView alloc] initWithFrame:frame];
 		[gWindow setContentView:gPointerView];
 
@@ -231,9 +232,10 @@ int main(int argc, const char *argv[]) {
 		[gHighlightWindow setBackgroundColor:[NSColor clearColor]];
 		[gHighlightWindow setHasShadow:NO];
 		[gHighlightWindow setIgnoresMouseEvents:YES];
-		[gHighlightWindow setLevel:NSScreenSaverWindowLevel];
+		[gHighlightWindow setLevel:NSFloatingWindowLevel];
 		[gHighlightWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
-											  NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle];
+											  NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle |
+											  NSWindowCollectionBehaviorFullScreenAuxiliary];
 		[gHighlightWindow setContentView:[[HighlightView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)]];
 
 		pthread_t thread;

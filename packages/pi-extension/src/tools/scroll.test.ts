@@ -31,6 +31,7 @@ function createComputer(): ComputerInterface {
 			.fn<ComputerInterface["listApps"]>()
 			.mockResolvedValue([{ name: "Finder", bundleId: "com.apple.finder", pid: 1234, isRunning: true }]),
 		setValue: vi.fn<ComputerInterface["setValue"]>(),
+		selectText: vi.fn<ComputerInterface["selectText"]>(),
 		performAction: vi.fn<ComputerInterface["performAction"]>(),
 		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>(),
 		typeIntoFocused: vi.fn<ComputerInterface["typeIntoFocused"]>(),
@@ -47,10 +48,12 @@ describe("#given scroll tool factory #when built #then tool name is Codex-compat
 	});
 });
 
-describe("#given scroll tool #when executed #then it performs AX page scroll on the requested element", () => {
-	it("performs AXScrollDownByPage on the element_index pages times without synthetic mouse wheel", async () => {
+describe("#given scroll tool #when executed #then it performs AX and targeted wheel scroll", () => {
+	it("performs AXScrollDownByPage on the element_index pages and sends targeted wheel fallback", async () => {
 		const computer = createComputer();
 		const performAction = vi.spyOn(computer, "performAction").mockResolvedValue(undefined);
+		const setTarget = vi.spyOn(computer, "setTarget");
+		const scroll = vi.spyOn(computer, "scroll").mockResolvedValue(undefined);
 		const tool = createScrollTool(computer);
 
 		await tool.execute(
@@ -65,8 +68,8 @@ describe("#given scroll tool #when executed #then it performs AX page scroll on 
 		expect(performAction).toHaveBeenNthCalledWith(1, 1234, 7, "AXScrollDownByPage");
 		expect(performAction).toHaveBeenNthCalledWith(2, 1234, 7, "AXScrollDownByPage");
 		expect(performAction).toHaveBeenNthCalledWith(3, 1234, 7, "AXScrollDownByPage");
-		expect(computer.scroll).not.toHaveBeenCalled();
-		expect(computer.setTarget).not.toHaveBeenCalled();
+		expect(setTarget).toHaveBeenNthCalledWith(1, 1234);
+		expect(scroll).toHaveBeenCalledWith({ direction: "down", amount: 30 });
 	});
 
 	it("throws when element_index is missing instead of taking over the cursor", async () => {

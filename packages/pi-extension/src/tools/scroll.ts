@@ -4,6 +4,8 @@ import { type Static, Type } from "typebox";
 import { type ToolDefinition, defineTool } from "../pi/index.js";
 import { actionCompleteResult } from "./result.js";
 
+const LINES_PER_PAGE = 10;
+
 export const ScrollParams = Type.Object(
 	{
 		app: Type.String({ description: "App name or bundle identifier." }),
@@ -36,7 +38,13 @@ export function createScrollTool(computer: ComputerInterface): ToolDefinition {
 				params.direction,
 				params.pages ?? 1,
 			);
+			computer.setTarget(targetPid);
+			await computer.scroll({ direction: params.direction, amount: pageCount(params.pages) * LINES_PER_PAGE });
 			return actionCompleteResult();
 		},
 	});
+}
+
+function pageCount(pages: number | undefined): number {
+	return Math.max(1, Math.trunc(pages ?? 1));
 }

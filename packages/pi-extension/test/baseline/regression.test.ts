@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionContext } from "../../src/pi/index.js";
 import { createClickTool } from "../../src/tools/click.js";
 import { createGetAppStateTool } from "../../src/tools/get-app-state.js";
-import { createPressKeyTool } from "../../src/tools/press-key.js";
+import { createPressKeysTool } from "../../src/tools/press-key.js";
 import { createScrollTool } from "../../src/tools/scroll.js";
 import { createTypeTextTool } from "../../src/tools/type-text.js";
 
@@ -44,11 +44,13 @@ function createFakeComputer(): ComputerInterface {
 			screenshotBase64: Buffer.from("89504e470d0a1a0a", "hex").toString("base64"),
 			screenshotWidth: 100,
 			screenshotHeight: 80,
+			display: { width: 100, height: 80, scaleFactor: 1 },
 		}),
 		listApps: vi
 			.fn<ComputerInterface["listApps"]>()
 			.mockResolvedValue([{ name: "TestApp", bundleId: "com.test.app", pid: 1234, isRunning: true }]),
 		setValue: vi.fn<ComputerInterface["setValue"]>().mockResolvedValue(undefined),
+		selectText: vi.fn<ComputerInterface["selectText"]>().mockResolvedValue(undefined),
 		performAction: vi.fn<ComputerInterface["performAction"]>().mockResolvedValue(undefined),
 		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>().mockResolvedValue(false),
 		typeIntoFocused: vi.fn<ComputerInterface["typeIntoFocused"]>().mockResolvedValue(false),
@@ -107,16 +109,16 @@ describe("#given baseline regression suite #when exercising computer interface #
 
 	describe("key with modifiers", () => {
 		it("presses a key with command modifier", async () => {
-			const tool = createPressKeyTool(computer);
-			await tool.execute("tc", { app: "TestApp", key: "command+c" }, undefined, undefined, context);
+			const tool = createPressKeysTool(computer);
+			await tool.execute("tc", { app: "TestApp", keys: ["command+c"] }, undefined, undefined, context);
 
 			expect(computer.key).toHaveBeenCalledTimes(1);
 			expect(computer.key).toHaveBeenCalledWith("c", { modifiers: ["command"] });
 		});
 
 		it("presses a key with multiple modifiers", async () => {
-			const tool = createPressKeyTool(computer);
-			await tool.execute("tc", { app: "TestApp", key: "cmd+shift+t" }, undefined, undefined, context);
+			const tool = createPressKeysTool(computer);
+			await tool.execute("tc", { app: "TestApp", keys: ["cmd+shift+t"] }, undefined, undefined, context);
 
 			expect(computer.key).toHaveBeenCalledTimes(1);
 			expect(computer.key).toHaveBeenCalledWith("t", { modifiers: ["command", "shift"] });

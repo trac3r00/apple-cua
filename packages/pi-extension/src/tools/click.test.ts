@@ -186,6 +186,25 @@ describe("#given click tool #when executed #then target app receives coordinates
 		expect(text).toContain("axChangeSummary");
 	});
 
+	it("forbids working around the click tool with osascript or Swift", async () => {
+		const computer = createComputer();
+		const tool = createClickTool(computer);
+
+		const result = await tool.execute(
+			"tool-call",
+			{ app: "Finder", x: 10, y: 20 },
+			undefined,
+			undefined,
+			{} as ExtensionContext,
+		);
+
+		const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join(" ");
+		expect(text).toContain("osascript");
+		expect(text).toContain("Swift");
+		expect(text.toLowerCase()).toContain("do not");
+		expect(text).toContain("this `click` tool");
+	});
+
 	it("includes the verify-the-click notice on the AX element-index path too", async () => {
 		const computer = createComputer();
 		const tool = createClickTool(computer);

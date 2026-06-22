@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { MacOSHostComputer } from "@macos-cua/core";
+import { MacOSHostComputer, NOOP_POINTER_OVERLAY } from "@macos-cua/core";
 import type { ComputerInterface, KeyOptions, ScreenshotOptions, ScrollOptions } from "@macos-cua/core";
 import { Command } from "commander";
 
@@ -17,6 +17,7 @@ type GlobalOptions = {
 	json?: boolean;
 	targetPid?: number;
 	targetBundleId?: string;
+	cursor?: boolean;
 };
 
 type MouseButton = "left" | "right" | "middle";
@@ -80,7 +81,8 @@ program
 		"deliver input to a target process id using the cached app window session from get_app_state",
 		parsePositiveInteger,
 	)
-	.option("--target-bundle-id <id>", "deliver input to the running app with this bundle identifier");
+	.option("--target-bundle-id <id>", "deliver input to the running app with this bundle identifier")
+	.option("--no-cursor", "hide the synthetic white+blue cursor overlay (shown by default to mark where input lands)");
 
 program
 	.command("screenshot")
@@ -356,7 +358,10 @@ function readPackageJson(): PackageJson {
 }
 
 async function withComputer(action: (computer: MacOSHostComputer) => Promise<void>): Promise<void> {
-	const computer = new MacOSHostComputer();
+	// Commander sets `cursor` to false only when `--no-cursor` is passed; the overlay
+	// is shown by default. When hidden, inject the no-op overlay so no helper spawns.
+	const showCursor = program.opts<GlobalOptions>().cursor !== false;
+	const computer = new MacOSHostComputer(showCursor ? {} : { overlay: NOOP_POINTER_OVERLAY });
 	try {
 		const targetPid = await resolveTargetPid();
 		computer.setTarget(targetPid);

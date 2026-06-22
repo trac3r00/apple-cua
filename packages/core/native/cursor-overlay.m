@@ -45,7 +45,8 @@ static const CGFloat kMaxStretch = 0.38;
 	[ring fill];
 	NSBezierPath *core = [NSBezierPath
 		bezierPathWithOvalInRect:NSMakeRect(cx - kCoreRadius, cy - kCoreRadius, kCoreRadius * 2, kCoreRadius * 2)];
-	[[NSColor colorWithSRGBRed:1.0 green:0.231 blue:0.188 alpha:1.0] setFill];
+	// White ring + blue core — the codex-style "agent is acting here" pointer.
+	[[NSColor colorWithSRGBRed:0.0 green:0.478 blue:1.0 alpha:1.0] setFill];
 	[core fill];
 	CGContextRestoreGState(ctx);
 }

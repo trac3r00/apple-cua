@@ -102,8 +102,10 @@ export function postUnicodeText(
 	targetWindow?: SkyLightTargetWindow | undefined,
 ): void {
 	for (const segment of Array.from(text)) {
+		// Set the unicode string on keyDown ONLY. Setting it on keyUp too makes macOS
+		// insert each character twice ("abc" -> "aabbcc"); keyUp is just the release.
 		postKeyboardEvent({ keyCode: 0, keyDown: true, flags: 0, text: segment, targetPid, targetWindow });
-		postKeyboardEvent({ keyCode: 0, keyDown: false, flags: 0, text: segment, targetPid, targetWindow });
+		postKeyboardEvent({ keyCode: 0, keyDown: false, flags: 0, text: undefined, targetPid, targetWindow });
 	}
 }
 

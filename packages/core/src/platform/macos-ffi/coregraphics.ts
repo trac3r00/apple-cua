@@ -179,10 +179,16 @@ function postKeyboard(
 	if (targetWindow === undefined) {
 		throw new Error("targeted keyboard input requires a target window from get_app_state or a prior pointer action");
 	}
+	// Deliver via ONE path only. Posting both the authenticated SkyLight event AND the
+	// CoreGraphics event to the window owner delivers every keystroke twice — apps that
+	// accept both insert each character twice ("abc" -> "aabbcc"). Use the authenticated
+	// SkyLight path as primary; fall back to CG to the window owner only when the
+	// authenticated SkyLight event can't be built.
 	if (!postAuthenticatedSkyLightEventToPid(targetPid, event)) {
-		throw new Error("failed to build authenticated targeted keyboard event");
+		if (!postCoreGraphicsEventToWindowOwner(targetWindow, event)) {
+			throw new Error("failed to deliver targeted keyboard event (SkyLight auth and CG both failed)");
+		}
 	}
-	postCoreGraphicsEventToWindowOwner(targetWindow, event);
 }
 
 function postScroll(

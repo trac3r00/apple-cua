@@ -27,6 +27,10 @@ import { openWindowsForTargeting } from "./macos-open-windows.js";
 import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
 import { selectVisibleTargetWindow } from "./macos-window-target.js";
 
+// Inter-character delay for typeText. Posting keystrokes back-to-back outruns the
+// target app's event loop and drops characters; ~12ms lets each be consumed.
+const TYPE_CHARACTER_DELAY_MS = 12;
+
 export class MacOSInputController {
 	private targetPid: number | undefined;
 	private lastTargetWindow: SkyLightTargetWindow | undefined;
@@ -132,8 +136,20 @@ export class MacOSInputController {
 	async typeText(text: string): Promise<void> {
 		this.beforeInput();
 		const targetWindow = await this.requireSessionWindow("keyboard");
-		for (const segment of Array.from(text)) {
+		// Pace keystrokes: posting characters back-to-back outruns the target app's
+		// event processing and drops characters ("https://example.com" -> "https://e").
+		// A small inter-character delay lets each keystroke be consumed before the next,
+		// so a single delivery per char is reliable (no drops) without doubling.
+		const segments = Array.from(text);
+		for (let i = 0; i < segments.length; i++) {
+			const segment = segments[i];
+			if (segment === undefined) {
+				continue;
+			}
 			postUnicodeText(segment, this.targetPid, targetWindow);
+			if (i < segments.length - 1) {
+				await delayMilliseconds(TYPE_CHARACTER_DELAY_MS);
+			}
 		}
 	}
 

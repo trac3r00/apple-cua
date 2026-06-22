@@ -132,7 +132,7 @@ describe("#given CoreGraphics keyboard event routing", () => {
 		expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledWith(koffiMock.keyboardEvent);
 	});
 
-	it("#when posting keyboard events to a known target window #then uses authenticated and owner delivery", async () => {
+	it("#when posting keyboard events to a known target window #then uses authenticated delivery only (no double-post)", async () => {
 		const { K_CG_EVENT_FLAG_MASK_COMMAND, postKeyboardEvent } = await import("./coregraphics.js");
 		const targetWindow = { id: 99, bounds: { x: 80, y: 170, width: 400, height: 300 } };
 
@@ -146,11 +146,25 @@ describe("#given CoreGraphics keyboard event routing", () => {
 		});
 
 		expect(skyLightMock.postAuthenticatedSkyLightEventToPid).toHaveBeenCalledWith(4321, koffiMock.keyboardEvent);
+		// CG-to-window-owner is a FALLBACK only — NOT posted when authenticated SkyLight
+		// delivery succeeds. Posting both delivered every keystroke twice ("a" -> "aa").
+		expect(skyLightMock.postCoreGraphicsEventToWindowOwner).not.toHaveBeenCalled();
+		expect(koffiMock.coreGraphicsFunctions.CGEventPostToPid).not.toHaveBeenCalled();
+		expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledWith(koffiMock.keyboardEvent);
+	});
+
+	it("#when authenticated SkyLight delivery fails #then falls back to owner delivery", async () => {
+		skyLightMock.postAuthenticatedSkyLightEventToPid.mockReturnValueOnce(false);
+		skyLightMock.postCoreGraphicsEventToWindowOwner.mockReturnValueOnce(true);
+		const { postKeyboardEvent } = await import("./coregraphics.js");
+		const targetWindow = { id: 99, bounds: { x: 80, y: 170, width: 400, height: 300 } };
+
+		postKeyboardEvent({ keyCode: 37, keyDown: true, flags: 0, text: undefined, targetPid: 4321, targetWindow });
+
+		expect(skyLightMock.postAuthenticatedSkyLightEventToPid).toHaveBeenCalledWith(4321, koffiMock.keyboardEvent);
 		expect(skyLightMock.postCoreGraphicsEventToWindowOwner).toHaveBeenCalledWith(
 			targetWindow,
 			koffiMock.keyboardEvent,
 		);
-		expect(koffiMock.coreGraphicsFunctions.CGEventPostToPid).not.toHaveBeenCalled();
-		expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledWith(koffiMock.keyboardEvent);
 	});
 });

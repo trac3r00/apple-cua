@@ -136,6 +136,7 @@ export class MacOSInputController {
 	async typeText(text: string): Promise<void> {
 		this.beforeInput();
 		const targetWindow = await this.requireSessionWindow("keyboard");
+		this.pingOverlay();
 		// Pace keystrokes: posting characters back-to-back outruns the target app's
 		// event processing and drops characters ("https://example.com" -> "https://e").
 		// A small inter-character delay lets each keystroke be consumed before the next,
@@ -158,6 +159,7 @@ export class MacOSInputController {
 		const keyCode = virtualKeyCodeFor(key);
 		const flags = modifierFlags(options?.modifiers ?? []);
 		const targetWindow = await this.requireSessionWindow("keyboard");
+		this.pingOverlay();
 		postKeyboardEvent({
 			keyCode,
 			keyDown: true,
@@ -228,6 +230,13 @@ export class MacOSInputController {
 	private markPointer(position: Point): void {
 		this.pointer.moveTo(position);
 		this.overlay.set(position);
+	}
+
+	// Keep the overlay cursor visible during keyboard-only actions (e.g. typing a
+	// URL in browser.navigate, which never moves the mouse) by re-asserting it at
+	// the last known pointer position. Also resets the daemon's idle timer.
+	private pingOverlay(): void {
+		this.overlay.set(this.pointer.position());
 	}
 
 	private async targetWindow(position: Point): Promise<SkyLightTargetWindow | undefined> {

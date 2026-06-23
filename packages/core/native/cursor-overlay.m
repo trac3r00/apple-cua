@@ -1,5 +1,11 @@
 #import <Cocoa/Cocoa.h>
 #import <pthread.h>
+#import <sys/socket.h>
+#import <sys/un.h>
+#import <unistd.h>
+#import <errno.h>
+#import <stdlib.h>
+#import <string.h>
 
 static NSWindow *gWindow = nil;
 static NSView *gPointerView = nil;
@@ -12,6 +18,28 @@ static NSPoint gScootTo;
 static NSTimeInterval gScootStart;
 static CGFloat gStretch = 1.0;
 static CGFloat gAngle = 0.0;
+
+// Persistent-daemon idle shutdown: when driven over a unix socket the overlay
+// outlives any single CLI command, so it self-terminates after this many seconds
+// with no command (0 disables — the stdin/legacy mode never times out).
+static NSTimer *gIdleTimer = nil;
+static double gIdleTimeout = 0.0;
+
+static void reset_idle_timer(void) {
+	if (gIdleTimeout <= 0.0) {
+		return;
+	}
+	if (gIdleTimer != nil) {
+		[gIdleTimer invalidate];
+		gIdleTimer = nil;
+	}
+	gIdleTimer = [NSTimer scheduledTimerWithTimeInterval:gIdleTimeout
+												 repeats:NO
+												   block:^(NSTimer *timer) {
+													   (void)timer;
+													   [NSApp terminate:nil];
+												   }];
+}
 
 static const CGFloat kOverlaySize = 40.0;
 static const NSTimeInterval kFadeInDuration = 0.18;
@@ -39,6 +67,13 @@ static const CGFloat kMaxStretch = 0.38;
 	CGContextScaleCTM(ctx, gStretch, 1.0 / gStretch);
 	CGContextRotateCTM(ctx, -gAngle);
 	CGContextTranslateCTM(ctx, -cx, -cy);
+	// Dark outline first so the white ring + blue core stay visible on ANY
+	// background (light pages would otherwise swallow the white halo).
+	CGFloat kOutline = kRingRadius + 1.6;
+	NSBezierPath *outline = [NSBezierPath
+		bezierPathWithOvalInRect:NSMakeRect(cx - kOutline, cy - kOutline, kOutline * 2, kOutline * 2)];
+	[[NSColor colorWithSRGBRed:0.0 green:0.0 blue:0.0 alpha:0.55] setFill];
+	[outline fill];
 	NSBezierPath *ring = [NSBezierPath
 		bezierPathWithOvalInRect:NSMakeRect(cx - kRingRadius, cy - kRingRadius, kRingRadius * 2, kRingRadius * 2)];
 	[[NSColor colorWithSRGBRed:1.0 green:1.0 blue:1.0 alpha:1.0] setFill];
@@ -172,27 +207,40 @@ static void apply_hide(void) {
 	}
 }
 
+// Parse one command line and apply it on the main thread. Returns 1 for "quit".
+// Every recognized command resets the idle timer (daemon mode only).
+static int dispatch_command_line(const char *line) {
+	double x = 0.0;
+	double y = 0.0;
+	double w = 0.0;
+	double h = 0.0;
+	if (sscanf(line, "set %lf %lf", &x, &y) == 2) {
+		dispatch_async(dispatch_get_main_queue(), ^{
+			apply_set(x, y);
+			reset_idle_timer();
+		});
+	} else if (sscanf(line, "highlight %lf %lf %lf %lf", &x, &y, &w, &h) == 4) {
+		dispatch_async(dispatch_get_main_queue(), ^{
+			apply_highlight(x, y, w, h);
+			reset_idle_timer();
+		});
+	} else if (strncmp(line, "hide", 4) == 0) {
+		dispatch_async(dispatch_get_main_queue(), ^{
+			apply_hide();
+			reset_idle_timer();
+		});
+	} else if (strncmp(line, "quit", 4) == 0) {
+		return 1;
+	}
+	return 0;
+}
+
+// Legacy mode: one command channel over stdin, dies when stdin closes.
 static void *stdin_reader(void *arg) {
 	(void)arg;
 	char line[256];
 	while (fgets(line, sizeof(line), stdin) != NULL) {
-		double x = 0.0;
-		double y = 0.0;
-		double w = 0.0;
-		double h = 0.0;
-		if (sscanf(line, "set %lf %lf", &x, &y) == 2) {
-			dispatch_async(dispatch_get_main_queue(), ^{
-				apply_set(x, y);
-			});
-		} else if (sscanf(line, "highlight %lf %lf %lf %lf", &x, &y, &w, &h) == 4) {
-			dispatch_async(dispatch_get_main_queue(), ^{
-				apply_highlight(x, y, w, h);
-			});
-		} else if (strncmp(line, "hide", 4) == 0) {
-			dispatch_async(dispatch_get_main_queue(), ^{
-				apply_hide();
-			});
-		} else if (strncmp(line, "quit", 4) == 0) {
+		if (dispatch_command_line(line)) {
 			break;
 		}
 	}
@@ -202,9 +250,105 @@ static void *stdin_reader(void *arg) {
 	return NULL;
 }
 
+// Feed accumulated bytes through the line splitter, applying each command.
+// Returns 1 if a "quit" was seen. *llp is the running line-buffer length.
+static int drain_bytes(const char *buf, ssize_t n, char *line, size_t cap, size_t *llp) {
+	for (ssize_t i = 0; i < n; i++) {
+		char c = buf[i];
+		if (c == '\n' || *llp == cap - 1) {
+			line[*llp] = '\0';
+			int quit = (*llp > 0) ? dispatch_command_line(line) : 0;
+			*llp = 0;
+			if (quit) {
+				return 1;
+			}
+		} else {
+			line[(*llp)++] = c;
+		}
+	}
+	return 0;
+}
+
+// Persistent daemon mode: a unix-domain socket server so the overlay outlives
+// any single CLI command (each macos-cua verb is its own process). Singleton:
+// if a daemon already owns the socket, exit. Self-terminates after idle timeout.
+static void *socket_reader(void *arg) {
+	char *path = (char *)arg;
+	struct sockaddr_un addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+
+	// If another daemon already listens here, stand down (singleton).
+	int probe = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (probe >= 0) {
+		if (connect(probe, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+			close(probe);
+			free(path);
+			dispatch_async(dispatch_get_main_queue(), ^{
+				[NSApp terminate:nil];
+			});
+			return NULL;
+		}
+		close(probe);
+	}
+	unlink(path);  // clear any stale socket file from a crashed daemon
+
+	int server = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (server < 0 || bind(server, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+		listen(server, 8) != 0) {
+		if (server >= 0) {
+			close(server);
+		}
+		free(path);
+		dispatch_async(dispatch_get_main_queue(), ^{
+			[NSApp terminate:nil];
+		});
+		return NULL;
+	}
+	dispatch_async(dispatch_get_main_queue(), ^{
+		reset_idle_timer();
+	});
+
+	int stop = 0;
+	while (!stop) {
+		int client = accept(server, NULL, NULL);
+		if (client < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+			break;
+		}
+		char buf[512];
+		char line[256];
+		size_t ll = 0;
+		ssize_t n;
+		while ((n = read(client, buf, sizeof(buf))) > 0) {
+			if (drain_bytes(buf, n, line, sizeof(line), &ll)) {
+				stop = 1;
+				break;
+			}
+		}
+		close(client);
+	}
+	close(server);
+	unlink(path);
+	free(path);
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[NSApp terminate:nil];
+	});
+	return NULL;
+}
+
 int main(int argc, const char *argv[]) {
-	(void)argc;
-	(void)argv;
+	const char *socketPath = NULL;
+	for (int i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc) {
+			socketPath = argv[++i];
+		} else if (strcmp(argv[i], "--idle") == 0 && i + 1 < argc) {
+			gIdleTimeout = atof(argv[++i]);
+		}
+	}
 	@autoreleasepool {
 		[NSApplication sharedApplication];
 		[NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
@@ -240,7 +384,14 @@ int main(int argc, const char *argv[]) {
 		[gHighlightWindow setContentView:[[HighlightView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)]];
 
 		pthread_t thread;
-		pthread_create(&thread, NULL, stdin_reader, NULL);
+		if (socketPath != NULL) {
+			if (gIdleTimeout <= 0.0) {
+				gIdleTimeout = 4.0;  // default: vanish 4s after the last command
+			}
+			pthread_create(&thread, NULL, socket_reader, strdup(socketPath));
+		} else {
+			pthread_create(&thread, NULL, stdin_reader, NULL);
+		}
 		pthread_detach(thread);
 
 		[NSApp run];

@@ -1,63 +1,58 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { type OverlayProcessHandle, createCursorOverlay } from "./cursor-overlay.js";
+import { type OverlayTransport, createCursorOverlay } from "./cursor-overlay.js";
 
-function fakeHandle(): OverlayProcessHandle & { writes: string[]; ended: boolean; killed: boolean } {
-	const state = { writes: [] as string[], ended: false, killed: false };
+function fakeTransport(): OverlayTransport & { sends: string[]; closed: boolean } {
+	const state = { sends: [] as string[], closed: false };
 	return {
-		stdin: {
-			write(chunk: string) {
-				state.writes.push(chunk);
-			},
-			end() {
-				state.ended = true;
-			},
+		send(command: string) {
+			state.sends.push(command);
 		},
-		kill() {
-			state.killed = true;
+		close() {
+			state.closed = true;
 		},
-		get writes() {
-			return state.writes;
+		get sends() {
+			return state.sends;
 		},
-		get ended() {
-			return state.ended;
-		},
-		get killed() {
-			return state.killed;
+		get closed() {
+			return state.closed;
 		},
 	};
 }
 
-describe("#given a spawnable overlay #when driven #then it streams set/hide/quit commands lazily", () => {
-	it("spawns once and writes positioning commands", () => {
-		const handle = fakeHandle();
-		const spawner = vi.fn(() => handle);
-		const overlay = createCursorOverlay(spawner);
+describe("#given an overlay transport #when driven #then it streams set/hide commands lazily", () => {
+	it("resolves the transport once and forwards positioning commands", () => {
+		const transport = fakeTransport();
+		const factory = vi.fn(() => transport);
+		const overlay = createCursorOverlay(factory);
 
 		overlay.set({ x: 800, y: 500 });
 		overlay.set({ x: 12, y: 34 });
 		overlay.hide();
 		overlay.close();
 
-		expect(spawner).toHaveBeenCalledTimes(1);
-		expect(handle.writes).toEqual(["set 800 500\n", "set 12 34\n", "hide\n", "quit\n"]);
-		expect(handle.ended).toBe(true);
+		expect(factory).toHaveBeenCalledTimes(1);
+		// close() must NOT emit "quit": the daemon is shared across commands and
+		// self-terminates on its idle timeout. Quitting here is the "cursor never
+		// showed" bug (it died the instant a single verb's process exited).
+		expect(transport.sends).toEqual(["set 800 500\n", "set 12 34\n", "hide\n"]);
+		expect(transport.closed).toBe(true);
 	});
 });
 
-describe("#given a spawnable overlay #when highlighting a window #then it streams a highlight command", () => {
-	it("sends rounded window bounds to the helper", () => {
-		const handle = fakeHandle();
-		const overlay = createCursorOverlay(() => handle);
+describe("#given an overlay transport #when highlighting a window #then it forwards a highlight command", () => {
+	it("sends rounded window bounds", () => {
+		const transport = fakeTransport();
+		const overlay = createCursorOverlay(() => transport);
 
 		overlay.highlight({ x: 100, y: 200, width: 800, height: 600 });
 
-		expect(handle.writes).toEqual(["highlight 100 200 800 600\n"]);
+		expect(transport.sends).toEqual(["highlight 100 200 800 600\n"]);
 	});
 });
 
-describe("#given no overlay binary #when driven #then every call is a safe no-op", () => {
-	it("never throws when the spawner yields nothing", () => {
+describe("#given no overlay transport #when driven #then every call is a safe no-op", () => {
+	it("never throws when the factory yields nothing", () => {
 		const overlay = createCursorOverlay(() => undefined);
 
 		expect(() => {

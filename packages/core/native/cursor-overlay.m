@@ -43,7 +43,9 @@ static void reset_idle_timer(void) {
 
 static const CGFloat kOverlaySize = 40.0;
 static const NSTimeInterval kFadeInDuration = 0.18;
-static const NSTimeInterval kScootDuration = 0.16;
+// Longer glide so the cursor visibly travels across the screen (codex-style),
+// rather than snapping between points.
+static const NSTimeInterval kScootDuration = 0.42;
 static const CGFloat kRingRadius = 9.0;
 static const CGFloat kCoreRadius = 6.0;
 static const CGFloat kMaxStretch = 0.38;

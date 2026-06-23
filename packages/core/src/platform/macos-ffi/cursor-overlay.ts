@@ -42,7 +42,10 @@ const overlayBinaryCandidatePaths: readonly string[] = [
 // this many seconds after the last command, so it cleans itself up when a session
 // ends but stays put while commands keep arriving.
 const overlaySocketPath = join(tmpdir(), "macos-cua-cursor.sock");
-const overlayIdleSeconds = "5";
+// Long enough to stay visible across a multi-step agent session (vision steps take
+// a few seconds each) so the cursor glides continuously instead of fading out and
+// back in between commands; still self-cleans when the session truly ends.
+const overlayIdleSeconds = "15";
 
 export function createCursorOverlay(
 	transportFactory: OverlayTransportFactory = defaultSocketTransport,

@@ -183,21 +183,25 @@ export class MacOSInputController {
 
 	async scroll(options: ScrollOptions): Promise<void> {
 		this.beforeInput();
-		const amount = Math.trunc(options.amount);
+		const amount = Math.max(0, Math.trunc(Math.abs(options.amount)));
 		const targetWindow = await this.requireSessionWindow("scroll");
-		switch (options.direction) {
-			case "up":
-				postScrollEvent({ deltaX: 0, deltaY: amount, targetPid: this.targetPid, targetWindow });
-				return;
-			case "down":
-				postScrollEvent({ deltaX: 0, deltaY: -amount, targetPid: this.targetPid, targetWindow });
-				return;
-			case "left":
-				postScrollEvent({ deltaX: -amount, deltaY: 0, targetPid: this.targetPid, targetWindow });
-				return;
-			case "right":
-				postScrollEvent({ deltaX: amount, deltaY: 0, targetPid: this.targetPid, targetWindow });
-				return;
+		const unit: Record<ScrollOptions["direction"], [number, number]> = {
+			up: [0, 1],
+			down: [0, -1],
+			left: [-1, 0],
+			right: [1, 0],
+		};
+		const [ux, uy] = unit[options.direction];
+		// Deliver the total in small steps so it GLIDES smoothly instead of jumping.
+		const perStep = 4;
+		const steps = Math.max(1, Math.ceil(amount / perStep));
+		const delta = amount / steps;
+		for (let i = 0; i < steps; i++) {
+			const d = Math.round(delta);
+			postScrollEvent({ deltaX: d * ux, deltaY: d * uy, targetPid: this.targetPid, targetWindow });
+			if (i < steps - 1) {
+				await delayMilliseconds(14);
+			}
 		}
 	}
 

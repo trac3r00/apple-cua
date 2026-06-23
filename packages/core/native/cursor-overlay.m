@@ -19,6 +19,12 @@ static NSTimeInterval gScootStart;
 static CGFloat gStretch = 1.0;
 static CGFloat gAngle = 0.0;
 
+// Cursor MODE: 0 = pointer (acting/clicking), 1 = scroll (scroll glyph),
+// 2 = thinking (pulses in place so it never just vanishes while the agent reasons).
+static int gMode = 0;
+static double gPulse = 0.0;      // 0..1 animation phase for thinking
+static NSTimer *gPulseTimer = nil;
+
 // Persistent-daemon idle shutdown: when driven over a unix socket the overlay
 // outlives any single CLI command, so it self-terminates after this many seconds
 // with no command (0 disables — the stdin/legacy mode never times out).
@@ -50,6 +56,52 @@ static const CGFloat kRingRadius = 9.0;
 static const CGFloat kCoreRadius = 6.0;
 static const CGFloat kMaxStretch = 0.38;
 
+static void stop_pulse(void) {
+	if (gPulseTimer != nil) {
+		[gPulseTimer invalidate];
+		gPulseTimer = nil;
+	}
+	gPulse = 0.0;
+	[gPointerView setNeedsDisplay:YES];
+}
+
+static void start_pulse(void) {
+	if (gPulseTimer != nil) {
+		return;
+	}
+	gPulseTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 30.0
+												  repeats:YES
+													block:^(NSTimer *timer) {
+														(void)timer;
+														gPulse += (1.0 / 30.0) / 1.3;  // ~1.3s breath
+														if (gPulse > 1.0) {
+															gPulse -= 1.0;
+														}
+														[gPointerView setNeedsDisplay:YES];
+													}];
+}
+
+static void apply_mode(const char *name) {
+	int mode = 0;
+	if (strncmp(name, "scroll", 6) == 0) {
+		mode = 1;
+	} else if (strncmp(name, "think", 5) == 0) {
+		mode = 2;
+	}
+	gMode = mode;
+	if (mode == 2) {
+		start_pulse();
+	} else {
+		stop_pulse();
+	}
+	// Only repaint/raise if the cursor is already positioned — a mode set before the
+	// first `set` must NOT flash the cursor at (0,0); it applies once positioned.
+	if (gWindow != nil && gShown) {
+		[gWindow orderFrontRegardless];
+		[gPointerView setNeedsDisplay:YES];
+	}
+}
+
 @interface OverlayPointerView : NSView
 @end
 
@@ -69,22 +121,49 @@ static const CGFloat kMaxStretch = 0.38;
 	CGContextScaleCTM(ctx, gStretch, 1.0 / gStretch);
 	CGContextRotateCTM(ctx, -gAngle);
 	CGContextTranslateCTM(ctx, -cx, -cy);
+	// Thinking mode "breathes": ring grows/shrinks with the pulse phase.
+	CGFloat breathe = (gMode == 2) ? (0.5 + 0.5 * sin(gPulse * 2.0 * M_PI)) : 0.0;
+	CGFloat ringR = kRingRadius + 2.0 * breathe;
+
 	// Dark outline first so the white ring + blue core stay visible on ANY
 	// background (light pages would otherwise swallow the white halo).
-	CGFloat kOutline = kRingRadius + 1.6;
+	CGFloat kOutline = ringR + 1.6;
 	NSBezierPath *outline = [NSBezierPath
 		bezierPathWithOvalInRect:NSMakeRect(cx - kOutline, cy - kOutline, kOutline * 2, kOutline * 2)];
 	[[NSColor colorWithSRGBRed:0.0 green:0.0 blue:0.0 alpha:0.55] setFill];
 	[outline fill];
 	NSBezierPath *ring = [NSBezierPath
-		bezierPathWithOvalInRect:NSMakeRect(cx - kRingRadius, cy - kRingRadius, kRingRadius * 2, kRingRadius * 2)];
+		bezierPathWithOvalInRect:NSMakeRect(cx - ringR, cy - ringR, ringR * 2, ringR * 2)];
 	[[NSColor colorWithSRGBRed:1.0 green:1.0 blue:1.0 alpha:1.0] setFill];
 	[ring fill];
-	NSBezierPath *core = [NSBezierPath
-		bezierPathWithOvalInRect:NSMakeRect(cx - kCoreRadius, cy - kCoreRadius, kCoreRadius * 2, kCoreRadius * 2)];
-	// White ring + blue core — the codex-style "agent is acting here" pointer.
-	[[NSColor colorWithSRGBRed:0.0 green:0.478 blue:1.0 alpha:1.0] setFill];
-	[core fill];
+
+	NSColor *blue = [NSColor colorWithSRGBRed:0.0 green:0.478 blue:1.0 alpha:1.0];
+	if (gMode == 1) {
+		// Scroll: a blue up/down double-chevron (⇅) instead of a solid core.
+		[blue setFill];
+		CGFloat w = 4.5, h = 3.0, gap = 1.6;
+		NSBezierPath *up = [NSBezierPath bezierPath];
+		[up moveToPoint:NSMakePoint(cx - w, cy - gap)];
+		[up lineToPoint:NSMakePoint(cx + w, cy - gap)];
+		[up lineToPoint:NSMakePoint(cx, cy - gap - h)];
+		[up closePath];
+		[up fill];
+		NSBezierPath *down = [NSBezierPath bezierPath];
+		[down moveToPoint:NSMakePoint(cx - w, cy + gap)];
+		[down lineToPoint:NSMakePoint(cx + w, cy + gap)];
+		[down lineToPoint:NSMakePoint(cx, cy + gap + h)];
+		[down closePath];
+		[down fill];
+	} else if (gMode == 2) {
+		// Thinking: a pulsing blue core (size + alpha) — "still figuring it out".
+		CGFloat coreR = kCoreRadius * (0.55 + 0.45 * breathe);
+		[[blue colorWithAlphaComponent:0.55 + 0.45 * breathe] setFill];
+		[[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(cx - coreR, cy - coreR, coreR * 2, coreR * 2)] fill];
+	} else {
+		// Pointer: solid blue core — the codex-style "agent is acting here" dot.
+		[blue setFill];
+		[[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(cx - kCoreRadius, cy - kCoreRadius, kCoreRadius * 2, kCoreRadius * 2)] fill];
+	}
 	CGContextRestoreGState(ctx);
 }
 @end
@@ -231,6 +310,16 @@ static int dispatch_command_line(const char *line) {
 			apply_hide();
 			reset_idle_timer();
 		});
+	} else if (strncmp(line, "mode ", 5) == 0) {
+		char name[32] = {0};
+		if (sscanf(line, "mode %31s", name) == 1) {
+			char *copy = strdup(name);
+			dispatch_async(dispatch_get_main_queue(), ^{
+				apply_mode(copy);
+				free(copy);
+				reset_idle_timer();
+			});
+		}
 	} else if (strncmp(line, "quit", 4) == 0) {
 		return 1;
 	}

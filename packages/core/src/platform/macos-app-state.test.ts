@@ -179,7 +179,7 @@ describe("#given a URL blocklist #when a browser is on a blocked URL #then get_a
 
 describe("#given a fresh app session #when get_app_state runs #then it highlights the window once", () => {
 	it("fires the capture-start highlight on the first windowed call only", async () => {
-		const overlay = { set: vi.fn(), highlight: vi.fn(), hide: vi.fn(), close: vi.fn() };
+		const overlay = { set: vi.fn(), highlight: vi.fn(), setMode: vi.fn(), hide: vi.fn(), close: vi.fn() };
 		const appsJson = JSON.stringify([
 			{ name: "Finder", bundleId: "com.apple.finder", pid: TARGET_PID, isActive: true },
 		]);

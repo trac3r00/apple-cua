@@ -317,7 +317,7 @@ describe("#given MacOSInputController target routing", () => {
 		windowMock.openWindows.mockResolvedValue([
 			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
 		]);
-		const overlay = { set: vi.fn(), highlight: vi.fn(), hide: vi.fn(), close: vi.fn() };
+		const overlay = { set: vi.fn(), highlight: vi.fn(), setMode: vi.fn(), hide: vi.fn(), close: vi.fn() };
 		const { MacOSInputController } = await import("./macos-input.js");
 		const controller = new MacOSInputController(1234, overlay);
 
@@ -340,7 +340,7 @@ describe("#given MacOSInputController target routing", () => {
 		const { MacOSInputController } = await import("./macos-input.js");
 		const controller = new MacOSInputController(
 			1234,
-			{ set: vi.fn(), highlight: vi.fn(), hide: vi.fn(), close: vi.fn() },
+			{ set: vi.fn(), highlight: vi.fn(), setMode: vi.fn(), hide: vi.fn(), close: vi.fn() },
 			() => false,
 			displaySleep,
 		);
@@ -362,7 +362,7 @@ describe("#given MacOSInputController target routing", () => {
 		const { MacOSInputController } = await import("./macos-input.js");
 		const controller = new MacOSInputController(
 			1234,
-			{ set: vi.fn(), highlight: vi.fn(), hide: vi.fn(), close: vi.fn() },
+			{ set: vi.fn(), highlight: vi.fn(), setMode: vi.fn(), hide: vi.fn(), close: vi.fn() },
 			() => true,
 		);
 
@@ -378,6 +378,7 @@ describe("#given MacOSInputController target routing", () => {
 		const controller = new MacOSInputController(1234, {
 			set: vi.fn(),
 			highlight: vi.fn(),
+			setMode: vi.fn(),
 			hide: vi.fn(),
 			close: vi.fn(),
 		});

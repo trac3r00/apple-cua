@@ -47,6 +47,7 @@ export { CloudComputer, type CloudComputerOptions } from "./platform/cloud.js";
 export { HostComputer, type HostComputerOptions } from "./platform/host.js";
 export { MacOSHostComputer, type MacOSHostComputerOptions } from "./platform/macos.js";
 export {
+	type PointerMode,
 	type PointerOverlay,
 	NOOP_POINTER_OVERLAY,
 	createCursorOverlay,

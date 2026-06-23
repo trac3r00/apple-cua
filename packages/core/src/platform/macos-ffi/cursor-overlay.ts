@@ -6,9 +6,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Point, Rect } from "../../types/index.js";
 
+export type PointerMode = "pointer" | "scroll" | "thinking";
+
 export interface PointerOverlay {
 	set(point: Point): void;
 	highlight(rect: Rect): void;
+	setMode(mode: PointerMode): void;
 	hide(): void;
 	close(): void;
 }
@@ -27,6 +30,7 @@ export type OverlayTransportFactory = () => OverlayTransport | undefined;
 export const NOOP_POINTER_OVERLAY: PointerOverlay = {
 	set(): void {},
 	highlight(): void {},
+	setMode(): void {},
 	hide(): void {},
 	close(): void {},
 };
@@ -71,6 +75,9 @@ export function createCursorOverlay(
 			send(
 				`highlight ${Math.round(rect.x)} ${Math.round(rect.y)} ${Math.round(rect.width)} ${Math.round(rect.height)}\n`,
 			);
+		},
+		setMode(mode: PointerMode): void {
+			send(`mode ${mode}\n`);
 		},
 		hide(): void {
 			send("hide\n");

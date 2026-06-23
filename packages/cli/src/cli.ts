@@ -5,8 +5,14 @@ import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { MacOSHostComputer, NOOP_POINTER_OVERLAY } from "@macos-cua/core";
-import type { ComputerInterface, KeyOptions, ScreenshotOptions, ScrollOptions } from "@macos-cua/core";
+import { MacOSHostComputer, NOOP_POINTER_OVERLAY, createCursorOverlay } from "@macos-cua/core";
+import type {
+	ComputerInterface,
+	KeyOptions,
+	PointerMode,
+	ScreenshotOptions,
+	ScrollOptions,
+} from "@macos-cua/core";
 import { Command } from "commander";
 
 type PackageJson = {
@@ -230,6 +236,19 @@ program
 	.action(async (options: ScrollCommandOptions) => {
 		await withComputer((computer) => computer.scroll({ direction: options.direction, amount: options.amount }));
 		writeActionOutput("scroll", options, `Scrolled ${options.direction} by ${options.amount}`);
+	});
+
+program
+	.command("cursor-mode")
+	.description("Set the cursor overlay mode: pointer (acting), scroll, or thinking")
+	.argument("<mode>", "pointer | scroll | thinking")
+	.action((mode: string) => {
+		const normalized: PointerMode =
+			mode === "scroll" || mode === "thinking" ? mode : "pointer";
+		// Drive the shared overlay daemon directly (it persists across commands);
+		// no computer/input session needed just to change how the cursor looks.
+		createCursorOverlay().setMode(normalized);
+		writeActionOutput("cursor-mode", { mode: normalized }, `Cursor mode: ${normalized}`);
 	});
 
 program

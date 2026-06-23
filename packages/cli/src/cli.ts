@@ -242,12 +242,15 @@ program
 	.command("cursor-mode")
 	.description("Set the cursor overlay mode: pointer (acting), scroll, or thinking")
 	.argument("<mode>", "pointer | scroll | thinking")
-	.action((mode: string) => {
+	.action(async (mode: string) => {
 		const normalized: PointerMode =
 			mode === "scroll" || mode === "thinking" ? mode : "pointer";
-		// Drive the shared overlay daemon directly (it persists across commands);
-		// no computer/input session needed just to change how the cursor looks.
+		// Drive the shared overlay daemon directly (it persists across commands).
+		// setMode writes to the daemon socket asynchronously; await briefly so the
+		// command actually lands before this short-lived process exits (otherwise
+		// the mode change is dropped and the cursor stays the plain pointer).
 		createCursorOverlay().setMode(normalized);
+		await sleep(200);
 		writeActionOutput("cursor-mode", { mode: normalized }, `Cursor mode: ${normalized}`);
 	});
 

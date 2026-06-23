@@ -6,7 +6,7 @@ import {
 	type CGPoint,
 	K_CG_EVENT_SOURCE_STATE_HID_SYSTEM_STATE,
 	K_CG_HID_EVENT_TAP,
-	K_CG_SCROLL_EVENT_UNIT_LINE,
+	K_CG_SCROLL_EVENT_UNIT_PIXEL,
 } from "./coregraphics-types.js";
 import { koffi } from "./koffi.js";
 
@@ -120,13 +120,27 @@ export function createKeyboardEvent(keyCode: number, keyDown: boolean): CGEventR
 	}
 }
 
+// Pixels per scroll "unit" — browsers (Chrome) honor PIXEL-unit scroll events but
+// often ignore small LINE-unit ones, so amounts are delivered as pixels.
+const SCROLL_PIXELS_PER_UNIT = 12;
+
 export function createScrollEvent(deltaX: number, deltaY: number): CGEventRef {
 	const source = createEventSource();
 	try {
-		const event = CGEventCreateScrollWheelEvent(source, K_CG_SCROLL_EVENT_UNIT_LINE, 2, deltaY, deltaX);
+		const event = CGEventCreateScrollWheelEvent(
+			source,
+			K_CG_SCROLL_EVENT_UNIT_PIXEL,
+			2,
+			Math.round(deltaY * SCROLL_PIXELS_PER_UNIT),
+			Math.round(deltaX * SCROLL_PIXELS_PER_UNIT),
+		);
 		if (event === null) {
 			throw new Error("CGEventCreateScrollWheelEvent returned null");
 		}
+		// kCGScrollWheelEventIsContinuous (field 88): mark this as a continuous
+		// (trackpad-style) scroll. Chrome and other apps ignore non-continuous
+		// synthetic wheel events, so without this the page doesn't move.
+		setIntegerValueField(event, 88, 1);
 		stampEvent(event);
 		return event;
 	} finally {

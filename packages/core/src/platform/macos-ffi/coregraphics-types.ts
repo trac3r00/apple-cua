@@ -40,6 +40,7 @@ export type ScrollEventOptions = {
 export const K_CG_EVENT_SOURCE_STATE_HID_SYSTEM_STATE = 1;
 export const K_CG_HID_EVENT_TAP = 0;
 export const K_CG_SCROLL_EVENT_UNIT_LINE = 1;
+export const K_CG_SCROLL_EVENT_UNIT_PIXEL = 0;
 export const K_CG_MOUSE_EVENT_CLICK_STATE = 1;
 export const K_CG_MOUSE_EVENT_BUTTON_NUMBER = 3;
 export const K_CG_MOUSE_EVENT_SUBTYPE = 7;

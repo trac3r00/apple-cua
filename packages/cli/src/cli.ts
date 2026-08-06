@@ -406,7 +406,79 @@ appsCommand
 		});
 	});
 
+appsCommand
+	.command("set-value <app> <elementIndex> <value>")
+	.description("Set the value of a settable accessibility element (e.g. a text field)")
+	.action(async (app: string, elementIndex: string, value: string) => {
+		await withComputer(async (computer) => {
+			const pid = await resolveAppPidForCli(computer, app);
+			await computer.setValue(pid, parseElementIndexForCli(elementIndex), value);
+			writeOutput({ ok: true, app, pid, elementIndex: Number(elementIndex) }, "ok");
+		});
+	});
+
+appsCommand
+	.command("perform-action <app> <elementIndex> <action>")
+	.description("Perform an AX action on an element (e.g. AXPress, AXRaise)")
+	.action(async (app: string, elementIndex: string, action: string) => {
+		await withComputer(async (computer) => {
+			const pid = await resolveAppPidForCli(computer, app);
+			await computer.performAction(pid, parseElementIndexForCli(elementIndex), action);
+			writeOutput({ ok: true, app, pid, elementIndex: Number(elementIndex), action }, "ok");
+		});
+	});
+
+appsCommand
+	.command("select-text <app> <elementIndex>")
+	.description("Select text in an element, or place the caret before/after a match")
+	.option("--text <text>", "Text to select")
+	.option("--prefix <prefix>", "Disambiguate a repeated match by preceding text")
+	.option("--suffix <suffix>", "Disambiguate a repeated match by following text")
+	.option("--selection <selection>", "Selection mode (default: text)")
+	.action(
+		async (
+			app: string,
+			elementIndex: string,
+			options: { text?: string; prefix?: string; suffix?: string; selection?: string },
+		) => {
+			await withComputer(async (computer) => {
+				const pid = await resolveAppPidForCli(computer, app);
+				await computer.selectText(pid, parseElementIndexForCli(elementIndex), {
+					selection: parseSelectionForCli(options.selection),
+					...(options.text !== undefined ? { text: options.text } : {}),
+					...(options.prefix !== undefined ? { prefix: options.prefix } : {}),
+					...(options.suffix !== undefined ? { suffix: options.suffix } : {}),
+				});
+				writeOutput({ ok: true, app, pid, elementIndex: Number(elementIndex) }, "ok");
+			});
+		},
+	);
+
 await program.parseAsync().catch(handleError);
+
+/** Resolve an app name/bundleId to a pid, reusing the same matching as `apps state`. */
+async function resolveAppPidForCli(computer: MacOSHostComputer, app: string): Promise<number> {
+	const state = await getAppStateForApp(computer, app);
+	return state.pid;
+}
+
+/** Element indices address the AX tree from `apps state`; reject junk rather than sending NaN. */
+function parseElementIndexForCli(raw: string): number {
+	const index = Number(raw);
+	if (!Number.isInteger(index) || index < 0) {
+		throw new Error(`Invalid element index "${raw}": expected a non-negative integer`);
+	}
+	return index;
+}
+
+/** Selection mode is a closed set in core; validate here so a typo fails loudly. */
+function parseSelectionForCli(raw: string | undefined): "text" | "before" | "after" {
+	const selection = raw ?? "text";
+	if (selection !== "text" && selection !== "before" && selection !== "after") {
+		throw new Error(`Invalid --selection "${raw}": expected text, before, or after`);
+	}
+	return selection;
+}
 
 function readPackageJson(): PackageJson {
 	const parsed: { version: string } = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf8")) as {

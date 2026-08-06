@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { MacOSHostComputer, NOOP_POINTER_OVERLAY, createCursorOverlay } from "@macos-cua/core";
+import { MacOSHostComputer, NOOP_POINTER_OVERLAY, createCursorOverlay, getAppStateForApp } from "@macos-cua/core";
 import type {
 	ComputerInterface,
 	KeyOptions,
@@ -365,6 +365,45 @@ windowsCommand
 		const windows = await loadWindows();
 		const windowList = await callFirstMethod(windows, ["list", "listWindows", "all"]);
 		writeOutput(windowList, formatUnknown(windowList));
+	});
+
+const appsCommand = program.command("apps").description("Inspect running apps and their accessibility state");
+
+appsCommand
+	.command("list")
+	.description("Print running apps (name, bundleId, pid)")
+	.action(async () => {
+		await withComputer(async (computer) => {
+			const apps = await computer.listApps();
+			writeOutput(
+				apps,
+				apps.map((app) => `${app.pid}\t${app.bundleId}\t${app.name}`).join("\n"),
+			);
+		});
+	});
+
+appsCommand
+	.command("state <app>")
+	.description("Print an app's accessibility (AX) element tree")
+	.option("--screenshot", "Include the base64 screenshot payload (large; omitted by default)")
+	.action(async (app: string, options: { screenshot?: boolean }) => {
+		await withComputer(async (computer) => {
+			const state = await getAppStateForApp(computer, app);
+			// The base64 screenshot dwarfs the AX tree and makes the JSON unusable for
+			// programmatic consumers, so it is dropped unless explicitly requested.
+			const payload = options.screenshot === true ? state : { ...state, screenshotBase64: "" };
+			writeOutput(
+				payload,
+				[
+					`${state.app} (${state.bundleId}) pid=${state.pid} frontmost=${state.frontmost} axAvailable=${state.axAvailable}`,
+					...state.elements.map(
+						(element) =>
+							`#${element.id}\t${element.role}\t${element.label ?? ""}\t` +
+							`[${element.frame.x},${element.frame.y},${element.frame.width},${element.frame.height}]`,
+					),
+				].join("\n"),
+			);
+		});
 	});
 
 await program.parseAsync().catch(handleError);

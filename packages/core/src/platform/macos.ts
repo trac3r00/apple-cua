@@ -46,6 +46,8 @@ const SYSTEM_PROFILER_TIMEOUT_MILLISECONDS = 10_000;
 const SCREENSHOT_TIMEOUT_MILLISECONDS = 10_000;
 const SCREENSHOT_MAX_BUFFER_BYTES = 100 * 1024 * 1024;
 const DEFAULT_APP_STATE_SETTLE_MILLISECONDS = 300;
+/** Interval between accessibility-tree polls while waiting for the UI to settle. */
+const UI_SETTLE_POLL_MILLISECONDS = 40;
 
 export interface MacOSHostComputerOptions extends HostComputerOptions {
 	defaultTargetPid?: number;
@@ -162,13 +164,13 @@ export class MacOSHostComputer extends HostComputer {
 
 	async getAppState(targetPid?: number, options?: AppStateOptions): Promise<AppState> {
 		const settleMs = options?.settleMs ?? DEFAULT_APP_STATE_SETTLE_MILLISECONDS;
-		if (settleMs > 0) {
-			await new Promise((resolve) => setTimeout(resolve, settleMs));
-		}
 		const apps = await getRunningMacOSApps();
 		const app = resolveTargetApp(apps, targetPid);
 		this.assertAppApproved(app);
 		await this.assertBrowserUrlAllowed(app);
+		if (settleMs > 0) {
+			await this.waitForUiSettle(app.pid, settleMs);
+		}
 		const targetWindow = await this.input.rememberTargetWindow(app.pid);
 		// Scope the screenshot to the target window at its own aspect ratio (capped),
 		// so the model sees an undistorted window image and coordinates invert cleanly.
@@ -255,6 +257,28 @@ export class MacOSHostComputer extends HostComputer {
 		}
 		if (decision === "needs-approval") {
 			throw new Error(`Computer Use needs your approval to use '${app.name}'. Approve the app and try again.`);
+		}
+	}
+
+	/**
+	 * Wait for the target app's UI to stop changing before capturing state, instead of
+	 * sleeping a fixed duration. Polls the accessibility tree and returns as soon as two
+	 * consecutive snapshots are identical (the UI has settled) or the `settleMs` cap
+	 * elapses, whichever comes first. This is the ChatGPT computer-use "skyshot settle"
+	 * technique: faster when the UI is already stable, more robust when it is still moving.
+	 */
+	private async waitForUiSettle(pid: number, settleMs: number): Promise<void> {
+		const deadline = Date.now() + settleMs;
+		let previous = normalizeAxTree(extractAccessibilityTree(pid).elements);
+		// Poll until the tree is stable across two consecutive reads, or the cap elapses.
+		while (Date.now() < deadline) {
+			await new Promise((resolve) => setTimeout(resolve, UI_SETTLE_POLL_MILLISECONDS));
+			const current = normalizeAxTree(extractAccessibilityTree(pid).elements);
+			const change = diffAxTreesByKey(previous, current);
+			if (change.added === 0 && change.removed === 0 && change.changed === 0) {
+				return;
+			}
+			previous = current;
 		}
 	}
 

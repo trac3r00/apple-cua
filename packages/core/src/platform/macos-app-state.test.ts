@@ -322,6 +322,56 @@ describe("#given no target window #when get_app_state captures the full display 
 	});
 });
 
+describe("#given an accessibility tree that stabilizes #when get_app_state settles #then it stops at stability, not the cap", () => {
+	it("polls the tree until it is stable and returns before the settle cap elapses", async () => {
+		vi.useFakeTimers();
+		try {
+			const stableElement = {
+				id: 5,
+				role: "AXButton",
+				label: "Open",
+				value: null,
+				frame: { x: 800, y: 550, width: 200, height: 160 },
+				actions: ["AXPress"],
+				children: [],
+			};
+			// First poll: tree still changing (extra element). Subsequent polls: stable.
+			accessibilityMock.extractAccessibilityTree
+				.mockReturnValueOnce({ axAvailable: true, elements: [stableElement, { ...stableElement, id: 6, label: "Transient" }] })
+				.mockReturnValue({ axAvailable: true, elements: [stableElement] });
+			const computer = new MacOSHostComputer();
+
+			const statePromise = computer.getAppState(TARGET_PID, { settleMs: 500 });
+			// Let the event-driven settle loop run its (short) poll intervals.
+			await vi.advanceTimersByTimeAsync(200);
+
+			// Must have finished WITHOUT advancing the full 500ms cap.
+			const state = await statePromise;
+			expect(state.elements.map((element) => element.id)).toEqual([5]);
+			// Event-driven settle polls the tree more than once to confirm stability.
+			expect(accessibilityMock.extractAccessibilityTree.mock.calls.length).toBeGreaterThan(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("returns immediately once the tree is already stable instead of sleeping the whole cap", async () => {
+		vi.useFakeTimers();
+		try {
+			const computer = new MacOSHostComputer();
+
+			const statePromise = computer.getAppState(TARGET_PID, { settleMs: 500 });
+			// Advance far less than the 500ms cap; a stable tree settles right away.
+			await vi.advanceTimersByTimeAsync(120);
+
+			const state = await statePromise;
+			expect(state.pid).toBe(TARGET_PID);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
+
 describe("#given a window on a secondary display #when get_app_state remaps frames #then negative origins are handled", () => {
 	it("offsets frames by the negative window origin", async () => {
 		const negativeBounds = { x: -1920, y: -200, width: 960, height: 600 };

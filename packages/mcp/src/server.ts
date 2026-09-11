@@ -6,6 +6,7 @@ import {
 	MacOSHostComputer,
 	clickPoint,
 	getAppStateForApp,
+	observeAction,
 	parseElementIndex,
 	pressElement,
 	resolveAppPid,
@@ -18,7 +19,14 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod/v4";
 import { registerPressKeysTool } from "./press-keys.js";
 import { SERVER_INFO } from "./server-info.js";
-import { type ToolContent, type ToolResult, actionComplete, clickComplete, textResult } from "./tool-result.js";
+import {
+	type ToolContent,
+	type ToolResult,
+	actionComplete,
+	clickComplete,
+	observedActionComplete,
+	textResult,
+} from "./tool-result.js";
 
 export { TOOL_NAMES } from "./tool-names.js";
 
@@ -129,11 +137,13 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 			const pressCount = Math.max(1, Math.trunc(click_count ?? 1));
 			if (element_index !== undefined) {
 				const index = parseElementIndex(element_index);
-				for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
-					await pressElement(computer, targetPid, index);
-				}
+				const state = await observeAction(computer, targetPid, async () => {
+					for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
+						await pressElement(computer, targetPid, index);
+					}
+				});
 				void mouse_button;
-				return clickComplete();
+				return observedActionComplete(state);
 			}
 			const point = await resolveScreenPoint(computer, targetPid, parseCoordinate(x, y));
 			if ((mouse_button ?? "left") === "left") {

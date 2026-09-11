@@ -50,6 +50,12 @@ export interface AppState {
 	screenshotHeight: number;
 	screenshotMimeType?: "image/png" | "image/jpeg";
 	display: DisplayInfo;
+	/**
+	 * Whether the accessibility tree or the screenshot is the more reliable
+	 * perception channel for this screen ("ax" or "image"). When "image", the
+	 * tree is sparse or image-dominated, so prefer the screenshot (vision).
+	 */
+	contentKind?: import("./content-kind.js").ContentKind;
 	axChangeSummary?: AxTreeChangeSummary;
 	/**
 	 * The element-level diff from the previous `get_app_state` call for this app,

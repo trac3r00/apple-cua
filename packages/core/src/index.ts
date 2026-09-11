@@ -1,9 +1,12 @@
 export type * from "./accessibility/types.js";
+export { classifyContentKind, type ContentKind } from "./accessibility/content-kind.js";
+export { diffAxTreeChanges, type AxTreeChanges } from "./accessibility/diff.js";
 export {
 	AX_PRESS_ACTION,
 	axScrollActionFor,
 	clickPoint,
 	getAppStateForApp,
+	observeAction,
 	parseElementIndex,
 	parseKeyChord,
 	pressElement,

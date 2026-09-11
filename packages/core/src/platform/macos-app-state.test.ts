@@ -87,20 +87,19 @@ beforeEach(() => {
 	});
 	childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
 		// The sips step would resize to 1280x800; mirror that in the returned png header.
-		callback(null, fakePng(1280, 800), "");
+		callback(null, fakePng(2560, 1600), "");
 	});
 });
 
 describe("#given a target window #when get_app_state captures it #then the screenshot is sized to the window aspect", () => {
-	it("requests a 1280-long-edge window screenshot, not the full screen", async () => {
+	it("captures the window at full fidelity up to the 2560 long-edge cap, not the full screen", async () => {
 		const computer = new MacOSHostComputer();
 
 		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
 
-		const screenshotCall = childProcessMock.execFile.mock.calls[1];
-		expect(screenshotCall?.[1]).toEqual(expect.arrayContaining(["1280", "800"]));
-		expect(state.screenshotWidth).toBe(1280);
-		expect(state.screenshotHeight).toBe(800);
+		// WINDOW_BOUNDS is 2560x1600, which fits the raised 2560 cap uncapped.
+		expect(state.screenshotWidth).toBe(2560);
+		expect(state.screenshotHeight).toBe(1600);
 		expect(state.windowBounds).toEqual(WINDOW_BOUNDS);
 	});
 });
@@ -117,7 +116,7 @@ describe("#given two get_app_state calls #when the second runs #then it reports 
 				);
 			});
 			childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
-				callback(null, fakePng(1280, 800), "");
+				callback(null, fakePng(2560, 1600), "");
 			});
 		}
 		const computer = new MacOSHostComputer();
@@ -127,6 +126,46 @@ describe("#given two get_app_state calls #when the second runs #then it reports 
 
 		expect(first.axChangeSummary).toBeUndefined();
 		expect(second.axChangeSummary).toEqual({ added: 0, removed: 0, changed: 0 });
+	});
+
+	it("exposes the element-level diff on the second call", async () => {
+		childProcessMock.execFile.mockReset();
+		for (let call = 0; call < 2; call += 1) {
+			childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
+				callback(
+					null,
+					JSON.stringify([{ name: "Finder", bundleId: "com.apple.finder", pid: TARGET_PID, isActive: true }]),
+					"",
+				);
+			});
+			childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
+				callback(null, fakePng(2560, 1600), "");
+			});
+		}
+		const baseElement = {
+			id: 5,
+			role: "AXButton",
+			label: "Open",
+			value: null,
+			frame: { x: 800, y: 550, width: 200, height: 160 },
+			actions: ["AXPress"],
+			children: [],
+		};
+		accessibilityMock.extractAccessibilityTree
+			.mockReturnValueOnce({ axAvailable: true, elements: [baseElement] })
+			.mockReturnValue({
+				axAvailable: true,
+				elements: [baseElement, { ...baseElement, id: 6, label: "New", frame: { x: 100, y: 100, width: 50, height: 50 } }],
+			});
+		const computer = new MacOSHostComputer();
+
+		const first = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+		const second = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+		expect(first.axChanges).toBeUndefined();
+		expect(second.axChanges?.added.map((element) => element.label)).toEqual(["New"]);
+		expect(second.axChanges?.removed).toEqual([]);
+		expect(second.axChanges?.changed).toEqual([]);
 	});
 });
 
@@ -143,7 +182,7 @@ describe("#given an app-approval store #when an app is not approved #then get_ap
 			callback(null, appsJson, ""),
 		);
 		childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) =>
-			callback(null, fakePng(1280, 800), ""),
+			callback(null, fakePng(2560, 1600), ""),
 		);
 		const approval = new AppApprovalStore();
 		const computer = new MacOSHostComputer({ appApproval: approval });
@@ -189,7 +228,7 @@ describe("#given a fresh app session #when get_app_state runs #then it highlight
 				callback(null, appsJson, ""),
 			);
 			childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) =>
-				callback(null, fakePng(1280, 800), ""),
+				callback(null, fakePng(2560, 1600), ""),
 			);
 		}
 		const computer = new MacOSHostComputer({ overlay });
@@ -246,7 +285,7 @@ describe("#given a known app #when get_app_state runs #then it includes the app-
 			);
 		});
 		childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
-			callback(null, fakePng(1280, 800), "");
+			callback(null, fakePng(2560, 1600), "");
 		});
 		const computer = new MacOSHostComputer();
 
@@ -272,8 +311,8 @@ describe("#given a window-scoped screenshot #when get_app_state returns the tree
 
 		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
 
-		// scale = 1280/2560 = 0.5; origin offset = window (300,150).
-		expect(state.elements[0]?.frame).toEqual({ x: 250, y: 200, width: 100, height: 80 });
+		// scale = 2560/2560 = 1.0; origin offset = window (300,150).
+		expect(state.elements[0]?.frame).toEqual({ x: 500, y: 400, width: 200, height: 160 });
 		// id and actions are preserved so element_index clicks still work.
 		expect(state.elements[0]?.id).toBe(5);
 		expect(state.elements[0]?.actions).toEqual(["AXPress"]);
@@ -287,7 +326,7 @@ describe("#given a prior get_app_state #when reading the screenshot viewport #th
 
 		const viewport = await computer.getScreenshotViewport(TARGET_PID);
 
-		expect(viewport).toEqual({ windowBounds: WINDOW_BOUNDS, screenshotWidth: 1280, screenshotHeight: 800 });
+		expect(viewport).toEqual({ windowBounds: WINDOW_BOUNDS, screenshotWidth: 2560, screenshotHeight: 1600 });
 	});
 });
 
@@ -297,7 +336,7 @@ describe("#given no prior get_app_state #when reading the screenshot viewport #t
 
 		const viewport = await computer.getScreenshotViewport(TARGET_PID);
 
-		expect(viewport).toEqual({ windowBounds: WINDOW_BOUNDS, screenshotWidth: 1280, screenshotHeight: 800 });
+		expect(viewport).toEqual({ windowBounds: WINDOW_BOUNDS, screenshotWidth: 2560, screenshotHeight: 1600 });
 	});
 
 	it("returns undefined when the target app has no visible window", async () => {

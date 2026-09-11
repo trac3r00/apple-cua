@@ -1,7 +1,7 @@
 import { stableElementKey } from "./stable-element-key.js";
-import type { AXTreeElement, AxTreeChangeSummary } from "./types.js";
+import type { AXTreeElement, AxTreeChangeSummary, AxTreeChanges } from "./types.js";
 
-export type { AxTreeChangeSummary };
+export type { AxTreeChangeSummary, AxTreeChanges };
 
 export function diffAxTreesByKey(
 	previous: readonly AXTreeElement[],
@@ -23,6 +23,39 @@ export function diffAxTreesByKey(
 	for (const key of previousByKey.keys()) {
 		if (!currentByKey.has(key)) {
 			removed += 1;
+		}
+	}
+	return { added, removed, changed };
+}
+
+/**
+ * Diff two accessibility snapshots into the actual elements that were added,
+ * removed, and changed, matched by content identity ({@link stableElementKey})
+ * rather than positional id so reordered/renumbered trees do not produce
+ * spurious changes. This is the element-level counterpart of
+ * {@link diffAxTreesByKey}: the token-efficient observation the model reads to
+ * see *what* changed, not just *how much*.
+ */
+export function diffAxTreeChanges(
+	previous: readonly AXTreeElement[],
+	current: readonly AXTreeElement[],
+): AxTreeChanges {
+	const previousByKey = new Map(previous.map((element) => [stableElementKey(element), element]));
+	const currentByKey = new Map(current.map((element) => [stableElementKey(element), element]));
+	const added: AXTreeElement[] = [];
+	const changed: Array<{ before: AXTreeElement; after: AXTreeElement }> = [];
+	for (const [key, element] of currentByKey) {
+		const prior = previousByKey.get(key);
+		if (prior === undefined) {
+			added.push(element);
+		} else if ((prior.value ?? "") !== (element.value ?? "")) {
+			changed.push({ before: prior, after: element });
+		}
+	}
+	const removed: AXTreeElement[] = [];
+	for (const [key, element] of previousByKey) {
+		if (!currentByKey.has(key)) {
+			removed.push(element);
 		}
 	}
 	return { added, removed, changed };

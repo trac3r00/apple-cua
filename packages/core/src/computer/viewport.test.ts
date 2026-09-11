@@ -14,13 +14,19 @@ describe("#given a window smaller than the cap #when resolving screenshot size #
 	});
 });
 
+describe("#given the screenshot fidelity cap #when read #then it is raised for Retina-legible captures", () => {
+	it("caps the long edge at 2560, not 1280", () => {
+		expect(MAX_SCREENSHOT_LONG_EDGE).toBe(2560);
+	});
+});
+
 describe("#given a window larger than the cap #when resolving screenshot size #then the long edge is capped", () => {
-	it("preserves the window aspect ratio against the 1280 long edge", () => {
-		expect(resolveWindowScreenshotSize({ width: 2560, height: 1600 })).toEqual({ width: 1280, height: 800 });
+	it("preserves the window aspect ratio against the 2560 long edge", () => {
+		expect(resolveWindowScreenshotSize({ width: 5120, height: 3200 })).toEqual({ width: 2560, height: 1600 });
 	});
 
 	it("caps a tall window by its height", () => {
-		expect(resolveWindowScreenshotSize({ width: 1000, height: 2560 })).toEqual({ width: 500, height: 1280 });
+		expect(resolveWindowScreenshotSize({ width: 1000, height: 5120 })).toEqual({ width: 500, height: 2560 });
 	});
 
 	it("never collapses a thin window below one pixel", () => {

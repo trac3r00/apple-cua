@@ -10,19 +10,19 @@ describe("#given a small screen #when resolving display config #then model dimen
 	});
 });
 
-describe("#given a large 16:9 screen #when resolving display config #then dimensions fit 1280x720", () => {
-	it("downscales while preserving aspect ratio", () => {
+describe("#given a 16:9 screen at the cap #when resolving display config #then dimensions pass through uncapped", () => {
+	it("keeps a 2560-wide screen at full fidelity", () => {
 		const display = resolveDisplayConfig({ width: 2560, height: 1440 });
 
-		expect(display).toEqual({ logicalWidth: 2560, logicalHeight: 1440, modelWidth: 1280, modelHeight: 720 });
+		expect(display).toEqual({ logicalWidth: 2560, logicalHeight: 1440, modelWidth: 2560, modelHeight: 1440 });
 	});
 });
 
-describe("#given a large non-16:9 screen #when resolving display config #then the long edge is capped", () => {
-	it("preserves aspect ratio against the 1280 long edge", () => {
-		const display = resolveDisplayConfig({ width: 2560, height: 1600 });
+describe("#given a screen beyond the cap #when resolving display config #then the long edge is capped", () => {
+	it("preserves aspect ratio against the 2560 long edge", () => {
+		const display = resolveDisplayConfig({ width: 5120, height: 2880 });
 
-		expect(display).toEqual({ logicalWidth: 2560, logicalHeight: 1600, modelWidth: 1280, modelHeight: 800 });
+		expect(display).toEqual({ logicalWidth: 5120, logicalHeight: 2880, modelWidth: 2560, modelHeight: 1440 });
 	});
 });
 

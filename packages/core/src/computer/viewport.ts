@@ -1,7 +1,12 @@
 import type { Point, Rect, Size } from "../types/index.js";
 
-/** Longest screenshot edge sent to the model, matching the native full-display path. */
-export const MAX_SCREENSHOT_LONG_EDGE = 1280;
+/**
+ * Longest screenshot edge sent to the model, matching the native full-display path.
+ * Raised from 1280 to 2560 so Retina windows stay legible: small controls and dense
+ * text survive the downscale. Kept in sync with MAX_MODEL_LONG_EDGE in the
+ * pi-extension coordinate mapping.
+ */
+export const MAX_SCREENSHOT_LONG_EDGE = 2560;
 
 /**
  * Everything needed to translate between the window screenshot the model sees and

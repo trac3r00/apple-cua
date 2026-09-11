@@ -26,6 +26,18 @@ export interface AxTreeChangeSummary {
 	changed: number;
 }
 
+/**
+ * The element-level accessibility diff: the actual elements that were added,
+ * removed, and changed between two snapshots. This is the token-efficient
+ * observation the model reads to see *what* changed, not just *how much*
+ * ({@link AxTreeChangeSummary}).
+ */
+export interface AxTreeChanges {
+	added: AXTreeElement[];
+	removed: AXTreeElement[];
+	changed: Array<{ before: AXTreeElement; after: AXTreeElement }>;
+}
+
 export interface AppState {
 	app: string;
 	bundleId: string;
@@ -39,6 +51,12 @@ export interface AppState {
 	screenshotMimeType?: "image/png" | "image/jpeg";
 	display: DisplayInfo;
 	axChangeSummary?: AxTreeChangeSummary;
+	/**
+	 * The element-level diff from the previous `get_app_state` call for this app,
+	 * present when a prior snapshot exists. Prefer this over re-reading the full
+	 * `elements` tree when you only need to know what changed.
+	 */
+	axChanges?: AxTreeChanges;
 	appInstructions?: string;
 	/**
 	 * Target window rect in global logical screen points, present when the

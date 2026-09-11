@@ -1,4 +1,6 @@
-const MAX_MODEL_LONG_EDGE = 1280;
+// Kept in sync with MAX_SCREENSHOT_LONG_EDGE in @macos-cua/core computer/viewport.ts
+// so the screenshot the model sees and the coordinates it returns share one scale.
+const MAX_MODEL_LONG_EDGE = 2560;
 
 export interface DisplayConfig {
 	/** Logical screen width in points (e.g. 2560 on a 16" MBP). */

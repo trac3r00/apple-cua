@@ -76,21 +76,21 @@ function createMockPi(): MockPi {
 			registeredTools.push({ name: tool.name });
 			activeTools.push(tool.name);
 		},
-		registerCommand() {},
-		registerShortcut() {},
-		registerFlag() {},
+		registerCommand() { },
+		registerShortcut() { },
+		registerFlag() { },
 		getFlag() {
 			return undefined;
 		},
-		registerMessageRenderer() {},
-		sendMessage() {},
-		sendUserMessage() {},
-		appendEntry() {},
-		setSessionName() {},
+		registerMessageRenderer() { },
+		sendMessage() { },
+		sendUserMessage() { },
+		appendEntry() { },
+		setSessionName() { },
 		getSessionName() {
 			return undefined;
 		},
-		setLabel() {},
+		setLabel() { },
 		exec: vi.fn<ExtensionAPI["exec"]>(),
 		getActiveTools() {
 			return [...activeTools];
@@ -106,9 +106,9 @@ function createMockPi(): MockPi {
 		},
 		setModel: vi.fn<ExtensionAPI["setModel"]>().mockResolvedValue(false),
 		getThinkingLevel: vi.fn<ExtensionAPI["getThinkingLevel"]>(),
-		setThinkingLevel() {},
-		registerProvider() {},
-		unregisterProvider() {},
+		setThinkingLevel() { },
+		registerProvider() { },
+		unregisterProvider() { },
 		events: {} as ExtensionAPI["events"],
 	};
 }
@@ -484,8 +484,8 @@ describe("#given supported sonnet session #when provider payload hook runs #then
 				{
 					type: "computer_20250124",
 					name: "computer",
-					display_width_px: 1280,
-					display_height_px: 720,
+					display_width_px: 2560,
+					display_height_px: 1440,
 				},
 			],
 			headers: { "anthropic-beta": "computer-use-2025-01-24" },
@@ -507,7 +507,7 @@ describe("#given enabled session #when agent prompt hook runs #then native compu
 		});
 
 		expect(result).toEqual({
-			systemPrompt: expect.stringContaining("1280x720"),
+			systemPrompt: expect.stringContaining("2560x1440"),
 		});
 	});
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { diffAxTrees, diffAxTreesByKey } from "./diff.js";
+import { diffAxTreeChanges, diffAxTrees, diffAxTreesByKey } from "./diff.js";
 import type { AXTreeElement } from "./types.js";
 
 function el(partial: Partial<AXTreeElement> & { id: number; role: string }): AXTreeElement {
@@ -39,6 +39,27 @@ describe("#given reordered/renumbered ids with stable content #when diffed by ke
 		const current = [el({ id: 5, role: "AXTextField", label: "Name", value: "new" })];
 
 		expect(diffAxTreesByKey(previous, current)).toEqual({ added: 0, removed: 0, changed: 1 });
+	});
+});
+
+describe("#given two AX snapshots #when diffed into element changes #then the actual elements are returned", () => {
+	it("returns the added, removed, and changed elements keyed by content identity", () => {
+		const saveBefore = el({ id: 0, role: "AXButton", label: "Save" });
+		const saveAfter = el({ id: 0, role: "AXButton", label: "Save", value: "pressed" });
+		const removed = el({ id: 1, role: "AXButton", label: "Old" });
+		const added = el({ id: 2, role: "AXButton", label: "New" });
+
+		const changes = diffAxTreeChanges([saveBefore, removed], [saveAfter, added]);
+
+		expect(changes.added).toEqual([added]);
+		expect(changes.removed).toEqual([removed]);
+		expect(changes.changed).toEqual([{ before: saveBefore, after: saveAfter }]);
+	});
+
+	it("reports no element changes for identical snapshots", () => {
+		const tree = [el({ id: 0, role: "AXButton", label: "Save" })];
+
+		expect(diffAxTreeChanges(tree, tree)).toEqual({ added: [], removed: [], changed: [] });
 	});
 });
 

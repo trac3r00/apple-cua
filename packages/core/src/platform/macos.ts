@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { diffAxTreesByKey } from "../accessibility/diff.js";
+import { diffAxTreeChanges, diffAxTreesByKey } from "../accessibility/diff.js";
 import { normalizeAxTree } from "../accessibility/normalize.js";
 import type { AXTreeElement, AppInfo, AppState, DisplayInfo } from "../accessibility/types.js";
 import { resolveAppInstructions } from "../app-instructions/index.js";
@@ -204,6 +204,7 @@ export class MacOSHostComputer extends HostComputer {
 		elements = normalizeAxTree(elements);
 		const previousTree = this.lastAxTreeByPid.get(app.pid);
 		const axChangeSummary = previousTree === undefined ? undefined : diffAxTreesByKey(previousTree, elements);
+		const axChanges = previousTree === undefined ? undefined : diffAxTreeChanges(previousTree, elements);
 		this.lastAxTreeByPid.set(app.pid, elements);
 
 		return {
@@ -219,6 +220,7 @@ export class MacOSHostComputer extends HostComputer {
 			screenshotMimeType: screenshot.mimeType,
 			display,
 			...(axChangeSummary !== undefined ? { axChangeSummary } : {}),
+			...(axChanges !== undefined ? { axChanges } : {}),
 			...(appInstructions !== undefined ? { appInstructions } : {}),
 			...(windowBounds !== undefined ? { windowBounds } : {}),
 		};

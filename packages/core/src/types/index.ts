@@ -33,6 +33,8 @@ export interface AppStateOptions {
 	 * always returns the full tree so element indices can be derived.
 	 */
 	diffOnly?: boolean;
+	/** Require a visible target window instead of falling back to a full-display capture. */
+	requireWindow?: boolean;
 }
 
 export interface KeyOptions {

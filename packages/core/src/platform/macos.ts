@@ -6,6 +6,7 @@ import { normalizeAxTree } from "../accessibility/normalize.js";
 import type { AXTreeElement, AppInfo, AppState, DisplayInfo } from "../accessibility/types.js";
 import { resolveAppInstructions } from "../app-instructions/index.js";
 import { resolveDisplayMetadata } from "../computer/display-metadata.js";
+import type { InputObservation, PreflightResult } from "../computer/guarded-interface.js";
 import type { ComputerInterface, ScreenshotResult } from "../computer/interface.js";
 import { type ScreenshotViewport, resolveWindowScreenshotSize, screenRectToScreenshot } from "../computer/viewport.js";
 import type { AppApprovalStore } from "../permission/app-approval.js";
@@ -15,6 +16,7 @@ import type {
 	DragOptions,
 	KeyOptions,
 	Point,
+	Rect,
 	ScreenshotOptions,
 	ScrollOptions,
 	SelectTextOptions,
@@ -40,6 +42,9 @@ import {
 } from "./macos-ffi/screenshot.js";
 import { selectTextByIndex } from "./macos-ffi/select-text.js";
 import { MacOSInputController } from "./macos-input.js";
+import { openWindowsForTargeting } from "./macos-open-windows.js";
+import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
+import { selectVisibleTargetWindow } from "./macos-window-target.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -74,6 +79,8 @@ export class MacOSHostComputer extends HostComputer {
 	private readonly urlBlocklist: readonly string[];
 	private readonly overlay: PointerOverlay;
 	private readonly highlightedApps = new Set<number>();
+	private readonly inputObservations = new Map<number, InputObservation>();
+	private observationGeneration = 0;
 
 	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
@@ -166,16 +173,34 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async getAppState(targetPid?: number, options?: AppStateOptions): Promise<AppState> {
+		try {
+			return await this.captureAppState(targetPid, options);
+		} catch (error) {
+			if (targetPid === undefined) {
+				for (const pid of this.inputObservations.keys()) {
+					this.invalidateInputObservation(pid);
+				}
+			} else {
+				this.invalidateInputObservation(targetPid);
+			}
+			throw error;
+		}
+	}
+
+	private async captureAppState(targetPid?: number, options?: AppStateOptions): Promise<AppState> {
 		const settleMs = options?.settleMs ?? DEFAULT_APP_STATE_SETTLE_MILLISECONDS;
 		const apps = await getRunningMacOSApps();
 		const app = resolveTargetApp(apps, targetPid);
 		this.assertAppApproved(app);
-		await this.assertBrowserUrlAllowed(app);
+		await this.assertBrowserUrlAllowed(app, options?.requireWindow === true);
+		const targetWindow = await this.input.rememberTargetWindow(app.pid);
+		if (options?.requireWindow === true && targetWindow === undefined) {
+			throw new Error(`No visible target window available for pid ${app.pid}`);
+		}
 		this.observedAxPids.add(app.pid);
 		if (settleMs > 0) {
 			await this.waitForUiSettle(app.pid, settleMs);
 		}
-		const targetWindow = await this.input.rememberTargetWindow(app.pid);
 		// Scope the screenshot to the target window at its own aspect ratio (capped),
 		// so the model sees an undistorted window image and coordinates invert cleanly.
 		// Without a target window, fall back to the full display.
@@ -213,7 +238,7 @@ export class MacOSHostComputer extends HostComputer {
 		const contentKind = classifyContentKind(elements, { width: screenshot.width, height: screenshot.height });
 		const diffOnly = options?.diffOnly === true && previousTree !== undefined;
 
-		return {
+		const state: AppState = {
 			app: app.name,
 			bundleId: app.bundleId,
 			pid: app.pid,
@@ -231,27 +256,39 @@ export class MacOSHostComputer extends HostComputer {
 			...(appInstructions !== undefined ? { appInstructions } : {}),
 			...(windowBounds !== undefined ? { windowBounds } : {}),
 		};
+		if (targetWindow === undefined) {
+			this.inputObservations.delete(app.pid);
+		} else {
+			this.observationGeneration += 1;
+			this.inputObservations.set(app.pid, {
+				generation: this.observationGeneration,
+				pid: app.pid,
+				bundleId: app.bundleId,
+				windowId: targetWindow.id,
+				windowBounds: { ...targetWindow.bounds },
+				screenshotViewport: {
+					width: screenshot.width,
+					height: screenshot.height,
+					bounds: { ...targetWindow.bounds },
+				},
+				observedElementIds: new Set(elements.map((element) => element.id)),
+			});
+		}
+		return state;
 	}
 
-	private async assertBrowserUrlAllowed(app: RunningAppInfo): Promise<void> {
+	private async assertBrowserUrlAllowed(app: RunningAppInfo, requireUrl: boolean): Promise<void> {
 		if (this.urlBlocklist.length === 0 || !isBrowserBundle(app.bundleId)) {
 			return;
 		}
-		const script = browserUrlScript(app.bundleId);
-		if (script === undefined) {
+		const url = await readCurrentBrowserUrl(app.bundleId);
+		if (url === undefined) {
+			if (requireUrl) {
+				throw new Error("Computer Use cannot verify the current browser URL.");
+			}
 			return;
 		}
-		let url: string;
-		try {
-			const result = await execFileAsync("osascript", ["-e", script], {
-				encoding: "utf8",
-				timeout: FINDER_DESKTOP_BOUNDS_TIMEOUT_MILLISECONDS,
-			});
-			url = execFileStdout(result).trim();
-		} catch {
-			return;
-		}
-		if (url.length > 0 && blockedUrl(url, this.urlBlocklist)) {
+		if (blockedUrl(url, this.urlBlocklist)) {
 			throw new Error(`Computer Use is not allowed on the current browser URL: ${url}`);
 		}
 	}
@@ -347,16 +384,145 @@ export class MacOSHostComputer extends HostComputer {
 		return typeIntoFocusedAXElement(targetPid, text);
 	}
 
+	getInputObservation(targetPid: number): InputObservation | undefined {
+		return this.inputObservations.get(targetPid);
+	}
+
+	private invalidateInputObservation(targetPid: number): void {
+		this.inputObservations.delete(targetPid);
+		releaseAccessibilitySnapshot(targetPid);
+	}
+
+	async preflightInput(expected: InputObservation): Promise<PreflightResult> {
+		const stored = this.inputObservations.get(expected.pid);
+		if (stored === undefined || !sameObservation(stored, expected)) {
+			return { ok: false, reason: "observation-replaced" };
+		}
+
+		let apps: readonly RunningAppInfo[];
+		try {
+			apps = await getRunningMacOSApps();
+		} catch (error) {
+			if (error instanceof Error) {
+				return { ok: false, reason: "app-not-frontmost" };
+			}
+			throw error;
+		}
+		const app = apps.find((candidate) => candidate.pid === expected.pid);
+		if (app === undefined || !app.isActive) {
+			return { ok: false, reason: "app-not-frontmost" };
+		}
+		if (app.bundleId !== expected.bundleId) {
+			return { ok: false, reason: "observation-replaced" };
+		}
+		if (this.appApproval?.decide(app.bundleId) !== "approved") {
+			return { ok: false, reason: "app-not-approved" };
+		}
+
+		if (this.urlBlocklist.length > 0 && isBrowserBundle(app.bundleId)) {
+			const url = await readCurrentBrowserUrl(app.bundleId);
+			if (url === undefined) {
+				return { ok: false, reason: "url-unavailable" };
+			}
+			if (blockedUrl(url, this.urlBlocklist)) {
+				return { ok: false, reason: "url-blocked" };
+			}
+		}
+
+		let targetWindow: Awaited<ReturnType<typeof queryVisibleTargetWindow>>;
+		try {
+			targetWindow = await queryVisibleTargetWindow(expected.pid);
+		} catch (error) {
+			if (error instanceof Error) {
+				return { ok: false, reason: "window-missing" };
+			}
+			throw error;
+		}
+		const current = this.inputObservations.get(expected.pid);
+		if (current === undefined || !sameObservation(current, expected)) {
+			return { ok: false, reason: "observation-replaced" };
+		}
+		if (this.appApproval?.decide(app.bundleId) !== "approved") {
+			return { ok: false, reason: "app-not-approved" };
+		}
+		if (targetWindow === undefined) {
+			return { ok: false, reason: "window-missing" };
+		}
+		if (targetWindow.id !== expected.windowId) {
+			return { ok: false, reason: "window-changed" };
+		}
+		if (!sameRect(targetWindow.bounds, expected.windowBounds)) {
+			return { ok: false, reason: "window-bounds-changed" };
+		}
+		return { ok: true };
+	}
+
 	async close(): Promise<void> {
 		try {
 			this.input.close();
 		} finally {
+			this.inputObservations.clear();
 			for (const pid of this.observedAxPids) {
 				releaseAccessibilitySnapshot(pid);
 			}
 			this.observedAxPids.clear();
 		}
 	}
+}
+
+async function queryVisibleTargetWindow(pid: number) {
+	const windows = await openWindowsForTargeting();
+	return selectVisibleTargetWindow(windows, pid) ?? (await selectSystemEventsTargetWindow(windows, pid));
+}
+
+async function readCurrentBrowserUrl(bundleId: string): Promise<string | undefined> {
+	const script = browserUrlScript(bundleId);
+	if (script === undefined) {
+		return undefined;
+	}
+	try {
+		const result = await execFileAsync("osascript", ["-e", script], {
+			encoding: "utf8",
+			timeout: FINDER_DESKTOP_BOUNDS_TIMEOUT_MILLISECONDS,
+		});
+		const url = execFileStdout(result).trim();
+		return url.length === 0 ? undefined : url;
+	} catch (error) {
+		if (error instanceof Error) {
+			return undefined;
+		}
+		throw error;
+	}
+}
+
+function sameObservation(left: InputObservation, right: InputObservation): boolean {
+	return (
+		left.generation === right.generation &&
+		left.pid === right.pid &&
+		left.bundleId === right.bundleId &&
+		left.windowId === right.windowId &&
+		sameRect(left.windowBounds, right.windowBounds) &&
+		left.screenshotViewport.width === right.screenshotViewport.width &&
+		left.screenshotViewport.height === right.screenshotViewport.height &&
+		sameRect(left.screenshotViewport.bounds, right.screenshotViewport.bounds) &&
+		sameNumberSet(left.observedElementIds, right.observedElementIds)
+	);
+}
+
+function sameRect(left: Rect, right: Rect): boolean {
+	return left.x === right.x && left.y === right.y && left.width === right.width && left.height === right.height;
+}
+
+function sameNumberSet(left: ReadonlySet<number>, right: ReadonlySet<number>): boolean {
+	if (left.size !== right.size) {
+		return false;
+	}
+	for (const value of left) {
+		if (!right.has(value)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 export async function getMacOSLogicalScreenSize(): Promise<{ width: number; height: number }> {

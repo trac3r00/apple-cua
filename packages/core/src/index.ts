@@ -24,6 +24,11 @@ export {
 	type SelectionRangeInput,
 	resolveSelectionRange,
 } from "./computer/select-text.js";
+export type {
+	GuardedComputerInterface,
+	InputObservation,
+	PreflightResult,
+} from "./computer/guarded-interface.js";
 export type { ComputerInterface, ScreenshotResult } from "./computer/interface.js";
 export {
 	MAX_SCREENSHOT_LONG_EDGE,

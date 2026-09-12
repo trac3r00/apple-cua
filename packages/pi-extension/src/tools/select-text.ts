@@ -1,8 +1,14 @@
-import { type ComputerInterface, type SelectTextOptions, parseElementIndex, resolveAppPid } from "@macos-cua/core";
+import {
+	type ComputerInterface,
+	type SelectTextOptions,
+	observeAction,
+	parseElementIndex,
+	resolveAppPid,
+} from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
-import { actionCompleteResult } from "./result.js";
+import { observedActionCompleteResult } from "./result.js";
 
 const Selection = Type.Union([Type.Literal("text"), Type.Literal("before"), Type.Literal("after")]);
 
@@ -32,12 +38,11 @@ export function createSelectTextTool(computer: ComputerInterface): ToolDefinitio
 			"Select text inside a text element, or place the text cursor before or after it. Provide text exactly as it appears in the accessibility tree; use prefix or suffix to disambiguate repeated matches.",
 		parameters: SelectTextParams,
 		async execute(_toolCallId, params) {
-			await computer.selectText(
-				await resolveAppPid(computer, params.app),
-				parseElementIndex(params.element_index),
-				toSelectTextOptions(params),
-			);
-			return actionCompleteResult();
+			const targetPid = await resolveAppPid(computer, params.app);
+			const state = await observeAction(computer, targetPid, async () => {
+				await computer.selectText(targetPid, parseElementIndex(params.element_index), toSelectTextOptions(params));
+			});
+			return observedActionCompleteResult(state);
 		},
 	});
 }

@@ -1,8 +1,8 @@
-import { type ComputerInterface, parseElementIndex, resolveAppPid, scrollElement } from "@macos-cua/core";
+import { type ComputerInterface, observeAction, parseElementIndex, resolveAppPid, scrollElement } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
-import { actionCompleteResult } from "./result.js";
+import { observedActionCompleteResult } from "./result.js";
 
 const LINES_PER_PAGE = 10;
 
@@ -31,16 +31,18 @@ export function createScrollTool(computer: ComputerInterface): ToolDefinition {
 				throw new Error("scroll requires element_index of a scrollable accessibility element");
 			}
 			const targetPid = await resolveAppPid(computer, params.app);
-			await scrollElement(
-				computer,
-				targetPid,
-				parseElementIndex(params.element_index),
-				params.direction,
-				params.pages ?? 1,
-			);
-			computer.setTarget(targetPid);
-			await computer.scroll({ direction: params.direction, amount: pageCount(params.pages) * LINES_PER_PAGE });
-			return actionCompleteResult();
+			const state = await observeAction(computer, targetPid, async () => {
+				await scrollElement(
+					computer,
+					targetPid,
+					parseElementIndex(params.element_index),
+					params.direction,
+					params.pages ?? 1,
+				);
+				computer.setTarget(targetPid);
+				await computer.scroll({ direction: params.direction, amount: pageCount(params.pages) * LINES_PER_PAGE });
+			});
+			return observedActionCompleteResult(state);
 		},
 	});
 }

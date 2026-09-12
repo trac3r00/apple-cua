@@ -2,6 +2,7 @@ import {
 	type ComputerInterface,
 	type KeySequenceEntry,
 	type KeySequenceOptions,
+	observeAction,
 	pressKeySequence,
 	resolveAppPid,
 	withTargetedApp,
@@ -9,7 +10,7 @@ import {
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
-import { actionCompleteResult } from "./result.js";
+import { observedActionCompleteResult } from "./result.js";
 
 const KeyEntryParams = Type.Union([
 	Type.String({ description: "Key or key combination to press." }),
@@ -48,10 +49,12 @@ export function createPressKeysTool(computer: ComputerInterface): ToolDefinition
 		parameters: PressKeysParams,
 		async execute(_toolCallId, params) {
 			const targetPid = await resolveAppPid(computer, params.app);
-			await withTargetedApp(computer, targetPid, async () => {
-				await pressKeySequence(computer, normalizeKeys(params.keys), keySequenceOptions(params));
+			const state = await observeAction(computer, targetPid, async () => {
+				await withTargetedApp(computer, targetPid, async () => {
+					await pressKeySequence(computer, normalizeKeys(params.keys), keySequenceOptions(params));
+				});
 			});
-			return actionCompleteResult();
+			return observedActionCompleteResult(state);
 		},
 	});
 }

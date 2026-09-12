@@ -1,8 +1,8 @@
-import { type ComputerInterface, parseElementIndex, resolveAppPid } from "@macos-cua/core";
+import { type ComputerInterface, observeAction, parseElementIndex, resolveAppPid } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
-import { actionCompleteResult } from "./result.js";
+import { observedActionCompleteResult } from "./result.js";
 
 export const PerformSecondaryActionParams = Type.Object(
 	{
@@ -22,12 +22,11 @@ export function createPerformSecondaryActionTool(computer: ComputerInterface): T
 		description: "Invoke a secondary accessibility action exposed by an element.",
 		parameters: PerformSecondaryActionParams,
 		async execute(_toolCallId, params) {
-			await computer.performAction(
-				await resolveAppPid(computer, params.app),
-				parseElementIndex(params.element_index),
-				params.action,
-			);
-			return actionCompleteResult();
+			const targetPid = await resolveAppPid(computer, params.app);
+			const state = await observeAction(computer, targetPid, async () => {
+				await computer.performAction(targetPid, parseElementIndex(params.element_index), params.action);
+			});
+			return observedActionCompleteResult(state);
 		},
 	});
 }

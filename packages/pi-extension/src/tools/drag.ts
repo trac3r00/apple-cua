@@ -1,8 +1,8 @@
-import { type ComputerInterface, resolveAppPid, resolveScreenPoint, withTargetedApp } from "@macos-cua/core";
+import { type ComputerInterface, observeAction, resolveAppPid, resolveScreenPoint, withTargetedApp } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
-import { actionCompleteResult } from "./result.js";
+import { observedActionCompleteResult } from "./result.js";
 
 export const DragParams = Type.Object(
 	{
@@ -27,10 +27,12 @@ export function createDragTool(computer: ComputerInterface): ToolDefinition {
 			const targetPid = await resolveAppPid(computer, params.app);
 			const from = await resolveScreenPoint(computer, targetPid, { x: params.from_x, y: params.from_y });
 			const to = await resolveScreenPoint(computer, targetPid, { x: params.to_x, y: params.to_y });
-			await withTargetedApp(computer, targetPid, async () => {
-				await computer.drag({ from, to });
+			const state = await observeAction(computer, targetPid, async () => {
+				await withTargetedApp(computer, targetPid, async () => {
+					await computer.drag({ from, to });
+				});
 			});
-			return actionCompleteResult();
+			return observedActionCompleteResult(state);
 		},
 	});
 }

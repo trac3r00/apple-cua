@@ -6,6 +6,12 @@ import { type ToolDefinition, defineTool } from "../pi/index.js";
 export const GetAppStateParams = Type.Object(
 	{
 		app: Type.String({ description: "App name or bundle identifier." }),
+		diff_only: Type.Optional(
+			Type.Boolean({
+				description:
+					"When true and a prior snapshot exists, omit the full accessibility tree and return only the diff (axChanges + axChangeSummary + contentKind). The first call always returns the full tree.",
+			}),
+		),
 	},
 	{ additionalProperties: false },
 );
@@ -20,7 +26,11 @@ export function createGetAppStateTool(computer: ComputerInterface): ToolDefiniti
 			"Start an app use session if needed, then get the state of the app's key window and return a screenshot and accessibility tree.",
 		parameters: GetAppStateParams,
 		async execute(_toolCallId, params) {
-			const state = await getAppStateForApp(computer, params.app);
+			const state = await getAppStateForApp(
+				computer,
+				params.app,
+				params.diff_only === true ? { diffOnly: true } : undefined,
+			);
 			const content = [
 				{ type: "image" as const, data: state.screenshotBase64, mimeType: state.screenshotMimeType ?? "image/png" },
 				{ type: "text" as const, text: JSON.stringify({ ...state, screenshotBase64: undefined }, null, 2) },

@@ -208,6 +208,7 @@ export class MacOSHostComputer extends HostComputer {
 		const axChanges = previousTree === undefined ? undefined : diffAxTreeChanges(previousTree, elements);
 		this.lastAxTreeByPid.set(app.pid, elements);
 		const contentKind = classifyContentKind(elements, { width: screenshot.width, height: screenshot.height });
+		const diffOnly = options?.diffOnly === true && previousTree !== undefined;
 
 		return {
 			app: app.name,
@@ -215,7 +216,7 @@ export class MacOSHostComputer extends HostComputer {
 			pid: app.pid,
 			frontmost: app.isActive,
 			axAvailable: tree.axAvailable,
-			elements,
+			elements: diffOnly ? [] : elements,
 			screenshotBase64: screenshot.data.toString("base64"),
 			screenshotWidth: screenshot.width,
 			screenshotHeight: screenshot.height,

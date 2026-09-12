@@ -1,4 +1,4 @@
-import type { Point } from "@macos-cua/core";
+import type { AppState, Point } from "@macos-cua/core";
 import type { AgentToolResult } from "../pi/index.js";
 
 const ACTION_COMPLETE_TEXT = "Action completed. Call `get_app_state` to fetch the updated UI state.";
@@ -52,6 +52,19 @@ export function textResult<TDetails = undefined>(
 
 export function actionCompleteResult(): AgentToolResult<undefined> {
 	return textResult(ACTION_COMPLETE_TEXT);
+}
+
+// Post-action verification: the fresh state's accessibility diff, so the model confirms the effect without a separate get_app_state call.
+export function observedActionCompleteResult(state: AppState): AgentToolResult<undefined> {
+	const summary = state.axChangeSummary;
+	const changed = summary === undefined ? "unknown" : `${summary.added}/${summary.removed}/${summary.changed}`;
+	const verification =
+		summary !== undefined && summary.added === 0 && summary.removed === 0 && summary.changed === 0
+			? "The accessibility tree did not change (axChangeSummary 0/0/0): the action most likely missed — retry it once, or use element_index for a reliable accessibility press."
+			: "The accessibility tree changed, so the action registered.";
+	return textResult(
+		`Action completed and observed. axChangeSummary ${changed}. ${verification} Do NOT fall back to osascript, AppleScript, JXA, Swift, or any shell scripting to perform actions — those bypass this agent's native input path and are NOT allowed.\n${JSON.stringify({ ...state, screenshotBase64: undefined, elements: undefined }, null, 2)}`,
+	);
 }
 
 export function imageResult<TDetails = undefined>(

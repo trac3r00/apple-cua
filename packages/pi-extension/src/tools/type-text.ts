@@ -1,8 +1,8 @@
-import { type ComputerInterface, resolveAppPid, withTargetedApp } from "@macos-cua/core";
+import { type ComputerInterface, observeAction, resolveAppPid, withTargetedApp } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
-import { actionCompleteResult } from "./result.js";
+import { observedActionCompleteResult } from "./result.js";
 
 export const TypeTextParams = Type.Object(
 	{
@@ -22,13 +22,15 @@ export function createTypeTextTool(computer: ComputerInterface): ToolDefinition 
 		parameters: TypeTextParams,
 		async execute(_toolCallId, params) {
 			const targetPid = await resolveAppPid(computer, params.app);
-			if (await computer.typeIntoFocused(targetPid, params.text)) {
-				return actionCompleteResult();
-			}
-			await withTargetedApp(computer, targetPid, async () => {
-				await computer.type(params.text);
+			const state = await observeAction(computer, targetPid, async () => {
+				if (await computer.typeIntoFocused(targetPid, params.text)) {
+					return;
+				}
+				await withTargetedApp(computer, targetPid, async () => {
+					await computer.type(params.text);
+				});
 			});
-			return actionCompleteResult();
+			return observedActionCompleteResult(state);
 		},
 	});
 }

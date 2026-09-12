@@ -49,7 +49,7 @@ class InMemoryTransport implements Transport {
 	onerror?: (error: Error) => void;
 	onmessage?: <T extends JSONRPCMessage>(message: T) => void;
 
-	async start(): Promise<void> {}
+	async start(): Promise<void> { }
 
 	async send(message: JSONRPCMessage): Promise<void> {
 		const peer = this.peer;
@@ -130,6 +130,23 @@ beforeEach(() => {
 		screenshotBase64: Buffer.from("png-bytes").toString("base64"),
 		screenshotWidth: 1280,
 		screenshotHeight: 720,
+		contentKind: "ax",
+		axChangeSummary: { added: 1, removed: 0, changed: 0 },
+		axChanges: {
+			added: [
+				{
+					id: 10,
+					role: "AXStaticText",
+					label: null,
+					value: "abc",
+					frame: { x: 0, y: 0, width: 10, height: 10 },
+					actions: [],
+					children: [],
+				},
+			],
+			removed: [],
+			changed: [],
+		},
 	});
 	mockedComputer.listApps.mockResolvedValue([
 		{ name: "Finder", bundleId: "com.apple.finder", pid: 1234, isRunning: true },
@@ -282,6 +299,25 @@ describe("MCP server tools #given #when #then", () => {
 		// then
 		expect(mockedComputer.setValue).toHaveBeenCalledWith(1234, 9, "abc");
 		expect(mockedComputer.performAction).toHaveBeenCalledWith(1234, 9, "AXPress");
+	});
+
+	it("returns post-action observation for set_value, not just prose", async () => {
+		// given
+		const { client, close } = await createHarness();
+		closeHarness = close;
+
+		// when
+		const result = await client.callTool({ name: "set_value", arguments: { app: "Finder", element_index: "9", value: "abc" } });
+
+		// then: the tool result carries the post-action verification payload.
+		if (!Array.isArray(result.content)) {
+			throw new Error("set_value result content must be an array");
+		}
+		const text = result.content.map((item) => (item.type === "text" ? item.text : "")).join("\n");
+		expect(text).toContain("axChangeSummary 1/0/0");
+		expect(text).toContain("\"axChanges\"");
+		expect(mockedComputer.setValue).toHaveBeenCalledWith(1234, 9, "abc");
+		expect(mockedComputer.getAppState).toHaveBeenCalledWith(1234);
 	});
 
 	it("routes select_text with a default selection mode and disambiguating suffix", async () => {

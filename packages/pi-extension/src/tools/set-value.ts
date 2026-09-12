@@ -1,8 +1,8 @@
-import { type ComputerInterface, parseElementIndex, resolveAppPid } from "@macos-cua/core";
+import { type ComputerInterface, observeAction, parseElementIndex, resolveAppPid } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
-import { actionCompleteResult } from "./result.js";
+import { observedActionCompleteResult } from "./result.js";
 
 export const SetValueParams = Type.Object(
 	{
@@ -22,12 +22,11 @@ export function createSetValueTool(computer: ComputerInterface): ToolDefinition 
 		description: "Set the value of a settable accessibility element.",
 		parameters: SetValueParams,
 		async execute(_toolCallId, params) {
-			await computer.setValue(
-				await resolveAppPid(computer, params.app),
-				parseElementIndex(params.element_index),
-				params.value,
-			);
-			return actionCompleteResult();
+			const targetPid = await resolveAppPid(computer, params.app);
+			const state = await observeAction(computer, targetPid, async () => {
+				await computer.setValue(targetPid, parseElementIndex(params.element_index), params.value);
+			});
+			return observedActionCompleteResult(state);
 		},
 	});
 }

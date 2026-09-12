@@ -26,6 +26,13 @@ export interface AppStateOptions {
 	screenshotSize?: Size;
 	timeoutMs?: number;
 	settleMs?: number;
+	/**
+	 * When true and a prior snapshot exists for the app, omit the full `elements`
+	 * tree and return only the accessibility diff (`axChanges` + `axChangeSummary`),
+	 * the token-efficient observation. Has no effect on the first snapshot, which
+	 * always returns the full tree so element indices can be derived.
+	 */
+	diffOnly?: boolean;
 }
 
 export interface KeyOptions {

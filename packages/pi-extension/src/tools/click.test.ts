@@ -168,7 +168,7 @@ describe("#given click tool #when executed #then target app receives coordinates
 		expect(result.details).toEqual({ cursorBefore: { x: 11, y: 22 }, cursorAfter: { x: 33, y: 44 } });
 	});
 
-	it("always tells the model the click may have missed and to verify with get_app_state", async () => {
+	it("self-verifies the click and reports the post-action axChangeSummary", async () => {
 		const computer = createComputer();
 		const tool = createClickTool(computer);
 
@@ -181,9 +181,9 @@ describe("#given click tool #when executed #then target app receives coordinates
 		);
 
 		const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join(" ");
-		expect(text).toContain("get_app_state");
-		expect(text.toLowerCase()).toContain("may not have registered");
 		expect(text).toContain("axChangeSummary");
+		expect(text).toContain("observed");
+		expect(computer.getAppState).toHaveBeenCalledWith(1234);
 	});
 
 	it("forbids working around the click tool with osascript or Swift", async () => {
@@ -202,10 +202,9 @@ describe("#given click tool #when executed #then target app receives coordinates
 		expect(text).toContain("osascript");
 		expect(text).toContain("Swift");
 		expect(text.toLowerCase()).toContain("do not");
-		expect(text).toContain("this `click` tool");
 	});
 
-	it("includes the verify-the-click notice on the AX element-index path too", async () => {
+	it("self-verifies on the AX element-index path too", async () => {
 		const computer = createComputer();
 		const tool = createClickTool(computer);
 
@@ -218,8 +217,8 @@ describe("#given click tool #when executed #then target app receives coordinates
 		);
 
 		const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join(" ");
-		expect(text.toLowerCase()).toContain("may not have registered");
-		expect(text).toContain("get_app_state");
+		expect(text).toContain("axChangeSummary");
+		expect(computer.getAppState).toHaveBeenCalledWith(1234);
 	});
 
 	it("presses the AX element click_count times for repeated activations", async () => {

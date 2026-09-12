@@ -23,7 +23,6 @@ import {
 	type ToolContent,
 	type ToolResult,
 	actionComplete,
-	clickComplete,
 	observedActionComplete,
 	textResult,
 } from "./tool-result.js";
@@ -34,6 +33,12 @@ const appSchema = z.string().min(1);
 
 const getAppStateSchema = z.object({
 	app: appSchema,
+	diff_only: z
+		.boolean()
+		.optional()
+		.describe(
+			"When true and a prior snapshot exists, omit the full accessibility tree and return only the diff (axChanges + axChangeSummary + contentKind). The first call always returns the full tree.",
+		),
 });
 
 const clickSchema = z.object({
@@ -110,8 +115,8 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 				"Start an app use session if needed, then get the state of the app's key window and return a screenshot and accessibility tree.",
 			inputSchema: getAppStateSchema,
 		},
-		async ({ app }): Promise<ToolResult> => {
-			const state = await getAppStateForApp(computer, app);
+		async ({ app, diff_only }): Promise<ToolResult> => {
+			const state = await getAppStateForApp(computer, app, diff_only === true ? { diffOnly: true } : undefined);
 			const content: ToolContent[] = [
 				{ type: "image", data: state.screenshotBase64, mimeType: state.screenshotMimeType ?? "image/png" },
 				{ type: "text", text: JSON.stringify({ ...state, screenshotBase64: undefined }, null, 2) },
@@ -146,22 +151,24 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 				return observedActionComplete(state);
 			}
 			const point = await resolveScreenPoint(computer, targetPid, parseCoordinate(x, y));
-			if ((mouse_button ?? "left") === "left") {
-				let pressedAll = true;
-				for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
-					if (!(await computer.pressAtPosition(targetPid, point))) {
-						pressedAll = false;
-						break;
+			const state = await observeAction(computer, targetPid, async () => {
+				if ((mouse_button ?? "left") === "left") {
+					let pressedAll = true;
+					for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
+						if (!(await computer.pressAtPosition(targetPid, point))) {
+							pressedAll = false;
+							break;
+						}
+					}
+					if (pressedAll) {
+						return;
 					}
 				}
-				if (pressedAll) {
-					return clickComplete();
-				}
-			}
-			await withTargetedApp(computer, targetPid, async () => {
-				await clickPoint(computer, point, mouse_button ?? "left", pressCount);
+				await withTargetedApp(computer, targetPid, async () => {
+					await clickPoint(computer, point, mouse_button ?? "left", pressCount);
+				});
 			});
-			return clickComplete();
+			return observedActionComplete(state);
 		},
 	);
 
@@ -172,8 +179,11 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 			inputSchema: performSecondaryActionSchema,
 		},
 		async ({ app, element_index, action }): Promise<ToolResult> => {
-			await computer.performAction(await resolveAppPid(computer, app), parseElementIndex(element_index), action);
-			return actionComplete();
+			const targetPid = await resolveAppPid(computer, app);
+			const state = await observeAction(computer, targetPid, async () => {
+				await computer.performAction(targetPid, parseElementIndex(element_index), action);
+			});
+			return observedActionComplete(state);
 		},
 	);
 
@@ -184,8 +194,11 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 			inputSchema: setValueSchema,
 		},
 		async ({ app, element_index, value }): Promise<ToolResult> => {
-			await computer.setValue(await resolveAppPid(computer, app), parseElementIndex(element_index), value);
-			return actionComplete();
+			const targetPid = await resolveAppPid(computer, app);
+			const state = await observeAction(computer, targetPid, async () => {
+				await computer.setValue(targetPid, parseElementIndex(element_index), value);
+			});
+			return observedActionComplete(state);
 		},
 	);
 
@@ -197,13 +210,16 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 			inputSchema: selectTextSchema,
 		},
 		async ({ app, element_index, text, prefix, suffix, selection }): Promise<ToolResult> => {
-			await computer.selectText(await resolveAppPid(computer, app), parseElementIndex(element_index), {
-				selection: selection ?? "text",
-				...(text !== undefined ? { text } : {}),
-				...(prefix !== undefined ? { prefix } : {}),
-				...(suffix !== undefined ? { suffix } : {}),
+			const targetPid = await resolveAppPid(computer, app);
+			const state = await observeAction(computer, targetPid, async () => {
+				await computer.selectText(targetPid, parseElementIndex(element_index), {
+					selection: selection ?? "text",
+					...(text !== undefined ? { text } : {}),
+					...(prefix !== undefined ? { prefix } : {}),
+					...(suffix !== undefined ? { suffix } : {}),
+				});
 			});
-			return actionComplete();
+			return observedActionComplete(state);
 		},
 	);
 
@@ -218,10 +234,12 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 			const from = await resolveScreenPoint(computer, targetPid, { x: from_x, y: from_y });
 			const to = await resolveScreenPoint(computer, targetPid, { x: to_x, y: to_y });
 			const dragOptions: DragOptions = { from, to };
-			await withTargetedApp(computer, targetPid, async () => {
-				await computer.drag(dragOptions);
+			const state = await observeAction(computer, targetPid, async () => {
+				await withTargetedApp(computer, targetPid, async () => {
+					await computer.drag(dragOptions);
+				});
 			});
-			return actionComplete();
+			return observedActionComplete(state);
 		},
 	);
 
@@ -236,8 +254,10 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 				throw new Error("scroll requires element_index of a scrollable accessibility element");
 			}
 			const targetPid = await resolveAppPid(computer, app);
-			await scrollElement(computer, targetPid, parseElementIndex(element_index), direction, pages ?? 1);
-			return actionComplete();
+			const state = await observeAction(computer, targetPid, async () => {
+				await scrollElement(computer, targetPid, parseElementIndex(element_index), direction, pages ?? 1);
+			});
+			return observedActionComplete(state);
 		},
 	);
 
@@ -249,13 +269,15 @@ export function createMcpServer(computer: ComputerInterface = new MacOSHostCompu
 		},
 		async ({ app, text }): Promise<ToolResult> => {
 			const targetPid = await resolveAppPid(computer, app);
-			if (await computer.typeIntoFocused(targetPid, text)) {
-				return actionComplete();
-			}
-			await withTargetedApp(computer, targetPid, async () => {
-				await computer.type(text);
+			const state = await observeAction(computer, targetPid, async () => {
+				if (await computer.typeIntoFocused(targetPid, text)) {
+					return;
+				}
+				await withTargetedApp(computer, targetPid, async () => {
+					await computer.type(text);
+				});
 			});
-			return actionComplete();
+			return observedActionComplete(state);
 		},
 	);
 

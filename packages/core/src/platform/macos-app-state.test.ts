@@ -169,6 +169,36 @@ describe("#given two get_app_state calls #when the second runs #then it reports 
 	});
 });
 
+describe("#given diff_only mode #when a prior snapshot exists #then the full tree is omitted and only the diff returned", () => {
+	it("returns the full tree on the first call and only axChanges on the second", async () => {
+		childProcessMock.execFile.mockReset();
+		for (let call = 0; call < 2; call += 1) {
+			childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
+				callback(
+					null,
+					JSON.stringify([{ name: "Finder", bundleId: "com.apple.finder", pid: TARGET_PID, isActive: true }]),
+					"",
+				);
+			});
+			childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
+				callback(null, fakePng(2560, 1600), "");
+			});
+		}
+		const computer = new MacOSHostComputer();
+
+		const first = await computer.getAppState(TARGET_PID, { settleMs: 0, diffOnly: true });
+		const second = await computer.getAppState(TARGET_PID, { settleMs: 0, diffOnly: true });
+
+		// First call: no prior snapshot, so the full tree is always returned.
+		expect(first.elements.length).toBeGreaterThan(0);
+		// Second call: diff_only omits the full tree and returns only the diff.
+		expect(second.elements).toEqual([]);
+		expect(second.axChanges).toBeDefined();
+		expect(second.axChangeSummary).toBeDefined();
+		expect(second.contentKind).toBeDefined();
+	});
+});
+
 describe("#given an app-approval store #when an app is not approved #then get_app_state is refused until approved", () => {
 	it("refuses an unapproved app and proceeds once approved for the session", async () => {
 		const appsJson = JSON.stringify([

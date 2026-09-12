@@ -23,6 +23,7 @@ vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
 
 const accessibilityMock = vi.hoisted(() => ({
 	extractAccessibilityTree: vi.fn(),
+	releaseAccessibilitySnapshot: vi.fn(),
 	performActionByIndex: vi.fn(),
 	pressElementAtScreenPoint: vi.fn(),
 	setValueByIndex: vi.fn(),
@@ -55,6 +56,8 @@ beforeEach(() => {
 	childProcessMock.execFile.mockReset();
 	windowMock.openWindows.mockReset();
 	accessibilityMock.extractAccessibilityTree.mockReset();
+	accessibilityMock.performActionByIndex.mockReset();
+	accessibilityMock.releaseAccessibilitySnapshot.mockReset();
 	screenshotMock.captureMainDisplayPng.mockReset();
 	screenshotMock.getMainDisplayLogicalSize.mockReset();
 	screenshotMock.getMainDisplayNativePixelSize.mockReset();
@@ -155,7 +158,10 @@ describe("#given two get_app_state calls #when the second runs #then it reports 
 			.mockReturnValueOnce({ axAvailable: true, elements: [baseElement] })
 			.mockReturnValue({
 				axAvailable: true,
-				elements: [baseElement, { ...baseElement, id: 6, label: "New", frame: { x: 100, y: 100, width: 50, height: 50 } }],
+				elements: [
+					baseElement,
+					{ ...baseElement, id: 6, label: "New", frame: { x: 100, y: 100, width: 50, height: 50 } },
+				],
 			});
 		const computer = new MacOSHostComputer();
 
@@ -301,6 +307,8 @@ describe("#given a noisy accessibility tree #when get_app_state runs #then non-d
 		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
 
 		expect(state.elements.map((element) => element.id)).toEqual([5]);
+		await computer.performAction(TARGET_PID, state.elements[0]?.id ?? -1, "AXPress");
+		expect(accessibilityMock.performActionByIndex).toHaveBeenCalledWith(TARGET_PID, 5, "AXPress");
 	});
 });
 
@@ -406,7 +414,10 @@ describe("#given an accessibility tree that stabilizes #when get_app_state settl
 			};
 			// First poll: tree still changing (extra element). Subsequent polls: stable.
 			accessibilityMock.extractAccessibilityTree
-				.mockReturnValueOnce({ axAvailable: true, elements: [stableElement, { ...stableElement, id: 6, label: "Transient" }] })
+				.mockReturnValueOnce({
+					axAvailable: true,
+					elements: [stableElement, { ...stableElement, id: 6, label: "Transient" }],
+				})
 				.mockReturnValue({ axAvailable: true, elements: [stableElement] });
 			const computer = new MacOSHostComputer();
 
@@ -438,6 +449,18 @@ describe("#given an accessibility tree that stabilizes #when get_app_state settl
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+});
+
+describe("#given an observed AX app #when the host closes #then its retained accessibility snapshot is released", () => {
+	it("releases each observed pid", async () => {
+		const computer = new MacOSHostComputer();
+		await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+		await computer.close();
+
+		expect(accessibilityMock.releaseAccessibilitySnapshot).toHaveBeenCalledOnce();
+		expect(accessibilityMock.releaseAccessibilitySnapshot).toHaveBeenCalledWith(TARGET_PID);
 	});
 });
 

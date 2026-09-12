@@ -27,6 +27,7 @@ import {
 	extractAccessibilityTree,
 	performActionByIndex,
 	pressElementAtScreenPoint,
+	releaseAccessibilitySnapshot,
 	setValueByIndex,
 	typeIntoFocusedAXElement,
 } from "./macos-ffi/accessibility.js";
@@ -68,6 +69,7 @@ export class MacOSHostComputer extends HostComputer {
 	private readonly input: MacOSInputController;
 	private readonly lastViewportByPid = new Map<number, ScreenshotViewport>();
 	private readonly lastAxTreeByPid = new Map<number, AXTreeElement[]>();
+	private readonly observedAxPids = new Set<number>();
 	private readonly appApproval: AppApprovalStore | undefined;
 	private readonly urlBlocklist: readonly string[];
 	private readonly overlay: PointerOverlay;
@@ -169,6 +171,7 @@ export class MacOSHostComputer extends HostComputer {
 		const app = resolveTargetApp(apps, targetPid);
 		this.assertAppApproved(app);
 		await this.assertBrowserUrlAllowed(app);
+		this.observedAxPids.add(app.pid);
 		if (settleMs > 0) {
 			await this.waitForUiSettle(app.pid, settleMs);
 		}
@@ -345,7 +348,14 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async close(): Promise<void> {
-		this.input.close();
+		try {
+			this.input.close();
+		} finally {
+			for (const pid of this.observedAxPids) {
+				releaseAccessibilitySnapshot(pid);
+			}
+			this.observedAxPids.clear();
+		}
 	}
 }
 

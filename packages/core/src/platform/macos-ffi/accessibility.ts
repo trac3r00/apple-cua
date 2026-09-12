@@ -41,6 +41,14 @@ const AX_VALUE_CG_SIZE = 2;
 const DOUBLE_SIZE = 8;
 const CG_PAIR_SIZE = DOUBLE_SIZE * 2;
 
+interface AXElementSnapshot {
+	readonly maxDepth: number;
+	readonly maxElements: number;
+	readonly elements: readonly AXUIElementRef[];
+}
+
+const elementSnapshots = new Map<number, AXElementSnapshot>();
+
 const applicationServices = koffi.load("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices");
 const AX_UI_ELEMENT_REF = koffi.pointer("AXUIElementRef", koffi.opaque());
 const AX_VALUE_REF = koffi.pointer("AXValueRef", koffi.opaque());
@@ -115,6 +123,10 @@ export function releaseAXElement(element: AXUIElementRef | null): void {
 	cfRelease(element);
 }
 
+export function releaseAccessibilitySnapshot(pid: number): void {
+	replaceElementSnapshot(pid, undefined);
+}
+
 export function performAction(element: AXUIElementRef, action: string): void {
 	withCFString(action, (actionReference) => {
 		assertAXSuccess("AXUIElementPerformAction", AXUIElementPerformAction(element, actionReference));
@@ -148,18 +160,38 @@ export function copyAttributeValue(element: AXUIElementRef, attribute: string): 
 
 export function extractAccessibilityTree(pid: number, maxDepth = 10, maxElements = 2_000): AccessibilityTreeResult {
 	if (!AXIsProcessTrusted() || !isRunning(pid) || maxDepth < 0 || maxElements <= 0) {
+		replaceElementSnapshot(pid, undefined);
 		return { elements: [], axAvailable: false };
 	}
 
 	const root = createApplicationElement(pid);
+	const snapshotElements: AXUIElementRef[] = [];
 	try {
-		if (copyElementChildren(root).length === 0) {
-			return { elements: [], axAvailable: false };
+		const rootChildren = copyElementChildren(root);
+		try {
+			if (rootChildren.length === 0) {
+				replaceElementSnapshot(pid, undefined);
+				return { elements: [], axAvailable: false };
+			}
+		} finally {
+			for (const child of rootChildren) {
+				releaseAXElement(child);
+			}
 		}
 
 		const elements: AXTreeElement[] = [];
-		appendAXElement(root, 0, maxDepth, maxElements, elements);
-		return elements.length === 0 ? { elements: [], axAvailable: false } : { elements, axAvailable: true };
+		appendAXElement(root, 0, maxDepth, maxElements, elements, snapshotElements);
+		if (elements.length === 0) {
+			replaceElementSnapshot(pid, undefined);
+			return { elements: [], axAvailable: false };
+		}
+		replaceElementSnapshot(pid, { maxDepth, maxElements, elements: snapshotElements });
+		return { elements, axAvailable: true };
+	} catch (error) {
+		for (const element of snapshotElements) {
+			releaseAXElement(element);
+		}
+		throw error;
 	} finally {
 		releaseAXElement(root);
 	}
@@ -269,10 +301,24 @@ export function setValueByIndex(pid: number, elementIndex: number, value: string
 
 export function refetchElement(pid: number, elementIndex: number, maxDepth = 10, maxElements = 2_000): AXUIElementRef {
 	if (!AXIsProcessTrusted()) {
+		replaceElementSnapshot(pid, undefined);
 		throw new Error("accessibility permission denied");
 	}
-	if (!isRunning(pid) || elementIndex < 0 || elementIndex >= maxElements) {
+	if (!isRunning(pid)) {
+		replaceElementSnapshot(pid, undefined);
 		throw new Error(`invalid process or element index: ${pid}:${elementIndex}`);
+	}
+	if (elementIndex < 0 || elementIndex >= maxElements) {
+		throw new Error(`invalid process or element index: ${pid}:${elementIndex}`);
+	}
+
+	const snapshot = elementSnapshots.get(pid);
+	if (snapshot?.maxDepth === maxDepth && snapshot.maxElements === maxElements) {
+		const cached = snapshot.elements[elementIndex];
+		if (cached === undefined) {
+			throw new Error(`element ${elementIndex} not found in snapshot`);
+		}
+		return cfRetain(cached);
 	}
 
 	const root = createApplicationElement(pid);
@@ -294,12 +340,14 @@ function appendAXElement(
 	maxDepth: number,
 	maxElements: number,
 	elements: AXTreeElement[],
+	snapshotElements: AXUIElementRef[],
 ): number | undefined {
 	if (depth > maxDepth || elements.length >= maxElements) {
 		return undefined;
 	}
 
 	const id = elements.length;
+	snapshotElements.push(cfRetain(element));
 	elements.push({
 		id,
 		role: copyStringAttribute(element, K_AX_ROLE_ATTRIBUTE) ?? "",
@@ -319,7 +367,7 @@ function appendAXElement(
 				if (elements.length >= maxElements) {
 					break;
 				}
-				const childId = appendAXElement(child, depth + 1, maxDepth, maxElements, elements);
+				const childId = appendAXElement(child, depth + 1, maxDepth, maxElements, elements, snapshotElements);
 				if (childId !== undefined) {
 					childIds.push(childId);
 				}
@@ -337,6 +385,20 @@ function appendAXElement(
 	}
 	elements[id] = { ...current, children: childIds };
 	return id;
+}
+
+function replaceElementSnapshot(pid: number, snapshot: AXElementSnapshot | undefined): void {
+	const previous = elementSnapshots.get(pid);
+	if (previous !== undefined) {
+		for (const element of previous.elements) {
+			releaseAXElement(element);
+		}
+	}
+	if (snapshot === undefined) {
+		elementSnapshots.delete(pid);
+	} else {
+		elementSnapshots.set(pid, snapshot);
+	}
 }
 
 function findAXElement(

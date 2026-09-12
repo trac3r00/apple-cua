@@ -4,6 +4,11 @@ Target: `/Applications/ChatGPT.app` (bundle id `com.openai.codex`, display name 
 Electron shell via `NSPrincipalClass = BrowserCrApplication`), build timestamp Sep 5 2026,
 notarized by OpenAI OpCo. Analysis performed 2026-09-11 against the on-disk bundle.
 
+Confidence: shipped JS/types establish the tool contract. Native symbols establish that
+capabilities exist, not their exact algorithms, defaults, synchronization guarantees or
+performance. The macos-cua changes are independent implementations, not proof of identical
+ChatGPT model intelligence or speed. See §8 for current limitations and corrections.
+
 This supersedes `codex-cua-comparison.md`, which analyzed the older Codex.app 1.0.809 era
 (`SkyComputerUseClient mcp`). The current app has replaced that MCP-tool design with a
 **persistent JavaScript REPL** architecture.
@@ -106,7 +111,8 @@ check (`withComputerUsePolicy`) and forwards to a lazily-imported client
 `ScreenCaptureKit.framework`, `ApplicationServices` (AX), `CoreGraphics`, `AppKit`.
 Symbol/string evidence (`nm -gU`, `strings -a`) shows the perception/action pipeline:
 
-- **"Skyshot" = one atomic observation**: screenshot + AX tree + revision, captured together.
+- **"Skyshot" groups observation data**: screenshot + AX tree + revision. Atomic capture
+  is not established by the type/symbol names alone.
   Types: `ComputerUseIPCSkyshot`, `ComputerUseIPCSkyshotResult`, `SkyshotCapture`,
   `SkyshotOperation`, `ComputerUseSkyshotAttachment`, `computerUseAppControllerDidUpdateSkyshot`.
 - **ScreenCaptureKit streaming**, not one-shot `screencapture`: `SCStream`,
@@ -117,8 +123,8 @@ Symbol/string evidence (`nm -gU`, `strings -a`) shows the perception/action pipe
   `_hadAxText`, and an "invalidation monitor" on every skyshot.
 - **UI-settle gating (the key speed+accuracy technique)**: `needsUISettleBeforeSkyshot`,
   `onSettled`, `onSourceResizeSettled`, `lockUISettleDelay`, `SystemLockScreenSettleObservation`,
-  `scootPositionSettleVelocity`. The runtime waits for the UI to *stop changing* before
-  capturing, instead of sleeping a fixed duration. The browser docs state the user-facing
+  `scootPositionSettleVelocity`. These suggest settle handling; they do not establish an
+  event-driven algorithm or rule out fixed delays in the native app. The browser docs state the user-facing
   contract: "It is usually not necessary to pause or delay between performing an action and
   getting the updated page state. The runtime automatically waits an appropriate amount of time
   before capturing the new state."
@@ -163,7 +169,7 @@ model is taught:
 |---|---|---|
 | JS-REPL batching, one `js` tool | §2 | Eliminates per-action model/tool round trips. |
 | Event-driven UI settle before capture | §5 (`needsUISettleBeforeSkyshot`, `onSettled`) | Faster than a fixed sleep when UI is already settled; more reliable than a fixed sleep when it is not. |
-| Skyshot = screenshot+AX+revision, atomic | §5 | Observation and the coordinates it authorizes can never disagree. |
+| Skyshot groups screenshot+AX+revision | §5 | Helps relate observations; atomicity and stale-target guarantees remain unverified. |
 | AX diff as the default observation | §4, §6 | Token efficiency; model sees only what changed. |
 | AX-index actions, coordinate fallback | §4, §6 | Semantic targeting survives layout shifts; pixels only when needed. |
 | AXTextMarker caret placement | §5 | Exact select/cursor ops without fragile pixel math. |
@@ -171,22 +177,59 @@ model is taught:
 | SkyshotClassifier image detection | §5 | Picks AX-text vs vision perception per screen. |
 | `post_action_sleep_ms`, fixed `mouse_size_px` | §4 (full-desktop) | Deterministic action pacing; a visible cursor in every screenshot. |
 
-## 8. Gap analysis vs this repo (`macos-cua`)
+## 8. Current macos-cua implementation and limitations
 
-Already at parity: per-window SCK screenshot with viewport remap (`computer/viewport.ts`),
-AX tree normalize (`accessibility/normalize.ts`), AX diff **counts** (`accessibility/diff.ts`),
-`setValue`/`selectText`/`performAction` AX writes, app instructions, URL blocklist, app approval.
+- `getAppState` supports window viewport remapping and normalized AX trees. Full-display
+  capture has a native path, but **window capture still runs `screencapture` and `sips`**
+  (`platform/macos.ts`, `captureMacOSScreenshot` / `captureWindowScreenshotViaCli`). It is
+  not a persistent per-window ScreenCaptureKit stream.
+- `waitForUiSettle` polls AX trees at 40 ms intervals with a nominal 300 ms budget.
+  This is a local heuristic, not an event subscription or a recovered ChatGPT algorithm.
+  AX read cost can exceed the nominal budget; no comparative speed claim is established.
+- `axChanges` contains element-level changes. `diffOnly` / `diff_only` returns an empty
+  `elements` array after a prior snapshot; first capture is full. This is opt-in, and the
+  screenshot is still captured. Changes in the tree are observations, not proof of success.
+- The screenshot/model cap is now **2560**, a local fidelity/cost choice rather than a
+  recovered ChatGPT default. It does not guarantee Retina backing-pixel fidelity.
+- `contentKind` is an AX-role/area heuristic (`accessibility/content-kind.ts`), not a
+  pixel classifier or a copy of OpenAI's classifier. Empty AX data recommends vision;
+  that does not prove the screen contains a photograph.
+- `observeAction` runs the action then reads state. The shipped `@oai/sky` macOS
+  `types/window/Click.d.ts` and `SetValue.d.ts` actually return `Promise<void>`; the earlier
+  assertion that every ChatGPT action automatically returns a skyshot was incorrect.
+- Native `element_index` is the returned element **`id`**, never its position in a filtered
+  array. Obtain it from the latest state. Index guessing and acting on unsupported controls
+  are invalid QA scenarios. Native AX references now remain attached to the latest captured
+  IDs within the process, so a later hierarchy insertion cannot silently retarget an action.
+  A new snapshot replaces that mapping; IDs are not durable across sessions or snapshots.
 
-Remaining gaps (port candidates, ranked by value):
+Matching API vocabulary does not establish full behavioral parity. Native action reliability,
+observation truthfulness, timing and safe target identity require independent live verification.
 
-1. **Fixed 300 ms settle sleep** (`platform/macos.ts` `DEFAULT_APP_STATE_SETTLE_MILLISECONDS`)
-   vs ChatGPT's event-driven settle. Blind sleep is slower when settled and unreliable when not.
-   → Port: AX-stability-driven settle.
-2. **AX diff returns only `{added, removed, changed}` counts**; the full normalized tree is
-   re-sent every call. ChatGPT returns the diff tree itself.
-   → Port: diff-text observation mode.
-3. **`MAX_SCREENSHOT_LONG_EDGE = 1280`** (`computer/viewport.ts`) downscales Retina windows;
-   ChatGPT captures full window fidelity. (Flagged in the old comparison doc too.)
-4. **Actions return `void`**; ChatGPT's every action yields a fresh skyshot, so the model gets
-   post-action verification for free.
-5. No image-content classifier to choose AX vs vision perception.
+### AX error interpretation
+
+Apple's `HIServices.framework/Headers/AXError.h` defines `-25200` as generic failure,
+`-25205` as unsupported attribute, `-25206` as unsupported action, and `-25208` as not
+implemented. Earlier reports mapped these incorrectly. A failed write to the app root or
+an unsupported Finder scroll operation does not by itself prove broken FFI bindings.
+
+### Reproduced native action fix (2026-09-12)
+
+A disposable AppKit fixture proved a separate, real stale-target failure: after a snapshot
+assigned ID 4 to a button, insertion of a preceding control made a fresh tree walk resolve
+ID 4 to a text field. `AXPress` then failed with `-25206`. Retaining the snapshot's native
+AXUIElement references lets the same observed ID press the intended button despite the
+insertion. The regression also covers value writes and text-selection ranges.
+
+Snapshots are replaced on capture and released on computer close, unavailable Accessibility
+or dead-PID lookup. Unknown IDs in a matching snapshot fail instead of targeting an unobserved
+new node. Direct calls without a matching snapshot retain the legacy fresh-walk behavior.
+
+Independent Swift and Node/Koffi probes both succeeded for supported field writes and button
+presses, and both rejected unsupported actions. This disproves the earlier blanket claim of
+broken FFI signatures. It does not establish the cause of every Finder-specific AX rejection.
+
+Observed action results now expose `observationStatus`: `unavailable` (no baseline),
+`unchanged`, or `changed`. These describe the AX comparison, not whether the user's intended
+outcome occurred. In particular, a missing baseline must not claim an action registered, and
+an unchanged tree must not trigger an automatic retry of a potentially non-idempotent action.

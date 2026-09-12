@@ -144,12 +144,7 @@ export function parseKeyChord(key: string): { readonly key: string; readonly mod
 	return { key: finalKey, modifiers };
 }
 
-/**
- * Run an action and return the fresh application state captured immediately
- * after it, so the model gets post-action verification in a single call instead
- * of issuing a separate `get_app_state`. This mirrors ChatGPT computer-use,
- * where every action yields a fresh observation (screenshot + AX + revision).
- */
+/** Run an action, then capture state for the caller to verify its intended effect. */
 export async function observeAction(
 	computer: ComputerInterface,
 	targetPid: number,

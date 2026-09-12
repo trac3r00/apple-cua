@@ -1,3 +1,5 @@
+import type { AppState } from "@macos-cua/core";
+
 export type ToolContent =
 	| { type: "text"; text: string }
 	| { type: "image"; data: string; mimeType: "image/png" | "image/jpeg" };
@@ -14,8 +16,6 @@ export function actionComplete(): ToolResult {
 	return textResult("Action completed. Call `get_app_state` to fetch the updated UI state.");
 }
 
-import type { AppState } from "@macos-cua/core";
-
 /**
  * Tool result for an action that was observed immediately after dispatch. The
  * fresh state's accessibility diff is included so the model can confirm the
@@ -24,17 +24,21 @@ import type { AppState } from "@macos-cua/core";
 export function observedActionComplete(state: AppState): ToolResult {
 	const summary = state.axChangeSummary;
 	const changed = summary === undefined ? "unknown" : `${summary.added}/${summary.removed}/${summary.changed}`;
+	const observationStatus =
+		summary === undefined
+			? "unavailable"
+			: summary.added === 0 && summary.removed === 0 && summary.changed === 0
+				? "unchanged"
+				: "changed";
 	const verification =
-		summary !== undefined && summary.added === 0 && summary.removed === 0 && summary.changed === 0
-			? "The accessibility tree did not change (axChangeSummary 0/0/0): the action most likely missed — retry it once, or use element_index for a reliable accessibility press."
-			: "The accessibility tree changed, so the action registered.";
+		"The AX comparison is an observation, not proof of the intended outcome. Inspect the returned state before retrying; unavailable means there is no previous snapshot.";
 	return {
 		content: [
 			{
 				type: "text",
 				text: `Action completed and observed. axChangeSummary ${changed}. ${verification}`,
 			},
-			{ type: "text", text: JSON.stringify({ ...state, screenshotBase64: undefined }, null, 2) },
+			{ type: "text", text: JSON.stringify({ ...state, observationStatus, screenshotBase64: undefined }, null, 2) },
 		],
 	};
 }

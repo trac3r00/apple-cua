@@ -1,341 +1,109 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TOOL_NAMES, createMcpServer } from "./server.js";
+import { AppApprovalStore } from "@macos-cua/core";
+import { afterEach, describe, expect, it } from "vitest";
+import { allowedBundleIdsFromEnvironment } from "./native-policy.js";
+import { createHarness, jsonPayload } from "./protocol-client-harness.js";
+import type { FakeGuardedComputer } from "./protocol-test-harness.js";
+import { TOOL_NAMES } from "./server.js";
 
-const mockedComputer = vi.hoisted(() => ({
-	capabilities: {
-		supportsScreenshot: true,
-		supportsInput: true,
-		supportsAccessibility: true,
-		supportsClipboard: true,
-	},
-	setTarget: vi.fn(),
-	screenshot: vi.fn(),
-	move: vi.fn(),
-	click: vi.fn(),
-	rightClick: vi.fn(),
-	middleClick: vi.fn(),
-	doubleClick: vi.fn(),
-	type: vi.fn(),
-	key: vi.fn(),
-	scroll: vi.fn(),
-	drag: vi.fn(),
-	getCursorPosition: vi.fn(),
-	getScreenSize: vi.fn(),
-	getAppState: vi.fn(),
-	getScreenshotViewport: vi.fn(),
-	listApps: vi.fn(),
-	setValue: vi.fn(),
-	selectText: vi.fn(),
-	performAction: vi.fn(),
-	pressAtPosition: vi.fn(),
-	typeIntoFocused: vi.fn(),
-	close: vi.fn(),
-}));
+const MUTATION_NAMES = [
+	"click",
+	"perform_secondary_action",
+	"set_value",
+	"select_text",
+	"drag",
+	"scroll",
+	"type_text",
+	"press_keys",
+] as const;
 
-vi.mock("@macos-cua/core", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@macos-cua/core")>();
-	return {
-		...actual,
-		MacOSHostComputer: vi.fn(() => mockedComputer),
-	};
-});
-
-class InMemoryTransport implements Transport {
-	peer: InMemoryTransport | null = null;
-	onclose?: () => void;
-	onerror?: (error: Error) => void;
-	onmessage?: <T extends JSONRPCMessage>(message: T) => void;
-
-	async start(): Promise<void> { }
-
-	async send(message: JSONRPCMessage): Promise<void> {
-		const peer = this.peer;
-		if (!peer) {
-			throw new Error("Transport peer is not connected");
-		}
-
-		queueMicrotask(() => {
-			peer.onmessage?.(message);
-		});
-	}
-
-	async close(): Promise<void> {
-		this.onclose?.();
-	}
-}
-
-function createTransportPair(): readonly [InMemoryTransport, InMemoryTransport] {
-	const clientTransport = new InMemoryTransport();
-	const serverTransport = new InMemoryTransport();
-	clientTransport.peer = serverTransport;
-	serverTransport.peer = clientTransport;
-	return [clientTransport, serverTransport];
-}
-
-async function createHarness(): Promise<{ client: Client; close: () => Promise<void> }> {
-	const server = createMcpServer();
-	const client = new Client({ name: "macos-cua-test", version: "0.1.0" });
-	const [clientTransport, serverTransport] = createTransportPair();
-
-	await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-
-	return {
-		client,
-		close: async () => {
-			await Promise.all([client.close(), server.close()]);
-		},
-	};
-}
-
-let closeHarness: (() => Promise<void>) | null = null;
-
-beforeEach(() => {
-	mockedComputer.screenshot.mockResolvedValue({
-		data: Buffer.from("png-bytes"),
-		mimeType: "image/png",
-		width: 1920,
-		height: 1080,
-	});
-	mockedComputer.move.mockResolvedValue(undefined);
-	mockedComputer.click.mockResolvedValue(undefined);
-	mockedComputer.rightClick.mockResolvedValue(undefined);
-	mockedComputer.middleClick.mockResolvedValue(undefined);
-	mockedComputer.doubleClick.mockResolvedValue(undefined);
-	mockedComputer.type.mockResolvedValue(undefined);
-	mockedComputer.key.mockResolvedValue(undefined);
-	mockedComputer.scroll.mockResolvedValue(undefined);
-	mockedComputer.drag.mockResolvedValue(undefined);
-	mockedComputer.getCursorPosition.mockResolvedValue({ x: 10, y: 20 });
-	mockedComputer.getScreenSize.mockResolvedValue({ width: 1920, height: 1080 });
-	mockedComputer.getAppState.mockResolvedValue({
-		app: "Finder",
-		bundleId: "com.apple.finder",
-		pid: 1234,
-		frontmost: true,
-		axAvailable: true,
-		elements: [
-			{
-				id: 9,
-				role: "AXButton",
-				label: "Open",
-				value: null,
-				frame: { x: 100, y: 200, width: 20, height: 10 },
-				actions: ["AXPress"],
-				children: [],
-			},
-		],
-		screenshotBase64: Buffer.from("png-bytes").toString("base64"),
-		screenshotWidth: 1280,
-		screenshotHeight: 720,
-		contentKind: "ax",
-		axChangeSummary: { added: 1, removed: 0, changed: 0 },
-		axChanges: {
-			added: [
-				{
-					id: 10,
-					role: "AXStaticText",
-					label: null,
-					value: "abc",
-					frame: { x: 0, y: 0, width: 10, height: 10 },
-					actions: [],
-					children: [],
-				},
-			],
-			removed: [],
-			changed: [],
-		},
-	});
-	mockedComputer.listApps.mockResolvedValue([
-		{ name: "Finder", bundleId: "com.apple.finder", pid: 1234, isRunning: true },
-	]);
-	mockedComputer.setValue.mockResolvedValue(undefined);
-	mockedComputer.performAction.mockResolvedValue(undefined);
-	mockedComputer.pressAtPosition.mockResolvedValue(false);
-	mockedComputer.typeIntoFocused.mockResolvedValue(false);
-	mockedComputer.getScreenshotViewport.mockResolvedValue(undefined);
-});
+let closeHarness: (() => Promise<void>) | undefined;
 
 afterEach(async () => {
-	if (closeHarness) {
+	if (closeHarness !== undefined) {
 		await closeHarness();
-		closeHarness = null;
+		closeHarness = undefined;
 	}
-	vi.useRealTimers();
-	vi.clearAllMocks();
 });
 
-describe("MCP server tools #given #when #then", () => {
-	it("lists every expected computer-use and macOS extra tool", async () => {
-		// given
-		const { client, close } = await createHarness();
-		closeHarness = close;
+describe("MCP metadata #given a connected client #when initialized #then the context-first contract is advertised", () => {
+	it("publishes instructions, every tool, required mutation tokens, and conservative annotations", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
 
-		// when
-		const result = await client.listTools();
-		const toolNames = result.tools.map((tool) => tool.name).sort();
+		const result = await harness.client.listTools();
+		const tools = new Map(result.tools.map((tool) => [tool.name, tool]));
 
-		// then
-		expect(result.tools).toHaveLength(TOOL_NAMES.length);
-		expect(toolNames).toEqual([...TOOL_NAMES].sort());
-	});
-
-	it("returns image content and accessibility JSON for get_app_state", async () => {
-		// given
-		const { client, close } = await createHarness();
-		closeHarness = close;
-
-		// when
-		const result = await client.callTool({ name: "get_app_state", arguments: { app: "Finder" } });
-
-		// then
-		if (!Array.isArray(result.content)) {
-			throw new Error("get_app_state result content must be an array");
+		expect(harness.client.getInstructions()).toEqual(expect.any(String));
+		expect([...tools.keys()].sort()).toEqual([...TOOL_NAMES].sort());
+		expect(tools.get("list_apps")?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+		expect(tools.get("get_app_state")?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+		for (const name of MUTATION_NAMES) {
+			expect(tools.get(name)?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+			expect(tools.get(name)?.inputSchema.required).toContain("observation_token");
 		}
-		const firstContent = result.content[0];
-		const secondContent = result.content[1];
-		expect(firstContent).toEqual({
+	});
+});
+
+describe("native allowlist #given host configuration #when defaults are built #then approval is exact and default-deny", () => {
+	it("denies an unset allowlist and normalizes configured comma-separated bundle ids", () => {
+		const emptyStore = new AppApprovalStore(allowedBundleIdsFromEnvironment(undefined));
+		const configuredStore = new AppApprovalStore(
+			allowedBundleIdsFromEnvironment(" com.apple.Finder, ,COM.EXAMPLE.Editor "),
+		);
+
+		expect(emptyStore.decide("com.apple.finder")).toBe("needs-approval");
+		expect(configuredStore.decide("COM.APPLE.FINDER")).toBe("approved");
+		expect(configuredStore.decide("com.example.editor")).toBe("approved");
+		expect(configuredStore.decide("com.example.other")).toBe("needs-approval");
+	});
+});
+
+describe("strict observations #given an approved app #when state is requested #then a window-bound token is returned", () => {
+	it("returns image and JSON without discarding the first full tree", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
+
+		const result = await harness.client.callTool({
+			name: "get_app_state",
+			arguments: { app: "Finder", diff_only: true },
+		});
+		const payload = jsonPayload(result);
+
+		expect(result.content).toContainEqual({
 			type: "image",
 			data: Buffer.from("png-bytes").toString("base64"),
 			mimeType: "image/png",
 		});
-		expect(secondContent?.type).toBe("text");
-		expect(mockedComputer.getAppState).toHaveBeenCalledWith(1234, undefined);
+		expect(payload["elements"]).toEqual([expect.objectContaining({ id: 9 })]);
+		expect(payload["observation_token"]).toEqual(expect.any(String));
+		expect(harness.computer.stateOptions).toEqual([{ diffOnly: true, requireWindow: true }]);
 	});
 
-	it("calls the computer click method with the requested app and coordinates", async () => {
-		// given
-		const { client, close } = await createHarness();
-		closeHarness = close;
+	it("mints no usable token when strict window observation fails", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
+		harness.computer.stateError = new Error("target window missing");
 
-		// when
-		await client.callTool({ name: "click", arguments: { app: "Finder", x: 123, y: 456, mouse_button: "left" } });
+		const observation = await harness.client.callTool({ name: "get_app_state", arguments: { app: "Finder" } });
+		const mutation = await harness.client.callTool({
+			name: "click",
+			arguments: { app: "Finder", observation_token: "unobserved", element_index: "9" },
+		});
 
-		// then
-		expect(mockedComputer.click).toHaveBeenCalledOnce();
-		expect(mockedComputer.click).toHaveBeenCalledWith({ x: 123, y: 456 });
-		expect(mockedComputer.setTarget).toHaveBeenNthCalledWith(1, 1234);
-		expect(mockedComputer.setTarget).toHaveBeenLastCalledWith(undefined);
+		expect(observation.isError).toBe(true);
+		expect(mutation.isError).toBe(true);
+		expect(inputEffects(harness.computer)).toEqual([]);
+		expect(harness.computer.stateOptions).toEqual([{ requireWindow: true }]);
 	});
 
-	it("maps screenshot pixel coordinates onto the window before clicking", async () => {
-		// given
-		mockedComputer.getScreenshotViewport.mockResolvedValue({
-			windowBounds: { x: 300, y: 150, width: 1000, height: 800 },
-			screenshotWidth: 500,
-			screenshotHeight: 400,
-		});
-		const { client, close } = await createHarness();
-		closeHarness = close;
+	it("closes the owned computer once when the server session closes", async () => {
+		const harness = await createHarness();
+		await harness.close();
 
-		// when
-		await client.callTool({ name: "click", arguments: { app: "Finder", x: 250, y: 200 } });
-
-		// then
-		expect(mockedComputer.pressAtPosition).toHaveBeenCalledWith(1234, { x: 800, y: 550 });
-		expect(mockedComputer.click).toHaveBeenCalledWith({ x: 800, y: 550 });
-	});
-
-	it("maps both drag endpoints onto the window before dragging", async () => {
-		// given
-		mockedComputer.getScreenshotViewport.mockResolvedValue({
-			windowBounds: { x: 300, y: 150, width: 1000, height: 800 },
-			screenshotWidth: 500,
-			screenshotHeight: 400,
-		});
-		const { client, close } = await createHarness();
-		closeHarness = close;
-
-		// when
-		await client.callTool({ name: "drag", arguments: { app: "Finder", from_x: 0, from_y: 0, to_x: 250, to_y: 200 } });
-
-		// then
-		expect(mockedComputer.drag).toHaveBeenCalledWith({ from: { x: 300, y: 150 }, to: { x: 800, y: 550 } });
-	});
-
-	it("maps press_keys to timed computer key calls", async () => {
-		// given
-		vi.useFakeTimers();
-		const { client, close } = await createHarness();
-		closeHarness = close;
-
-		// when
-		const call = client.callTool({
-			name: "press_keys",
-			arguments: {
-				app: "Finder",
-				keys: ["super+k", { key: "Return", hold_seconds: 0.25 }],
-				hold_seconds: 0.1,
-				interval_seconds: 0.5,
-			},
-		});
-		await vi.runAllTimersAsync();
-		await call;
-
-		// then
-		expect(mockedComputer.key).toHaveBeenNthCalledWith(1, "k", {
-			modifiers: ["command"],
-			holdMilliseconds: 100,
-		});
-		expect(mockedComputer.key).toHaveBeenNthCalledWith(2, "Return", { holdMilliseconds: 250 });
-		expect(vi.getTimerCount()).toBe(0);
-		vi.useRealTimers();
-	});
-
-	it("routes set_value and perform_secondary_action to accessibility helpers", async () => {
-		// given
-		const { client, close } = await createHarness();
-		closeHarness = close;
-
-		// when
-		await client.callTool({ name: "set_value", arguments: { app: "Finder", element_index: "9", value: "abc" } });
-		await client.callTool({
-			name: "perform_secondary_action",
-			arguments: { app: "Finder", element_index: "9", action: "AXPress" },
-		});
-
-		// then
-		expect(mockedComputer.setValue).toHaveBeenCalledWith(1234, 9, "abc");
-		expect(mockedComputer.performAction).toHaveBeenCalledWith(1234, 9, "AXPress");
-	});
-
-	it("returns post-action observation for set_value, not just prose", async () => {
-		// given
-		const { client, close } = await createHarness();
-		closeHarness = close;
-
-		// when
-		const result = await client.callTool({ name: "set_value", arguments: { app: "Finder", element_index: "9", value: "abc" } });
-
-		// then: the tool result carries the post-action verification payload.
-		if (!Array.isArray(result.content)) {
-			throw new Error("set_value result content must be an array");
-		}
-		const text = result.content.map((item) => (item.type === "text" ? item.text : "")).join("\n");
-		expect(text).toContain("axChangeSummary 1/0/0");
-		expect(text).toContain("\"axChanges\"");
-		expect(mockedComputer.setValue).toHaveBeenCalledWith(1234, 9, "abc");
-		expect(mockedComputer.getAppState).toHaveBeenCalledWith(1234);
-	});
-
-	it("routes select_text with a default selection mode and disambiguating suffix", async () => {
-		// given
-		const { client, close } = await createHarness();
-		closeHarness = close;
-
-		// when
-		await client.callTool({
-			name: "select_text",
-			arguments: { app: "Finder", element_index: "9", text: "foo", suffix: " baz" },
-		});
-
-		// then
-		expect(mockedComputer.selectText).toHaveBeenCalledWith(1234, 9, {
-			selection: "text",
-			text: "foo",
-			suffix: " baz",
-		});
+		expect(harness.computer.effects).toEqual([{ kind: "close" }]);
 	});
 });
+
+function inputEffects(computer: FakeGuardedComputer) {
+	return computer.effects.filter((effect) => effect.kind !== "close");
+}

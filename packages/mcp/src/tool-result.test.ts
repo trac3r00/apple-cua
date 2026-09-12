@@ -1,6 +1,6 @@
 import type { AppState } from "@macos-cua/core";
 import { describe, expect, it } from "vitest";
-import { observedActionComplete } from "./tool-result.js";
+import { observedActionResult } from "./tool-result.js";
 
 const state: AppState = {
 	app: "Fixture",
@@ -23,10 +23,13 @@ describe("#given observed action state #when formatted #then observation is not 
 		{ summary: { added: 0, removed: 1, changed: 0 }, expected: "changed" },
 		{ summary: { added: 0, removed: 0, changed: 1 }, expected: "changed" },
 	])("reports $expected without inventing an outcome", ({ summary, expected }) => {
-		const result = observedActionComplete({
-			...state,
-			...(summary === undefined ? {} : { axChangeSummary: summary }),
-		});
+		const result = observedActionResult(
+			{
+				...state,
+				...(summary === undefined ? {} : { axChangeSummary: summary }),
+			},
+			true,
+		);
 		const text = result.content.flatMap((item) => (item.type === "text" ? [item.text] : [])).join("\n");
 		const payload: unknown = JSON.parse(text.slice(text.indexOf("{")));
 		expect(payload).toHaveProperty("observationStatus", expected);

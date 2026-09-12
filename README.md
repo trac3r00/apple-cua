@@ -81,7 +81,7 @@ Pressed: command+shift+cmd
 
 ### Per-PID targeting
 
-By default, input events go to the globally focused application. If you want the agent to drive a specific app, call `get_app_state` for that app first or pass `--target-pid <pid>` after the app has a visible window. The host implementation caches the app window session and routes mouse, drag, keyboard, text, and scroll events through CoreGraphics plus SkyLight/AppKit FFI. If no visible target window is known, targeted input fails loudly instead of falling back to global cursor-moving input.
+For the low-level CLI, input events default to the globally focused application; guarded MCP instead requires an observed, approved target. For explicitly authorized CLI app targeting, call `get_app_state` for that app first or pass `--target-pid <pid>` after the app has a visible window. The host implementation caches the app window session and routes mouse, drag, keyboard, text, and scroll events through CoreGraphics plus SkyLight/AppKit FFI. If no visible target window is known, targeted input fails loudly instead of falling back to global cursor-moving input.
 
 Example: send a URL to Safari while Terminal stays focused:
 
@@ -113,44 +113,55 @@ If `--target-pid` is used before a target window has been discovered, the comman
 
 ### MCP server
 
-Spawn the stdio MCP server and wire it to Claude Desktop, VS Code, or any MCP client:
+Use the guarded stdio MCP server for autonomous desktop tasks. It works through ordinary
+MCP schemas and text/image results, without a Pi-specific extension or embedded agent.
+It must run on the Mac being controlled, with the actual launcher's macOS permissions.
 
 ```bash
-# Build
-pnpm --filter @macos-cua/mcp build
-
-# Run
-./packages/mcp/dist/server.js
+pnpm --filter @macos-cua/core --filter @macos-cua/mcp build
+MACOS_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit node packages/mcp/dist/server.js
 ```
 
-Claude Desktop `claude_desktop_config.json`:
+The host owner configures exact approved bundle IDs through
+`MACOS_CUA_ALLOWED_BUNDLE_IDS`. **Missing or empty means no apps are approved**; the agent
+cannot approve itself. App approval does not authorize every operation inside the app.
+
+A Claude Desktop-style server configuration is below. Other clients use different root
+keys; see the [OpenClaw and Hermes setup guide](skills/macos-cua/references/harnesses.md).
+Merge configuration rather than replacing unrelated settings.
 
 ```json
 {
   "mcpServers": {
     "macos-cua": {
       "command": "node",
-      "args": ["/absolute/path/to/packages/mcp/dist/server.js"]
+      "args": ["/absolute/path/to/macos-cua/packages/mcp/dist/server.js"],
+      "env": {
+        "MACOS_CUA_ALLOWED_BUNDLE_IDS": "com.apple.TextEdit"
+      }
     }
   }
 }
 ```
 
-VS Code `settings.json` (MCP extension):
+**Context-first contract (MCP migration):**
 
-```json
-{
-  "mcp.servers": {
-    "macos-cua": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/absolute/path/to/packages/mcp/dist/server.js"]
-    }
-  }
-}
-```
+1. The harness understands the user's goal, target and intended result before choosing input.
+2. `get_app_state` returns the target's current state and an opaque `observation_token`.
+3. Every mutating tool, including `press_keys`, requires that token. The server consumes it,
+   validates the observed target/current approval and serializes preflight, input and post-read.
+4. Read the resulting state before using any continuation token. Unchanged, unavailable,
+   failed or unexpected context pauses input; explicitly observe again rather than replaying.
+5. Confirm irreversible/external actions with the human through the harness. Tokens are
+   sequencing evidence, not proof of consent or model understanding. UI text is untrusted data.
 
-The server exposes 9 Codex Computer Use tools. See the [Action surface](#action-surface) table below.
+Use element `id` values from the observation, not array positions or guessed coordinates.
+The server refuses a missing target window instead of substituting the full desktop. Its queue
+covers only that server instance, not other agents, raw CLI callers or human input.
+
+Load the [portable agent skill](skills/macos-cua/SKILL.md) alongside the MCP tools. Raw CLI/core
+and the Pi extension remain low-level interfaces; the MCP guard does not automatically apply
+to them. This migration intentionally rejects old unobserved mutation calls.
 
 ### pi-extension
 
@@ -162,7 +173,7 @@ pi install file://./packages/pi-extension
 
 Loading the extension auto-enables native computer-use for Anthropic Messages and OpenAI Responses models. Anthropic requests receive the `computer-use-2025-01-24` native `computer` tool plus the required beta header/body fields and a short system prompt. OpenAI Responses requests receive only `{ "type": "computer" }` in `payload.tools` — no headers, no `extra_body`, and no extra system prompt. No configuration is required; advanced users can opt out of both providers with `MACOS_CUA_DISABLE_COMPUTER_USE_BETA=1` (`true`, `yes`, and `on` also work).
 
-The extension resolves the host display in logical macOS points, captures model-facing screenshots at a 1280px long edge (1280x720 on 16:9 displays), declares those dimensions to Anthropic, and unscales returned model coordinates back to logical points before dispatching clicks, moves, and drags. OpenAI Responses uses the same screenshot invariant: model coordinates are always in the image space the model received, while `MacOSHostComputer` still receives logical points.
+The extension resolves the host display in logical macOS points, captures model-facing screenshots at a 2560px long edge (2560x1440 on large 16:9 displays), declares those dimensions to Anthropic, and unscales returned model coordinates back to logical points before dispatching clicks, moves, and drags. OpenAI Responses uses the same screenshot invariant: model coordinates are always in the image space the model received, while `MacOSHostComputer` still receives logical points.
 
 The extension also registers Codex-compatible Computer Use tools:
 

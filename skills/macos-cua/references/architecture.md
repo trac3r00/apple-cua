@@ -1,86 +1,77 @@
-# Architecture reference
+# Architecture and guard boundaries
 
-Why macos-cua takes the host-native path, how the layers stack, and where the project is headed.
-
-## Philosophy: host-native over sandbox
-
-macos-cua is designed for the same OpenAI computer-use action vocabulary that Codex uses, but it runs directly on the host Mac instead of inside a VM sandbox. See [`codex-cua-comparison.md`](../../codex-cua-comparison.md) at the repo root for the full analysis.
-
-The key trade-off:
-
-- **Sandbox path** (trycua/cua style): strong isolation via Docker/QEMU/Lume, but pays for VM boot, guest services, HTTP/JSON transport, PIL screenshot encoding, base64 serialization, and a default 500 ms post-action delay.
-- **Host-native path** (macos-cua style): no VM boundary, no transport hops, no repeated base64 cycles. Screenshots currently use the system `screencapture` + `sips` fallback. Global input goes through `koffi`-bound CoreGraphics CGEvent, while targeted app input goes through TypeScript-owned SkyLight/AppKit FFI and a cached visible window session.
-
-The result is lower latency and real-app fidelity. The cost is weaker environmental isolation, so the agent must never auto-drive destructive UI without user confirmation.
-
-## Layer diagram
+macos-cua supplies local macOS observation and input primitives. It does not contain a model
+or a second autonomous agent. The harness owns task interpretation, choosing actions, user
+confirmation and deciding whether the requested outcome is satisfied.
 
 ```text
-┌─────────────────────────────────────────────────────────┐
-│  Entry points                                            │
-│  CLI (macos-cua) │ MCP server (macos-cua-mcp) │ pi-ext  │
-├─────────────────────────────────────────────────────────┤
-│  @macos-cua/core                                         │
-│  ComputerInterface (abstract contract)                   │
-│    screenshot() → ScreenshotResult                       │
-│    click() / doubleClick() / type() / key() / scroll()   │
-│    drag() / getCursorPosition() / getScreenSize()        │
-├─────────────────────────────────────────────────────────┤
-│  Platform implementations                                │
-│  MacOSHostComputer (implemented)                         │
-│    screencapture/sips → PNG buffer                       │
-│    koffi/CGEvent → global mouse/keyboard/scroll          │
-│    SkyLight/AppKit FFI → targeted app sessions           │
-│    Finder/system_profiler → logical screen size          │
-│  VMComputer (interface only)                             │
-│  CloudComputer (interface only)                            │
-└─────────────────────────────────────────────────────────┘
+OpenClaw / Hermes / another MCP client
+  -> local stdio MCP server
+     -> serialized observation-token gate
+     -> read-only approval/app/window preflight
+     -> existing native action
+     -> post-action observation / continuation or pause
+        -> @macos-cua/core / MacOSHostComputer
 ```
 
-## Current implementation
+The CLI and Pi extension are separate low-level entry points into core. They do not
+implicitly pass through the MCP gate. A caller that bypasses MCP must supply equivalent
+orchestration itself; it must not use that route to evade a denied MCP action.
 
-`MacOSHostComputer` lives in `packages/core/src/platform/macos.ts`. It implements the full `ComputerInterface` contract using macOS-native APIs:
+## What the MCP gate enforces
 
-- **Screenshots**: `screencapture` captures the primary display and `sips` resizes the PNG to the requested target dimensions.
-- **Global input**: `koffi`-bound CoreGraphics CGEvent for click, double-click, type, key chords, scroll, and drag. Events are posted globally via `CGEventPost` by default, preserving the original behavior.
-- **Targeted input**: `MacOSInputController` resolves visible windows with `get-windows`, remembers the target window after `get_app_state` or pointer routing, and posts through SkyLight/AppKit FFI. It refuses targeted keyboard, text, mouse, and scroll when no target window is known.
-- **Queries**: Finder desktop bounds provide logical screen size, with `system_profiler SPDisplaysDataType` as a cold fallback. `CGEventGetLocation(CGEventCreate(NULL))` reports the current cursor position.
+- One active server-local, single-use observation token.
+- Observation of an authorized app/window before a mutation.
+- Current app approval and target identity validation immediately before input.
+- Element IDs from the captured observation, or finite in-image coordinates converted using
+  the captured viewport rather than a newly guessed screen scale.
+- A FIFO transaction covering observation, validation, action and the post-action read.
+- No autonomous retry. Failed, unavailable, unchanged or unexpected context pauses input;
+  a subsequent action needs deliberate fresh observation/authority.
 
-## Computer-use coordinate scaling
+`MACOS_CUA_ALLOWED_BUNDLE_IDS` is host configuration, not a tool argument or model-granted
+permission. Tokens do not prove consent. Neither AX changes nor a successful dispatch prove
+that an external operation completed. The harness must inspect the specific outcome and
+ask the human before irreversible/external actions.
 
-The pi-extension keeps model coordinates and macOS input coordinates separate:
+## Native components
 
-1. `MacOSHostComputer.getScreenSize()` returns logical desktop points.
-2. `computeDownscale()` downscales those logical dimensions to a 1280px long edge while preserving aspect ratio.
-3. Screenshots returned through native computer-use are resized to `targetWidth x targetHeight`.
-4. Model actions are interpreted in that resized image space. `unscaleCoordinate()` maps them back to logical points before `click`, `move`, or `drag` reaches `MacOSHostComputer`.
+- CoreGraphics CGEvent and Accessibility implement input and semantic AX actions through
+  Koffi bindings. Targeted input uses the remembered app window and native window APIs.
+- Full-display capture has a native path. Window capture currently uses `screencapture` and
+  `sips`; it is not a persistent per-window ScreenCaptureKit stream.
+- Accessibility observations retain native element references so hierarchy insertions do
+  not silently reinterpret the previously observed IDs. A new snapshot replaces the mapping;
+  unavailable/dead contexts and close release retained references.
+- The guarded preflight reads current policy and window metadata without taking another
+  screenshot or replacing the AX references on which the requested action depends.
+- Native snapshot IDs are not durable across observations or separate processes. Keep one
+  MCP session for a task; separate CLI invocations do not preserve its snapshot/token.
 
-Pipeline shorthand: logical points → 1280-edge screenshot → model coordinate → unscaled logical point → macOS input.
+The guard uses in-process metadata, a small queue and existing local APIs. It adds no service,
+model or runtime package dependency. The host-native path avoids a VM, but no universal speed
+or ChatGPT-intelligence equivalence is claimed; measure the actual app and operation.
 
-Anthropic receives `display_width_px` and `display_height_px` set to the downscaled model dimensions. OpenAI Responses needs only `{ type: "computer" }`, but follows the same resized-screenshot and unscale-on-action invariant.
+## Coordinate spaces
 
-## Reserved interfaces
+Input primitives use global logical macOS points. MCP coordinates refer to the exact window
+screenshot returned with the observation. The guard validates against its reported dimensions
+and maps through its captured viewport. The current screenshot/model cap is 2560 on the long
+edge, but small windows and explicit sizes differ: never hardcode 2560 or a Retina factor.
 
-Two platform implementations exist as stubs:
+The Pi extension's `resolveDisplayConfig` and `unscaleCoord` provide its separate provider
+image-to-logical mapping. Raw CLI callers must make their own conversion; the MCP token guard
+is not present there.
 
-- `VMComputer` — for QEMU, Lume, or other VM-based control. Currently throws `Not implemented`.
-- `CloudComputer` — for remote instance control. Currently throws `Not implemented`.
+## Limits
 
-These are placeholders for future expansion. The `ComputerInterface` contract is intentionally platform-agnostic so that a single automation script can switch from `MacOSHostComputer` to `VMComputer` by changing one import.
+The guard is not a sandbox or a proof of model understanding. It does not coordinate another
+MCP process, a raw input script or a human using the same desktop, and a metadata preflight is
+not an atomic lock on every pixel or control. Use a single controller, keep observations
+current, inspect outcomes and stop on uncertainty.
 
-## Targeted mouse / scroll / keyboard (Implemented)
+VM/cloud platform classes are interfaces/stubs, not alternative working backends. General
+remote transport and cross-harness user-consent services are outside this implementation.
 
-Targeted input is helper-free and stays inside the TypeScript process:
-
-- **Mouse left-click**: resolve a visible target window, create AppKit-backed mouse `CGEvent`s when a window is known, stamp `mouseEventSubtype = 3`, `mouseEventClickState`, target window IDs, `CGEventSetWindowLocation` for window-local coords, and SkyLight raw field 40 = pid. Events post through `SLEventPostToPid` plus the window owner's process serial number without intentionally promoting the app to frontmost.
-- **Mouse right / middle / drag**: use the same target-window stamping and SkyLight/window-owner delivery, without the global `CGEventPostToPid` fallback.
-- **Keyboard**: standard `CGEventCreateKeyboardEvent`, then `SLEventSetAuthenticationMessage` via `+[SLSEventAuthenticationMessage messageWithEventRecord:pid:version:]`, posted via `SLEventPostToPid`.
-- **Type text**: per-character `CGEvent` with `CGEventKeyboardSetUnicodeString` routed through the remembered app session.
-- **Scroll**: wheel events require the remembered app window and use SkyLight/window-owner delivery; without a remembered session the call fails before any event is posted.
-
-## Future work
-
-The current architecture is fully functional. Planned improvements:
-
-1. **Display selection** — support `--display` for multi-monitor setups.
-2. **Streaming frames** — add an IOSurface/SCStream path for higher frame-rate observation when one-shot screenshots are not enough.
+For the evidence and limits of the ChatGPT.app comparison, see the repository report at
+`docs/chatgpt-cua-reverse-engineering.md` (not needed for normal agent operation).

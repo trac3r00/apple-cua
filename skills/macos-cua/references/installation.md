@@ -1,77 +1,79 @@
-# Installation reference
+# Installation and local permissions
 
-Setting up `macos-cua` so the `macos-cua` CLI is on PATH and the TypeScript build is current.
+macos-cua runs on the Mac being controlled, in its logged-in graphical session. Autonomous
+harnesses should use the guarded MCP server. See [harness configuration](harnesses.md) for
+OpenClaw/Hermes examples and the required local app allowlist.
 
-## Prerequisites
+## Build from the checkout
 
-- macOS 13 (Ventura) or later
-- Node.js 20 or later
-- pnpm (install via `corepack enable` or `npm install -g pnpm`)
-
-## TL;DR
+Prerequisites: Node.js 20+, pnpm, and Apple's Command Line Tools for the bundled native
+capture/cursor components. The host also needs normal macOS desktop permissions.
 
 ```bash
-# 1. install dependencies
 pnpm install
-
-# 2. build the CLI
-pnpm --filter @macos-cua/core build
-pnpm --filter @macos-cua/cli build
-
-# 3. verify the binary is available
-pnpm macos-cua --version
-
-# 4. smoke test
-TS=$(date +%s%N)
-SHOT="/tmp/macos-cua-${TS}.png"
-pnpm macos-cua screenshot -o "${SHOT}" && ls -lh "${SHOT}"
+pnpm --filter @macos-cua/core --filter @macos-cua/cli --filter @macos-cua/mcp build
+node packages/cli/dist/cli.js --help
 ```
 
-If the screenshot is 0 bytes or black, the controlling terminal lacks Screen Recording permission. Fix it in **System Settings → Privacy & Security → Screen Recording** and toggle the entry for the terminal/IDE that launched the process.
+The built entry points are:
 
-## Granting Screen Recording + Accessibility + Apple Events permissions
+- CLI: `packages/cli/dist/cli.js`
+- Stdio MCP: `packages/mcp/dist/server.js`
 
-macOS gates screen capture, input synthesis, and System Events app lookup behind separate permission dialogs. The first time `macos-cua screenshot` or `macos-cua click` runs, macOS may prompt automatically. If it doesn't, grant them manually:
+Use absolute paths in harness configuration. The optional Pi extension is not required for
+Hermes, OpenClaw or another MCP client. Do not assume workspace-local bin aliases are on
+PATH in a background gateway process.
 
-1. Open **System Settings → Privacy & Security → Screen Recording**.
-2. Find the terminal/IDE binary (iTerm2, Ghostty, WezTerm, Apple Terminal, VS Code, etc.) and toggle it ON.
-3. Open **System Settings → Privacy & Security → Accessibility**.
-4. Toggle the same terminal/IDE ON.
-5. Open **System Settings → Privacy & Security → Apple Events**.
-6. Allow the terminal/IDE to control **System Events** if you use `--target-bundle-id` or permission checks that query System Events.
-7. Restart the terminal (some apps cache the permission state at launch).
+## Grant permissions through the user
 
-Permission is per-binary. If you switch terminals, you must re-grant for the new app.
+The actual process chain launching the server needs:
 
-## Verifying the build
+- **Screen Recording** for screenshot capture.
+- **Accessibility** for AX queries/actions and native input.
+- **Automation / Apple Events** where System Events or browser scripting is used.
 
-After `pnpm --filter @macos-cua/cli build`, the compiled CLI lives at:
+Grant these manually in **System Settings → Privacy & Security**, for the terminal, app,
+Node executable or launcher macOS identifies. Permission state belongs to the real process
+chain and user account, not to a project directory. A working terminal test does not prove
+a separately launched gateway has the same grants.
 
-```
-packages/cli/dist/cli.js
-```
+Do not automate clicks to approve permissions. If a request is denied or the captured image
+is unusable, stop input and resolve the permission issue with the human. Restart the relevant
+launcher if macOS requires it after a grant.
 
-The `package.json` bin alias `macos-cua` points at this file. When running through pnpm workspaces, use `pnpm macos-cua <verb>`. For a permanent global alias:
+Read-only checks from the checkout:
 
 ```bash
-ln -sf $(pwd)/packages/cli/dist/cli.js ~/.local/bin/macos-cua
+node packages/cli/dist/cli.js permissions check screen
+node packages/cli/dist/cli.js permissions check accessibility
+node packages/cli/dist/cli.js permissions check apple-events
+node packages/cli/dist/cli.js --json apps list
 ```
 
-## Building the MCP server and pi-extension
+## Configure MCP app approval
+
+The host owner sets `MACOS_CUA_ALLOWED_BUNDLE_IDS` to exact approved bundle IDs. Empty or
+unset defaults to no approved apps. The server does not expose an approval tool to the model.
+Example for a host-authorized TextEdit task:
 
 ```bash
-pnpm --filter @macos-cua/mcp build
-pnpm --filter @macos-cua/pi-extension build
+MACOS_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit node packages/mcp/dist/server.js
 ```
 
-The MCP server binary is `packages/mcp/dist/server.js`, aliased as `macos-cua-mcp` in its `package.json`.
+Normally the harness starts this process and owns stdin/stdout. Configure the same environment
+in its MCP server definition instead of starting a competing manual instance. Never run two
+controllers against the same desktop and expect the server's per-process queue to coordinate
+them. See [harnesses.md](harnesses.md) for complete configuration examples.
 
-## Uninstall
+## Optional CLI alias
 
-```bash
-rm -rf node_modules
-rm -rf packages/*/dist
-unlink ~/.local/bin/macos-cua   # if you symlinked it
-```
+After building, either keep using `node /absolute/path/to/packages/cli/dist/cli.js` or create an
+alias/symlink in a directory already on your PATH. Do not replace an existing installation
+without checking it. Direct CLI commands are low-level and do not enforce MCP observation
+tokens or the server's app allowlist.
 
-No system locations are modified.
+## Smoke-test without input
+
+Connect the harness, inspect `tools/list`, then call `list_apps`. Only after the user has
+approved an app in local configuration should the agent call `get_app_state` and inspect its
+result. Do not use a click or a guessed `set_value` target as an installation test.

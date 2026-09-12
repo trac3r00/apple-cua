@@ -1,106 +1,98 @@
-# Troubleshooting
+# Troubleshooting without blind input
 
-Specific errors and their fixes. Most macos-cua failures come from OS-permission gaps, a missing build, or Retina coordinate confusion.
+Do not test an installation or a hypothesis by clicking arbitrary controls. Stop input,
+inspect the error/current context, and resolve the specific cause. Never remove targeting,
+expand your own approval policy or switch to raw input to evade a guarded MCP denial.
 
-## Screenshot returns a black or 0-byte image
+## App not approved
 
-**Cause:** the terminal/IDE that launched `macos-cua` lacks Screen Recording permission.
+The host's `MACOS_CUA_ALLOWED_BUNDLE_IDS` is empty or does not contain the exact bundle ID.
+`list_apps` can show IDs for human setup; listing is not approval. Ask the host owner to
+configure the intended app and restart the server. An observation token cannot override
+approval and an app allowlist does not replace consent for irreversible actions.
 
-**Fix:**
+## Missing, stale or replayed observation token
 
-1. Open **System Settings → Privacy & Security → Screen Recording**.
-2. Find the entry for your terminal (iTerm2, Ghostty, WezTerm, Apple Terminal, VS Code, etc.).
-3. Toggle it ON. If the entry doesn't exist, click `+` and add the app.
-4. Restart the terminal (some apps cache the permission state at launch).
-5. Re-run `macos-cua screenshot -o /tmp/test.png`.
+Call `get_app_state` for the actual target and read the response before choosing input.
+Pass its `observation_token` with the next mutating tool call. A token is single-use;
+another explicit observation replaces it. Do not reuse a token from another app/session,
+cache one across turns without checking the current result, or replay a failed request.
 
-## Click or type silently does nothing
+A paused result requires a new explicit observation. That observation should answer a
+specific question about the blocker or intended result, not serve as a mechanical step
+in an endless observe/click/retry loop.
 
-**Cause:** the terminal/IDE lacks Accessibility permission.
+## Target app is not foreground, or its window changed/disappeared
 
-**Fix:** same path as above but in **System Settings → Privacy & Security → Accessibility**. Toggle the controlling terminal/IDE ON, restart it, and re-test.
+The pre-input check refuses to guess. Ensure the user-intended app is running with the
+correct visible window in front, then observe it again. A new dialog or different window
+may need different targets. Do not use coordinates from the previous window or change
+`app` while keeping the old token. If the target is unavailable, ask for help rather than
+falling back to global clicks.
 
-Permission is per-binary. If you switch from iTerm to Ghostty, you must grant Ghostty too. The same applies to VS Code's integrated terminal.
+## Element is not in the observation
 
-## Click doesn't work in Chrome or Firefox
+`element_index` is the returned element's **`id`**, not its index in the `elements` array.
+Normalization can leave gaps in IDs. Refresh the observation if the context changed; choose
+an element actually present in the current result. An advertised action name must also be
+appropriate for that control. The root application is not a text field.
 
-**Cause:** Accessibility permission is granted, but the browser's trusted-event policy rejects synthetic clicks on certain elements (e.g., file inputs, permission prompts).
+## AX action fails or the outcome is unclear
 
-**Fix:** there is no universal workaround for browser security policies. Try clicking a safe element first (the page background) to establish focus, then target the desired element. For file uploads, use the browser's keyboard shortcuts (Tab + Return) rather than direct click.
+Native AX errors are meaningful, not invitations to retry blindly:
 
-## `macos-cua: command not found`
+- `-25200`: generic failure.
+- `-25205`: unsupported attribute.
+- `-25206`: unsupported action.
 
-**Cause:** the CLI hasn't been built, or the built `dist/cli.js` isn't on PATH.
+Different apps expose different capabilities. An action rejected on one control does not
+prove all native input is broken. Re-observe the intended target and inspect a relevant
+state signal. If the supported AX route cannot express the operation, a screenshot-guided
+coordinate action may be appropriate only within valid current MCP context and authorization.
 
-**Fix:**
+`observationStatus` describes the AX comparison, not task success. Focus, selection or visual
+changes might not change AX diff counts; conversely, unrelated UI activity can change counts.
+Check the intended field value, selection, result or confirmation instead of repeating input.
+
+## URL policy cannot be checked
+
+A configured URL restriction must not be bypassed because browser automation failed. Resolve
+the browser/Automation permission issue with the host owner, or stop. Do not disable the
+blocklist, use another process or turn a failed lookup into permission to act.
+
+## Screenshot is black, missing or unusable
+
+Check capture errors and Screen Recording permission for the actual launcher. A service may
+have different grants from the terminal used to build the project. Resolve permission through
+human-operated System Settings. If the harness did not deliver image content to the model,
+use valid AX targets or stop; an image file's existence is not visual understanding.
+
+## CLI/server command not found
+
+Use the explicit built paths from the checkout rather than assuming a bin alias:
 
 ```bash
-# build the CLI
-pnpm --filter @macos-cua/cli build
-
-# run through pnpm (always works from the repo root)
-pnpm macos-cua --version
-
-# or symlink permanently
-ln -sf $(pwd)/packages/cli/dist/cli.js ~/.local/bin/macos-cua
+pnpm --filter @macos-cua/core --filter @macos-cua/cli --filter @macos-cua/mcp build
+node packages/cli/dist/cli.js --help
 ```
 
-## `macos-cua-mcp: command not found`
+The MCP server is `node /absolute/path/to/macos-cua/packages/mcp/dist/server.js`; it speaks
+stdio JSON-RPC and is not a CLI with `--version`. Let the harness launch it with the approved
+bundle-ID environment. Do not print log messages into its protocol stdout.
 
-**Cause:** the MCP server hasn't been built.
+## Coordinates land incorrectly
 
-**Fix:**
+Use dimensions from the current MCP screenshot/token, not a fixed 1280/2560 size or assumed
+Retina factor. Raw CLI input uses global logical points and is a separate low-level surface.
+Do not keep trying scaled variants on live controls. Obtain the right window observation and
+verify the coordinate space before input.
 
-```bash
-pnpm --filter @macos-cua/mcp build
-pnpm macos-cua-mcp --version
-```
+## Interleaved inputs or wrong active app
 
-## Coordinates seem off by 2x
+Use one controlling agent/server for the desktop. Disable parallel tool scheduling in the
+harness configuration; the server also queues its own transactions, but cannot arbitrate
+another process or a human changing focus. Stop conflicting controllers and observe again.
 
-**Cause:** Retina screenshots can be physical pixels (for example 5120x2880) while macOS input and `MacOSHostComputer.getScreenSize()` use logical points (for example 2560x1440). Clicks landing at half the intended position usually mean a physical screenshot coordinate was sent as a logical input coordinate, or a model saw physical pixels but returned coordinates for a downscaled/logical space.
-
-**Fix:** for the pi-extension, keep the built-in pipeline intact: logical screen size → 1280px-long-edge screenshot → model coordinate → unscaled logical click. For direct CLI use, convert physical screenshot pixels to logical points before clicking on Retina displays.
-
-## Multiple monitors
-
-**Cause:** `macos-cua` currently targets the primary display. Clicks or screenshots may land on the wrong screen if the target UI is on a secondary monitor.
-
-**Fix:** move the target window to the primary display before automating it. Future versions may add `--display` selection.
-
-## Targeted command says no app window is known
-
-**Cause:** targeted mouse/scroll/text/key routes require a visible app window. In MCP or pi-extension mode, `get_app_state` primes that window session. In CLI mode, the command primes from the current visible windows before dispatching.
-
-**Fix:**
-
-1. Confirm the app is running and has at least one visible, non-minimized window.
-2. In MCP/pi-extension mode, call `get_app_state` for that app before `press_key`, `type_text`, or `scroll`.
-3. In CLI mode, pass the correct `--target-pid` or `--target-bundle-id`.
-4. Do not work around this by omitting the target unless global cursor movement is acceptable.
-
-## Targeted click/scroll does nothing in Safari/Chrome
-
-**Cause:** the controlling terminal/IDE may not have Accessibility permission, or the app window session is stale.
-
-**Fix:** grant Accessibility to the terminal/IDE that launches `macos-cua`, then refresh the app session with `get_app_state` or retry the CLI command after ensuring the target window is visible.
-
-## My active app loses focus or my keystrokes get redirected mid-task
-
-**Cause:** on older builds, raw coordinate `click`/`drag` (calls without `element_index`) activated the target app before posting synthetic mouse events. Current builds route through the remembered visible target window without intentionally promoting the app to frontmost.
-
-**Fix:** update to a build with focus-preserving targeted input, then refresh the target app session with `get_app_state`. Prefer the AX-indexed path when an element is exposed in the accessibility tree; use raw coordinates only when the element has no AX representation.
-
-## set_value silently does nothing on a web text field
-
-**Cause:** Safari/Chrome content-process AXTextFields accept `AXUIElementSetAttributeValue(AXValue, ...)` calls without raising an error, but ignore the write. The macos-cua port keeps strict AX-only semantics — it never falls back to typing the value into whatever has focus, because that would type into the user's other app.
-
-**Fix:** confirm the target really is settable via AX. If not, use `click` (with `element_index`) followed by `type_text` to compose the value yourself. Avoid passing raw cursor coordinates unless the element has no AX representation.
-
-## Still stuck
-
-1. Capture the full error output (stderr + stdout).
-2. Verify the build: `pnpm --filter @macos-cua/cli build`.
-3. Check permissions in both **Screen Recording** and **Accessibility** lists.
-4. Confirm the terminal/IDE binary is the one in both lists.
-5. Search the repo issues before filing a new one.
+For a bug report, capture the relevant tool name, target metadata and complete error while
+redacting private document/image content. Include version/build and launcher information;
+do not substitute a successful unit suite for a real reproduction.

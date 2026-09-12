@@ -49,6 +49,7 @@ function createComputer(): ComputerInterface {
 			.fn<ComputerInterface["listApps"]>()
 			.mockResolvedValue([{ name: "Finder", bundleId: "com.apple.finder", pid: 1234, isRunning: true }]),
 		setValue: vi.fn<ComputerInterface["setValue"]>(),
+		selectText: vi.fn<ComputerInterface["selectText"]>(),
 		performAction: vi.fn<ComputerInterface["performAction"]>(),
 		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>(),
 		typeIntoFocused: vi.fn<ComputerInterface["typeIntoFocused"]>(),

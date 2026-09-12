@@ -45,6 +45,7 @@ function createComputer(): ComputerInterface {
 			.fn<ComputerInterface["listApps"]>()
 			.mockResolvedValue([{ name: "TextEdit", bundleId: "com.apple.TextEdit", pid: 9001, isRunning: true }]),
 		setValue: vi.fn<ComputerInterface["setValue"]>(),
+		selectText: vi.fn<ComputerInterface["selectText"]>(),
 		performAction: vi.fn<ComputerInterface["performAction"]>(),
 		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>(),
 		typeIntoFocused: vi.fn<ComputerInterface["typeIntoFocused"]>(),

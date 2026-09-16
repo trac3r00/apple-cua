@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
+
 interface TestWindow {
 	readonly id: number;
 	readonly owner: {
@@ -73,6 +75,7 @@ function callOrderAt(orders: readonly number[], index: number, label: string): n
 describe("#given focused app targeted input", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		setOnscreenWindowIdsSourceForTesting(() => [10, 20, 30, 99]);
 		windowMock.openWindows.mockResolvedValue([]);
 		skyLightMock.beginFocusWithoutRaise.mockReturnValue(skyLightMock.focusToken);
 		skyLightMock.state.frontProcess = skyLightMock.targetPsn;

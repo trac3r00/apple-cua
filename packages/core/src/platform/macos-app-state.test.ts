@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
+
 type ExecFileCallback = (error: Error | null, stdout: string | Buffer, stderr: string) => void;
 type ExecFileMock = (
 	file: string,
@@ -73,6 +75,7 @@ beforeEach(() => {
 	setRunningApplicationLookupForTesting(unavailableNativeLookup);
 	childProcessMock.execFile.mockReset();
 	windowMock.openWindows.mockReset();
+	setOnscreenWindowIdsSourceForTesting(() => [42, 99]);
 	accessibilityMock.extractAccessibilityTree.mockReset();
 	accessibilityMock.performActionByIndex.mockReset();
 	accessibilityMock.releaseAccessibilitySnapshot.mockReset();

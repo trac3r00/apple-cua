@@ -63,6 +63,18 @@ const CFArrayGetCount = coreFoundation.func("CFArrayGetCount", "long", ["void *"
 	(reference: CFArrayRef) => number
 >;
 
+let cfDictionaryGetValueBinding: KoffiFunc<(dictionary: CFTypeRef, key: CFStringRef) => CFTypeRef | null> | undefined;
+
+function getCFDictionaryGetValue(): KoffiFunc<(dictionary: CFTypeRef, key: CFStringRef) => CFTypeRef | null> {
+	if (cfDictionaryGetValueBinding === undefined) {
+		cfDictionaryGetValueBinding = coreFoundation.func("CFDictionaryGetValue", "void *", [
+			"void *",
+			"void *",
+		]) as KoffiFunc<(dictionary: CFTypeRef, key: CFStringRef) => CFTypeRef | null>;
+	}
+	return cfDictionaryGetValueBinding;
+}
+
 const CFArrayGetValueAtIndex = coreFoundation.func("CFArrayGetValueAtIndex", "void *", ["void *", "long"]) as KoffiFunc<
 	(reference: CFArrayRef, index: number) => CFTypeRef | null
 >;
@@ -155,6 +167,11 @@ export function isCFArray(reference: CFTypeRef): reference is CFArrayRef {
 
 export function cfArrayValueAt(reference: CFArrayRef, index: number): CFTypeRef | null {
 	return CFArrayGetValueAtIndex(reference, index);
+}
+
+/** Borrowed value from a dictionary: the containing collection still owns it. */
+export function cfDictionaryValue(dictionary: CFTypeRef, key: CFStringRef): CFTypeRef | null {
+	return getCFDictionaryGetValue()(dictionary, key);
 }
 
 export function isCFString(reference: CFTypeRef): reference is CFStringRef {

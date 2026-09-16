@@ -13,6 +13,7 @@ import { NOOP_POINTER_OVERLAY, type PointerOverlay } from "./macos-ffi/cursor-ov
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";
 import { type DisplaySleepAssertion, NOOP_DISPLAY_SLEEP } from "./macos-ffi/power.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
+import { listOnscreenWindows } from "./macos-ffi/window-list.js";
 import {
 	type MousePost,
 	postClick,
@@ -25,7 +26,23 @@ import {
 import { modifierFlags, virtualKeyCodeFor } from "./macos-keycodes.js";
 import { openWindowsForTargeting } from "./macos-open-windows.js";
 import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
-import { selectVisibleTargetWindow } from "./macos-window-target.js";
+import { resolveTargetWindow } from "./macos-window-target.js";
+
+/**
+ * On-screen window ids in the WindowServer's front-to-back order. A window that is minimized or
+ * on another space is absent, so using this list is what stops targeted input from being routed
+ * to a window the caller cannot see.
+ */
+let onscreenWindowIdsSource: () => readonly number[] | undefined = () =>
+	listOnscreenWindows()?.map((window) => window.id);
+
+export function currentOnscreenWindowIds(): readonly number[] | undefined {
+	return onscreenWindowIdsSource();
+}
+
+export function setOnscreenWindowIdsSourceForTesting(source: () => readonly number[] | undefined): void {
+	onscreenWindowIdsSource = source;
+}
 
 // Inter-character delay for typeText. Posting keystrokes back-to-back outruns the
 // target app's event loop and drops characters; ~12ms lets each be consumed.
@@ -257,15 +274,17 @@ export class MacOSInputController {
 
 	private async visibleWindowForPid(pid: number, position?: Point): Promise<SkyLightTargetWindow | undefined> {
 		const windows = await openWindowsForTargeting();
-		return (
-			selectVisibleTargetWindow(windows, pid, position) ??
-			(await selectSystemEventsTargetWindow(windows, pid, position))
-		);
+		const resolution = resolveTargetWindow(windows, pid, currentOnscreenWindowIds(), position);
+		if (resolution.kind === "resolved") {
+			return resolution.window;
+		}
+		return await selectSystemEventsTargetWindow(windows, pid, position);
 	}
 
 	private async windowByIdForPid(pid: number, windowId: number): Promise<SkyLightTargetWindow | undefined> {
 		const windows = await openWindowsForTargeting();
-		return selectVisibleTargetWindow(windows, pid, undefined, windowId);
+		const resolution = resolveTargetWindow(windows, pid, currentOnscreenWindowIds(), undefined, windowId);
+		return resolution.kind === "resolved" ? resolution.window : undefined;
 	}
 
 	private requirePointerWindow(targetWindow: SkyLightTargetWindow | undefined): void {

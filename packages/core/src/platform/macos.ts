@@ -51,9 +51,10 @@ import {
 import { selectTextByIndex } from "./macos-ffi/select-text.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
 import { MacOSInputController } from "./macos-input.js";
+import { currentOnscreenWindowIds } from "./macos-input.js";
 import { openWindowsForTargeting } from "./macos-open-windows.js";
 import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
-import { selectVisibleTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
+import { resolveTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -609,10 +610,13 @@ export class MacOSHostComputer extends HostComputer {
 
 async function queryVisibleTargetWindow(pid: number, windowId?: number) {
 	const windows = await openWindowsForTargeting();
+	const onscreen = currentOnscreenWindowIds();
 	if (windowId !== undefined) {
-		return selectVisibleTargetWindow(windows, pid, undefined, windowId);
+		const requested = resolveTargetWindow(windows, pid, onscreen, undefined, windowId);
+		return requested.kind === "resolved" ? requested.window : undefined;
 	}
-	return selectVisibleTargetWindow(windows, pid) ?? (await selectSystemEventsTargetWindow(windows, pid));
+	const resolution = resolveTargetWindow(windows, pid, onscreen);
+	return resolution.kind === "resolved" ? resolution.window : await selectSystemEventsTargetWindow(windows, pid);
 }
 
 async function queryVisibleWindowsForPid(pid: number) {

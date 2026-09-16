@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setRunningApplicationLookupForTesting } from "./app-list.js";
+import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
 
 interface TestWindow {
 	readonly id: number;
@@ -144,6 +145,7 @@ beforeEach(() => {
 	});
 
 	windowMock.openWindows.mockReset();
+	setOnscreenWindowIdsSourceForTesting(() => [42, 99]);
 	windowMock.openWindows.mockResolvedValue([{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
 	accessibilityMock.extractAccessibilityTree.mockReset();
 	accessibilityMock.extractAccessibilityTree.mockReturnValue({

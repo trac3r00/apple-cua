@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
+
 interface TestWindow {
 	readonly id: number;
 	readonly owner: {
@@ -74,6 +76,7 @@ describe("#given MacOSInputController target routing", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		windowMock.openWindows.mockResolvedValue([]);
+		setOnscreenWindowIdsSourceForTesting(() => [77, 88, 99]);
 		skyLightMock.beginFocusWithoutRaise.mockReturnValue(skyLightMock.focusToken);
 	});
 

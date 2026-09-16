@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
+
 interface TestWindow {
 	readonly id: number;
 	readonly owner: {
@@ -49,6 +51,7 @@ vi.mock("./macos-window-target-fallback.js", () => ({
 describe("#given target windows without owner metadata", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		setOnscreenWindowIdsSourceForTesting(() => [55, 77, 88]);
 		windowMock.openWindows.mockResolvedValue([]);
 		fallbackMock.selectSystemEventsTargetWindow.mockResolvedValue(undefined);
 	});

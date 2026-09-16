@@ -35,28 +35,66 @@ export function toTargetWindow(window: MacOSWindowInfo): SkyLightTargetWindow {
 	};
 }
 
+export type TargetWindowResolution =
+	| { readonly kind: "resolved"; readonly window: SkyLightTargetWindow }
+	| { readonly kind: "unavailable"; readonly reason: string };
+
 /**
- * Resolve the window input should go to. An explicit `windowId` is authoritative and never
- * falls back: when that window is gone the answer is undefined, because silently retargeting
- * another window of the same app is how input lands somewhere the caller never observed.
- * Without an id, a position picks the window under it and otherwise the first visible window
- * is a guess, so callers that need certainty pass the observed id.
+ * Resolve the window input should go to, proven against the WindowServer rather than assumed.
+ * An explicit `windowId` is authoritative: when it is gone, or the WindowServer does not
+ * report it on screen, the answer is a refusal with a reason instead of another window of the
+ * same app. Without an id, only on-screen windows are candidates, `onscreenWindowIds` is in
+ * the WindowServer's front-to-back order, so a position picks the window under it and the
+ * fallback is the app's front window rather than whatever order the listing returned.
  */
-export function selectVisibleTargetWindow(
+export function resolveTargetWindow(
 	windows: readonly MacOSWindowInfo[],
 	pid: number,
+	onscreenWindowIds: readonly number[] | undefined,
 	position?: Point,
 	windowId?: number,
-): SkyLightTargetWindow | undefined {
+): TargetWindowResolution {
+	if (onscreenWindowIds === undefined) {
+		return {
+			kind: "unavailable",
+			reason: "the on-screen window list could not be read from the WindowServer; targeted input is paused",
+		};
+	}
+	const frontToBack = new Map(onscreenWindowIds.map((id, index) => [id, index] as const));
 	const visibleWindows = visibleWindowsForPid(windows, pid);
+	const onscreen = visibleWindows.filter((window) => frontToBack.has(window.id));
+
 	if (windowId !== undefined) {
 		const requested = visibleWindows.find((window) => window.id === windowId);
-		return requested === undefined ? undefined : toTargetWindow(requested);
+		if (requested === undefined) {
+			return { kind: "unavailable", reason: `window ${windowId} is no longer open for this app` };
+		}
+		if (!frontToBack.has(windowId)) {
+			return {
+				kind: "unavailable",
+				reason: `window ${windowId} is not on the current space; it may be minimized or on another space`,
+			};
+		}
+		return { kind: "resolved", window: toTargetWindow(requested) };
 	}
-	const containingTarget =
-		position === undefined ? undefined : visibleWindows.find((window) => containsPoint(window, position));
-	const target = containingTarget ?? visibleWindows[0];
-	return target === undefined ? undefined : toTargetWindow(target);
+
+	if (onscreen.length === 0) {
+		return {
+			kind: "unavailable",
+			reason: "this app has no window on the current space; its windows may be minimized or on another space",
+		};
+	}
+
+	const containing = position === undefined ? undefined : onscreen.find((window) => containsPoint(window, position));
+	const ordered = [...onscreen].sort(
+		(left, right) =>
+			(frontToBack.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (frontToBack.get(right.id) ?? Number.MAX_SAFE_INTEGER),
+	);
+	const target = containing ?? ordered[0];
+	if (target === undefined) {
+		return { kind: "unavailable", reason: "this app has no window on the current space" };
+	}
+	return { kind: "resolved", window: toTargetWindow(target) };
 }
 
 function containsPoint(window: MacOSWindowInfo, position: Point): boolean {

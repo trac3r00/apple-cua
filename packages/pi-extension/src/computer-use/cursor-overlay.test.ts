@@ -79,7 +79,14 @@ function imageDataFrom(result: Awaited<ReturnType<typeof executeNativeComputerAc
 
 function pixelAt(png: PNG, x: number, y: number): readonly number[] {
 	const offset = (png.width * y + x) * 4;
-	return [png.data[offset], png.data[offset + 1], png.data[offset + 2], png.data[offset + 3]];
+	const red = png.data[offset];
+	const green = png.data[offset + 1];
+	const blue = png.data[offset + 2];
+	const alpha = png.data[offset + 3];
+	if (red === undefined || green === undefined || blue === undefined || alpha === undefined) {
+		throw new Error(`pixelAt(${x}, ${y}) is outside the ${png.width}x${png.height} image`);
+	}
+	return [red, green, blue, alpha];
 }
 
 describe("#given native computer screenshots #when Anthropic screenshot executes #then cursor is drawn into returned PNG", () => {

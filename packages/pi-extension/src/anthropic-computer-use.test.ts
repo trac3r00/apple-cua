@@ -101,7 +101,7 @@ describe("#given a non-record payload #when adding computer use #then payload is
 });
 
 describe("#given unknown or unsupported model #when adding computer use #then payload is untouched (safe default)", () => {
-	it.each([undefined, "claude-opus-4-6", "claude-opus-4-8", "claude-future-9-0", "some-unknown-model"])(
+	it.each([undefined, "claude-future-9-0", "some-unknown-model", "claude-opus-5-0"])(
 		"skips native injection for %s",
 		(modelId) => {
 			const payload = { messages: [] };
@@ -114,12 +114,15 @@ describe("#given unknown or unsupported model #when adding computer use #then pa
 	);
 });
 
-describe("#given supported sonnet model #when checking support #then returns true", () => {
+describe("#given a documented computer-use model #when checking support #then returns true", () => {
 	it.each([
 		"claude-sonnet-4-5",
 		"claude-sonnet-4-20250514",
 		"claude-3-7-sonnet-20250219",
 		"claude-3-5-sonnet-20241022",
+		"claude-opus-4-20250514",
+		"claude-opus-4-6",
+		"claude-haiku-4-5",
 	])("supports %s", (modelId) => {
 		expect(supportsAnthropicNativeComputerUse(modelId)).toBe(true);
 	});

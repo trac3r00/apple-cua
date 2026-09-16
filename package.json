@@ -7,11 +7,12 @@
 	"scripts": {
 		"build": "pnpm -r build",
 		"typecheck": "pnpm -r typecheck",
+		"typecheck:tests": "tsgo --noEmit -p tsconfig.test.json",
 		"lint": "biome check .",
 		"lint:fix": "biome check . --write",
 		"test": "vitest --run",
 		"test:watch": "vitest",
-		"check": "biome check . && pnpm -r typecheck && vitest --run"
+		"check": "biome check . && pnpm -r typecheck && pnpm typecheck:tests && vitest --run"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",

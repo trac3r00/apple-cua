@@ -9,7 +9,7 @@ Native macOS computer-use control, designed for the OpenAI computer-use action v
 
 OpenAI Codex Computer Use is fast because it runs on the host with macOS-native APIs (ScreenCaptureKit, CoreGraphics, local MCP stdio). By contrast, [trycua/cua](https://github.com/trycua/cua) is portable but slow because of the multi-hop VM/HTTP/PIL pipeline: Python agent loop, 500 ms post-action screenshot delay, HTTP/WebSocket JSON to a guest FastAPI server, PIL encode, base64 SSE, client decode/re-encode. Codex removes the VM boundary and repeated image serialization; cua keeps it for sandbox isolation.
 
-`macos-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same app-oriented `list_apps / get_app_state / click / type_text / press_keys / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs: ScreenCaptureKit for window and main-display capture, `koffi`-bound CoreGraphics for global input, Accessibility for app state/actions, and SkyLight/AppKit FFI for app-targeted window sessions. No Docker, no QEMU, no VNC, no external helper process, no cloud API key.
+`macos-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same app-oriented `list_apps / get_app_state / click / type_text / press_keys / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs: ScreenCaptureKit for window and main-display capture, `koffi`-bound CoreGraphics for global input, Accessibility for app state/actions, and SkyLight/AppKit FFI for app-targeted window sessions. No Docker, no QEMU, no VNC, no bundled helper service, no cloud API key.
 
 The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-comparison.md). If you need strong VM isolation, use cua. If you need low-latency host-native control, use this.
 
@@ -18,7 +18,7 @@ The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-co
 | Runs on | Host Mac | VM / container / cloud | Host Mac |
 | Needs VM | No | Yes (default) | No |
 | Needs API key | OpenAI only | Optional `CUA_API_KEY` for cloud | No |
-| Screenshot path | Native ScreenCaptureKit / IOSurface | PIL `ImageGrab` in guest | Native ScreenCaptureKit (CoreGraphics fallback for the main display) |
+| Screenshot path | Native ScreenCaptureKit / IOSurface | PIL `ImageGrab` in guest | Native ScreenCaptureKit, CoreGraphics for the main display, `screencapture -l` for uncapturable windows |
 | Input path | Native CGEvent / Apple Events | `pynput` in guest | CoreGraphics CGEvent via koffi + SkyLight/AppKit FFI for app-targeted windows |
 | Transport | Local MCP stdio | HTTP/WebSocket JSON + SSE | Local process / MCP stdio / pi extension |
 | Post-action delay | None reported | 500 ms default | None |
@@ -54,6 +54,12 @@ The `macos-cua` binary is a thin `commander.js` wrapper over `MacOSHostComputer`
 ```bash
 # Screenshot (main display)
 macos-cua screenshot -o shot.png
+
+# Region of a display, in global screen points
+macos-cua screenshot -o shot.png -r 100,100,800,600
+
+# A specific display id instead of the main display
+macos-cua screenshot -o shot.png --display 58
 
 # Click and type
 macos-cua click -x 500 -y 300
@@ -268,7 +274,8 @@ The walk now runs in one round trip per element (attributes are read together), 
 parent window instead of the whole app when the target window is known, skips action reads
 for non-actionable roles, and enumerates running apps in-process rather than by spawning
 AppleScript. Main-display capture falls back to CoreGraphics when the ScreenCaptureKit path is
-unavailable; window capture requires the native ScreenCaptureKit library.
+unavailable; window capture falls back to `screencapture -l` plus `sips` when the native
+library or the window itself is not capturable.
 Observation is aimed at the app's focused window, resolved natively, so a multi-window app is
 not scoped by whatever order window enumeration returns; the chosen window id, its title and
 any alternatives travel back on the state, and input is validated against that same id.
@@ -287,7 +294,7 @@ Every tool/action exposed by CLI, MCP, and pi-extension:
 
 | Action | Parameters | Returns | What it does |
 |---|---|---|---|
-| `screenshot` | `targetSize?: { width, height }` | PNG `Buffer` + dimensions | Native ScreenCaptureKit main-display capture, resized to `targetSize` |
+| `screenshot` | `targetSize?: { width, height }`, `region?: { x, y, width, height }`, `display?: number` | `Buffer` + dimensions + mime type | Native ScreenCaptureKit display capture, cropped in CoreGraphics when `region` is given and resized to `targetSize`. Regions and display selection return PNG |
 | `click` | `x: number`, `y: number` | void | Single click via CoreGraphics `CGEventCreateMouseEvent` / `CGEventPost` |
 | `double_click` | `x: number`, `y: number` | void | Double click via CoreGraphics `CGEventCreateMouseEvent` / `CGEventPost` |
 | `type` | `text: string` | void | Type literal text via CoreGraphics `CGEventCreateKeyboardEvent` |
@@ -355,7 +362,7 @@ Full walkthrough: [`skills/macos-cua/references/installation.md`](./skills/macos
 | Lume runtime | Interface stub | Apple Virtualization.Framework VM |
 | VirtualBox / Parallels runtime | Interface stub | Planned |
 | Cloud provider runtime | Interface stub | [`packages/core/src/platform/cloud.ts`](./packages/core/src/platform/cloud.ts) |
-| ScreenCaptureKit capture | Implemented | Window and main-display capture through `libsckit.dylib`; window capture fails closed when that library is missing |
+| ScreenCaptureKit capture | Implemented | Window and main-display capture through `libsckit.dylib`, with CoreGraphics and `screencapture -l` fallbacks |
 | SkyLight authenticated targeted input | Implemented | TypeScript FFI uses `SLEventPostToPid`, focus-without-raise, AppKit-backed mouse events, and keyboard auth messages |
 | Accessibility API queries | Implemented | `AXUIElement` tree extraction, `set_value`, and secondary actions |
 

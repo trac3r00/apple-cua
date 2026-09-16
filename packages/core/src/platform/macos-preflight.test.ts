@@ -44,7 +44,8 @@ const accessibilityMock = vi.hoisted(() => ({
 	typeIntoFocusedAXElement: vi.fn(),
 }));
 const screenshotMock = vi.hoisted(() => ({
-	captureMainDisplayPng: vi.fn(),
+	captureDisplayPng: vi.fn(),
+	getMainDisplayId: vi.fn(() => 1),
 	getMainDisplayLogicalSize: vi.fn(),
 	getMainDisplayNativePixelSize: vi.fn(),
 }));
@@ -177,8 +178,8 @@ beforeEach(() => {
 		],
 	});
 	accessibilityMock.releaseAccessibilitySnapshot.mockReset();
-	screenshotMock.captureMainDisplayPng.mockReset();
-	screenshotMock.captureMainDisplayPng.mockReturnValue({ data: fakePng(), width: 800, height: 600 });
+	screenshotMock.captureDisplayPng.mockReset();
+	screenshotMock.captureDisplayPng.mockReturnValue({ data: fakePng(), width: 800, height: 600 });
 	screenshotMock.getMainDisplayLogicalSize.mockReset();
 	screenshotMock.getMainDisplayLogicalSize.mockReturnValue({ width: 1440, height: 900 });
 	screenshotMock.getMainDisplayNativePixelSize.mockReset();
@@ -234,7 +235,7 @@ describe("MacOSHostComputer input observations", () => {
 		await computer.getAppState(TARGET_PID, { settleMs: 0 });
 
 		expect(computer.getInputObservation(TARGET_PID)).toBeUndefined();
-		expect(screenshotMock.captureMainDisplayPng).toHaveBeenCalledOnce();
+		expect(screenshotMock.captureDisplayPng).toHaveBeenCalledOnce();
 	});
 
 	it("requires a visible window before guarded capture and invalidates the prior observation", async () => {
@@ -249,7 +250,7 @@ describe("MacOSHostComputer input observations", () => {
 		);
 
 		expect(childProcessMock.execFile.mock.calls.filter(([file]) => file === "sh")).toHaveLength(screenshotReads);
-		expect(screenshotMock.captureMainDisplayPng).not.toHaveBeenCalled();
+		expect(screenshotMock.captureDisplayPng).not.toHaveBeenCalled();
 		expect(accessibilityMock.extractAccessibilityTree).toHaveBeenCalledTimes(axReads);
 		expect(computer.getInputObservation(TARGET_PID)).toBeUndefined();
 	});
@@ -271,7 +272,7 @@ describe("MacOSHostComputer input observations", () => {
 			);
 
 			expect(childProcessMock.execFile.mock.calls.filter(([file]) => file === "sh")).toHaveLength(0);
-			expect(screenshotMock.captureMainDisplayPng).not.toHaveBeenCalled();
+			expect(screenshotMock.captureDisplayPng).not.toHaveBeenCalled();
 			expect(accessibilityMock.extractAccessibilityTree).not.toHaveBeenCalled();
 		},
 	);
@@ -433,7 +434,7 @@ describe("MacOSHostComputer preflightInput", () => {
 		await computer.preflightInput(expected);
 
 		expect(childProcessMock.execFile.mock.calls.filter(([file]) => file === "sh")).toHaveLength(screenshotReads);
-		expect(screenshotMock.captureMainDisplayPng).not.toHaveBeenCalled();
+		expect(screenshotMock.captureDisplayPng).not.toHaveBeenCalled();
 		expect(accessibilityMock.extractAccessibilityTree).toHaveBeenCalledTimes(axReads);
 		expect(rememberTargetWindow).not.toHaveBeenCalled();
 	});

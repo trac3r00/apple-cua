@@ -6,11 +6,9 @@ export const ANTHROPIC_COMPUTER_USE_BETA = "computer-use-2025-01-24";
 export const ANTHROPIC_NATIVE_COMPUTER_TOOL_TYPE = "computer_20250124";
 export const ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME = "computer";
 
-// Anthropic documents the native computer tool on Sonnet 4.5, Sonnet 4, 3.7 Sonnet and
-// 3.5 Sonnet. It also lists Opus 4.x and Haiku 4.5, which stay out of scope here so an
-// unattested model keeps the non-native semantic path. Each family prefix covers the
-// dated and dotted id variants, so no documented Sonnet generation silently loses the
-// native path.
+// Anthropic documents the native computer tool on Sonnet 4.5, Sonnet 4, 3.7 Sonnet,
+// 3.5 Sonnet, Opus 4.x and Haiku 4.5. Each family prefix covers the dated and dotted id
+// variants, so no documented generation silently loses the native path.
 const SUPPORTS_NATIVE_COMPUTER_MODEL_MARKERS = [
 	"sonnet-4",
 	"4-sonnet",
@@ -20,6 +18,8 @@ const SUPPORTS_NATIVE_COMPUTER_MODEL_MARKERS = [
 	"3.5-sonnet",
 	"3-7-sonnet",
 	"3.7-sonnet",
+	"opus-4",
+	"haiku-4",
 ] as const;
 
 type ToolDefinition = Record<string, unknown>;

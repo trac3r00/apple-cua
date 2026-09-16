@@ -107,7 +107,7 @@ const koffiMock = vi.hoisted(() => {
 			if (element !== textField) return -25205;
 			if (attribute.value === "AXValue" && value.value !== undefined) {
 				observableState.fieldValue = value.value;
-				if (textField.attributes !== undefined) textField.attributes.AXValue = value.value;
+				if (textField.attributes !== undefined) textField.attributes["AXValue"] = value.value;
 				return 0;
 			}
 			if (attribute.value === "AXSelectedTextRange" && value.location !== undefined && value.length !== undefined) {
@@ -204,7 +204,7 @@ beforeEach(() => {
 	koffiMock.observableState.fieldValue = "initial";
 	koffiMock.observableState.pressCount = 0;
 	koffiMock.observableState.selection = null;
-	if (koffiMock.textField.attributes !== undefined) koffiMock.textField.attributes.AXValue = "initial";
+	if (koffiMock.textField.attributes !== undefined) koffiMock.textField.attributes["AXValue"] = "initial";
 	koffiMock.accessibilityFunctions.AXIsProcessTrusted.mockReturnValue(true);
 	koffiMock.accessibilityFunctions.AXUIElementPerformAction.mockClear();
 	koffiMock.coreFoundationFunctions.CFRelease.mockClear();

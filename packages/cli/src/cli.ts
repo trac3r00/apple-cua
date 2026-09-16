@@ -6,7 +6,14 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { MacOSHostComputer, NOOP_POINTER_OVERLAY, createCursorOverlay, getAppStateForApp } from "@macos-cua/core";
-import type { ComputerInterface, KeyOptions, PointerMode, ScreenshotOptions, ScrollOptions } from "@macos-cua/core";
+import type {
+	ComputerInterface,
+	KeyOptions,
+	MacOSHostComputerOptions,
+	PointerMode,
+	ScreenshotOptions,
+	ScrollOptions,
+} from "@macos-cua/core";
 import { Command } from "commander";
 
 type PackageJson = {
@@ -33,6 +40,8 @@ type PermissionController = {
 
 type ScreenshotCommandOptions = {
 	output: string;
+	region?: string;
+	display?: number;
 	format: "png" | "jpeg";
 	quality: number;
 };
@@ -87,13 +96,18 @@ program
 	.command("screenshot")
 	.description("Take a screenshot")
 	.option("-o, --output <path>", "output file path", "./screenshot.png")
+	.option("-r, --region <x,y,w,h>", "screenshot region in global screen points")
+	.option("--display <id>", "capture this display id instead of the main display", parsePositiveInteger)
 	.option("-f, --format <format>", "image format: png or jpeg", parseScreenshotFormat, "png")
 	.option("-q, --quality <n>", "JPEG quality from 1 to 100", parseQuality, 95)
 	.action(async (options: ScreenshotCommandOptions) => {
+		const region = options.region === undefined ? undefined : parseRegion(options.region);
+		const hostOptions = options.display === undefined ? {} : { display: options.display };
 		await withComputer(async (computer) => {
 			const screenshotOptions: ScreenshotOptions = {
 				format: options.format,
 				quality: options.quality,
+				...(region === undefined ? {} : { region }),
 			};
 			const result = await computer.screenshot(screenshotOptions);
 			writeFileSync(options.output, result.data);
@@ -105,6 +119,8 @@ program
 						output: options.output,
 						format: options.format,
 						quality: options.quality,
+						...(region === undefined ? {} : { region }),
+						...(options.display === undefined ? {} : { display: options.display }),
 					},
 					output: options.output,
 					mimeType: result.mimeType,
@@ -113,7 +129,7 @@ program
 				},
 				`Screenshot saved to ${options.output} (${result.mimeType}, ${result.width}x${result.height})`,
 			);
-		});
+		}, hostOptions);
 	});
 
 program
@@ -500,11 +516,14 @@ function readPackageJson(): PackageJson {
 	return parsed;
 }
 
-async function withComputer(action: (computer: MacOSHostComputer) => Promise<void>): Promise<void> {
+async function withComputer(
+	action: (computer: MacOSHostComputer) => Promise<void>,
+	hostOptions: MacOSHostComputerOptions = {},
+): Promise<void> {
 	// Commander sets `cursor` to false only when `--no-cursor` is passed; the overlay
 	// is shown by default. When hidden, inject the no-op overlay so no helper spawns.
 	const showCursor = program.opts<GlobalOptions>().cursor !== false;
-	const computer = new MacOSHostComputer(showCursor ? {} : { overlay: NOOP_POINTER_OVERLAY });
+	const computer = new MacOSHostComputer(showCursor ? hostOptions : { ...hostOptions, overlay: NOOP_POINTER_OVERLAY });
 	try {
 		const targetPid = await resolveTargetPid();
 		computer.setTarget(targetPid);
@@ -626,6 +645,15 @@ function parseQuality(value: string): number {
 		throw new Error("quality must be between 1 and 100");
 	}
 	return quality;
+}
+
+function parseRegion(value: string): NonNullable<ScreenshotOptions["region"]> {
+	const parts = value.split(",").map((part) => parseInteger(part.trim(), "region value"));
+	const [x, y, width, height] = parts;
+	if (parts.length !== 4 || x === undefined || y === undefined || width === undefined || height === undefined) {
+		throw new Error("region must be x,y,width,height");
+	}
+	return { x, y, width, height };
 }
 
 function parseScreenshotFormat(value: string): ScreenshotOptions["format"] {

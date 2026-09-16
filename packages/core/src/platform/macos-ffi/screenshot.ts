@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { KoffiFunc } from "koffi";
+import type { Rect } from "../../types/index.js";
 import { type CFTypeRef, cfRelease, withCFString } from "./corefoundation.js";
 import { koffi } from "./koffi.js";
 import { captureMainDisplayPngViaSck, isSckitAvailable } from "./sckit.js";
@@ -94,6 +95,11 @@ const CGDisplayBounds = coreGraphics.func("CGDisplayBounds", CG_RECT, ["uint32_t
 const CGDisplayCreateImage = coreGraphics.func("CGDisplayCreateImage", CG_IMAGE_REF, ["uint32_t"]) as KoffiFunc<
 	(displayId: number) => CGImageRef | null
 >;
+
+const CGImageCreateWithImageInRect = coreGraphics.func("CGImageCreateWithImageInRect", CG_IMAGE_REF, [
+	CG_IMAGE_REF,
+	CG_RECT,
+]) as KoffiFunc<(image: CGImageRef, rect: CGRect) => CGImageRef | null>;
 
 const CGImageGetWidth = coreGraphics.func("CGImageGetWidth", "size_t", [CG_IMAGE_REF]) as KoffiFunc<
 	(image: CGImageRef) => number
@@ -211,14 +217,77 @@ export function captureWindowImage(
 	}
 }
 
-export function captureMainDisplayPng(targetWidth: number, targetHeight: number): CapturedScreenshot {
+export function getMainDisplayId(): number {
+	return CGMainDisplayID();
+}
+
+function openDisplayImage(displayId: number): CGImageRef {
+	if (!Number.isSafeInteger(displayId) || displayId <= 0) {
+		throw new Error(`display id must be a positive integer, got ${displayId}`);
+	}
+	const sourceImage = CGDisplayCreateImage(displayId);
+	if (sourceImage === null) {
+		throw new Error(
+			`CGDisplayCreateImage returned null for display ${displayId} (check the display id and Screen Recording permission)`,
+		);
+	}
+	return sourceImage;
+}
+
+/**
+ * Converts a region in global logical points into the pixel rectangle to cut from a display
+ * image, which may be captured at a different scale and may not start at the origin.
+ */
+export function computeDisplayCrop(
+	region: Rect,
+	displayBounds: {
+		readonly origin: { readonly x: number; readonly y: number };
+		readonly size: { readonly width: number; readonly height: number };
+	},
+	imageSize: { readonly width: number; readonly height: number },
+): { readonly x: number; readonly y: number; readonly width: number; readonly height: number } {
+	if (
+		!Number.isFinite(region.x) ||
+		!Number.isFinite(region.y) ||
+		!Number.isFinite(region.width) ||
+		!Number.isFinite(region.height)
+	) {
+		throw new Error("region coordinates must be finite numbers");
+	}
+	if (region.width <= 0 || region.height <= 0) {
+		throw new Error(`region must have a positive size, got ${region.width}x${region.height}`);
+	}
+	if (displayBounds.size.width <= 0 || displayBounds.size.height <= 0) {
+		throw new Error("display bounds are empty, so the display is not active");
+	}
+	if (imageSize.width <= 0 || imageSize.height <= 0) {
+		throw new Error("display image has no pixels");
+	}
+
+	const scaleX = imageSize.width / displayBounds.size.width;
+	const scaleY = imageSize.height / displayBounds.size.height;
+	const left = (region.x - displayBounds.origin.x) * scaleX;
+	const top = (region.y - displayBounds.origin.y) * scaleY;
+	const x = Math.max(0, Math.round(left));
+	const y = Math.max(0, Math.round(top));
+	const right = Math.min(imageSize.width, Math.round(left + region.width * scaleX));
+	const bottom = Math.min(imageSize.height, Math.round(top + region.height * scaleY));
+	if (right <= x || bottom <= y) {
+		throw new Error(
+			`region ${region.x},${region.y} ${region.width}x${region.height} does not overlap the display area`,
+		);
+	}
+	return { x, y, width: right - x, height: bottom - y };
+}
+
+export function captureDisplayPng(displayId: number, targetWidth: number, targetHeight: number): CapturedScreenshot {
 	if (targetWidth <= 0 || targetHeight <= 0) {
-		throw new Error(`captureMainDisplayPng requires positive dimensions, got ${targetWidth}x${targetHeight}`);
+		throw new Error(`captureDisplayPng requires positive dimensions, got ${targetWidth}x${targetHeight}`);
 	}
 
 	const maxPixelSize = Math.max(Math.round(targetWidth), Math.round(targetHeight));
 
-	if (isSckitAvailable()) {
+	if (displayId === CGMainDisplayID() && isSckitAvailable()) {
 		try {
 			const captured = captureMainDisplayPngViaSck(targetWidth, targetHeight);
 			if (captured !== null) {
@@ -227,11 +296,7 @@ export function captureMainDisplayPng(targetWidth: number, targetHeight: number)
 		} catch {}
 	}
 
-	const sourceImage = CGDisplayCreateImage(CGMainDisplayID());
-	if (sourceImage === null) {
-		throw new Error("CGDisplayCreateImage returned null (Screen Recording permission may be missing)");
-	}
-
+	const sourceImage = openDisplayImage(displayId);
 	try {
 		const sourceWidth = CGImageGetWidth(sourceImage);
 		const sourceHeight = CGImageGetHeight(sourceImage);
@@ -242,6 +307,51 @@ export function captureMainDisplayPng(targetWidth: number, targetHeight: number)
 			width: outputDimensions.width,
 			height: outputDimensions.height,
 		};
+	} finally {
+		cfRelease(sourceImage);
+	}
+}
+
+export function captureMainDisplayPng(targetWidth: number, targetHeight: number): CapturedScreenshot {
+	return captureDisplayPng(CGMainDisplayID(), targetWidth, targetHeight);
+}
+
+/** Zooms a region of one display. CoreGraphics has no region-capture call, so the full display
+ * image is taken and cropped in memory before encoding. */
+export function captureDisplayRegionPng(
+	displayId: number,
+	region: Rect,
+	targetWidth: number,
+	targetHeight: number,
+): CapturedScreenshot {
+	const maxPixelSize = Math.max(Math.round(targetWidth), Math.round(targetHeight));
+	if (maxPixelSize <= 0) {
+		throw new Error(`captureDisplayRegionPng requires positive dimensions, got ${targetWidth}x${targetHeight}`);
+	}
+
+	const sourceImage = openDisplayImage(displayId);
+	try {
+		const crop = computeDisplayCrop(region, CGDisplayBounds(displayId), {
+			width: CGImageGetWidth(sourceImage),
+			height: CGImageGetHeight(sourceImage),
+		});
+		const cropped = CGImageCreateWithImageInRect(sourceImage, {
+			origin: { x: crop.x, y: crop.y },
+			size: { width: crop.width, height: crop.height },
+		});
+		if (cropped === null) {
+			throw new Error(`CoreGraphics could not crop ${crop.width}x${crop.height} from display ${displayId}`);
+		}
+		try {
+			const outputDimensions = computeAspectPreservedDimensions(crop.width, crop.height, maxPixelSize);
+			return {
+				data: encodeImageAsPng(cropped, maxPixelSize),
+				width: outputDimensions.width,
+				height: outputDimensions.height,
+			};
+		} finally {
+			cfRelease(cropped);
+		}
 	} finally {
 		cfRelease(sourceImage);
 	}
@@ -284,10 +394,15 @@ function computeAspectPreservedDimensions(
 }
 
 function encodeImageAsPng(image: CGImageRef, maxPixelSize: number): Buffer {
+	// ImageIO's max-pixel-size property resizes to the requested edge in both directions, so a
+	// small crop would be upscaled into invented pixels and a dimension mismatch. Clamp it to
+	// the source edge, which keeps the metadata this module reports equal to the real image.
+	const longestSourceEdge = Math.max(CGImageGetWidth(image), CGImageGetHeight(image));
+	const effectiveMaxPixelSize = Math.max(1, Math.min(Math.round(maxPixelSize), longestSourceEdge));
 	return withCFString(PNG_UNIFORM_TYPE, (pngType) =>
 		withCFString(MAX_PIXEL_SIZE_KEY, (maxPixelSizeKey) => {
 			const valueBytes = Buffer.alloc(4);
-			valueBytes.writeInt32LE(maxPixelSize, 0);
+			valueBytes.writeInt32LE(effectiveMaxPixelSize, 0);
 
 			const maxPixelSizeValue = CFNumberCreate(null, CF_NUMBER_INT_TYPE, valueBytes);
 			if (maxPixelSizeValue === null) {

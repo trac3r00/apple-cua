@@ -33,7 +33,8 @@ const accessibilityMock = vi.hoisted(() => ({
 }));
 
 const screenshotMock = vi.hoisted(() => ({
-	captureMainDisplayPng: vi.fn(),
+	captureDisplayPng: vi.fn(),
+	getMainDisplayId: vi.fn(() => 1),
 	captureWindowImage: vi.fn(),
 	getMainDisplayLogicalSize: vi.fn(),
 	getMainDisplayNativePixelSize: vi.fn(),
@@ -74,12 +75,12 @@ beforeEach(() => {
 	accessibilityMock.extractAccessibilityTree.mockReset();
 	accessibilityMock.performActionByIndex.mockReset();
 	accessibilityMock.releaseAccessibilitySnapshot.mockReset();
-	screenshotMock.captureMainDisplayPng.mockReset();
+	screenshotMock.captureDisplayPng.mockReset();
 	screenshotMock.getMainDisplayLogicalSize.mockReset();
 	screenshotMock.getMainDisplayNativePixelSize.mockReset();
 	screenshotMock.getMainDisplayLogicalSize.mockReturnValue({ width: 1920, height: 1080 });
 	screenshotMock.getMainDisplayNativePixelSize.mockReturnValue({ width: 3840, height: 2160 });
-	screenshotMock.captureMainDisplayPng.mockReturnValue({ data: fakePng(1920, 1080), width: 1920, height: 1080 });
+	screenshotMock.captureDisplayPng.mockReturnValue({ data: fakePng(1920, 1080), width: 1920, height: 1080 });
 
 	windowMock.openWindows.mockResolvedValue([{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
 	// Mirrors the real contract: element ids belong to one exact walk, so the key reflects

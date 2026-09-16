@@ -21,6 +21,14 @@ function runCli(args: string[]) {
 	});
 }
 
+function runCliAllowingFailure(args: string[]) {
+	return execa(process.execPath, ["--experimental-strip-types", cliPath, ...args], {
+		cwd: workspaceRoot,
+		env: { ...process.env, FORCE_COLOR: "0" },
+		reject: false,
+	});
+}
+
 describe("macos-cua CLI", () => {
 	it("#given package metadata #when --version runs #then it prints the package version", async () => {
 		// given
@@ -78,5 +86,25 @@ describe("macos-cua CLI", () => {
 
 		// then
 		expect(expectedStatuses).toContain(result.stdout.trim());
+	});
+});
+
+describe("macos-cua CLI screenshot capture options", () => {
+	it("#given the screenshot command #when help runs #then region and display selection are documented", async () => {
+		// when
+		const result = await runCli(["screenshot", "--help"]);
+
+		// then
+		expect(result.stdout).toContain("--region");
+		expect(result.stdout).toContain("--display");
+	});
+
+	it("#given a malformed region #when screenshot runs #then it fails before capturing", async () => {
+		// when
+		const result = await runCliAllowingFailure(["screenshot", "-o", "/tmp/macos-cua-unused.png", "-r", "1,2,3"]);
+
+		// then
+		expect(result.exitCode).not.toBe(0);
+		expect(result.stderr).toContain("region must be x,y,width,height");
 	});
 });

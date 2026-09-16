@@ -39,8 +39,10 @@ import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
 import { type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
 import { createDisplaySleepAssertion } from "./macos-ffi/power.js";
 import {
-	captureMainDisplayPng,
+	captureDisplayPng,
+	captureDisplayRegionPng,
 	captureWindowImage,
+	getMainDisplayId,
 	getMainDisplayLogicalSize,
 	getMainDisplayNativePixelSize,
 } from "./macos-ffi/screenshot.js";
@@ -88,6 +90,7 @@ export class MacOSHostComputer extends HostComputer {
 	private readonly appApproval: AppApprovalStore | undefined;
 	private readonly urlBlocklist: readonly string[];
 	private readonly overlay: PointerOverlay;
+	private readonly displayId: number | undefined;
 	private readonly highlightedApps = new Set<number>();
 	private readonly inputObservations = new Map<number, InputObservation>();
 	private observationGeneration = 0;
@@ -103,8 +106,7 @@ export class MacOSHostComputer extends HostComputer {
 			undefined,
 			createDisplaySleepAssertion(),
 		);
-		// TODO: use options for display selection
-		void options.display;
+		this.displayId = options.display;
 	}
 
 	setTarget(pid?: number): void {
@@ -120,11 +122,31 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	private async captureScreenshot(options?: ScreenshotOptions, windowId?: number): Promise<ScreenshotResult> {
-		if (options?.region) {
-			throw new Error("Region screenshots are not supported by the macOS screenshot fallback yet");
-		}
 		const size = options?.targetSize ?? (await this.getScreenSize());
-		const data = await captureMacOSScreenshot(size, windowId, options?.format ?? "png", options?.quality ?? 72);
+		if (options?.region !== undefined) {
+			if (windowId !== undefined) {
+				throw new Error("region capture cannot be combined with a window target; capture the window instead");
+			}
+			const region = captureDisplayRegionPng(
+				this.displayId ?? getMainDisplayId(),
+				options.region,
+				size.width,
+				size.height,
+			);
+			return {
+				data: region.data,
+				mimeType: sniffImageMimeType(region.data),
+				width: region.width,
+				height: region.height,
+			};
+		}
+		const data = await captureMacOSScreenshot(
+			size,
+			windowId,
+			options?.format ?? "png",
+			options?.quality ?? 72,
+			this.displayId,
+		);
 		const dimensions = parseImageDimensions(data);
 		return {
 			data,
@@ -637,6 +659,7 @@ export async function captureMacOSScreenshot(
 	windowId?: number,
 	format: "png" | "jpeg" = "png",
 	quality = 72,
+	displayId?: number,
 ): Promise<Buffer> {
 	if (!Number.isSafeInteger(targetSize.width) || !Number.isSafeInteger(targetSize.height)) {
 		throw new Error("requested screenshot dimensions must be integers");
@@ -649,7 +672,7 @@ export async function captureMacOSScreenshot(
 	}
 
 	if (windowId === undefined) {
-		const captured = captureMainDisplayPng(targetSize.width, targetSize.height);
+		const captured = captureDisplayPng(displayId ?? getMainDisplayId(), targetSize.width, targetSize.height);
 		parsePngDimensions(captured.data);
 		return captured.data;
 	}

@@ -7,25 +7,49 @@ export function diffAxTreesByKey(
 	previous: readonly AXTreeElement[],
 	current: readonly AXTreeElement[],
 ): AxTreeChangeSummary {
-	const previousByKey = new Map(previous.map((element) => [stableElementKey(element), element]));
-	const currentByKey = new Map(current.map((element) => [stableElementKey(element), element]));
+	const before = groupByKey(previous);
+	const after = groupByKey(current);
 	let added = 0;
 	let changed = 0;
-	for (const [key, element] of currentByKey) {
-		const prior = previousByKey.get(key);
-		if (prior === undefined) {
-			added += 1;
-		} else if ((prior.value ?? "") !== (element.value ?? "")) {
+	for (const [key, group] of after) {
+		const prior = before.get(key) ?? [];
+		added += Math.max(0, group.length - prior.length);
+		changed += countValueChanges(prior, group);
+	}
+	let removed = 0;
+	for (const [key, group] of before) {
+		removed += Math.max(0, group.length - (after.get(key)?.length ?? 0));
+	}
+	return { added, removed, changed };
+}
+
+/**
+ * Elements sharing one content key are compared as a multiset: a second row that looks like
+ * an existing one is an addition, and a row that disappears is a removal, instead of both
+ * collapsing into one entry.
+ */
+function groupByKey(elements: readonly AXTreeElement[]): Map<string, AXTreeElement[]> {
+	const groups = new Map<string, AXTreeElement[]>();
+	for (const element of elements) {
+		const key = stableElementKey(element);
+		const group = groups.get(key);
+		if (group === undefined) {
+			groups.set(key, [element]);
+		} else {
+			group.push(element);
+		}
+	}
+	return groups;
+}
+
+function countValueChanges(prior: readonly AXTreeElement[], current: readonly AXTreeElement[]): number {
+	let changed = 0;
+	for (let index = 0; index < Math.min(prior.length, current.length); index += 1) {
+		if ((prior[index]?.value ?? "") !== (current[index]?.value ?? "")) {
 			changed += 1;
 		}
 	}
-	let removed = 0;
-	for (const key of previousByKey.keys()) {
-		if (!currentByKey.has(key)) {
-			removed += 1;
-		}
-	}
-	return { added, removed, changed };
+	return changed;
 }
 
 /**
@@ -40,24 +64,30 @@ export function diffAxTreeChanges(
 	previous: readonly AXTreeElement[],
 	current: readonly AXTreeElement[],
 ): AxTreeChanges {
-	const previousByKey = new Map(previous.map((element) => [stableElementKey(element), element]));
-	const currentByKey = new Map(current.map((element) => [stableElementKey(element), element]));
+	const before = groupByKey(previous);
+	const after = groupByKey(current);
 	const added: AXTreeElement[] = [];
 	const changed: Array<{ before: AXTreeElement; after: AXTreeElement }> = [];
-	for (const [key, element] of currentByKey) {
-		const prior = previousByKey.get(key);
-		if (prior === undefined) {
-			added.push(element);
-		} else if ((prior.value ?? "") !== (element.value ?? "")) {
-			changed.push({ before: prior, after: element });
+	for (const [key, group] of after) {
+		const prior = before.get(key) ?? [];
+		added.push(...group.slice(prior.length));
+		for (let index = 0; index < Math.min(prior.length, group.length); index += 1) {
+			const beforeElement = prior[index];
+			const afterElement = group[index];
+			if (
+				beforeElement !== undefined &&
+				afterElement !== undefined &&
+				(beforeElement.value ?? "") !== (afterElement.value ?? "")
+			) {
+				changed.push({ before: beforeElement, after: afterElement });
+			}
 		}
 	}
 	const removed: AXTreeElement[] = [];
-	for (const [key, element] of previousByKey) {
-		if (!currentByKey.has(key)) {
-			removed.push(element);
-		}
+	for (const [key, group] of before) {
+		removed.push(...group.slice(after.get(key)?.length ?? 0));
 	}
+
 	return { added, removed, changed };
 }
 

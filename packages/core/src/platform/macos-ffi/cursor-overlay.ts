@@ -120,11 +120,10 @@ function defaultSocketTransport(): OverlayTransport {
 			return;
 		}
 		try {
-			const child = spawn(
-				binaryPath,
-				["--socket", overlaySocketPath, "--idle", overlayIdleSeconds],
-				{ detached: true, stdio: "ignore" },
-			);
+			const child = spawn(binaryPath, ["--socket", overlaySocketPath, "--idle", overlayIdleSeconds], {
+				detached: true,
+				stdio: "ignore",
+			});
 			child.unref();
 		} catch {}
 	}

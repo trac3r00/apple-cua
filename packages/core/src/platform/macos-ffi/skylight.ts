@@ -14,6 +14,8 @@ export interface SkyLightTargetWindow {
 
 export interface FocusRestoreToken {
 	readonly previousPsn: Buffer;
+	/** Process serial number the lease focused, so the holder can tell whether it still holds focus. */
+	readonly targetPsn: Buffer;
 }
 
 const skyLight = koffi.load("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight");
@@ -132,8 +134,8 @@ export function activateWindowWithoutRaise(window: SkyLightTargetWindow): boolea
 }
 
 export function beginFocusWithoutRaise(window: SkyLightTargetWindow): FocusRestoreToken | null {
-	const previousPsn = Buffer.alloc(8);
-	if (_SLPSGetFrontProcess(previousPsn) !== 0) {
+	const previousPsn = frontProcessSerialNumber();
+	if (previousPsn === null) {
 		return null;
 	}
 
@@ -150,7 +152,17 @@ export function beginFocusWithoutRaise(window: SkyLightTargetWindow): FocusResto
 	const defocused = SLPSPostEventRecordTo(previousPsn, record) === 0;
 	record[0x8a] = 0x01;
 	const focused = SLPSPostEventRecordTo(targetPsn, record) === 0;
-	return defocused && focused ? { previousPsn } : null;
+	return defocused && focused ? { previousPsn, targetPsn } : null;
+}
+
+/** The process that is frontmost right now, or null when the query fails. */
+export function frontProcessSerialNumber(): Buffer | null {
+	const frontProcess = Buffer.alloc(8);
+	return _SLPSGetFrontProcess(frontProcess) === 0 ? frontProcess : null;
+}
+
+export function processSerialNumbersMatch(left: Buffer, right: Buffer): boolean {
+	return left.equals(right);
 }
 
 export function restoreFrontProcessNoWindows(token: FocusRestoreToken): boolean {

@@ -74,7 +74,11 @@ describe("strict observations #given an approved app #when state is requested #t
 			data: Buffer.from("png-bytes").toString("base64"),
 			mimeType: "image/png",
 		});
-		expect(payload["elements"]).toEqual([expect.objectContaining({ id: 9 })]);
+		expect(payload["elements"]).toEqual([
+			expect.objectContaining({ id: 9 }),
+			expect.objectContaining({ id: 20 }),
+			expect.objectContaining({ id: 21 }),
+		]);
 		expect(payload["observation_token"]).toEqual(expect.any(String));
 		expect(harness.computer.stateOptions).toEqual([{ diffOnly: true, requireWindow: true }]);
 	});

@@ -179,10 +179,12 @@ model is taught:
 
 ## 8. Current macos-cua implementation and limitations
 
-- `getAppState` supports window viewport remapping and normalized AX trees. Full-display
-  capture has a native path, but **window capture still runs `screencapture` and `sips`**
-  (`platform/macos.ts`, `captureMacOSScreenshot` / `captureWindowScreenshotViaCli`). It is
-  not a persistent per-window ScreenCaptureKit stream.
+- `getAppState` supports window viewport remapping and normalized AX trees. Display and
+  window capture are both native ScreenCaptureKit now: window frames come from
+  `sckit_capture_window` in `libsckit.dylib` (`platform/macos-ffi/screenshot.ts`), and
+  main-display capture falls back to `CGDisplayCreateImage` when that path is unavailable.
+  Capture is still one-shot rather than a persistent per-window stream, region capture is
+  not implemented, and display selection is not honoured yet.
 - `waitForUiSettle` polls AX trees at 40 ms intervals with a nominal 300 ms budget.
   This is a local heuristic, not an event subscription or a recovered ChatGPT algorithm.
   AX read cost can exceed the nominal budget; no comparative speed claim is established.

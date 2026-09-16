@@ -4,6 +4,7 @@ import type { ComputerActionDriver } from "../../src/anthropic-computer-use.js";
 
 const BASELINE_LIVE = process.env["BASELINE_LIVE"] === "1";
 const ITERATION_COUNT = 50;
+const SMOKE_ITERATIONS = 3;
 
 function createComputer(): ComputerActionDriver {
 	return {
@@ -31,6 +32,7 @@ function createComputer(): ComputerActionDriver {
 		drag: vi.fn<ComputerActionDriver["drag"]>().mockResolvedValue(undefined),
 		getCursorPosition: vi.fn<ComputerActionDriver["getCursorPosition"]>().mockResolvedValue({ x: 7, y: 9 }),
 		getScreenSize: vi.fn<ComputerActionDriver["getScreenSize"]>().mockResolvedValue({ width: 100, height: 80 }),
+		getScreenshotViewport: vi.fn<ComputerActionDriver["getScreenshotViewport"]>().mockResolvedValue(undefined),
 		getAppState: vi.fn<ComputerActionDriver["getAppState"]>().mockResolvedValue({
 			app: "TestApp",
 			bundleId: "com.test.app",
@@ -41,9 +43,11 @@ function createComputer(): ComputerActionDriver {
 			screenshotBase64: "",
 			screenshotWidth: 100,
 			screenshotHeight: 80,
+			display: { width: 100, height: 80, scaleFactor: 1 },
 		}),
 		listApps: vi.fn<ComputerActionDriver["listApps"]>().mockResolvedValue([]),
 		setValue: vi.fn<ComputerActionDriver["setValue"]>().mockResolvedValue(undefined),
+		selectText: vi.fn<ComputerActionDriver["selectText"]>().mockResolvedValue(undefined),
 		performAction: vi.fn<ComputerActionDriver["performAction"]>().mockResolvedValue(undefined),
 		pressAtPosition: vi.fn<ComputerActionDriver["pressAtPosition"]>().mockResolvedValue(false),
 		typeIntoFocused: vi.fn<ComputerActionDriver["typeIntoFocused"]>().mockResolvedValue(false),
@@ -56,36 +60,16 @@ function percentile(sortedMilliseconds: readonly number[], fraction: number): nu
 	return sortedMilliseconds[Math.max(0, Math.min(index, sortedMilliseconds.length - 1))] ?? 0;
 }
 
-describe("#given click + app-state cycle benchmark #when executed 50 times #then percentiles are recorded", () => {
-	it("captures p50/p95 latency for click + explicit screenshot pipeline", async () => {
+describe("#given a stubbed driver #when a click + screenshot cycle runs #then the pipeline is exercised without reporting latency", () => {
+	it("completes the cycle and returns image bytes", async () => {
 		const computer = createComputer();
-		const timings: number[] = [];
 
-		for (let iteration = 0; iteration < ITERATION_COUNT; iteration += 1) {
-			const start = performance.now();
+		for (let iteration = 0; iteration < SMOKE_ITERATIONS; iteration += 1) {
 			await computer.click({ x: 100, y: 200 });
 			const screenshot = await computer.screenshot({ targetSize: { width: 1280, height: 720 } });
-			const end = performance.now();
 
 			expect(screenshot.data.byteLength).toBeGreaterThan(0);
-
-			timings.push(end - start);
 		}
-
-		timings.sort((a, b) => a - b);
-
-		const metrics = {
-			click_capture_p50_ms: percentile(timings, 0.5),
-			click_capture_p95_ms: percentile(timings, 0.95),
-			click_capture_p99_ms: percentile(timings, 0.99),
-			click_capture_samples: timings.length,
-			click_capture_min_ms: timings[0] ?? 0,
-			click_capture_max_ms: timings[timings.length - 1] ?? 0,
-		};
-
-		expect(metrics.click_capture_p50_ms).toBeGreaterThan(0);
-		expect(metrics.click_capture_p95_ms).toBeGreaterThanOrEqual(metrics.click_capture_p50_ms);
-		expect(metrics.click_capture_p99_ms).toBeGreaterThanOrEqual(metrics.click_capture_p95_ms);
 	});
 });
 

@@ -15,14 +15,21 @@ const koffiMock = vi.hoisted(() => {
 		CFStringGetLength: vi.fn(),
 		CFStringGetMaximumSizeForEncoding: vi.fn(),
 		CFStringGetCString: vi.fn(),
-		CFArrayCreate: vi.fn(),
-		CFArrayGetCount: vi.fn(() => 0),
-		CFArrayGetValueAtIndex: vi.fn(),
+		CFArrayCreate: vi.fn((_allocator: null, values: readonly object[] | null) => ({
+			type: "cf-array",
+			values: values ?? [],
+		})),
+		CFArrayGetCount: vi.fn((reference: { values?: readonly object[] }) => reference.values?.length ?? 0),
+		CFArrayGetValueAtIndex: vi.fn(
+			(reference: { values?: readonly object[] }, index: number) => reference.values?.[index] ?? null,
+		),
 		CFStringGetTypeID: vi.fn(() => 1),
 		CFNumberGetTypeID: vi.fn(() => 2),
 		CFNumberGetValue: vi.fn(),
 		CFBooleanGetTypeID: vi.fn(() => 3),
 		CFBooleanGetValue: vi.fn(),
+		CFArrayGetTypeID: vi.fn(() => 6),
+		CFNullGetTypeID: vi.fn(() => 7),
 		CFRelease: vi.fn(),
 	};
 
@@ -46,6 +53,13 @@ const koffiMock = vi.hoisted(() => {
 			outActions[0] = { type: "cf-array", values: [] };
 			return 0;
 		}),
+		AXUIElementCopyMultipleAttributeValues: vi.fn(
+			(_element: object, _attributes: object, _options: number, outValues: Array<object | null>) => {
+				outValues[0] = { type: "cf-array", values: [] };
+				return 0;
+			},
+		),
+		_AXUIElementGetWindow: vi.fn(() => -25205),
 	};
 
 	function libraryFor(path: string) {

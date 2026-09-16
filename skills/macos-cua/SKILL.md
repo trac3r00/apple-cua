@@ -34,23 +34,61 @@ merely to understand the "whole situation." Do not begin by clicking to discover
    `MACOS_CUA_ALLOWED_BUNDLE_IDS`; never edit that policy to approve yourself.
 2. **Observe the chosen app.** Call `get_app_state` and read its screenshot, accessibility
    elements, target metadata and any local app guidance. Identify the relevant field/control,
-   blocking dialog, current value and expected next state before choosing an action.
+   blocking dialog, current value and expected next state before choosing an action. Spend
+   observation deliberately: `include_screenshot: false` returns element ids and geometry
+   without the image (the cheapest re-index before an element action), `diff_only: true`
+   returns only what changed since the previous observation, `max_elements` caps a huge tree
+   (the answer then sets `elementsTruncated`, so you know the tree is partial), and
+   `include_menu_bar: true` adds application menus only when the task needs them.
 3. **Use the actual observation.** Every mutating MCP call requires the returned
    `observation_token`. `element_index` is an element's returned **`id`**, never its array
    position. IDs/tokens from earlier observations, other apps or previous sessions are invalid.
+   The observation also names the window it was scoped to (`windowId`, `windowTitle`, plus
+   `windowCandidates` when the app has several windows); input is checked against that same
+   window, so if it disappeared the call is refused rather than redirected to another window
+   of the same app. When a different window is the right target, observe again with `window_id`.
 4. **Act deliberately.** Prefer an observed semantic target (`set_value`, `select_text`,
    `click` by ID, or an advertised secondary action). Use coordinates only when visual
    inspection justifies them; they must lie inside the exact screenshot received. Do not
    guess IDs, action names, coordinates, shortcuts or the meaning of an unfamiliar control.
+   For a multi-field edit (status plus sequence plus notes, for example), prefer one
+   `set_fields` call over one round trip per field: it checks each observed id against a
+   fresh observation before writing, reads each value back from the app, and stops at the
+   first field it cannot verify.
 5. **Inspect the result.** Post-action state is evidence to evaluate, not automatic proof
-   of success. `observationStatus: changed` means AX data changed; `unchanged` is not proof
-   that input failed, and `unavailable` means there was no comparison baseline. Check the
-   specific intended outcome, such as the exact draft value or visible confirmation.
-6. **Continue only with fresh authority.** Tokens are single-use. Use a returned continuation
+   of success. A mutation answers with what changed rather than the whole accessibility
+   tree (`treeOmitted: true`; pass `full_state: true` when the complete tree is needed),
+   so `axChanges` and `axChangeSummary` are the signal to read. `observationStatus: changed`
+   means AX data changed; `unchanged` is not proof that input failed, and `unavailable`
+   means there was no comparison baseline. Each mutation also carries a closed envelope:
+   `route`/`delivery` say how the input travelled (accessibility or synthetic events,
+   background or foreground), `effect` says how far the driver can account for it
+   (`confirmed` from a value read back, `partial` when some updates verified,
+   `observed_change` when the window changed after the action, `suspected_noop` when nothing
+   changed, `unverifiable` when input went out with no evidence either way), `evidence`
+   lists what that rests on, and `escalation` names the next honest step with its reason
+   instead of a silent retry. `windowEvents` reports windows that appeared while the action
+   ran, such as a modal sheet or a newly opened document, which the target window's own tree
+   may not show. For `set_fields`, `inputDispatched` counts dispatched writes while
+   `verified` counts values read back matching the request — only the latter confirms the
+   outcome.
+6. **Verify rather than assume.** `verify_state` re-reads the app freshly and answers per
+   expectation: an element still exists, an element is gone, a `value`/`label` matches, or a
+   window titled `window_title` is open. Each check returns `verified` plus the `actual`
+   value found, so a failed check tells you what is true instead of only that you were wrong;
+   `timeout_ms` polls until every check passes or the deadline passes, which is how to wait
+   for a slow screen change without guessing a sleep. Never treat `suspected_noop` or a
+   failed check as permission to replay a non-idempotent action.
+7. **Continue only with fresh authority.** Tokens are single-use. Use a returned continuation
    token only after reading the new state. A paused/error result or missing token requires
    an explicit fresh `get_app_state` before another action. Never replay the old request.
-7. **Stop when done.** Once the requested outcome is verified, stop interacting. Do not
+8. **Stop when done.** Once the requested outcome is verified, stop interacting. Do not
    keep exploring, clicking or "checking again" without a new reason.
+
+A refused call is not a failure to retry blindly: `effect: "refused"` with
+`actionDispatched: false` means nothing was sent, and `reason` plus `escalation` say what to do
+instead — re-observe after `stale_observation`, pick the window again after `no_window_target`,
+and stop for `permission_required` rather than working around policy.
 
 The server serializes reads and action transactions and checks current app approval,
 foreground target/window and observation validity before input. It rejects missing or

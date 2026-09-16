@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const accessibilityMock = vi.hoisted(() => ({
 	extractAccessibilityTree: vi.fn(),
+	focusedWindowIdForPid: vi.fn(() => undefined),
 	performActionByIndex: vi.fn(),
 	setValueByIndex: vi.fn(),
 }));

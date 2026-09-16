@@ -6,13 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { MacOSHostComputer, NOOP_POINTER_OVERLAY, createCursorOverlay, getAppStateForApp } from "@macos-cua/core";
-import type {
-	ComputerInterface,
-	KeyOptions,
-	PointerMode,
-	ScreenshotOptions,
-	ScrollOptions,
-} from "@macos-cua/core";
+import type { ComputerInterface, KeyOptions, PointerMode, ScreenshotOptions, ScrollOptions } from "@macos-cua/core";
 import { Command } from "commander";
 
 type PackageJson = {
@@ -39,7 +33,6 @@ type PermissionController = {
 
 type ScreenshotCommandOptions = {
 	output: string;
-	region?: string;
 	format: "png" | "jpeg";
 	quality: number;
 };
@@ -94,7 +87,6 @@ program
 	.command("screenshot")
 	.description("Take a screenshot")
 	.option("-o, --output <path>", "output file path", "./screenshot.png")
-	.option("-r, --region <x,y,w,h>", "screenshot region as x,y,width,height")
 	.option("-f, --format <format>", "image format: png or jpeg", parseScreenshotFormat, "png")
 	.option("-q, --quality <n>", "JPEG quality from 1 to 100", parseQuality, 95)
 	.action(async (options: ScreenshotCommandOptions) => {
@@ -102,7 +94,6 @@ program
 			const screenshotOptions: ScreenshotOptions = {
 				format: options.format,
 				quality: options.quality,
-				...(options.region === undefined ? {} : { region: parseRegion(options.region) }),
 			};
 			const result = await computer.screenshot(screenshotOptions);
 			writeFileSync(options.output, result.data);
@@ -114,7 +105,6 @@ program
 						output: options.output,
 						format: options.format,
 						quality: options.quality,
-						...(options.region === undefined ? {} : { region: parseRegion(options.region) }),
 					},
 					output: options.output,
 					mimeType: result.mimeType,
@@ -243,8 +233,7 @@ program
 	.description("Set the cursor overlay mode: pointer (acting), scroll, or thinking")
 	.argument("<mode>", "pointer | scroll | thinking")
 	.action(async (mode: string) => {
-		const normalized: PointerMode =
-			mode === "scroll" || mode === "thinking" ? mode : "pointer";
+		const normalized: PointerMode = mode === "scroll" || mode === "thinking" ? mode : "pointer";
 		// Drive the shared overlay daemon directly (it persists across commands).
 		// setMode writes to the daemon socket asynchronously; await briefly so the
 		// command actually lands before this short-lived process exits (otherwise
@@ -375,10 +364,7 @@ appsCommand
 	.action(async () => {
 		await withComputer(async (computer) => {
 			const apps = await computer.listApps();
-			writeOutput(
-				apps,
-				apps.map((app) => `${app.pid}\t${app.bundleId}\t${app.name}`).join("\n"),
-			);
+			writeOutput(apps, apps.map((app) => `${app.pid}\t${app.bundleId}\t${app.name}`).join("\n"));
 		});
 	});
 
@@ -386,25 +372,49 @@ appsCommand
 	.command("state <app>")
 	.description("Print an app's accessibility (AX) element tree")
 	.option("--screenshot", "Include the base64 screenshot payload (large; omitted by default)")
-	.action(async (app: string, options: { screenshot?: boolean }) => {
-		await withComputer(async (computer) => {
-			const state = await getAppStateForApp(computer, app);
-			// The base64 screenshot dwarfs the AX tree and makes the JSON unusable for
-			// programmatic consumers, so it is dropped unless explicitly requested.
-			const payload = options.screenshot === true ? state : { ...state, screenshotBase64: "" };
-			writeOutput(
-				payload,
-				[
-					`${state.app} (${state.bundleId}) pid=${state.pid} frontmost=${state.frontmost} axAvailable=${state.axAvailable}`,
-					...state.elements.map(
-						(element) =>
-							`#${element.id}\t${element.role}\t${element.label ?? ""}\t` +
-							`[${element.frame.x},${element.frame.y},${element.frame.width},${element.frame.height}]`,
-					),
-				].join("\n"),
-			);
-		});
-	});
+	.option("--max-elements <count>", "Cap the accessibility elements walked", (value) => Number.parseInt(value, 10))
+	.option("--window-id <id>", "Observe this WindowServer window id instead of the focused window", (value) =>
+		Number.parseInt(value, 10),
+	)
+	.option("--menu-bar", "Include the application menu bar")
+	.action(
+		async (
+			app: string,
+			options: {
+				screenshot?: boolean;
+				maxElements?: number;
+				windowId?: number;
+				menuBar?: boolean;
+			},
+		) => {
+			await withComputer(async (computer) => {
+				const state = await getAppStateForApp(computer, app, {
+					...(options.maxElements === undefined ? {} : { maxElements: options.maxElements }),
+					...(options.windowId === undefined ? {} : { windowId: options.windowId }),
+					...(options.menuBar === true ? { includeMenuBar: true } : {}),
+				});
+				// The base64 screenshot dwarfs the AX tree and makes the JSON unusable for
+				// programmatic consumers, so it is dropped unless explicitly requested.
+				const payload = options.screenshot === true ? state : { ...state, screenshotBase64: "" };
+				writeOutput(
+					payload,
+					[
+						`${state.app} (${state.bundleId}) pid=${state.pid} frontmost=${state.frontmost} axAvailable=${state.axAvailable}${state.windowId === undefined ? "" : ` window=${state.windowId}${state.windowTitle === undefined ? "" : ` (${state.windowTitle})`}`}`,
+						...(state.windowCandidates ?? []).map(
+							(candidate) =>
+								`candidate #${candidate.id}\t${candidate.title}\t` +
+								`[${candidate.bounds.x},${candidate.bounds.y},${candidate.bounds.width},${candidate.bounds.height}]`,
+						),
+						...state.elements.map(
+							(element) =>
+								`#${element.id}\t${element.role}\t${element.label ?? ""}\t` +
+								`[${element.frame.x},${element.frame.y},${element.frame.width},${element.frame.height}]`,
+						),
+					].join("\n"),
+				);
+			});
+		},
+	);
 
 appsCommand
 	.command("set-value <app> <elementIndex> <value>")
@@ -616,15 +626,6 @@ function parseQuality(value: string): number {
 		throw new Error("quality must be between 1 and 100");
 	}
 	return quality;
-}
-
-function parseRegion(value: string): NonNullable<ScreenshotOptions["region"]> {
-	const parts = value.split(",").map((part) => parseInteger(part.trim(), "region value"));
-	const [x, y, width, height] = parts;
-	if (parts.length !== 4 || x === undefined || y === undefined || width === undefined || height === undefined) {
-		throw new Error("region must be x,y,width,height");
-	}
-	return { x, y, width, height };
 }
 
 function parseScreenshotFormat(value: string): ScreenshotOptions["format"] {

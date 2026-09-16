@@ -36,7 +36,7 @@ describe("#given a guarded observation #when shutdown or context changes #then n
 	it("drains the in-flight post-read before native teardown and does not issue another token", async () => {
 		const computer = new PausedObservationComputer();
 		const session = new GuardedSession(computer);
-		const token = requireToken(jsonPayload(await session.observe("Finder", false)));
+		const token = requireToken(jsonPayload(await session.observe({ app: "Finder", diffOnly: false })));
 		computer.pauseObservation = true;
 		const mutation = session.mutate(
 			token,
@@ -61,7 +61,7 @@ describe("#given a guarded observation #when shutdown or context changes #then n
 		const computer = new InconsistentObservationComputer();
 		const session = new GuardedSession(computer);
 		try {
-			const token = requireToken(jsonPayload(await session.observe("Finder", false)));
+			const token = requireToken(jsonPayload(await session.observe({ app: "Finder", diffOnly: false })));
 			computer.unexpectedState = true;
 			const result = jsonPayload(
 				await session.mutate(

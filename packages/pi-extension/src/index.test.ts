@@ -76,21 +76,21 @@ function createMockPi(): MockPi {
 			registeredTools.push({ name: tool.name });
 			activeTools.push(tool.name);
 		},
-		registerCommand() { },
-		registerShortcut() { },
-		registerFlag() { },
+		registerCommand() {},
+		registerShortcut() {},
+		registerFlag() {},
 		getFlag() {
 			return undefined;
 		},
-		registerMessageRenderer() { },
-		sendMessage() { },
-		sendUserMessage() { },
-		appendEntry() { },
-		setSessionName() { },
+		registerMessageRenderer() {},
+		sendMessage() {},
+		sendUserMessage() {},
+		appendEntry() {},
+		setSessionName() {},
 		getSessionName() {
 			return undefined;
 		},
-		setLabel() { },
+		setLabel() {},
 		exec: vi.fn<ExtensionAPI["exec"]>(),
 		getActiveTools() {
 			return [...activeTools];
@@ -106,9 +106,9 @@ function createMockPi(): MockPi {
 		},
 		setModel: vi.fn<ExtensionAPI["setModel"]>().mockResolvedValue(false),
 		getThinkingLevel: vi.fn<ExtensionAPI["getThinkingLevel"]>(),
-		setThinkingLevel() { },
-		registerProvider() { },
-		unregisterProvider() { },
+		setThinkingLevel() {},
+		registerProvider() {},
+		unregisterProvider() {},
 		events: {} as ExtensionAPI["events"],
 	};
 }
@@ -328,8 +328,8 @@ describe("#given enabled session #when model changes from native computer-use to
 	});
 });
 
-describe("#given enabled session #when model changes to direct OpenAI Responses #then computer is activated", () => {
-	it("adds computer back only for direct OpenAI native computer-use", async () => {
+describe("#given enabled session #when model changes to direct OpenAI Responses #then native activation follows the transport gate", () => {
+	it("keeps semantic tools while the installed transport cannot carry computer calls", async () => {
 		const pi = createMockPi();
 		macosCuaExtension(pi);
 		await runSessionStart(pi, {
@@ -344,7 +344,30 @@ describe("#given enabled session #when model changes to direct OpenAI Responses 
 			baseUrl: "https://api.openai.com/v1",
 		});
 
-		expect(pi.getActiveTools()).toContain("computer");
+		expect(pi.getActiveTools()).not.toContain("computer");
+	});
+
+	it("adds computer back for direct OpenAI native computer-use once the operator opts in", async () => {
+		vi.stubEnv("MACOS_CUA_OPENAI_NATIVE_TRANSPORT", "1");
+		try {
+			const pi = createMockPi();
+			macosCuaExtension(pi);
+			await runSessionStart(pi, {
+				api: "openai-completions",
+				provider: "opengateway-dev",
+				baseUrl: "https://dev-asmr-v2.sionic.im/v1",
+			});
+
+			await runModelSelect(pi, {
+				api: "openai-responses",
+				provider: "openai",
+				baseUrl: "https://api.openai.com/v1",
+			});
+
+			expect(pi.getActiveTools()).toContain("computer");
+		} finally {
+			vi.unstubAllEnvs();
+		}
 	});
 });
 
@@ -392,8 +415,8 @@ describe("#given enabled session and OpenAI Chat Completions #when provider payl
 	});
 });
 
-describe("#given enabled session and OpenAI Responses #when provider payload hook runs #then native computer tool is added", () => {
-	it("appends the OpenAI computer tool for direct OpenAI", async () => {
+describe("#given enabled session and OpenAI Responses #when provider payload hook runs #then native tool follows the transport gate", () => {
+	it("strips the fallback computer function and adds no native tool by default", async () => {
 		const pi = createMockPi();
 		macosCuaExtension(pi);
 		await runSessionStart(pi);
@@ -406,7 +429,28 @@ describe("#given enabled session and OpenAI Responses #when provider payload hoo
 			{ tools: [computerFunction, shellTool] },
 		);
 
-		expect(result).toEqual({ tools: [shellTool, { type: "computer" }] });
+		expect(result).toEqual({ tools: [shellTool] });
+	});
+
+	it("appends the OpenAI computer tool for direct OpenAI when the transport is opted in", async () => {
+		vi.stubEnv("MACOS_CUA_OPENAI_NATIVE_TRANSPORT", "1");
+		try {
+			const pi = createMockPi();
+			macosCuaExtension(pi);
+			await runSessionStart(pi);
+			const computerFunction = { type: "function", name: "computer", parameters: { anyOf: [] } };
+			const shellTool = { type: "function", name: "shell" };
+
+			const result = runBeforeProviderRequest(
+				pi,
+				{ api: "openai-responses", provider: "openai", baseUrl: "https://api.openai.com/v1" },
+				{ tools: [computerFunction, shellTool] },
+			);
+
+			expect(result).toEqual({ tools: [shellTool, { type: "computer" }] });
+		} finally {
+			vi.unstubAllEnvs();
+		}
 	});
 
 	it("leaves OpenAI-compatible proxy payloads on Codex-style tools", async () => {

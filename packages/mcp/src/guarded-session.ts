@@ -1,80 +1,260 @@
 import { randomUUID } from "node:crypto";
-import { resolveAppPid } from "@macos-cua/core";
-import type { AppState, GuardedComputerInterface, InputObservation, Point, Rect } from "@macos-cua/core";
+import { parseElementIndex, resolveAppPid } from "@macos-cua/core";
+import type {
+	AXTreeElement,
+	AppState,
+	GuardedComputerInterface,
+	InputObservation,
+	Point,
+	Rect,
+	TopLevelWindow,
+} from "@macos-cua/core";
 import {
+	type ActionDispatch,
+	type SetFieldStepReport,
+	type SetFieldsReport,
 	type ToolResult,
+	type Verification,
+	type VerificationCheck,
+	type WindowEvent,
+	describeElement,
 	observedActionResult,
+	observedSetFieldsResult,
 	postActionErrorResult,
+	refusalResult,
 	stateResult,
 	textResult,
+	verificationResult,
 } from "./tool-result.js";
+
+const VERIFY_POLL_INTERVAL_MILLISECONDS = 150;
+
+function delayMilliseconds(milliseconds: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, milliseconds);
+	});
+}
 
 const STRICT_STATE_OPTIONS = { requireWindow: true } as const;
 const STRICT_DIFF_STATE_OPTIONS = { diffOnly: true, requireWindow: true } as const;
+const FIELD_VERIFY_STATE_OPTIONS = { requireWindow: true, settleMs: 80 } as const;
 
-type Mutation = (targetPid: number, observation: InputObservation) => Promise<void>;
+export interface MutationOptions {
+	/** Return the whole accessibility tree in the post-action observation instead of only the diff. */
+	readonly fullState?: boolean;
+}
+
+export interface ObservationOptions {
+	/** Omit the image: the cheapest way to re-index elements before an element action. */
+	readonly includeScreenshot?: boolean;
+	/** Cap the accessibility elements returned for this observation. */
+	readonly maxElements?: number;
+	/** Include the application menu bar, which is app chrome rather than window content. */
+	readonly includeMenuBar?: boolean;
+}
+
+export interface ObserveRequest extends ObservationOptions {
+	readonly app: string;
+	readonly diffOnly: boolean;
+}
+
+export interface VerifyCheckRequest {
+	readonly element_index: string;
+	readonly exists?: boolean | undefined;
+	readonly value?: string | undefined;
+	readonly label?: string | undefined;
+}
+
+export interface VerifyRequest {
+	readonly checks?: readonly VerifyCheckRequest[] | undefined;
+	readonly windowTitle?: string | undefined;
+	readonly timeoutMs?: number | undefined;
+}
+
+export interface SetFieldUpdate {
+	readonly element_index: string;
+	readonly value: string;
+}
+
+// biome-ignore lint/suspicious/noConfusingVoidType: a mutation may report how it dispatched input, or report nothing when its route is not known to it
+type Mutation = (targetPid: number, observation: InputObservation) => Promise<ActionDispatch | void>;
 type Validation = (observation: InputObservation) => void;
+type ObservedElementIdentity = ReadonlyMap<number, { readonly role: string; readonly label: string | null }>;
+
+/** A refusal to dispatch input: nothing was sent, and the caller must be told why. */
+class InputRefusal extends Error {
+	constructor(
+		readonly reason: string,
+		detail?: string,
+	) {
+		super(detail ?? `input refused: ${reason}`);
+	}
+}
 
 export class GuardedSession {
-	private active: { readonly token: string; readonly observation: InputObservation } | undefined;
+	private active:
+		| {
+				readonly token: string;
+				readonly observation: InputObservation;
+				readonly elements: ObservedElementIdentity | undefined;
+		  }
+		| undefined;
 	private tail: Promise<void> = Promise.resolve();
 	private closed = false;
 	private closePromise: Promise<void> | undefined;
 
-	constructor(private readonly computer: GuardedComputerInterface) {}
+	constructor(
+		private readonly computer: GuardedComputerInterface,
+		private readonly windowProbe?: () => Promise<readonly TopLevelWindow[]>,
+	) {}
 
 	listApps(): Promise<ToolResult> {
 		return this.enqueue(async () => textResult(JSON.stringify(await this.computer.listApps(), null, 2)));
 	}
 
-	observe(app: string, diffOnly: boolean): Promise<ToolResult> {
+	observe(request: ObserveRequest): Promise<ToolResult> {
 		return this.enqueue(async () => {
 			this.active = undefined;
-			const targetPid = await resolveAppPid(this.computer, app);
-			const state = await this.computer.getAppState(
-				targetPid,
-				diffOnly ? STRICT_DIFF_STATE_OPTIONS : STRICT_STATE_OPTIONS,
-			);
+			const targetPid = await resolveAppPid(this.computer, request.app);
+			const state = await this.computer.getAppState(targetPid, {
+				...(request.diffOnly ? STRICT_DIFF_STATE_OPTIONS : STRICT_STATE_OPTIONS),
+				...(request.includeScreenshot === undefined ? {} : { includeScreenshot: request.includeScreenshot }),
+				...(request.maxElements === undefined ? {} : { maxElements: request.maxElements }),
+				...(request.includeMenuBar === undefined ? {} : { includeMenuBar: request.includeMenuBar }),
+			});
 			this.assertOpen();
 			const observation = this.computer.getInputObservation(targetPid);
 			const token =
 				observation !== undefined && observationMatchesState(observation, state)
-					? this.issue(observation)
+					? this.issue(observation, observedElementIdentity(state))
 					: undefined;
 			return stateResult(state, token);
 		});
 	}
 
-	mutate(token: string, app: string, validate: Validation, action: Mutation): Promise<ToolResult> {
+	mutate(
+		token: string,
+		app: string,
+		validate: Validation,
+		action: Mutation,
+		options: MutationOptions = {},
+	): Promise<ToolResult> {
 		return this.enqueue(async () => {
-			const expected = this.consume(token);
-			const targetPid = await resolveAppPid(this.computer, app);
-			if (targetPid !== expected.pid) {
-				throw new Error("requested app does not match the token observation");
-			}
-			validate(expected);
-			const preflight = await this.computer.preflightInput(expected);
-			if (!preflight.ok) {
-				throw new Error(`input preflight rejected: ${preflight.reason}`);
-			}
-			this.assertOpen();
-			await action(targetPid, expected);
+			let expected: Awaited<ReturnType<typeof this.beginMutation>>;
 			try {
-				this.assertOpen();
-				const state = await this.computer.getAppState(targetPid, STRICT_STATE_OPTIONS);
-				this.assertOpen();
-				const current = this.computer.getInputObservation(targetPid);
-				const contextUnchanged =
-					current !== undefined &&
-					state.frontmost &&
-					observationMatchesState(current, state) &&
-					sameInputContext(expected, current);
-				const changed = hasAxChange(state);
-				const nextToken = contextUnchanged && changed ? this.issue(current) : undefined;
-				return observedActionResult(state, contextUnchanged, nextToken);
+				expected = await this.beginMutation(token, app, validate);
+			} catch (error: unknown) {
+				const refused = this.refusalFrom(error);
+				if (refused !== undefined) {
+					return refused;
+				}
+				throw error;
+			}
+			const beforeAction = await this.captureWindowBaseline();
+			const dispatch = await action(expected.pid, expected.observation);
+			try {
+				const outcome = await this.readOutcome(expected.pid, expected.observation, options);
+				const windowEvents = await this.describeWindowSideEffects(beforeAction);
+				return observedActionResult(
+					outcome.state,
+					outcome.contextUnchanged,
+					outcome.nextToken,
+					windowEvents,
+					dispatch === undefined ? undefined : dispatch,
+				);
 			} catch (error: unknown) {
 				this.active = undefined;
 				return postActionErrorResult(error);
+			}
+		});
+	}
+
+	setFields(
+		token: string,
+		app: string,
+		updates: readonly SetFieldUpdate[],
+		options: MutationOptions = {},
+	): Promise<ToolResult> {
+		return this.enqueue(async () => {
+			let expected: Awaited<ReturnType<typeof this.beginMutation>>;
+			try {
+				expected = await this.beginMutation(token, app, () => undefined);
+			} catch (error: unknown) {
+				const refused = this.refusalFrom(error);
+				if (refused !== undefined) {
+					return refused;
+				}
+				throw error;
+			}
+			const targets = updates.map((update) => ({ update, index: parseFieldIndex(update.element_index) }));
+			for (const target of targets) {
+				validateElement(expected.observation, target.index);
+			}
+
+			const steps: SetFieldStepReport[] = [];
+			let baseline = await this.readFieldBaseline(expected.pid);
+			let uiChanged = false;
+			let stoppedEarly = false;
+
+			for (const { update, index } of targets) {
+				const element = baseline.elements.get(index);
+				if (element === undefined) {
+					steps.push(skippedStep(index, update.value, "element index is not present in the latest observation"));
+					stoppedEarly = true;
+					break;
+				}
+				const observedIdentity = expected.elements?.get(index);
+				if (observedIdentity !== undefined && !sameElementIdentity(observedIdentity, element)) {
+					steps.push(
+						skippedStep(
+							index,
+							update.value,
+							`element ${index} is now ${element.role} "${element.label ?? ""}", not the observed control; re-observe`,
+						),
+					);
+					stoppedEarly = true;
+					break;
+				}
+
+				try {
+					await this.computer.setValue(expected.pid, index, update.value);
+				} catch (error: unknown) {
+					steps.push({
+						element_index: index,
+						requested_value: update.value,
+						input_dispatched: false,
+						status: "unverified",
+						reason: error instanceof Error ? error.message : String(error),
+					});
+					stoppedEarly = true;
+					break;
+				}
+
+				baseline = await this.readFieldBaseline(expected.pid);
+				uiChanged = uiChanged || baseline.changed;
+				const observedValue = baseline.elements.get(index)?.value ?? null;
+				const verified = observedValue === update.value;
+				steps.push({
+					element_index: index,
+					requested_value: update.value,
+					input_dispatched: true,
+					observed_value: observedValue,
+					status: verified ? "verified" : "unverified",
+					...(verified ? {} : { reason: "value read back from the app does not match the requested value" }),
+				});
+				if (!verified) {
+					stoppedEarly = true;
+					break;
+				}
+			}
+
+			const report = summarize(steps, updates.length, stoppedEarly, uiChanged);
+			try {
+				const outcome = await this.readOutcome(expected.pid, expected.observation, options);
+				return observedSetFieldsResult(outcome.state, report, outcome.contextUnchanged, outcome.nextToken);
+			} catch (error: unknown) {
+				this.active = undefined;
+				return postActionErrorResult(error, report);
 			}
 		});
 	}
@@ -90,19 +270,214 @@ export class GuardedSession {
 		await this.closePromise;
 	}
 
-	private issue(observation: InputObservation): string {
+	verify(token: string, app: string, request: VerifyRequest): Promise<ToolResult> {
+		return this.enqueue(async () => {
+			const active = this.consume(token);
+			const targetPid = await resolveAppPid(this.computer, app);
+			if (targetPid !== active.observation.pid) {
+				throw new Error("requested app does not match the token observation");
+			}
+			const deadline = Date.now() + (request.timeoutMs ?? 0);
+			for (;;) {
+				this.assertOpen();
+				const state = await this.computer.getAppState(targetPid, {
+					...STRICT_STATE_OPTIONS,
+					includeScreenshot: false,
+					settleMs: 0,
+				});
+				this.assertOpen();
+				const verification = await this.runChecks(targetPid, state, request);
+				if (verification.verified || Date.now() >= deadline) {
+					const observation = this.computer.getInputObservation(targetPid);
+					const nextToken =
+						observation !== undefined && observationMatchesState(observation, state)
+							? this.issue(observation, observedElementIdentity(state))
+							: undefined;
+					return verificationResult(verification, state, nextToken);
+				}
+				await delayMilliseconds(VERIFY_POLL_INTERVAL_MILLISECONDS);
+			}
+		});
+	}
+
+	private async runChecks(pid: number, state: AppState, request: VerifyRequest): Promise<Verification> {
+		const byId = new Map(state.elements.map((element) => [element.id, element] as const));
+		const checks: VerificationCheck[] = [];
+		for (const check of request.checks ?? []) {
+			const index = parseElementIndex(check.element_index);
+			const element = byId.get(index);
+			if (check.exists === false) {
+				checks.push({
+					check: `element ${index} is absent`,
+					verified: element === undefined,
+					actual: element === undefined ? "absent" : describeElement(element),
+				});
+				continue;
+			}
+			if (element === undefined) {
+				checks.push({ check: `element ${index} exists`, verified: false, actual: "absent" });
+				continue;
+			}
+			if (check.value !== undefined) {
+				checks.push({
+					check: `element ${index} value is ${JSON.stringify(check.value)}`,
+					verified: (element.value ?? "") === check.value,
+					actual: `value ${JSON.stringify(element.value ?? "")}`,
+				});
+			}
+			if (check.label !== undefined) {
+				checks.push({
+					check: `element ${index} label is ${JSON.stringify(check.label)}`,
+					verified: (element.label ?? "") === check.label,
+					actual: `label ${JSON.stringify(element.label ?? "")}`,
+				});
+			}
+			if (check.value === undefined && check.label === undefined) {
+				checks.push({ check: `element ${index} exists`, verified: true, actual: describeElement(element) });
+			}
+		}
+		if (request.windowTitle !== undefined) {
+			const titles = (await this.windowsForPid(pid)).map((window) => window.title);
+			checks.push({
+				check: `a window titled ${JSON.stringify(request.windowTitle)} is open`,
+				verified: titles.includes(request.windowTitle),
+				actual: titles.length === 0 ? "window titles are unavailable" : titles.join(" | "),
+			});
+		}
+		return { verified: checks.every((check) => check.verified), checks };
+	}
+
+	private async windowsForPid(pid: number): Promise<readonly TopLevelWindow[]> {
+		if (this.windowProbe === undefined) {
+			return [];
+		}
+		try {
+			return (await this.windowProbe()).filter((window) => window.ownerPid === pid);
+		} catch {
+			return [];
+		}
+	}
+
+	private async beginMutation(
+		token: string,
+		app: string,
+		validate: Validation,
+	): Promise<{
+		readonly pid: number;
+		readonly observation: InputObservation;
+		readonly elements: ObservedElementIdentity | undefined;
+	}> {
+		let active: ReturnType<GuardedSession["consume"]>;
+		try {
+			active = this.consume(token);
+		} catch (error: unknown) {
+			throw new InputRefusal("stale-observation-token", error instanceof Error ? error.message : undefined);
+		}
+		const targetPid = await resolveAppPid(this.computer, app);
+		if (targetPid !== active.observation.pid) {
+			throw new InputRefusal("token-observation-mismatch", "requested app does not match the token observation");
+		}
+		try {
+			validate(active.observation);
+		} catch (error: unknown) {
+			throw new InputRefusal("element-not-observed", error instanceof Error ? error.message : undefined);
+		}
+		const preflight = await this.computer.preflightInput(active.observation);
+		if (!preflight.ok) {
+			throw new InputRefusal(preflight.reason);
+		}
+		this.assertOpen();
+		return { pid: targetPid, observation: active.observation, elements: active.elements };
+	}
+
+	private refusalFrom(error: unknown): ToolResult | undefined {
+		return error instanceof InputRefusal ? refusalResult(error.reason, error.message) : undefined;
+	}
+
+	private async readOutcome(
+		targetPid: number,
+		expected: InputObservation,
+		options: MutationOptions,
+	): Promise<{
+		readonly state: AppState;
+		readonly contextUnchanged: boolean;
+		readonly nextToken: string | undefined;
+	}> {
+		this.assertOpen();
+		const state = await this.computer.getAppState(
+			targetPid,
+			options.fullState === true ? STRICT_STATE_OPTIONS : STRICT_DIFF_STATE_OPTIONS,
+		);
+		this.assertOpen();
+		const current = this.computer.getInputObservation(targetPid);
+		const contextUnchanged =
+			current !== undefined &&
+			state.frontmost &&
+			observationMatchesState(current, state) &&
+			sameInputContext(expected, current);
+		const nextToken = contextUnchanged && hasAxChange(state) ? this.issue(current, undefined) : undefined;
+		return { state, contextUnchanged, nextToken };
+	}
+
+	private async readFieldBaseline(targetPid: number): Promise<{
+		readonly elements: ReadonlyMap<number, AXTreeElement>;
+		readonly changed: boolean;
+	}> {
+		this.assertOpen();
+		const state = await this.computer.getAppState(targetPid, FIELD_VERIFY_STATE_OPTIONS);
+		this.assertOpen();
+		return {
+			elements: new Map(state.elements.map((element) => [element.id, element] as const)),
+			changed: hasAxChange(state),
+		};
+	}
+
+	private async captureWindowBaseline(): Promise<readonly number[] | undefined> {
+		if (this.windowProbe === undefined) {
+			return undefined;
+		}
+		try {
+			return (await this.windowProbe()).map((window) => window.id);
+		} catch {
+			return undefined;
+		}
+	}
+
+	private async describeWindowSideEffects(baseline: readonly number[] | undefined): Promise<readonly WindowEvent[]> {
+		if (baseline === undefined || this.windowProbe === undefined) {
+			return [];
+		}
+		try {
+			const known = new Set(baseline);
+			return (await this.windowProbe())
+				.filter((window) => !known.has(window.id))
+				.map((window) => ({
+					id: window.id,
+					ownerPid: window.ownerPid,
+					ownerName: window.ownerName,
+					title: window.title,
+				}));
+		} catch {
+			return [];
+		}
+	}
+
+	private issue(observation: InputObservation, elements: ObservedElementIdentity | undefined): string {
 		const token = randomUUID();
-		this.active = { token, observation };
+		this.active = { token, observation, elements };
 		return token;
 	}
 
-	private consume(token: string): InputObservation {
+	private consume(token: string): {
+		readonly observation: InputObservation;
+		readonly elements: ObservedElementIdentity | undefined;
+	} {
 		const active = this.active;
 		if (active === undefined || active.token !== token) {
 			throw new Error("observation token is missing, stale, or already consumed");
 		}
 		this.active = undefined;
-		return active.observation;
+		return { observation: active.observation, elements: active.elements };
 	}
 
 	private assertOpen(): void {
@@ -150,6 +525,57 @@ export function observedPointToScreen(observation: InputObservation, point: Poin
 	return {
 		x: viewport.bounds.x + (point.x / viewport.width) * viewport.bounds.width,
 		y: viewport.bounds.y + (point.y / viewport.height) * viewport.bounds.height,
+	};
+}
+
+function parseFieldIndex(elementIndex: string): number {
+	const index = Number(elementIndex.trim());
+	if (!Number.isSafeInteger(index) || index < 0) {
+		throw new Error(`Invalid element index: ${elementIndex}`);
+	}
+	return index;
+}
+
+function observedElementIdentity(state: AppState): ObservedElementIdentity | undefined {
+	if (state.treeOmitted === true) {
+		return undefined;
+	}
+	return new Map(state.elements.map((element) => [element.id, { role: element.role, label: element.label }] as const));
+}
+
+function sameElementIdentity(
+	observed: { readonly role: string; readonly label: string | null },
+	element: AXTreeElement,
+): boolean {
+	return observed.role === element.role && observed.label === element.label;
+}
+
+function skippedStep(elementIndex: number, requestedValue: string, reason: string): SetFieldStepReport {
+	return {
+		element_index: elementIndex,
+		requested_value: requestedValue,
+		input_dispatched: false,
+		status: "skipped",
+		reason,
+	};
+}
+
+function summarize(
+	steps: readonly SetFieldStepReport[],
+	requested: number,
+	stoppedEarly: boolean,
+	uiChanged: boolean,
+): SetFieldsReport {
+	const inputDispatched = steps.filter((step) => step.input_dispatched).length;
+	const verified = steps.filter((step) => step.status === "verified").length;
+	return {
+		requested,
+		inputDispatched,
+		verified,
+		outcomeVerified: verified === requested && !stoppedEarly,
+		stoppedEarly,
+		uiChanged,
+		steps,
 	};
 }
 

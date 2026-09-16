@@ -22,6 +22,8 @@ const koffiMock = vi.hoisted(() => {
 		}),
 		CFBooleanGetTypeID: vi.fn(() => 3),
 		CFBooleanGetValue: vi.fn(() => true),
+		CFArrayGetTypeID: vi.fn(() => 6),
+		CFNullGetTypeID: vi.fn(() => 7),
 		CFRelease: vi.fn(),
 	};
 	const coreFoundationLibrary = {

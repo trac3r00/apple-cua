@@ -2,8 +2,11 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Point } from "../types/index.js";
 import { type MouseButton, getCurrentCursorPosition, warpCursorPosition } from "./macos-ffi/coregraphics.js";
 import {
+	type FocusRestoreToken,
 	type SkyLightTargetWindow,
 	beginFocusWithoutRaise,
+	frontProcessSerialNumber,
+	processSerialNumbersMatch,
 	restoreFrontProcessNoWindows,
 } from "./macos-ffi/skylight.js";
 
@@ -44,7 +47,42 @@ export async function runFocusLeasedGesture(
 		await body();
 		await sleep(CLICK_DRAIN_MILLISECONDS);
 	} finally {
+		releaseFocusLease(token, savedCursor);
+	}
+}
+
+/**
+ * Undo the lease only while nothing else has taken over the pointer or focus.
+ *
+ * A background gesture must never fight the person at the keyboard: if the pointer
+ * moved or another process became frontmost while the gesture ran, that newer state
+ * wins and the lease is released without restoring anything. A yanked cursor or a
+ * yanked front process is human-visible interference, while a stale restore is not
+ * (the app keeps the focus the human chose).
+ */
+function releaseFocusLease(token: FocusRestoreToken, savedCursor: Point): void {
+	if (cursorIsUndisturbed(savedCursor)) {
 		warpCursorPosition(savedCursor);
+	}
+	if (frontProcessIs(token.targetPsn)) {
 		restoreFrontProcessNoWindows(token);
+	}
+}
+
+function cursorIsUndisturbed(savedCursor: Point): boolean {
+	try {
+		const current = getCurrentCursorPosition();
+		return current.x === savedCursor.x && current.y === savedCursor.y;
+	} catch {
+		return false;
+	}
+}
+
+function frontProcessIs(psn: Buffer): boolean {
+	try {
+		const current = frontProcessSerialNumber();
+		return current !== null && processSerialNumbersMatch(current, psn);
+	} catch {
+		return false;
 	}
 }

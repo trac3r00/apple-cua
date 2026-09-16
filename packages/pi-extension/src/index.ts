@@ -43,6 +43,7 @@ interface ComputerUseModel {
 }
 
 const DISABLE_COMPUTER_USE_BETA_ENV = "MACOS_CUA_DISABLE_COMPUTER_USE_BETA";
+const OPENAI_NATIVE_TRANSPORT_ENV = "MACOS_CUA_OPENAI_NATIVE_TRANSPORT";
 
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(sourceDirectory, "..");
@@ -54,6 +55,7 @@ const computerFallbackToolSchema = Type.Union([
 ]);
 
 let state: ExtensionState | undefined;
+let openAINativeTransportWarningEmitted = false;
 
 export default function macosCuaExtension(pi: ExtensionAPI): void {
 	pi.on("resources_discover", async () => {
@@ -132,6 +134,10 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 }
 
 function isOptedOut(value: string | undefined): boolean {
+	return isTruthyFlag(value);
+}
+
+function isTruthyFlag(value: string | undefined): boolean {
 	if (value === undefined) {
 		return false;
 	}
@@ -158,17 +164,46 @@ function syncComputerToolActivation(pi: ExtensionAPI, model: ComputerUseModel | 
 	}
 }
 
+/**
+ * The OpenAI Responses transport shipped with pi-ai 0.73.1 parses only `function_call`
+ * items and serializes every tool result as `function_call_output`, so a native
+ * `computer_call` item never reaches this extension and its required
+ * `computer_call_output` reply is never sent. Injecting `{type:"computer"}` therefore
+ * produced an unrunnable loop, so the native path stays off until the transport carries
+ * those items and an operator opts in.
+ */
 function shouldInjectOpenAINativeComputerUse(model: ComputerUseModel | undefined): boolean {
 	if (model?.provider !== "openai") {
 		return false;
 	}
-	const baseUrl = model.baseUrl ?? "https://api.openai.com/v1";
+	if (!isDirectOpenAIEndpoint(model.baseUrl)) {
+		return false;
+	}
+	if (isTruthyFlag(process.env[OPENAI_NATIVE_TRANSPORT_ENV])) {
+		return true;
+	}
+	warnOpenAINativeTransportUnavailable(model.id);
+	return false;
+}
+
+function isDirectOpenAIEndpoint(baseUrl: string | undefined): boolean {
 	try {
-		const hostname = new URL(baseUrl).hostname.toLowerCase();
+		const hostname = new URL(baseUrl ?? "https://api.openai.com/v1").hostname.toLowerCase();
 		return hostname === "api.openai.com";
 	} catch {
 		return false;
 	}
+}
+
+function warnOpenAINativeTransportUnavailable(modelId: string | undefined): void {
+	if (openAINativeTransportWarningEmitted) {
+		return;
+	}
+	openAINativeTransportWarningEmitted = true;
+	process.stderr.write(
+		`macos-cua: keeping semantic tools for ${modelId ?? "this model"}; the installed pi-ai transport handles only function_call/function_call_output items, not computer_call/computer_call_output. ` +
+			`Set ${OPENAI_NATIVE_TRANSPORT_ENV}=1 to force the native computer tool once the transport supports it.\n`,
+	);
 }
 
 async function executeComputerFallback(

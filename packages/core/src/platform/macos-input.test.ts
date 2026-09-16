@@ -27,11 +27,17 @@ const windowMock = vi.hoisted(() => ({
 }));
 
 const skyLightMock = vi.hoisted(() => {
-	const focusToken = { previousPsn: Buffer.alloc(8) };
+	const targetPsn = Buffer.alloc(8, 2);
+	const focusToken = { previousPsn: Buffer.alloc(8, 1), targetPsn };
+	const state = { frontProcess: targetPsn };
 	return {
 		beginFocusWithoutRaise: vi.fn(() => focusToken),
 		focusToken,
+		frontProcessSerialNumber: vi.fn(() => state.frontProcess),
+		processSerialNumbersMatch: (left: Buffer, right: Buffer) => left.equals(right),
 		restoreFrontProcessNoWindows: vi.fn(() => true),
+		state,
+		targetPsn,
 	};
 });
 
@@ -39,6 +45,8 @@ vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/skylight.js", () => ({
 	beginFocusWithoutRaise: skyLightMock.beginFocusWithoutRaise,
+	frontProcessSerialNumber: skyLightMock.frontProcessSerialNumber,
+	processSerialNumbersMatch: skyLightMock.processSerialNumbersMatch,
 	restoreFrontProcessNoWindows: skyLightMock.restoreFrontProcessNoWindows,
 }));
 vi.mock("./macos-ffi/coregraphics.js", () => ({

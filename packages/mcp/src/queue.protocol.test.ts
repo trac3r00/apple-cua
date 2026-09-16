@@ -96,7 +96,7 @@ describe("FIFO token queue #given concurrent protocol calls #when work overlaps 
 	it("invalidates in-flight and queued input before computer teardown", async () => {
 		const computer = new FakeGuardedComputer();
 		const session = new GuardedSession(computer);
-		const token = jsonPayload(await session.observe("Finder", false))["observation_token"];
+		const token = jsonPayload(await session.observe({ app: "Finder", diffOnly: false }))["observation_token"];
 		if (typeof token !== "string") {
 			throw new Error("observation token was not issued");
 		}

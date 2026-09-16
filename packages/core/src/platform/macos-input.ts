@@ -79,11 +79,12 @@ export class MacOSInputController {
 		this.lastTargetWindow = pid === undefined ? undefined : this.targetWindowsByPid.get(pid);
 	}
 
-	async rememberTargetWindow(pid: number): Promise<SkyLightTargetWindow | undefined> {
+	async rememberTargetWindow(pid: number, windowId?: number): Promise<SkyLightTargetWindow | undefined> {
 		if (!Number.isSafeInteger(pid) || pid <= 0) {
 			throw new Error("target pid must be a positive integer");
 		}
-		const targetWindow = await this.visibleWindowForPid(pid);
+		const targetWindow =
+			windowId === undefined ? await this.visibleWindowForPid(pid) : await this.windowByIdForPid(pid, windowId);
 		if (targetWindow !== undefined) {
 			this.targetWindowsByPid.set(pid, targetWindow);
 			if (this.targetPid === pid) {
@@ -260,6 +261,11 @@ export class MacOSInputController {
 			selectVisibleTargetWindow(windows, pid, position) ??
 			(await selectSystemEventsTargetWindow(windows, pid, position))
 		);
+	}
+
+	private async windowByIdForPid(pid: number, windowId: number): Promise<SkyLightTargetWindow | undefined> {
+		const windows = await openWindowsForTargeting();
+		return selectVisibleTargetWindow(windows, pid, undefined, windowId);
 	}
 
 	private requirePointerWindow(targetWindow: SkyLightTargetWindow | undefined): void {

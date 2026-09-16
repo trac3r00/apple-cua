@@ -38,6 +38,13 @@ export interface AxTreeChanges {
 	changed: Array<{ before: AXTreeElement; after: AXTreeElement }>;
 }
 
+/** One window of an app that input could target, as reported back on an observation. */
+export interface WindowInventoryEntry {
+	readonly id: number;
+	readonly title: string;
+	readonly bounds: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+}
+
 export interface AppState {
 	app: string;
 	bundleId: string;
@@ -58,6 +65,18 @@ export interface AppState {
 	contentKind?: import("./content-kind.js").ContentKind;
 	axChangeSummary?: AxTreeChangeSummary;
 	/**
+	 * True when `elements` was intentionally omitted from this result because a
+	 * diff-only observation replaced the tree with {@link axChanges}. Consumers that
+	 * need element ids must ask for a full observation.
+	 */
+	treeOmitted?: boolean;
+	/**
+	 * True when the accessibility walk stopped at the element budget, so `elements`
+	 * is a prefix of the real tree rather than all of it. Raise `max_elements` to see
+	 * the rest.
+	 */
+	elementsTruncated?: boolean;
+	/**
 	 * The element-level diff from the previous `get_app_state` call for this app,
 	 * present when a prior snapshot exists. Prefer this over re-reading the full
 	 * `elements` tree when you only need to know what changed.
@@ -70,6 +89,15 @@ export interface AppState {
 	 * map onto the screen through this rect.
 	 */
 	windowBounds?: { x: number; y: number; width: number; height: number };
+	/** WindowServer id of the window this observation was scoped to. */
+	windowId?: number;
+	/** Title of that window, when the window server reports one. */
+	windowTitle?: string;
+	/**
+	 * Every window of this app that input could target, present when there is more than one,
+	 * so a caller can pick explicitly instead of relying on the driver's default choice.
+	 */
+	windowCandidates?: readonly WindowInventoryEntry[];
 }
 
 export interface SkyshotResult {

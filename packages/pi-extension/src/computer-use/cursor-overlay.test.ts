@@ -60,6 +60,7 @@ function createComputer(cursor: { readonly x: number; readonly y: number }): Com
 		getScreenshotViewport: vi.fn<ComputerActionDriver["getScreenshotViewport"]>().mockResolvedValue(undefined),
 		listApps: vi.fn<ComputerActionDriver["listApps"]>(),
 		setValue: vi.fn<ComputerActionDriver["setValue"]>(),
+		selectText: vi.fn<ComputerActionDriver["selectText"]>(),
 		performAction: vi.fn<ComputerActionDriver["performAction"]>(),
 		pressAtPosition: vi.fn<ComputerActionDriver["pressAtPosition"]>(),
 		typeIntoFocused: vi.fn<ComputerActionDriver["typeIntoFocused"]>(),

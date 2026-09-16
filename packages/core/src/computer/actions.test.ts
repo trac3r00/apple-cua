@@ -84,7 +84,7 @@ describe("#given an action #when observed #then it runs the action and returns t
 	it("propagates the post-action state so the model can verify without a separate call", async () => {
 		const computer = fakeComputer();
 
-		const state = await observeAction(computer, 1234, async () => { });
+		const state = await observeAction(computer, 1234, async () => {});
 
 		expect(computer.getAppState).toHaveBeenCalledWith(1234);
 		expect(state.pid).toBe(1234);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
+import { createHarness, jsonPayload, jsonText, observe } from "./protocol-client-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
 
 const cases: readonly {
@@ -93,7 +93,9 @@ describe("mutation routing #given every mutation tool #when token state varies #
 			needsExplicitObservation: false,
 		});
 		expect(payload["observation_token"]).toEqual(expect.any(String));
-		expect(harness.computer.stateOptions.at(-1)).toEqual({ requireWindow: true });
+		expect(harness.computer.stateOptions.at(-1)).toEqual({ diffOnly: true, requireWindow: true });
+		expect(payload["treeOmitted"]).toBe(true);
+		expect(payload["elements"]).toBeUndefined();
 
 		const replay = await harness.client.callTool({
 			name: testCase.name,
@@ -101,6 +103,46 @@ describe("mutation routing #given every mutation tool #when token state varies #
 		});
 		expect(replay.isError).toBe(true);
 		expect(inputEffects(harness.computer.effects)).toEqual([testCase.expected]);
+	});
+});
+
+describe("post-action payload #given a mutation #when the caller asks for the full tree #then the complete accessibility state is returned", () => {
+	it("includes the tree only on request", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
+		const token = await observe(harness);
+
+		const result = await harness.client.callTool({
+			name: "click",
+			arguments: { app: "Finder", observation_token: token, element_index: "9", full_state: true },
+		});
+		const payload = jsonPayload(result);
+
+		expect(payload["elements"]).toHaveLength(3);
+		expect(payload["treeOmitted"]).toBeUndefined();
+		expect(harness.computer.stateOptions.at(-1)).toEqual({ requireWindow: true });
+	});
+});
+
+describe("post-action payload #given a mutation that changes many controls #when the answer is compact #then it stays bounded", () => {
+	it("bounds the diff and counts what it left out instead of echoing a screen-sized diff", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
+		const token = await observe(harness);
+		harness.computer.syntheticRowCount = 300;
+
+		const result = await harness.client.callTool({
+			name: "click",
+			arguments: { app: "Finder", observation_token: token, element_index: "9" },
+		});
+		const text = jsonText(result);
+		const payload = jsonPayload(result);
+
+		expect(payload["elements"]).toBeUndefined();
+		expect(payload["axChangesOmitted"]).toMatchObject({ added: 275 });
+		expect(payload["axChanges"]).toMatchObject({ added: expect.any(Array) });
+		expect((payload["axChanges"] as { added: unknown[] }).added).toHaveLength(25);
+		expect(text.length).toBeLessThan(6000);
 	});
 });
 
@@ -182,6 +224,13 @@ describe("native preflight #given recorded metadata #when policy revokes input #
 		});
 
 		expect(result.isError).toBe(true);
+		expect(jsonPayload(result)).toMatchObject({
+			actionDispatched: false,
+			effect: "refused",
+			reason: "app-not-approved",
+			escalation: { target: "session", reason: "permission_required" },
+			paused: true,
+		});
 		expect(harness.computer.preflightExpected).toEqual([before]);
 		expect(harness.computer.getInputObservation(1234)).toBe(before);
 		expect(inputEffects(harness.computer.effects)).toEqual([]);

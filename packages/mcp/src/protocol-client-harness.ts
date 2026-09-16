@@ -1,3 +1,4 @@
+import type { TopLevelWindow } from "@macos-cua/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
@@ -25,8 +26,11 @@ class InMemoryTransport implements Transport {
 	}
 }
 
-export async function createHarness(computer = new FakeGuardedComputer()) {
-	const server = createMcpServer(computer);
+export async function createHarness(
+	computer = new FakeGuardedComputer(),
+	windowProbe?: () => Promise<readonly TopLevelWindow[]>,
+) {
+	const server = createMcpServer(computer, windowProbe);
 	const client = new Client({ name: "context-first-test", version: "0.1.0" });
 	const clientTransport = new InMemoryTransport();
 	const serverTransport = new InMemoryTransport();
@@ -36,7 +40,7 @@ export async function createHarness(computer = new FakeGuardedComputer()) {
 	return { client, computer, server, close: async () => await server.close() };
 }
 
-export function jsonPayload(result: unknown): Record<string, unknown> {
+export function jsonText(result: unknown): string {
 	if (typeof result !== "object" || result === null || !("content" in result) || !Array.isArray(result.content)) {
 		throw new Error("tool result content must be an array");
 	}
@@ -49,7 +53,11 @@ export function jsonPayload(result: unknown): Record<string, unknown> {
 	if (text === undefined) {
 		throw new Error("tool result must contain JSON text");
 	}
-	const parsed: unknown = JSON.parse(text.text);
+	return text.text;
+}
+
+export function jsonPayload(result: unknown): Record<string, unknown> {
+	const parsed: unknown = JSON.parse(jsonText(result));
 	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
 		throw new Error("tool JSON payload must be an object");
 	}

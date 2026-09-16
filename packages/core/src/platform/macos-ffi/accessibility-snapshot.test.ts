@@ -35,8 +35,13 @@ const koffiMock = vi.hoisted(() => {
 	};
 	const windowElement: Reference = {
 		type: "ax",
-		attributes: { AXRole: "AXWindow", AXTitle: "Fixture" },
+		attributes: { AXRole: "AXWindow", AXTitle: "Fixture", AXWindowId: "42" },
 		children: [textField, targetButton],
+	};
+	const menuBarElement: Reference = {
+		type: "ax",
+		attributes: { AXRole: "AXMenuBar", AXTitle: "Menu Bar" },
+		children: [],
 	};
 	const applicationElement: Reference = {
 		type: "ax",
@@ -51,7 +56,9 @@ const koffiMock = vi.hoisted(() => {
 	};
 
 	const coreFoundationFunctions = {
-		CFGetTypeID: vi.fn((reference: Reference) => (reference.type === "ax" ? 4 : reference.type === "string" ? 1 : 6)),
+		CFGetTypeID: vi.fn((reference: Reference) =>
+			reference.type === "ax" ? 4 : reference.type === "string" ? 1 : reference.type === "null" ? 7 : 6,
+		),
 		CFRetain: vi.fn((reference: Reference) => reference),
 		CFStringCreateWithCString: vi.fn((_allocator: null, value: string) => ({ type: "string", value })),
 		CFStringGetLength: vi.fn((reference: Reference) => reference.value?.length ?? 0),
@@ -60,7 +67,10 @@ const koffiMock = vi.hoisted(() => {
 			buffer.write(reference.value ?? "", "utf8");
 			return true;
 		}),
-		CFArrayCreate: vi.fn(),
+		CFArrayCreate: vi.fn((_allocator: null, values: readonly Reference[] | null) => ({
+			type: "array",
+			children: values ?? [],
+		})),
 		CFArrayGetCount: vi.fn((reference: Reference) => reference.children?.length ?? 0),
 		CFArrayGetValueAtIndex: vi.fn((reference: Reference, index: number) => reference.children?.[index] ?? null),
 		CFStringGetTypeID: vi.fn(() => 1),
@@ -68,6 +78,8 @@ const koffiMock = vi.hoisted(() => {
 		CFNumberGetValue: vi.fn(),
 		CFBooleanGetTypeID: vi.fn(() => 3),
 		CFBooleanGetValue: vi.fn(),
+		CFArrayGetTypeID: vi.fn(() => 6),
+		CFNullGetTypeID: vi.fn(() => 7),
 		CFRelease: vi.fn(),
 	};
 
@@ -123,7 +135,31 @@ const koffiMock = vi.hoisted(() => {
 			};
 			return 0;
 		}),
+		AXUIElementCopyMultipleAttributeValues: vi.fn(
+			(element: Reference, attributes: Reference, _options: number, outValues: Array<Reference | null>) => {
+				const requested = attributes.children ?? [];
+				outValues[0] = {
+					type: "array",
+					children: requested.map((attribute) => valueForAttribute(element, attribute.value)),
+				};
+				return 0;
+			},
+		),
+		_AXUIElementGetWindow: vi.fn((element: Reference, outWindowId: Uint32Array) => {
+			const windowId = element.attributes?.["AXWindowId"];
+			if (windowId === undefined) return -25205;
+			outWindowId[0] = Number(windowId);
+			return 0;
+		}),
 	};
+
+	function valueForAttribute(element: Reference, attribute: string | undefined): Reference {
+		if (attribute === "AXChildren") {
+			return { type: "array", children: element.children ?? [] };
+		}
+		const value = attribute === undefined ? undefined : element.attributes?.[attribute];
+		return value === undefined ? { type: "null" } : { type: "string", value };
+	}
 
 	function libraryFor(path: string) {
 		if (path.includes("ApplicationServices.framework")) return accessibilityFunctions;
@@ -136,6 +172,7 @@ const koffiMock = vi.hoisted(() => {
 		applicationElement,
 		coreFoundationFunctions,
 		insertedPrefix,
+		menuBarElement,
 		observableState,
 		targetButton,
 		textField,
@@ -162,6 +199,7 @@ const koffiMock = vi.hoisted(() => {
 vi.mock("koffi", () => koffiMock.module);
 
 beforeEach(() => {
+	koffiMock.applicationElement.children = [koffiMock.windowElement];
 	koffiMock.windowElement.children = [koffiMock.textField, koffiMock.targetButton];
 	koffiMock.observableState.fieldValue = "initial";
 	koffiMock.observableState.pressCount = 0;
@@ -176,6 +214,44 @@ beforeEach(() => {
 afterEach(async () => {
 	const { releaseAccessibilitySnapshot } = await import("./accessibility.js");
 	releaseAccessibilitySnapshot(process.pid);
+});
+
+describe("#given a window-scoped accessibility walk", () => {
+	it("#when the window id matches #then the walk covers that window without the app element or the menu bar", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+		koffiMock.applicationElement.children = [koffiMock.windowElement, koffiMock.menuBarElement];
+		koffiMock.windowElement.children = [koffiMock.textField, koffiMock.targetButton];
+
+		const scoped = extractAccessibilityTree(process.pid, { windowId: 42 });
+
+		expect(scoped.elements.map((element) => element.role)).toEqual(["AXWindow", "AXTextField", "AXButton"]);
+		expect(scoped.elements.some((element) => element.role === "AXApplication")).toBe(false);
+		expect(scoped.elements.some((element) => element.role === "AXMenuBar")).toBe(false);
+	});
+
+	it("#when the window id does not match #then the walk falls back to the whole application tree", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+		koffiMock.applicationElement.children = [koffiMock.windowElement, koffiMock.menuBarElement];
+
+		const unscoped = extractAccessibilityTree(process.pid, { windowId: 999 });
+
+		expect(unscoped.elements.map((element) => element.role)).toEqual([
+			"AXApplication",
+			"AXWindow",
+			"AXTextField",
+			"AXButton",
+			"AXMenuBar",
+		]);
+	});
+
+	it("#when the menu bar is requested #then the scoped walk keeps it", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+		koffiMock.applicationElement.children = [koffiMock.windowElement, koffiMock.menuBarElement];
+
+		const scoped = extractAccessibilityTree(process.pid, { windowId: 42, includeMenuBar: true });
+
+		expect(scoped.elements.map((element) => element.role)).toContain("AXMenuBar");
+	});
 });
 
 describe("#given an AX element index from an accessibility snapshot", () => {
@@ -295,7 +371,12 @@ describe("#given retained accessibility snapshots", () => {
 		koffiMock.coreFoundationFunctions.CFRelease.mockClear();
 		koffiMock.accessibilityFunctions.AXIsProcessTrusted.mockReturnValue(false);
 
-		expect(extractAccessibilityTree(process.pid)).toEqual({ elements: [], axAvailable: false });
+		expect(extractAccessibilityTree(process.pid)).toEqual({
+			elements: [],
+			axAvailable: false,
+			truncated: false,
+			walkKey: expect.any(String),
+		});
 		expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledTimes(4);
 	});
 });

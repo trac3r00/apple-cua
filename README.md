@@ -9,7 +9,7 @@ Native macOS computer-use control, designed for the OpenAI computer-use action v
 
 OpenAI Codex Computer Use is fast because it runs on the host with macOS-native APIs (ScreenCaptureKit, CoreGraphics, local MCP stdio). By contrast, [trycua/cua](https://github.com/trycua/cua) is portable but slow because of the multi-hop VM/HTTP/PIL pipeline: Python agent loop, 500 ms post-action screenshot delay, HTTP/WebSocket JSON to a guest FastAPI server, PIL encode, base64 SSE, client decode/re-encode. Codex removes the VM boundary and repeated image serialization; cua keeps it for sandbox isolation.
 
-`macos-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same app-oriented `list_apps / get_app_state / click / type_text / press_keys / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs: `screencapture`/`sips` for screenshot capture, `koffi`-bound CoreGraphics for global input, Accessibility for app state/actions, and SkyLight/AppKit FFI for app-targeted window sessions. No Docker, no QEMU, no VNC, no helper binary, no cloud API key.
+`macos-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same app-oriented `list_apps / get_app_state / click / type_text / press_keys / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs: ScreenCaptureKit for window and main-display capture, `koffi`-bound CoreGraphics for global input, Accessibility for app state/actions, and SkyLight/AppKit FFI for app-targeted window sessions. No Docker, no QEMU, no VNC, no external helper process, no cloud API key.
 
 The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-comparison.md). If you need strong VM isolation, use cua. If you need low-latency host-native control, use this.
 
@@ -18,7 +18,7 @@ The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-co
 | Runs on | Host Mac | VM / container / cloud | Host Mac |
 | Needs VM | No | Yes (default) | No |
 | Needs API key | OpenAI only | Optional `CUA_API_KEY` for cloud | No |
-| Screenshot path | Native ScreenCaptureKit / IOSurface | PIL `ImageGrab` in guest | Native `screencapture` + `sips` fallback |
+| Screenshot path | Native ScreenCaptureKit / IOSurface | PIL `ImageGrab` in guest | Native ScreenCaptureKit (CoreGraphics fallback for the main display) |
 | Input path | Native CGEvent / Apple Events | `pynput` in guest | CoreGraphics CGEvent via koffi + SkyLight/AppKit FFI for app-targeted windows |
 | Transport | Local MCP stdio | HTTP/WebSocket JSON + SSE | Local process / MCP stdio / pi extension |
 | Post-action delay | None reported | 500 ms default | None |
@@ -52,9 +52,8 @@ If the PNG is 0 bytes or black, grant Screen Recording permission to your termin
 The `macos-cua` binary is a thin `commander.js` wrapper over `MacOSHostComputer`.
 
 ```bash
-# Screenshot (full screen or region)
+# Screenshot (main display)
 macos-cua screenshot -o shot.png
-macos-cua screenshot -o shot.png -x 100 -y 200 -w 800 -h 600
 
 # Click and type
 macos-cua click -x 500 -y 300
@@ -150,9 +149,45 @@ Merge configuration rather than replacing unrelated settings.
 2. `get_app_state` returns the target's current state and an opaque `observation_token`.
 3. Every mutating tool, including `press_keys`, requires that token. The server consumes it,
    validates the observed target/current approval and serializes preflight, input and post-read.
-4. Read the resulting state before using any continuation token. Unchanged, unavailable,
-   failed or unexpected context pauses input; explicitly observe again rather than replaying.
-5. Confirm irreversible/external actions with the human through the harness. Tokens are
+4. Read the resulting state before using any continuation token. A mutation answers with a
+   compact post-action observation (what changed plus a fresh one-use `observation_token`)
+   and omits the full accessibility tree unless the call passes `full_state: true`, so long
+   autonomous runs stop paying for a complete tree after every click.
+5. Unchanged, unavailable, failed or unexpected context pauses input; explicitly observe
+   again rather than replaying. `set_fields` exists for multi-field edits: it applies up to
+   10 verified value updates in one call, reading each back from the app, and reports
+   `requested`/`inputDispatched`/`verified` so dispatched input is never read as success.
+6. Every mutation closes its own loop with a small envelope, so the caller never has to guess
+   what happened: `route` (`accessibility` or `synthetic_events`) and `delivery`
+   (`background`/`foreground`) say how the input actually travelled, `effect` says how far the
+   driver can account for the result (`confirmed` from a value read back, `partial` when some
+   updates verified, `observed_change` when the observed window changed after the action,
+   `suspected_noop` when nothing changed, `unverifiable` when input went out with no evidence
+   either way), and `evidence` lists what that judgment rests on (`value_readback`,
+   `ax_change`, `window_change`). An `escalation` field points at the next honest step
+   (`pixel`, `foreground`, `page`, `session`) with its reason instead of silently retrying.
+   `windowEvents` names any window that appeared during the action, so a modal sheet or a
+   newly opened window is never missed.
+7. `verify_state` is the read-only way to check a result instead of assuming it. Given the
+   latest token it re-reads the app freshly and answers per expectation: does the element
+   still exist, does its `value`/`label` match, is a window with that title open. Each check
+   returns `verified` plus the `actual` value found, and `timeout_ms` polls until every check
+   passes or the deadline passes. A false answer means the expectation does not hold yet, not
+   that the action failed silently.
+8. Input is aimed at one exact window. An observation reports the window it scoped to
+   (`windowId`, `windowTitle`) and, when the app has several windows, every alternative
+   (`windowCandidates`), because the driver resolves the app's *focused* window rather than
+   whatever window order happens to return. A mutation is then checked against that same
+   window id; if it is gone the driver refuses instead of silently retargeting another window
+   of the same app. Pass `window_id` on `get_app_state` to observe a specific candidate.
+9. A refusal is a result, not a crash: `actionDispatched: false`, `effect: "refused"`, a
+   machine-readable `reason` (`stale-observation-token`, `element-not-observed`, `app-not-approved`,
+   `app-not-frontmost`, `window-missing`, `window-changed`, `window-bounds-changed`, `url-blocked`,
+   `url-unavailable`) and an `escalation` naming the next honest step (`no_window_target`,
+   `stale_observation`, `permission_required`, `delivery_failed`, `route_unavailable`). Nothing is
+   dispatched on a refusal, and the answer is flagged `isError` so a caller that only checks that
+   flag never mistakes a refusal for success.
+10. Confirm irreversible/external actions with the human through the harness. Tokens are
    sequencing evidence, not proof of consent or model understanding. UI text is untrusted data.
 
 Use element `id` values from the observation, not array positions or guessed coordinates.
@@ -215,13 +250,44 @@ await computer.close();
 
 All methods return Promises. The API is intentionally identical to the OpenAI `Computer` abstraction so you can drop it into an agent loop without translation.
 
+## Observation cost
+
+Observation is the loop's dominant cost, so the driver keeps the cheap paths cheap. Measured
+on an M-series Mac against a Finder window with about 800 accessibility elements, warm runs,
+reporting medians:
+
+| Step | Before | Now |
+|---|---|---|
+| `get_app_state` with screenshot | 4,815 ms | about 1,350 ms |
+| Accessibility walk, window-scoped | 3,552 ms | 840 ms |
+| Accessibility walk capped at 250 elements | - | 92 ms |
+| Running-app lookup | 1,162 ms (`osascript`) | under 1 ms (in-process NSWorkspace) |
+| Window screenshot | 198 ms (`screencapture -l`) | 28 ms (native ScreenCaptureKit) |
+
+The walk now runs in one round trip per element (attributes are read together), reads the
+parent window instead of the whole app when the target window is known, skips action reads
+for non-actionable roles, and enumerates running apps in-process rather than by spawning
+AppleScript. Main-display capture falls back to CoreGraphics when the ScreenCaptureKit path is
+unavailable; window capture requires the native ScreenCaptureKit library.
+Observation is aimed at the app's focused window, resolved natively, so a multi-window app is
+not scoped by whatever order window enumeration returns; the chosen window id, its title and
+any alternatives travel back on the state, and input is validated against that same id.
+
+The knobs that keep this tunable, all per call: `include_screenshot: false` skips the image
+and returns only element ids and geometry, which is the cheapest way to re-index before an
+element action; `max_elements` caps a very large tree and `include_menu_bar` adds application
+menus when they are part of the task. When a tree is capped the answer says so in
+`elementsTruncated`, and a walk at a different budget is treated as a fresh baseline rather
+than diffed against a differently truncated one, so a diff never reports elements that were
+merely outside the budget as removed.
+
 ## Action surface
 
 Every tool/action exposed by CLI, MCP, and pi-extension:
 
 | Action | Parameters | Returns | What it does |
 |---|---|---|---|
-| `screenshot` | `targetSize?: { width, height }` | PNG `Buffer` + dimensions | Full-screen capture via `screencapture` and `sips` |
+| `screenshot` | `targetSize?: { width, height }` | PNG `Buffer` + dimensions | Native ScreenCaptureKit main-display capture, resized to `targetSize` |
 | `click` | `x: number`, `y: number` | void | Single click via CoreGraphics `CGEventCreateMouseEvent` / `CGEventPost` |
 | `double_click` | `x: number`, `y: number` | void | Double click via CoreGraphics `CGEventCreateMouseEvent` / `CGEventPost` |
 | `type` | `text: string` | void | Type literal text via CoreGraphics `CGEventCreateKeyboardEvent` |
@@ -266,7 +332,7 @@ Full walkthrough: [`skills/macos-cua/references/installation.md`](./skills/macos
 |  +----------------+------------------+                 |
 |                    |                                     |
 |  v                 v                  v                  |
-|  screencapture    koffi/CGEvent    SkyLight/AppKit FFI   |
+|  SCK (capture)    koffi/CGEvent    SkyLight/AppKit FFI   |
 |  (screenshots)    (global input)   (targeted sessions)   |
 +----------------------------------------------------------+
 ```
@@ -283,13 +349,13 @@ Full walkthrough: [`skills/macos-cua/references/installation.md`](./skills/macos
 
 | Feature | Status | Notes |
 |---|---|---|
-| macOS host-native screenshot | Implemented | `screencapture` + `sips` capture and resize |
+| macOS host-native screenshot | Implemented | Native ScreenCaptureKit window and main-display capture, resized to the requested size |
 | macOS host-native input | Implemented | Native CoreGraphics CGEvent via koffi for global input; SkyLight/AppKit FFI for targeted app windows |
 | QEMU runtime | Interface stub | [`packages/core/src/platform/vm.ts`](./packages/core/src/platform/vm.ts) |
 | Lume runtime | Interface stub | Apple Virtualization.Framework VM |
 | VirtualBox / Parallels runtime | Interface stub | Planned |
 | Cloud provider runtime | Interface stub | [`packages/core/src/platform/cloud.ts`](./packages/core/src/platform/cloud.ts) |
-| ScreenCaptureKit capture | Planned | Current implementation uses the system screenshot fallback while the TypeScript FFI path stays helper-free |
+| ScreenCaptureKit capture | Implemented | Window and main-display capture through `libsckit.dylib`; window capture fails closed when that library is missing |
 | SkyLight authenticated targeted input | Implemented | TypeScript FFI uses `SLEventPostToPid`, focus-without-raise, AppKit-backed mouse events, and keyboard auth messages |
 | Accessibility API queries | Implemented | `AXUIElement` tree extraction, `set_value`, and secondary actions |
 

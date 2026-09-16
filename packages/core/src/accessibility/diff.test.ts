@@ -63,6 +63,38 @@ describe("#given two AX snapshots #when diffed into element changes #then the ac
 	});
 });
 
+describe("#given live-list jitter #when diffed by key #then the same controls are not reported as add and remove", () => {
+	it("ignores cells that only re-truncated horizontally", () => {
+		const before = [el({ id: 0, role: "AXStaticText", frame: { x: 1331, y: 15, width: 46, height: 18 } })];
+		const after = [el({ id: 0, role: "AXStaticText", frame: { x: 1362, y: 15, width: 15, height: 18 } })];
+
+		expect(diffAxTreesByKey(before, after)).toEqual({ added: 0, removed: 0, changed: 0 });
+		expect(diffAxTreeChanges(before, after)).toEqual({ added: [], removed: [], changed: [] });
+	});
+});
+
+describe("#given repeated controls #when diffed by key #then counts are compared instead of collapsed", () => {
+	it("reports a second identical-looking row as added and its disappearance as removed", () => {
+		const one = [el({ id: 0, role: "AXRow", label: "Report.pdf" })];
+		const two = [
+			el({ id: 0, role: "AXRow", label: "Report.pdf" }),
+			el({ id: 3, role: "AXRow", label: "Report.pdf" }),
+		];
+
+		expect(diffAxTreesByKey(one, two)).toEqual({ added: 1, removed: 0, changed: 0 });
+		expect(diffAxTreesByKey(two, one)).toEqual({ added: 0, removed: 1, changed: 0 });
+		expect(diffAxTreeChanges(one, two).added).toEqual([two[1]]);
+		expect(diffAxTreeChanges(two, one).removed).toEqual([two[1]]);
+	});
+
+	it("still reports a value change among repeated controls", () => {
+		const before = [el({ id: 0, role: "AXTextField", label: "Name", value: "old" })];
+		const after = [el({ id: 7, role: "AXTextField", label: "Name", value: "new" })];
+
+		expect(diffAxTreesByKey(before, after)).toEqual({ added: 0, removed: 0, changed: 1 });
+	});
+});
+
 describe("#given identical snapshots #when diffed #then nothing changed", () => {
 	it("reports zero changes", () => {
 		const tree = [el({ id: 0, role: "AXButton", label: "Save" })];

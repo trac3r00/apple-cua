@@ -35,6 +35,21 @@ export interface AppStateOptions {
 	diffOnly?: boolean;
 	/** Require a visible target window instead of falling back to a full-display capture. */
 	requireWindow?: boolean;
+	/**
+	 * Capture viewport dimensions are still reported when false, but no image is
+	 * captured, so element frames and coordinate mapping stay valid while the
+	 * observation costs no screenshot time or image tokens. Default true.
+	 */
+	includeScreenshot?: boolean;
+	/** Cap the number of accessibility elements walked. Defaults to the driver's own cap. */
+	maxElements?: number;
+	/** Include the application menu bar in the tree. Default false for window-scoped observations. */
+	includeMenuBar?: boolean;
+	/**
+	 * Observe this exact WindowServer window id instead of the app's focused window. Use a
+	 * candidate id from a previous observation when an app has several windows.
+	 */
+	windowId?: number;
 }
 
 export interface KeyOptions {

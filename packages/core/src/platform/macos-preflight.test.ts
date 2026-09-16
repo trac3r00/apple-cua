@@ -1,10 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setRunningApplicationLookupForTesting } from "./app-list.js";
 
 interface TestWindow {
 	readonly id: number;
 	readonly owner: { readonly processId: number };
 	readonly bounds: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
 }
+
+/** Forces the AppleScript application-list fallback so the fixtures below stay authoritative. */
+const unavailableNativeLookup = {
+	getRunningApplications: (): never => {
+		throw new Error("native application lookup is unavailable in this test");
+	},
+	findRunningApplication: (): never => {
+		throw new Error("native application lookup is unavailable in this test");
+	},
+};
 
 type ExecFileCallback = (error: Error | null, stdout: string | Buffer, stderr: string) => void;
 type ExecFileMock = (
@@ -25,6 +36,7 @@ const childProcessMock = vi.hoisted(() => ({ execFile: vi.fn<ExecFileMock>() }))
 const windowMock = vi.hoisted(() => ({ openWindows: vi.fn<() => Promise<readonly TestWindow[]>>() }));
 const accessibilityMock = vi.hoisted(() => ({
 	extractAccessibilityTree: vi.fn(),
+	focusedWindowIdForPid: vi.fn(() => undefined),
 	releaseAccessibilitySnapshot: vi.fn(),
 	performActionByIndex: vi.fn(),
 	pressElementAtScreenPoint: vi.fn(),
@@ -100,6 +112,9 @@ beforeEach(() => {
 	runtime.browserUrl = "https://example.com/";
 	runtime.browserUrlError = undefined;
 	runtime.screenshotError = undefined;
+	// This suite feeds the application list through the AppleScript path, so the native
+	// NSWorkspace lookup is declared unavailable and the documented fallback runs.
+	setRunningApplicationLookupForTesting(unavailableNativeLookup);
 
 	childProcessMock.execFile.mockReset();
 	childProcessMock.execFile.mockImplementation((file, args, _options, callback) => {

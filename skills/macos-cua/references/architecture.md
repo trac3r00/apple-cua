@@ -38,8 +38,9 @@ ask the human before irreversible/external actions.
 
 - CoreGraphics CGEvent and Accessibility implement input and semantic AX actions through
   Koffi bindings. Targeted input uses the remembered app window and native window APIs.
-- Full-display capture has a native path. Window capture currently uses `screencapture` and
-  `sips`; it is not a persistent per-window ScreenCaptureKit stream.
+- Display and window capture both run natively through ScreenCaptureKit (`libsckit.dylib`);
+  the main display falls back to CoreGraphics when that path is unavailable, while window
+  capture fails closed. Capture is one-shot, not a persistent per-window stream.
 - Accessibility observations retain native element references so hierarchy insertions do
   not silently reinterpret the previously observed IDs. A new snapshot replaces the mapping;
   unavailable/dead contexts and close release retained references.

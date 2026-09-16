@@ -4,6 +4,7 @@ import { classifyContentKind } from "../accessibility/content-kind.js";
 import { diffAxTreeChanges, diffAxTreesByKey } from "../accessibility/diff.js";
 import { normalizeAxTree } from "../accessibility/normalize.js";
 import type { AXTreeElement, AppInfo, AppState, DisplayInfo } from "../accessibility/types.js";
+import type { WindowInventoryEntry } from "../accessibility/types.js";
 import { resolveAppInstructions } from "../app-instructions/index.js";
 import { resolveDisplayMetadata } from "../computer/display-metadata.js";
 import type { InputObservation, PreflightResult } from "../computer/guarded-interface.js";
@@ -27,24 +28,28 @@ import { HostComputer, type HostComputerOptions } from "./host.js";
 import { parseImageDimensions, parsePngDimensions, sniffImageMimeType } from "./image-format.js";
 import {
 	extractAccessibilityTree,
+	focusedWindowIdForPid,
 	performActionByIndex,
 	pressElementAtScreenPoint,
 	releaseAccessibilitySnapshot,
 	setValueByIndex,
 	typeIntoFocusedAXElement,
 } from "./macos-ffi/accessibility.js";
+import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
 import { type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
 import { createDisplaySleepAssertion } from "./macos-ffi/power.js";
 import {
 	captureMainDisplayPng,
+	captureWindowImage,
 	getMainDisplayLogicalSize,
 	getMainDisplayNativePixelSize,
 } from "./macos-ffi/screenshot.js";
 import { selectTextByIndex } from "./macos-ffi/select-text.js";
+import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
 import { MacOSInputController } from "./macos-input.js";
 import { openWindowsForTargeting } from "./macos-open-windows.js";
 import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
-import { selectVisibleTargetWindow } from "./macos-window-target.js";
+import { selectVisibleTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -55,6 +60,8 @@ const SCREENSHOT_MAX_BUFFER_BYTES = 100 * 1024 * 1024;
 const DEFAULT_APP_STATE_SETTLE_MILLISECONDS = 300;
 /** Interval between accessibility-tree polls while waiting for the UI to settle. */
 const UI_SETTLE_POLL_MILLISECONDS = 40;
+/** Element budget for settle polls: enough to see the visible tree change, far cheaper to walk. */
+const SETTLE_SIGNATURE_MAX_ELEMENTS = 250;
 
 export interface MacOSHostComputerOptions extends HostComputerOptions {
 	defaultTargetPid?: number;
@@ -73,7 +80,10 @@ export class MacOSHostComputer extends HostComputer {
 
 	private readonly input: MacOSInputController;
 	private readonly lastViewportByPid = new Map<number, ScreenshotViewport>();
-	private readonly lastAxTreeByPid = new Map<number, AXTreeElement[]>();
+	private readonly lastAxTreeByPid = new Map<
+		number,
+		{ readonly elements: AXTreeElement[]; readonly truncated: boolean; readonly walkKey: string }
+	>();
 	private readonly observedAxPids = new Set<number>();
 	private readonly appApproval: AppApprovalStore | undefined;
 	private readonly urlBlocklist: readonly string[];
@@ -187,19 +197,68 @@ export class MacOSHostComputer extends HostComputer {
 		}
 	}
 
+	/**
+	 * Pick the window an observation is scoped to: an explicitly requested window, otherwise
+	 * the app's focused window, otherwise whatever window enumeration reports. The chosen id
+	 * travels back on the state so input can be checked against the same window instead of a
+	 * fresh guess.
+	 */
+	private async describeWindowsForPid(pid: number): Promise<readonly WindowInventoryEntry[]> {
+		try {
+			const windows = await openWindowsForTargeting();
+			return visibleWindowsForPid(windows, pid).map((window) => ({
+				id: window.id,
+				title: window.title ?? "",
+				bounds: {
+					x: Math.round(window.bounds.x),
+					y: Math.round(window.bounds.y),
+					width: Math.round(window.bounds.width),
+					height: Math.round(window.bounds.height),
+				},
+			}));
+		} catch {
+			return [];
+		}
+	}
+
+	private async resolveObservationWindow(
+		pid: number,
+		requestedWindowId?: number,
+	): Promise<SkyLightTargetWindow | undefined> {
+		if (requestedWindowId !== undefined) {
+			return await this.input.rememberTargetWindow(pid, requestedWindowId);
+		}
+		const focusedWindowId = focusedWindowIdForPid(pid);
+		if (focusedWindowId !== undefined) {
+			const focusedWindow = await this.input.rememberTargetWindow(pid, focusedWindowId);
+			if (focusedWindow !== undefined) {
+				return focusedWindow;
+			}
+		}
+		return await this.input.rememberTargetWindow(pid);
+	}
+
 	private async captureAppState(targetPid?: number, options?: AppStateOptions): Promise<AppState> {
 		const settleMs = options?.settleMs ?? DEFAULT_APP_STATE_SETTLE_MILLISECONDS;
 		const apps = await getRunningMacOSApps();
 		const app = resolveTargetApp(apps, targetPid);
 		this.assertAppApproved(app);
 		await this.assertBrowserUrlAllowed(app, options?.requireWindow === true);
-		const targetWindow = await this.input.rememberTargetWindow(app.pid);
+		const targetWindow = await this.resolveObservationWindow(app.pid, options?.windowId);
 		if (options?.requireWindow === true && targetWindow === undefined) {
 			throw new Error(`No visible target window available for pid ${app.pid}`);
 		}
+		const windowInventory = await this.describeWindowsForPid(app.pid);
+		const targetWindowTitle = windowInventory.find((entry) => entry.id === targetWindow?.id)?.title;
+		const windowCandidates = windowInventory.length > 1 ? windowInventory : undefined;
 		this.observedAxPids.add(app.pid);
+		const walkOptions = {
+			...(options?.maxElements === undefined ? {} : { maxElements: options.maxElements }),
+			...(options?.includeMenuBar === undefined ? {} : { includeMenuBar: options.includeMenuBar }),
+			...(targetWindow === undefined ? {} : { windowId: targetWindow.id }),
+		};
 		if (settleMs > 0) {
-			await this.waitForUiSettle(app.pid, settleMs);
+			await this.waitForUiSettle(app.pid, settleMs, walkOptions);
 		}
 		// Scope the screenshot to the target window at its own aspect ratio (capped),
 		// so the model sees an undistorted window image and coordinates invert cleanly.
@@ -207,8 +266,11 @@ export class MacOSHostComputer extends HostComputer {
 		const size =
 			options?.screenshotSize ??
 			(targetWindow !== undefined ? resolveWindowScreenshotSize(targetWindow.bounds) : await this.getScreenSize());
-		const screenshot = await this.captureScreenshot({ targetSize: size, format: "jpeg" }, targetWindow?.id);
-		const tree = extractAccessibilityTree(app.pid);
+		const screenshot =
+			options?.includeScreenshot === false
+				? { data: Buffer.alloc(0), mimeType: "image/png" as const, width: size.width, height: size.height }
+				: await this.captureScreenshot({ targetSize: size, format: "jpeg" }, targetWindow?.id);
+		const tree = extractAccessibilityTree(app.pid, walkOptions);
 		const display = resolveDisplayInfo();
 		const appInstructions = resolveAppInstructions(app.name, app.bundleId);
 
@@ -232,9 +294,10 @@ export class MacOSHostComputer extends HostComputer {
 		}
 		elements = normalizeAxTree(elements);
 		const previousTree = this.lastAxTreeByPid.get(app.pid);
-		const axChangeSummary = previousTree === undefined ? undefined : diffAxTreesByKey(previousTree, elements);
-		const axChanges = previousTree === undefined ? undefined : diffAxTreeChanges(previousTree, elements);
-		this.lastAxTreeByPid.set(app.pid, elements);
+		const comparable = previousTree !== undefined && previousTree.walkKey === tree.walkKey;
+		const axChangeSummary = comparable ? diffAxTreesByKey(previousTree.elements, elements) : undefined;
+		const axChanges = comparable ? diffAxTreeChanges(previousTree.elements, elements) : undefined;
+		this.lastAxTreeByPid.set(app.pid, { elements, truncated: tree.truncated, walkKey: tree.walkKey });
 		const contentKind = classifyContentKind(elements, { width: screenshot.width, height: screenshot.height });
 		const diffOnly = options?.diffOnly === true && previousTree !== undefined;
 
@@ -245,6 +308,7 @@ export class MacOSHostComputer extends HostComputer {
 			frontmost: app.isActive,
 			axAvailable: tree.axAvailable,
 			elements: diffOnly ? [] : elements,
+			...(tree.truncated ? { elementsTruncated: true } : {}),
 			screenshotBase64: screenshot.data.toString("base64"),
 			screenshotWidth: screenshot.width,
 			screenshotHeight: screenshot.height,
@@ -253,8 +317,12 @@ export class MacOSHostComputer extends HostComputer {
 			contentKind,
 			...(axChangeSummary !== undefined ? { axChangeSummary } : {}),
 			...(axChanges !== undefined ? { axChanges } : {}),
+			...(diffOnly ? { treeOmitted: true } : {}),
 			...(appInstructions !== undefined ? { appInstructions } : {}),
 			...(windowBounds !== undefined ? { windowBounds } : {}),
+			...(targetWindow !== undefined ? { windowId: targetWindow.id } : {}),
+			...(targetWindowTitle !== undefined ? { windowTitle: targetWindowTitle } : {}),
+			...(windowCandidates !== undefined ? { windowCandidates } : {}),
 		};
 		if (targetWindow === undefined) {
 			this.inputObservations.delete(app.pid);
@@ -313,13 +381,19 @@ export class MacOSHostComputer extends HostComputer {
 	 * elapses, whichever comes first. This is the ChatGPT computer-use "skyshot settle"
 	 * technique: faster when the UI is already stable, more robust when it is still moving.
 	 */
-	private async waitForUiSettle(pid: number, settleMs: number): Promise<void> {
+	private async waitForUiSettle(pid: number, settleMs: number, walkOptions: AccessibilityTreeOptions): Promise<void> {
+		// Stability only needs the shape of the visible tree, so each poll walks a capped
+		// slice instead of the whole window; the observation that follows is a full walk.
+		const signatureOptions: AccessibilityTreeOptions = {
+			...walkOptions,
+			maxElements: SETTLE_SIGNATURE_MAX_ELEMENTS,
+		};
 		const deadline = Date.now() + settleMs;
-		let previous = normalizeAxTree(extractAccessibilityTree(pid).elements);
+		let previous = normalizeAxTree(extractAccessibilityTree(pid, signatureOptions).elements);
 		// Poll until the tree is stable across two consecutive reads, or the cap elapses.
 		while (Date.now() < deadline) {
 			await new Promise((resolve) => setTimeout(resolve, UI_SETTLE_POLL_MILLISECONDS));
-			const current = normalizeAxTree(extractAccessibilityTree(pid).elements);
+			const current = normalizeAxTree(extractAccessibilityTree(pid, signatureOptions).elements);
 			const change = diffAxTreesByKey(previous, current);
 			if (change.added === 0 && change.removed === 0 && change.changed === 0) {
 				return;
@@ -431,7 +505,7 @@ export class MacOSHostComputer extends HostComputer {
 
 		let targetWindow: Awaited<ReturnType<typeof queryVisibleTargetWindow>>;
 		try {
-			targetWindow = await queryVisibleTargetWindow(expected.pid);
+			targetWindow = await queryVisibleTargetWindow(expected.pid, expected.windowId);
 		} catch (error) {
 			if (error instanceof Error) {
 				return { ok: false, reason: "window-missing" };
@@ -446,7 +520,8 @@ export class MacOSHostComputer extends HostComputer {
 			return { ok: false, reason: "app-not-approved" };
 		}
 		if (targetWindow === undefined) {
-			return { ok: false, reason: "window-missing" };
+			const otherWindows = await queryVisibleWindowsForPid(expected.pid);
+			return { ok: false, reason: otherWindows.length > 0 ? "window-changed" : "window-missing" };
 		}
 		if (targetWindow.id !== expected.windowId) {
 			return { ok: false, reason: "window-changed" };
@@ -470,9 +545,20 @@ export class MacOSHostComputer extends HostComputer {
 	}
 }
 
-async function queryVisibleTargetWindow(pid: number) {
+async function queryVisibleTargetWindow(pid: number, windowId?: number) {
 	const windows = await openWindowsForTargeting();
+	if (windowId !== undefined) {
+		return selectVisibleTargetWindow(windows, pid, undefined, windowId);
+	}
 	return selectVisibleTargetWindow(windows, pid) ?? (await selectSystemEventsTargetWindow(windows, pid));
+}
+
+async function queryVisibleWindowsForPid(pid: number) {
+	try {
+		return visibleWindowsForPid(await openWindowsForTargeting(), pid);
+	} catch {
+		return [];
+	}
 }
 
 async function readCurrentBrowserUrl(bundleId: string): Promise<string | undefined> {
@@ -568,7 +654,31 @@ export async function captureMacOSScreenshot(
 		return captured.data;
 	}
 
-	return captureWindowScreenshotViaCli(targetSize, windowId, format, quality);
+	return await captureWindowScreenshot(targetSize, windowId, format, quality);
+}
+
+/**
+ * Prefer in-process ScreenCaptureKit for a single window: it captures the window's own
+ * pixels even when occluded, and avoids the two subprocesses (screencapture + sips) plus
+ * their temporary files. The shell path stays as the fallback whenever the native path is
+ * unavailable (no dylib, missing permission, window not capturable, capture timeout).
+ */
+async function captureWindowScreenshot(
+	targetSize: { readonly width: number; readonly height: number },
+	windowId: number,
+	format: "png" | "jpeg",
+	quality: number,
+): Promise<Buffer> {
+	try {
+		const captured = captureWindowImage(windowId, targetSize.width, targetSize.height, format, quality);
+		if (captured.data.byteLength > 0) {
+			parseImageDimensions(captured.data);
+			return captured.data;
+		}
+	} catch {
+		// Fall through to the shell capture below.
+	}
+	return await captureWindowScreenshotViaCli(targetSize, windowId, format, quality);
 }
 
 async function captureWindowScreenshotViaCli(

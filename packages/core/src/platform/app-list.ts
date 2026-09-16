@@ -3,6 +3,12 @@ import { promisify } from "node:util";
 import type { AppInfo } from "../accessibility/types.js";
 import { type AppUsage, parseAppUsageBlocks } from "./app-usage.js";
 import { execFileStdout } from "./exec-util.js";
+import {
+	type RunningApplicationIdentifier,
+	type WorkspaceRunningApplication,
+	findRunningApplication,
+	getRunningApplications,
+} from "./macos-ffi/workspace.js";
 
 const execFileAsync = promisify(execFile);
 const LIST_APPS_TIMEOUT_MILLISECONDS = 20_000;
@@ -31,12 +37,68 @@ export async function collectAppUsage(paths: readonly string[]): Promise<Map<str
 	}
 }
 
+export interface RunningApplicationLookup {
+	getRunningApplications(): readonly WorkspaceRunningApplication[];
+	findRunningApplication(identifier: RunningApplicationIdentifier): WorkspaceRunningApplication | undefined;
+}
+
+const nativeRunningApplicationLookup: RunningApplicationLookup = {
+	getRunningApplications,
+	findRunningApplication,
+};
+let runningApplicationLookup = nativeRunningApplicationLookup;
+
+/**
+ * Replace the native application lookup. Tests inject a deterministic list here instead of
+ * depending on whichever apps happen to be running on the machine; production never calls it.
+ */
+export function setRunningApplicationLookupForTesting(lookup: RunningApplicationLookup | undefined): void {
+	runningApplicationLookup = lookup ?? nativeRunningApplicationLookup;
+}
+
+/**
+ * Running applications, enumerated in-process through NSWorkspace. The AppleScript/JXA path
+ * costs most of a second per call and is only a fallback for hosts where the native lookup
+ * fails.
+ */
 export async function getRunningMacOSApps(): Promise<RunningAppInfo[]> {
+	try {
+		return mapRunningApps(runningApplicationLookup.getRunningApplications());
+	} catch {
+		return await getRunningMacOSAppsWithJxa();
+	}
+}
+
+export async function findRunningApp(identifier: RunningApplicationIdentifier): Promise<RunningAppInfo | undefined> {
+	try {
+		const application = runningApplicationLookup.findRunningApplication(identifier);
+		return application === undefined ? undefined : mapRunningApp(application);
+	} catch {
+		const applications = await getRunningMacOSAppsWithJxa();
+		return applications.find((application) => matchesIdentifier(application, identifier));
+	}
+}
+
+export async function getRunningMacOSAppsWithJxa(): Promise<RunningAppInfo[]> {
 	const result = await execFileAsync("osascript", ["-l", "JavaScript", "-e", LIST_APPS_JXA], {
 		encoding: "utf8",
 		timeout: LIST_APPS_TIMEOUT_MILLISECONDS,
 	});
 	return parseRunningApps(execFileStdout(result));
+}
+
+function mapRunningApps(applications: readonly WorkspaceRunningApplication[]): RunningAppInfo[] {
+	return applications.map(mapRunningApp).sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function mapRunningApp(application: WorkspaceRunningApplication): RunningAppInfo {
+	return { ...application, isRunning: true };
+}
+
+function matchesIdentifier(application: RunningAppInfo, identifier: RunningApplicationIdentifier): boolean {
+	return typeof identifier === "number"
+		? application.pid === identifier
+		: application.bundleId === identifier || application.name === identifier;
 }
 
 export function parseRunningApps(output: string): RunningAppInfo[] {

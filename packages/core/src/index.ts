@@ -31,6 +31,10 @@ export type {
 } from "./computer/guarded-interface.js";
 export type { ComputerInterface, ScreenshotResult } from "./computer/interface.js";
 export {
+	type TopLevelWindow,
+	listTopLevelWindows,
+} from "./platform/macos-top-level-windows.js";
+export {
 	MAX_SCREENSHOT_LONG_EDGE,
 	type ScreenshotViewport,
 	resolveWindowScreenshotSize,
@@ -54,6 +58,9 @@ export { MacOSPermissions } from "./permission/macos.js";
 export { CloudComputer, type CloudComputerOptions } from "./platform/cloud.js";
 export { HostComputer, type HostComputerOptions } from "./platform/host.js";
 export { MacOSHostComputer, type MacOSHostComputerOptions } from "./platform/macos.js";
+export { invokeMenu } from "./platform/macos-menu.js";
+export { setWindowFrame } from "./platform/macos-window-frame.js";
+export { readClipboard, writeClipboard } from "./platform/macos-ffi/pasteboard.js";
 export {
 	type PointerMode,
 	type PointerOverlay,

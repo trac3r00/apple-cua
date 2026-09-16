@@ -11,8 +11,11 @@ const CF_STRING_ENCODING_UTF8 = 0x08000100;
 
 const coreFoundation = koffi.load("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation");
 const CF_TYPE_REF = koffi.pointer("CFTypeRef", koffi.opaque());
-const CF_STRING_REF = koffi.pointer("CFStringRef", koffi.opaque());
-const CF_ARRAY_REF = koffi.pointer("CFArrayRef", koffi.opaque());
+// One opaque pointer type for every CF reference: the distinctions below live in
+// TypeScript, and koffi-level tags would reject a CFString where an array of CFTypeRef
+// is expected.
+const CF_STRING_REF = CF_TYPE_REF;
+const CF_ARRAY_REF = CF_TYPE_REF;
 const CF_TYPE_REF_POINTER = koffi.pointer(CF_TYPE_REF);
 
 const CF_NUMBER_DOUBLE_TYPE = 13;
@@ -72,7 +75,11 @@ const CFNumberGetValue = coreFoundation.func("CFNumberGetValue", "bool", ["void 
 	(reference: CFNumberRef, type: number, valuePointer: Buffer) => boolean
 >;
 
+const CFArrayGetTypeID = coreFoundation.func("CFArrayGetTypeID", "ulong", []) as KoffiFunc<() => number>;
+
 const CFBooleanGetTypeID = coreFoundation.func("CFBooleanGetTypeID", "ulong", []) as KoffiFunc<() => number>;
+
+const CFNullGetTypeID = coreFoundation.func("CFNullGetTypeID", "ulong", []) as KoffiFunc<() => number>;
 
 const CFBooleanGetValue = coreFoundation.func("CFBooleanGetValue", "bool", ["void *"]) as KoffiFunc<
 	(reference: CFBooleanRef) => boolean
@@ -137,6 +144,15 @@ export function cfArrayLength(reference: CFArrayRef): number {
 	return CFArrayGetCount(reference);
 }
 
+/**
+ * Type check for values that claim to be arrays. Applications do misreport attribute
+ * types (an `AXChildren` value that is a string, a number, or a bare element), and
+ * treating such a value as a CFArray crashes inside CFArrayGetCount.
+ */
+export function isCFArray(reference: CFTypeRef): reference is CFArrayRef {
+	return cfGetTypeId(reference) === CFArrayGetTypeID();
+}
+
 export function cfArrayValueAt(reference: CFArrayRef, index: number): CFTypeRef | null {
 	return CFArrayGetValueAtIndex(reference, index);
 }
@@ -151,6 +167,11 @@ export function isCFNumber(reference: CFTypeRef): reference is CFNumberRef {
 
 export function isCFBoolean(reference: CFTypeRef): reference is CFBooleanRef {
 	return cfGetTypeId(reference) === CFBooleanGetTypeID();
+}
+
+/** `kCFNull`, which `AXUIElementCopyMultipleAttributeValues` returns for unsupported attributes. */
+export function isCFNull(reference: CFTypeRef): boolean {
+	return cfGetTypeId(reference) === CFNullGetTypeID();
 }
 
 export function withCFString<TResult>(value: string, callback: (reference: CFStringRef) => TResult): TResult {

@@ -63,9 +63,11 @@ function createComputer(): ComputerActionDriver {
 			screenshotBase64: "",
 			screenshotWidth: 100,
 			screenshotHeight: 80,
+			display: { width: 100, height: 80, scaleFactor: 1 },
 		}),
 		listApps: vi.fn<ComputerActionDriver["listApps"]>().mockResolvedValue([]),
 		setValue: vi.fn<ComputerActionDriver["setValue"]>().mockResolvedValue(undefined),
+		selectText: vi.fn<ComputerActionDriver["selectText"]>().mockResolvedValue(undefined),
 		performAction: vi.fn<ComputerActionDriver["performAction"]>().mockResolvedValue(undefined),
 		pressAtPosition: vi.fn<ComputerActionDriver["pressAtPosition"]>().mockResolvedValue(false),
 		typeIntoFocused: vi.fn<ComputerActionDriver["typeIntoFocused"]>().mockResolvedValue(false),
@@ -113,7 +115,12 @@ describe("#given unknown or unsupported model #when adding computer use #then pa
 });
 
 describe("#given supported sonnet model #when checking support #then returns true", () => {
-	it.each(["claude-sonnet-4-5", "claude-3-5-sonnet-20241022"])("supports %s", (modelId) => {
+	it.each([
+		"claude-sonnet-4-5",
+		"claude-sonnet-4-20250514",
+		"claude-3-7-sonnet-20250219",
+		"claude-3-5-sonnet-20241022",
+	])("supports %s", (modelId) => {
 		expect(supportsAnthropicNativeComputerUse(modelId)).toBe(true);
 	});
 });

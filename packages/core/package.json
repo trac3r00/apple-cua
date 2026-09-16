@@ -18,7 +18,14 @@
 		"typecheck": "tsgo --noEmit",
 		"test": "vitest --run"
 	},
-	"files": ["dist", "native/sckit.m", "native/build.sh", "native/libsckit.dylib", "native/cursor-overlay.m", "native/cursor-overlay"],
+	"files": [
+		"dist",
+		"native/sckit.m",
+		"native/build.sh",
+		"native/libsckit.dylib",
+		"native/cursor-overlay.m",
+		"native/cursor-overlay"
+	],
 	"dependencies": {
 		"get-windows": "9.3.0",
 		"koffi": "2.16.2",

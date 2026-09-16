@@ -27,11 +27,17 @@ const windowMock = vi.hoisted(() => ({
 }));
 
 const skyLightMock = vi.hoisted(() => {
-	const focusToken = { previousPsn: Buffer.alloc(8) };
+	const targetPsn = Buffer.alloc(8, 2);
+	const focusToken = { previousPsn: Buffer.alloc(8, 1), targetPsn };
+	const state = { frontProcess: targetPsn };
 	return {
 		beginFocusWithoutRaise: vi.fn(() => focusToken),
 		focusToken,
+		frontProcessSerialNumber: vi.fn(() => state.frontProcess),
+		processSerialNumbersMatch: (left: Buffer, right: Buffer) => left.equals(right),
 		restoreFrontProcessNoWindows: vi.fn(() => true),
+		state,
+		targetPsn,
 	};
 });
 
@@ -39,6 +45,8 @@ vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/skylight.js", () => ({
 	beginFocusWithoutRaise: skyLightMock.beginFocusWithoutRaise,
+	frontProcessSerialNumber: skyLightMock.frontProcessSerialNumber,
+	processSerialNumbersMatch: skyLightMock.processSerialNumbersMatch,
 	restoreFrontProcessNoWindows: skyLightMock.restoreFrontProcessNoWindows,
 }));
 vi.mock("./macos-ffi/coregraphics.js", () => ({
@@ -67,6 +75,7 @@ describe("#given focused app targeted input", () => {
 		vi.clearAllMocks();
 		windowMock.openWindows.mockResolvedValue([]);
 		skyLightMock.beginFocusWithoutRaise.mockReturnValue(skyLightMock.focusToken);
+		skyLightMock.state.frontProcess = skyLightMock.targetPsn;
 	});
 
 	it("#when a focused app has multiple visible windows #then pointer routing uses the window containing the click", async () => {
@@ -339,6 +348,51 @@ describe("#given focused app targeted input", () => {
 		});
 		expect(coreGraphicsMock.warpCursorPosition).toHaveBeenCalledOnce();
 		expect(skyLightMock.restoreFrontProcessNoWindows).toHaveBeenCalledOnce();
+		controller.close();
+	});
+
+	it("#when the pointer moves during a focus-leased click #then the human cursor position is left alone", async () => {
+		// given
+		windowMock.openWindows.mockResolvedValue([
+			{
+				id: 99,
+				owner: { processId: 1234 },
+				bounds: { x: 10, y: 20, width: 300, height: 200 },
+			},
+		]);
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(1234);
+		// The lease saves the pointer position, then the human moves the pointer mid-gesture.
+		coreGraphicsMock.getCurrentCursorPosition.mockReturnValueOnce({ x: 1, y: 2 }).mockReturnValue({ x: 640, y: 480 });
+
+		// when
+		await controller.click({ x: 50, y: 70 });
+
+		// then
+		expect(coreGraphicsMock.warpCursorPosition).not.toHaveBeenCalled();
+		expect(skyLightMock.restoreFrontProcessNoWindows).toHaveBeenCalledOnce();
+		controller.close();
+	});
+
+	it("#when another process becomes frontmost during a gesture #then the leased focus is released without restoring", async () => {
+		// given
+		windowMock.openWindows.mockResolvedValue([
+			{
+				id: 99,
+				owner: { processId: 1234 },
+				bounds: { x: 10, y: 20, width: 300, height: 200 },
+			},
+		]);
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(1234);
+		skyLightMock.state.frontProcess = Buffer.alloc(8, 9);
+
+		// when
+		await controller.click({ x: 50, y: 70 });
+
+		// then
+		expect(skyLightMock.restoreFrontProcessNoWindows).not.toHaveBeenCalled();
+		expect(coreGraphicsMock.warpCursorPosition).toHaveBeenCalledOnce();
 		controller.close();
 	});
 });

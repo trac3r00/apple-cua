@@ -13,6 +13,7 @@ vi.mock("node:child_process", () => ({ execFile: childProcessMock.execFile }));
 
 type TestWindow = {
 	id: number;
+	title?: string;
 	owner: { processId: number };
 	bounds: { x: number; y: number; width: number; height: number };
 };
@@ -23,6 +24,7 @@ vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
 
 const accessibilityMock = vi.hoisted(() => ({
 	extractAccessibilityTree: vi.fn(),
+	focusedWindowIdForPid: vi.fn<() => number | undefined>(() => undefined),
 	releaseAccessibilitySnapshot: vi.fn(),
 	performActionByIndex: vi.fn(),
 	pressElementAtScreenPoint: vi.fn(),
@@ -32,6 +34,7 @@ const accessibilityMock = vi.hoisted(() => ({
 
 const screenshotMock = vi.hoisted(() => ({
 	captureMainDisplayPng: vi.fn(),
+	captureWindowImage: vi.fn(),
 	getMainDisplayLogicalSize: vi.fn(),
 	getMainDisplayNativePixelSize: vi.fn(),
 }));
@@ -39,7 +42,19 @@ vi.mock("./macos-ffi/screenshot.js", () => screenshotMock);
 vi.mock("./macos-ffi/accessibility.js", () => accessibilityMock);
 
 import { AppApprovalStore } from "../permission/app-approval.js";
+import { setRunningApplicationLookupForTesting } from "./app-list.js";
+import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
 import { MacOSHostComputer } from "./macos.js";
+
+/** Forces the AppleScript application-list fallback so the execFile fixtures stay authoritative. */
+const unavailableNativeLookup = {
+	getRunningApplications: (): never => {
+		throw new Error("native application lookup is unavailable in this test");
+	},
+	findRunningApplication: (): never => {
+		throw new Error("native application lookup is unavailable in this test");
+	},
+};
 
 const TARGET_PID = 1234;
 const WINDOW_BOUNDS = { x: 300, y: 150, width: 2560, height: 1600 };
@@ -53,6 +68,7 @@ function fakePng(width: number, height: number): Buffer {
 }
 
 beforeEach(() => {
+	setRunningApplicationLookupForTesting(unavailableNativeLookup);
 	childProcessMock.execFile.mockReset();
 	windowMock.openWindows.mockReset();
 	accessibilityMock.extractAccessibilityTree.mockReset();
@@ -66,20 +82,30 @@ beforeEach(() => {
 	screenshotMock.captureMainDisplayPng.mockReturnValue({ data: fakePng(1920, 1080), width: 1920, height: 1080 });
 
 	windowMock.openWindows.mockResolvedValue([{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
-	accessibilityMock.extractAccessibilityTree.mockReturnValue({
-		axAvailable: true,
-		elements: [
-			{
-				id: 5,
-				role: "AXButton",
-				label: "Open",
-				value: null,
-				frame: { x: 800, y: 550, width: 200, height: 160 },
-				actions: ["AXPress"],
-				children: [],
-			},
-		],
-	});
+	// Mirrors the real contract: element ids belong to one exact walk, so the key reflects
+	// the window scope, menu-bar choice and element budget the caller asked for.
+	accessibilityMock.extractAccessibilityTree.mockImplementation(
+		(_pid: number, options?: AccessibilityTreeOptions) => ({
+			axAvailable: true,
+			truncated: false,
+			walkKey: JSON.stringify([
+				options?.windowId ?? null,
+				options?.includeMenuBar === true,
+				options?.maxElements ?? 2000,
+			]),
+			elements: [
+				{
+					id: 5,
+					role: "AXButton",
+					label: "Open",
+					value: null,
+					frame: { x: 800, y: 550, width: 200, height: 160 },
+					actions: ["AXPress"],
+					children: [],
+				},
+			],
+		}),
+	);
 	// First execFile call: getRunningMacOSApps (osascript JXA). Second: window screenshot (sh).
 	childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
 		callback(
@@ -107,6 +133,46 @@ describe("#given a target window #when get_app_state captures it #then the scree
 	});
 });
 
+describe("#given an app with several windows #when the observation resolves a target #then it names the window and lists the alternatives", () => {
+	it("scopes to the app's focused window and reports every candidate", async () => {
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, title: "Documents", owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS },
+			{
+				id: 42,
+				title: "Downloads",
+				owner: { processId: TARGET_PID },
+				bounds: { x: 0, y: 0, width: 400, height: 300 },
+			},
+		]);
+		accessibilityMock.focusedWindowIdForPid.mockReturnValue(42);
+		const computer = new MacOSHostComputer();
+
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+		expect(state.windowId).toBe(42);
+		expect(state.windowTitle).toBe("Downloads");
+		expect(state.windowCandidates?.map((candidate) => candidate.id)).toEqual([99, 42]);
+	});
+
+	it("honors an explicitly requested window id over the focused window", async () => {
+		accessibilityMock.focusedWindowIdForPid.mockReturnValue(42);
+		const computer = new MacOSHostComputer();
+
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0, windowId: 99 });
+
+		expect(state.windowId).toBe(99);
+	});
+
+	it("reports no candidates when the app has a single window", async () => {
+		const computer = new MacOSHostComputer();
+
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+		expect(state.windowId).toBe(99);
+		expect(state.windowCandidates).toBeUndefined();
+	});
+});
+
 describe("#given two get_app_state calls #when the second runs #then it reports an AX change summary", () => {
 	it("omits the summary on the first call and includes it on the second", async () => {
 		childProcessMock.execFile.mockReset();
@@ -129,6 +195,29 @@ describe("#given two get_app_state calls #when the second runs #then it reports 
 
 		expect(first.axChangeSummary).toBeUndefined();
 		expect(second.axChangeSummary).toEqual({ added: 0, removed: 0, changed: 0 });
+	});
+
+	it("omits the diff when the previous walk used a different scope", async () => {
+		childProcessMock.execFile.mockReset();
+		for (let call = 0; call < 2; call += 1) {
+			childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
+				callback(
+					null,
+					JSON.stringify([{ name: "Finder", bundleId: "com.apple.finder", pid: TARGET_PID, isActive: true }]),
+					"",
+				);
+			});
+			childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
+				callback(null, fakePng(2560, 1600), "");
+			});
+		}
+		const computer = new MacOSHostComputer();
+
+		await computer.getAppState(TARGET_PID, { settleMs: 0, includeMenuBar: true });
+		const afterScopeChange = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+		expect(afterScopeChange.axChangeSummary).toBeUndefined();
+		expect(afterScopeChange.axChanges).toBeUndefined();
 	});
 
 	it("exposes the element-level diff on the second call", async () => {

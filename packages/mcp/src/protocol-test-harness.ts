@@ -1,4 +1,5 @@
 import type {
+	AXTreeElement,
 	AppState,
 	AppStateOptions,
 	ComputerCapabilities,
@@ -23,6 +24,23 @@ export type Effect =
 	| { readonly kind: "type"; readonly text: string }
 	| { readonly kind: "key"; readonly key: string }
 	| { readonly kind: "close" };
+
+function diffElements(
+	before: readonly AXTreeElement[],
+	after: readonly AXTreeElement[],
+): { added: AXTreeElement[]; removed: AXTreeElement[]; changed: { before: AXTreeElement; after: AXTreeElement }[] } {
+	const beforeById = new Map(before.map((element) => [element.id, element] as const));
+	const afterById = new Map(after.map((element) => [element.id, element] as const));
+	const added = after.filter((element) => !beforeById.has(element.id));
+	const removed = before.filter((element) => !afterById.has(element.id));
+	const changed = after.flatMap((element) => {
+		const previous = beforeById.get(element.id);
+		return previous !== undefined && JSON.stringify(previous) !== JSON.stringify(element)
+			? [{ before: previous, after: element }]
+			: [];
+	});
+	return { added, removed, changed };
+}
 
 export class Deferred<T> {
 	readonly promise: Promise<T>;
@@ -61,6 +79,17 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	stateError: Error | undefined;
 	inputError: Error | undefined;
 	postActionSummary: AppState["axChangeSummary"] = { added: 1, removed: 0, changed: 0 };
+	readonly hiddenElementIds = new Set<number>();
+	readonly elementLabelOverrides = new Map<number, string>();
+	readonly fieldValues = new Map<number, string | null>([
+		[20, "draft"],
+		[21, "queued"],
+	]);
+	valueWriteEffect: "apply" | "ignore" = "apply";
+	/** Extra synthetic rows, used to model a mutation that changes many controls at once. */
+	syntheticRowCount = 0;
+	/** When true, state reports that the accessibility walk stopped at its element budget. */
+	elementsTruncated = false;
 	windowId = 71;
 	windowIdAfterAction: number | undefined;
 	windowBounds = { x: 300, y: 150, width: 1000, height: 800 };
@@ -83,31 +112,32 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 		}
 		const app = targetPid === 5678 ? "Other" : "Finder";
 		const bundleId = targetPid === 5678 ? "com.example.other" : "com.apple.finder";
+		const elements = this.currentElements();
+		const previous = this.snapshotByPid.get(targetPid);
+		const axChanges = previous === undefined ? undefined : diffElements(previous, elements);
+		this.snapshotByPid.set(targetPid, elements);
+		const treeOmitted = options?.diffOnly === true && this.sawSnapshot.has(targetPid);
+		this.sawSnapshot.add(targetPid);
 		const state: AppState = {
 			app,
 			bundleId,
 			pid: targetPid,
 			frontmost: true,
 			axAvailable: true,
-			elements: [
-				{
-					id: 9,
-					role: "AXButton",
-					label: "Open",
-					value: null,
-					frame: { x: 10, y: 20, width: 30, height: 40 },
-					actions: ["AXPress"],
-					children: [],
-				},
-			],
+			elements: treeOmitted ? [] : elements,
 			screenshotBase64: Buffer.from("png-bytes").toString("base64"),
 			screenshotWidth: 500,
 			screenshotHeight: 400,
 			screenshotMimeType: "image/png",
 			display: { width: 1920, height: 1080, scaleFactor: 2 },
 			windowBounds: { ...this.windowBounds },
+			...(treeOmitted ? { treeOmitted: true } : {}),
+			...(this.elementsTruncated ? { elementsTruncated: true } : {}),
 			...(this.actionDispatched && this.postActionSummary !== undefined
-				? { axChangeSummary: this.postActionSummary }
+				? {
+						axChangeSummary: this.postActionSummary,
+						...(axChanges === undefined ? {} : { axChanges }),
+					}
 				: {}),
 		};
 		this.generation += 1;
@@ -118,7 +148,7 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 			windowId: this.windowId,
 			windowBounds: { ...this.windowBounds },
 			screenshotViewport: { width: 500, height: 400, bounds: { ...this.windowBounds } },
-			observedElementIds: new Set([9]),
+			observedElementIds: new Set(elements.map((element) => element.id)),
 		};
 		return state;
 	}
@@ -149,6 +179,9 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	}
 	async setValue(pid: number, id: number, value: string): Promise<void> {
 		this.dispatch({ kind: "setValue", pid, id, value });
+		if (this.valueWriteEffect === "apply") {
+			this.fieldValues.set(id, value);
+		}
 	}
 	async selectText(pid: number, id: number, _options: SelectTextOptions): Promise<void> {
 		this.dispatch({ kind: "selectText", pid, id });
@@ -198,6 +231,53 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	}
 	async getScreenshotViewport() {
 		return undefined;
+	}
+
+	private readonly sawSnapshot = new Set<number>();
+	private readonly snapshotByPid = new Map<number, AXTreeElement[]>();
+
+	private currentElements(): AXTreeElement[] {
+		const elements: AXTreeElement[] = [
+			{
+				id: 9,
+				role: "AXButton",
+				label: this.elementLabelOverrides.get(9) ?? "Open",
+				value: null,
+				frame: { x: 10, y: 20, width: 30, height: 40 },
+				actions: ["AXPress"],
+				children: [],
+			},
+			{
+				id: 20,
+				role: "AXTextField",
+				label: this.elementLabelOverrides.get(20) ?? "Note",
+				value: this.fieldValues.get(20) ?? null,
+				frame: { x: 10, y: 70, width: 120, height: 24 },
+				actions: ["AXSetValue"],
+				children: [],
+			},
+			{
+				id: 21,
+				role: "AXTextField",
+				label: this.elementLabelOverrides.get(21) ?? "Status",
+				value: this.fieldValues.get(21) ?? null,
+				frame: { x: 10, y: 100, width: 120, height: 24 },
+				actions: ["AXSetValue"],
+				children: [],
+			},
+		];
+		for (let row = 0; row < this.syntheticRowCount; row += 1) {
+			elements.push({
+				id: 100 + row,
+				role: "AXStaticText",
+				label: `result row ${row} with a realistic descriptive label`,
+				value: null,
+				frame: { x: 0, y: row, width: 240, height: 18 },
+				actions: [],
+				children: [],
+			});
+		}
+		return elements.filter((element) => !this.hiddenElementIds.has(element.id));
 	}
 
 	private dispatch(effect: Effect): void {

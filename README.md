@@ -280,7 +280,9 @@ format on every path: JPEG is 4.6x smaller than PNG for a full 1920x1080 display
 against 1,363 KB) and 5.2x smaller for a 600x400 region (118 KB against 612 KB) at quality
 72. Main-display capture falls back to CoreGraphics when the ScreenCaptureKit path is
 unavailable; window capture falls back to `screencapture -l` plus `sips` when the native
-library or the window itself is not capturable.
+library or the window itself is not capturable. Driver-level numbers, the conditions they were
+measured under, and the dimensions this driver does *not* measure are recorded in
+[`driver-scorecard.md`](./docs/driver-scorecard.md).
 Observation is aimed at the app's focused window, resolved natively, so a multi-window app is
 not scoped by whatever order window enumeration returns; the chosen window id, its title and
 any alternatives travel back on the state, and input is validated against that same id.

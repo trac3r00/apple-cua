@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ExtensionContext } from "../pi/index.js";
 import { createClickTool } from "./click.js";
+import { AppObservationKeys } from "./observations.js";
 
 function createComputer(): ComputerInterface {
 	return {
@@ -64,14 +65,40 @@ function createComputer(): ComputerInterface {
 		performAction: vi.fn<ComputerInterface["performAction"]>().mockResolvedValue(undefined),
 		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>().mockResolvedValue(false),
 		typeIntoFocused: vi.fn<ComputerInterface["typeIntoFocused"]>().mockResolvedValue(false),
+		assertObservationCurrent: vi.fn<ComputerInterface["assertObservationCurrent"]>(),
 		close: vi.fn<ComputerInterface["close"]>(),
 	};
 }
 
+describe("#given a click whose observation is no longer current #when executed #then it refuses before dispatching", () => {
+	it("refuses when the driver reports a newer observation backs the ids", async () => {
+		const computer = createComputer();
+		vi.spyOn(computer, "assertObservationCurrent").mockImplementation(() => {
+			throw new Error("the observation these element ids came from is no longer the current one");
+		});
+		const tool = createClickTool(computer, testObservations());
+
+		await expect(
+			tool.execute("tool-call", { app: "Finder", element_index: "5" }, undefined, undefined, {} as ExtensionContext),
+		).rejects.toThrow(/no longer the current one/);
+		expect(computer.performAction).not.toHaveBeenCalled();
+	});
+
+	it("refuses when this session never observed the app", async () => {
+		const computer = createComputer();
+		const tool = createClickTool(computer, new AppObservationKeys());
+
+		await expect(
+			tool.execute("tool-call", { app: "Finder", x: 10, y: 20 }, undefined, undefined, {} as ExtensionContext),
+		).rejects.toThrow(/no observation of Finder is recorded/);
+		expect(computer.click).not.toHaveBeenCalled();
+	});
+});
+
 describe("#given click tool factory #when built #then tool name is Codex-compatible", () => {
 	it("returns click", () => {
 		const computer = createComputer();
-		const tool = createClickTool(computer);
+		const tool = createClickTool(computer, testObservations());
 
 		expect(tool.name).toBe("click");
 	});
@@ -81,7 +108,7 @@ describe("#given click tool #when executed #then target app receives coordinates
 	it("falls back to the synthetic mouse only when AX hit-test cannot press the element", async () => {
 		const computer = createComputer();
 		const pressAtPosition = vi.spyOn(computer, "pressAtPosition").mockResolvedValue(false);
-		const tool = createClickTool(computer);
+		const tool = createClickTool(computer, testObservations());
 
 		await tool.execute("tool-call", { app: "Finder", x: 10, y: 20 }, undefined, undefined, {} as ExtensionContext);
 
@@ -94,7 +121,7 @@ describe("#given click tool #when executed #then target app receives coordinates
 	it("presses the element under the cursor via AX without moving the mouse when AX accepts", async () => {
 		const computer = createComputer();
 		const pressAtPosition = vi.spyOn(computer, "pressAtPosition").mockResolvedValue(true);
-		const tool = createClickTool(computer);
+		const tool = createClickTool(computer, testObservations());
 
 		await tool.execute("tool-call", { app: "Finder", x: 10, y: 20 }, undefined, undefined, {} as ExtensionContext);
 
@@ -105,7 +132,7 @@ describe("#given click tool #when executed #then target app receives coordinates
 
 	it("presses the accessibility element via AXPress instead of moving the cursor", async () => {
 		const computer = createComputer();
-		const tool = createClickTool(computer);
+		const tool = createClickTool(computer, testObservations());
 
 		await tool.execute(
 			"tool-call",
@@ -129,7 +156,7 @@ describe("#given click tool #when executed #then target app receives coordinates
 		});
 		const getScreenshotViewport = vi.spyOn(computer, "getScreenshotViewport");
 		const pressAtPosition = vi.spyOn(computer, "pressAtPosition").mockResolvedValue(false);
-		const tool = createClickTool(computer);
+		const tool = createClickTool(computer, testObservations());
 
 		await tool.execute("tool-call", { app: "Finder", x: 250, y: 200 }, undefined, undefined, {} as ExtensionContext);
 
@@ -142,7 +169,7 @@ describe("#given click tool #when executed #then target app receives coordinates
 		const computer = createComputer();
 		vi.spyOn(computer, "getScreenshotViewport").mockResolvedValue(undefined);
 		const pressAtPosition = vi.spyOn(computer, "pressAtPosition").mockResolvedValue(false);
-		const tool = createClickTool(computer);
+		const tool = createClickTool(computer, testObservations());
 
 		await tool.execute("tool-call", { app: "Finder", x: 42, y: 17 }, undefined, undefined, {} as ExtensionContext);
 
@@ -155,7 +182,7 @@ describe("#given click tool #when executed #then target app receives coordinates
 		vi.spyOn(computer, "getCursorPosition")
 			.mockResolvedValueOnce({ x: 11, y: 22 })
 			.mockResolvedValueOnce({ x: 33, y: 44 });
-		const tool = createClickTool(computer);
+		const tool = createClickTool(computer, testObservations());
 
 		const result = await tool.execute(
 			"tool-call",
@@ -170,7 +197,7 @@ describe("#given click tool #when executed #then target app receives coordinates
 
 	it("self-verifies the click and reports the post-action axChangeSummary", async () => {
 		const computer = createComputer();
-		const tool = createClickTool(computer);
+		const tool = createClickTool(computer, testObservations());
 
 		const result = await tool.execute(
 			"tool-call",
@@ -188,7 +215,7 @@ describe("#given click tool #when executed #then target app receives coordinates
 
 	it("forbids working around the click tool with osascript or Swift", async () => {
 		const computer = createComputer();
-		const tool = createClickTool(computer);
+		const tool = createClickTool(computer, testObservations());
 
 		const result = await tool.execute(
 			"tool-call",
@@ -206,7 +233,7 @@ describe("#given click tool #when executed #then target app receives coordinates
 
 	it("self-verifies on the AX element-index path too", async () => {
 		const computer = createComputer();
-		const tool = createClickTool(computer);
+		const tool = createClickTool(computer, testObservations());
 
 		const result = await tool.execute(
 			"tool-call",
@@ -223,7 +250,7 @@ describe("#given click tool #when executed #then target app receives coordinates
 
 	it("presses the AX element click_count times for repeated activations", async () => {
 		const computer = createComputer();
-		const tool = createClickTool(computer);
+		const tool = createClickTool(computer, testObservations());
 
 		await tool.execute(
 			"tool-call",
@@ -239,3 +266,9 @@ describe("#given click tool #when executed #then target app receives coordinates
 		expect(computer.performAction).toHaveBeenNthCalledWith(3, 1234, 5, "AXPress");
 	});
 });
+
+function testObservations(): AppObservationKeys {
+	const observations = new AppObservationKeys();
+	observations.record(1234, "0:test");
+	return observations;
+}

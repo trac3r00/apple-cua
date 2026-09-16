@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ExtensionContext } from "../pi/index.js";
 import { createGetAppStateTool } from "./get-app-state.js";
+import { AppObservationKeys } from "./observations.js";
 
 function state(overrides: Partial<AppState> = {}): AppState {
 	return {
@@ -45,6 +46,7 @@ function createComputer(resolved: AppState): ComputerInterface {
 			.fn<ComputerInterface["listApps"]>()
 			.mockResolvedValue([{ name: "Finder", bundleId: "com.apple.finder", pid: 1234, isRunning: true }]),
 		getAppState: vi.fn<ComputerInterface["getAppState"]>().mockResolvedValue(resolved),
+		assertObservationCurrent: vi.fn<ComputerInterface["assertObservationCurrent"]>(),
 		close: vi.fn<ComputerInterface["close"]>(),
 	} as unknown as ComputerInterface;
 }
@@ -52,7 +54,7 @@ function createComputer(resolved: AppState): ComputerInterface {
 describe("#given get_app_state tool #when executed #then it forwards the observation shape the caller asked for", () => {
 	it("passes the screenshot, tree cap, menu bar, diff and window options through", async () => {
 		const computer = createComputer(state());
-		const tool = createGetAppStateTool(computer);
+		const tool = createGetAppStateTool(computer, testObservations());
 
 		await tool.execute(
 			"tool-call",
@@ -80,7 +82,7 @@ describe("#given get_app_state tool #when executed #then it forwards the observa
 
 	it("omits the image content when the observation skipped the screenshot", async () => {
 		const computer = createComputer(state({ screenshotBase64: "" }));
-		const tool = createGetAppStateTool(computer);
+		const tool = createGetAppStateTool(computer, testObservations());
 
 		const result = await tool.execute(
 			"tool-call",
@@ -94,3 +96,9 @@ describe("#given get_app_state tool #when executed #then it forwards the observa
 		expect(result.content.some((item) => item.type === "text")).toBe(true);
 	});
 });
+
+function testObservations(): AppObservationKeys {
+	const observations = new AppObservationKeys();
+	observations.record(1234, "0:test");
+	return observations;
+}

@@ -366,6 +366,30 @@ describe("#given a snapshot whose control was recycled #when the observed id is 
 	});
 });
 
+describe("#given an observation key #when walks and polls run #then the key tracks the backing snapshot", () => {
+	it("changes on a new walk, survives a signature poll, and disappears on release", async () => {
+		const { currentObservationKey, extractAccessibilityTree, releaseAccessibilitySnapshot } = await import(
+			"./accessibility.js"
+		);
+
+		releaseAccessibilitySnapshot(process.pid);
+		expect(currentObservationKey(process.pid)).toBeUndefined();
+
+		extractAccessibilityTree(process.pid, { windowId: 42 });
+		const first = currentObservationKey(process.pid);
+		expect(first).toBeDefined();
+
+		extractAccessibilityTree(process.pid, { windowId: 42, maxElements: 1, signatureOnly: true });
+		expect(currentObservationKey(process.pid)).toBe(first);
+
+		extractAccessibilityTree(process.pid, { windowId: 42 });
+		expect(currentObservationKey(process.pid)).not.toBe(first);
+
+		releaseAccessibilitySnapshot(process.pid);
+		expect(currentObservationKey(process.pid)).toBeUndefined();
+	});
+});
+
 describe("#given an AX element index from an accessibility snapshot", () => {
 	it("#when the live hierarchy shifts #then the action still targets the snapshotted element", async () => {
 		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");

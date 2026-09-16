@@ -2,7 +2,9 @@
 
 Use guarded MCP for autonomous desktop tasks. CLI and programmatic calls are low-level
 interfaces; they do not enforce the MCP context-token workflow. Never use them to bypass a
-paused or denied MCP action.
+paused or denied MCP action. The Pi extension is position-bound but not token-bound: it refuses
+element and coordinate input unless a `get_app_state` in the same session is still the current
+observation, so an index can never outlive the tree it was read from.
 
 ## Guarded MCP workflow
 

@@ -2,6 +2,7 @@ import { type ComputerInterface, observeAction, parseElementIndex, resolveAppPid
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
+import type { AppObservationKeys } from "./observations.js";
 import { observedActionCompleteResult } from "./result.js";
 
 export const PerformSecondaryActionParams = Type.Object(
@@ -15,7 +16,10 @@ export const PerformSecondaryActionParams = Type.Object(
 
 export type PerformSecondaryActionInput = Static<typeof PerformSecondaryActionParams>;
 
-export function createPerformSecondaryActionTool(computer: ComputerInterface): ToolDefinition {
+export function createPerformSecondaryActionTool(
+	computer: ComputerInterface,
+	observations: AppObservationKeys,
+): ToolDefinition {
 	return defineTool({
 		name: "perform_secondary_action",
 		label: "Computer Use: perform action",
@@ -23,6 +27,7 @@ export function createPerformSecondaryActionTool(computer: ComputerInterface): T
 		parameters: PerformSecondaryActionParams,
 		async execute(_toolCallId, params) {
 			const targetPid = await resolveAppPid(computer, params.app);
+			observations.assertCurrent(computer, targetPid, params.app);
 			const state = await observeAction(computer, targetPid, async () => {
 				await computer.performAction(targetPid, parseElementIndex(params.element_index), params.action);
 			});

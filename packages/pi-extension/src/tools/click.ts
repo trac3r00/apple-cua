@@ -12,6 +12,7 @@ import {
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
+import type { AppObservationKeys } from "./observations.js";
 import { observedActionCompleteResult } from "./result.js";
 
 const MouseButton = Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("middle")]);
@@ -30,7 +31,7 @@ export const ClickParams = Type.Object(
 
 export type ClickInput = Static<typeof ClickParams>;
 
-export function createClickTool(computer: ComputerInterface): ToolDefinition {
+export function createClickTool(computer: ComputerInterface, observations: AppObservationKeys): ToolDefinition {
 	return defineTool({
 		name: "click",
 		label: "Computer Use: click",
@@ -38,6 +39,7 @@ export function createClickTool(computer: ComputerInterface): ToolDefinition {
 		parameters: ClickParams,
 		async execute(_toolCallId, params) {
 			const targetPid = await resolveAppPid(computer, params.app);
+			observations.assertCurrent(computer, targetPid, params.app);
 			const pressCount = Math.max(1, Math.trunc(params.click_count ?? 1));
 			const cursorBefore = await readPointerPosition(computer);
 			const state = await observeAction(computer, targetPid, async () => {

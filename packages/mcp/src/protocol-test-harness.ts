@@ -153,6 +153,8 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 		return state;
 	}
 
+	assertObservationCurrent(): void {}
+
 	getInputObservation(targetPid: number): InputObservation | undefined {
 		return this.observation?.pid === targetPid ? this.observation : undefined;
 	}

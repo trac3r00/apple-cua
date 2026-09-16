@@ -2,6 +2,7 @@ import type { ComputerInterface } from "@macos-cua/core";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ExtensionContext } from "../pi/index.js";
+import { AppObservationKeys } from "./observations.js";
 import { createSetValueTool } from "./set-value.js";
 
 function createComputer(): ComputerInterface {
@@ -74,6 +75,7 @@ function createComputer(): ComputerInterface {
 		performAction: vi.fn<ComputerInterface["performAction"]>(),
 		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>(),
 		typeIntoFocused: vi.fn<ComputerInterface["typeIntoFocused"]>(),
+		assertObservationCurrent: vi.fn<ComputerInterface["assertObservationCurrent"]>(),
 		close: vi.fn<ComputerInterface["close"]>(),
 	};
 }
@@ -81,7 +83,7 @@ function createComputer(): ComputerInterface {
 describe("#given set_value tool #when executed #then it returns post-action observation, not just prose", () => {
 	it("includes the post-action axChangeSummary and axChanges in the result", async () => {
 		const computer = createComputer();
-		const tool = createSetValueTool(computer);
+		const tool = createSetValueTool(computer, testObservations());
 
 		const result = await tool.execute(
 			"tool-call",
@@ -98,3 +100,9 @@ describe("#given set_value tool #when executed #then it returns post-action obse
 		expect(computer.getAppState).toHaveBeenCalledWith(1234);
 	});
 });
+
+function testObservations(): AppObservationKeys {
+	const observations = new AppObservationKeys();
+	observations.record(1234, "0:test");
+	return observations;
+}

@@ -51,6 +51,8 @@ interface AXElementSnapshot {
 	readonly elements: readonly AXUIElementRef[];
 	/** What each observed id looked like, so an action can prove it still is that control. */
 	readonly identity: readonly ObservedElementShape[];
+	/** Bumped for every installed snapshot, so a caller can prove its ids are still current. */
+	readonly generation: number;
 }
 
 interface ObservedElementShape {
@@ -131,6 +133,7 @@ interface AXElementFacts {
 }
 
 const elementSnapshots = new Map<number, AXElementSnapshot>();
+let nextSnapshotGeneration = 0;
 
 const applicationServices = koffi.load("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices");
 const AX_UI_ELEMENT_REF = koffi.pointer("AXUIElementRef", koffi.opaque());
@@ -889,7 +892,7 @@ function copyActionsForRole(element: AXUIElementRef, role: string): string[] {
 	return NON_ACTIONABLE_ROLES.has(role) ? [] : copyActionNames(element);
 }
 
-function replaceElementSnapshot(pid: number, snapshot: AXElementSnapshot | undefined): void {
+function replaceElementSnapshot(pid: number, snapshot: Omit<AXElementSnapshot, "generation"> | undefined): void {
 	const previous = elementSnapshots.get(pid);
 	if (previous !== undefined) {
 		for (const element of previous.elements) {
@@ -899,8 +902,22 @@ function replaceElementSnapshot(pid: number, snapshot: AXElementSnapshot | undef
 	if (snapshot === undefined) {
 		elementSnapshots.delete(pid);
 	} else {
-		elementSnapshots.set(pid, snapshot);
+		nextSnapshotGeneration += 1;
+		elementSnapshots.set(pid, { ...snapshot, generation: nextSnapshotGeneration });
 	}
+}
+
+/**
+ * Key of the observation currently backing element ids for one app. A caller holds the key from
+ * the state it read ids out of and can then prove those ids still belong to that observation,
+ * which is what stops an index outliving the tree it was derived from.
+ */
+export function currentObservationKey(pid: number): string | undefined {
+	const snapshot = elementSnapshots.get(pid);
+	if (snapshot === undefined) {
+		return undefined;
+	}
+	return `${snapshot.generation}:${walkKeyFor(snapshot.scope, snapshot.maxDepth, snapshot.maxElements)}`;
 }
 
 /**

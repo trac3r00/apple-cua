@@ -32,6 +32,7 @@ function createComputer(): ComputerInterface {
 		performAction: vi.fn<ComputerInterface["performAction"]>(),
 		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>(),
 		typeIntoFocused: vi.fn<ComputerInterface["typeIntoFocused"]>(),
+		assertObservationCurrent: vi.fn(),
 		close: vi.fn<ComputerInterface["close"]>(),
 	};
 }

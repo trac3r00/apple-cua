@@ -26,6 +26,7 @@ const accessibilityMock = vi.hoisted(() => ({
 	extractAccessibilityTree: vi.fn(),
 	focusedWindowIdForPid: vi.fn<() => number | undefined>(() => undefined),
 	releaseAccessibilitySnapshot: vi.fn(),
+	currentObservationKey: vi.fn(() => "0:test"),
 	performActionByIndex: vi.fn(),
 	pressElementAtScreenPoint: vi.fn(),
 	setValueByIndex: vi.fn(),

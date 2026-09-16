@@ -64,6 +64,7 @@ function createComputer(cursor: { readonly x: number; readonly y: number }): Com
 		performAction: vi.fn<ComputerActionDriver["performAction"]>(),
 		pressAtPosition: vi.fn<ComputerActionDriver["pressAtPosition"]>(),
 		typeIntoFocused: vi.fn<ComputerActionDriver["typeIntoFocused"]>(),
+		assertObservationCurrent: vi.fn<ComputerActionDriver["assertObservationCurrent"]>(),
 		close: vi.fn<ComputerActionDriver["close"]>().mockResolvedValue(undefined),
 	};
 }

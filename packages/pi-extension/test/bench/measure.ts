@@ -92,6 +92,7 @@ export function createHarnessComputer(): ComputerInterface {
 		performAction: async () => undefined,
 		pressAtPosition: async () => false,
 		typeIntoFocused: async () => false,
+		assertObservationCurrent: () => undefined,
 		close: async () => undefined,
 	};
 }

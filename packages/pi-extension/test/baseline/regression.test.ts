@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionContext } from "../../src/pi/index.js";
 import { createClickTool } from "../../src/tools/click.js";
 import { createGetAppStateTool } from "../../src/tools/get-app-state.js";
+import { AppObservationKeys } from "../../src/tools/observations.js";
 import { createPressKeysTool } from "../../src/tools/press-key.js";
 import { createScrollTool } from "../../src/tools/scroll.js";
 import { createTypeTextTool } from "../../src/tools/type-text.js";
@@ -54,6 +55,7 @@ function createFakeComputer(): ComputerInterface {
 		performAction: vi.fn<ComputerInterface["performAction"]>().mockResolvedValue(undefined),
 		pressAtPosition: vi.fn<ComputerInterface["pressAtPosition"]>().mockResolvedValue(false),
 		typeIntoFocused: vi.fn<ComputerInterface["typeIntoFocused"]>().mockResolvedValue(false),
+		assertObservationCurrent: vi.fn<ComputerInterface["assertObservationCurrent"]>(),
 		close: vi.fn<ComputerInterface["close"]>().mockResolvedValue(undefined),
 	};
 }
@@ -70,7 +72,7 @@ describe("#given baseline regression suite #when exercising computer interface #
 
 	describe("get_app_state", () => {
 		it("returns PNG image content with app state text", async () => {
-			const tool = createGetAppStateTool(computer);
+			const tool = createGetAppStateTool(computer, testObservations());
 			const result = await tool.execute("tc", { app: "TestApp" }, undefined, undefined, context);
 
 			expect(computer.getAppState).toHaveBeenCalledTimes(1);
@@ -81,7 +83,7 @@ describe("#given baseline regression suite #when exercising computer interface #
 
 	describe("click", () => {
 		it("dispatches click to the computer with coordinates", async () => {
-			const tool = createClickTool(computer);
+			const tool = createClickTool(computer, testObservations());
 			await tool.execute("tc", { app: "TestApp", x: 100, y: 200 }, undefined, undefined, context);
 
 			expect(computer.click).toHaveBeenCalledTimes(1);
@@ -142,3 +144,9 @@ describe("#given baseline regression suite #when exercising computer interface #
 		});
 	});
 });
+
+function testObservations(): AppObservationKeys {
+	const observations = new AppObservationKeys();
+	observations.record(1234, "0:test");
+	return observations;
+}

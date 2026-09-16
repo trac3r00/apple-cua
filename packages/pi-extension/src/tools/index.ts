@@ -5,6 +5,7 @@ import { createClickTool } from "./click.js";
 import { createDragTool } from "./drag.js";
 import { createGetAppStateTool } from "./get-app-state.js";
 import { createListAppsTool } from "./list-apps.js";
+import { AppObservationKeys } from "./observations.js";
 import { createPerformSecondaryActionTool } from "./perform-secondary-action.js";
 import { createPressKeysTool } from "./press-key.js";
 import { createScrollTool } from "./scroll.js";
@@ -18,13 +19,14 @@ export interface ToolRegistrationOptions {
 
 export function buildAllTools(options: ToolRegistrationOptions): ReadonlyArray<ToolDefinition> {
 	const { computer } = options;
+	const observations = new AppObservationKeys();
 	return [
 		createListAppsTool(computer),
-		createGetAppStateTool(computer),
-		createClickTool(computer),
-		createPerformSecondaryActionTool(computer),
-		createSetValueTool(computer),
-		createSelectTextTool(computer),
+		createGetAppStateTool(computer, observations),
+		createClickTool(computer, observations),
+		createPerformSecondaryActionTool(computer, observations),
+		createSetValueTool(computer, observations),
+		createSelectTextTool(computer, observations),
 		createDragTool(computer),
 		createScrollTool(computer),
 		createTypeTextTool(computer),

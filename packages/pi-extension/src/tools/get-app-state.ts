@@ -2,6 +2,7 @@ import { type ComputerInterface, getAppStateForApp } from "@macos-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
+import type { AppObservationKeys } from "./observations.js";
 
 export const GetAppStateParams = Type.Object(
 	{
@@ -47,7 +48,7 @@ export const GetAppStateParams = Type.Object(
 
 export type GetAppStateInput = Static<typeof GetAppStateParams>;
 
-export function createGetAppStateTool(computer: ComputerInterface): ToolDefinition {
+export function createGetAppStateTool(computer: ComputerInterface, observations: AppObservationKeys): ToolDefinition {
 	return defineTool({
 		name: "get_app_state",
 		label: "Computer Use: get app state",
@@ -63,6 +64,7 @@ export function createGetAppStateTool(computer: ComputerInterface): ToolDefiniti
 				...(params.subtree_of === undefined ? {} : { subtreeOf: params.subtree_of }),
 				...(params.window_id === undefined ? {} : { windowId: params.window_id }),
 			});
+			observations.record(state.pid, state.observationKey);
 			const content = [
 				...(state.screenshotBase64.length === 0
 					? []

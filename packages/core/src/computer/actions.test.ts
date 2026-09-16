@@ -58,6 +58,7 @@ function fakeComputer(): ComputerInterface {
 		performAction: vi.fn(),
 		pressAtPosition: vi.fn(),
 		typeIntoFocused: vi.fn(),
+		assertObservationCurrent: vi.fn(),
 		close: vi.fn(),
 	};
 }

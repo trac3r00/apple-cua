@@ -8,6 +8,7 @@ import {
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
+import type { AppObservationKeys } from "./observations.js";
 import { observedActionCompleteResult } from "./result.js";
 
 const Selection = Type.Union([Type.Literal("text"), Type.Literal("before"), Type.Literal("after")]);
@@ -30,7 +31,7 @@ export const SelectTextParams = Type.Object(
 
 export type SelectTextInput = Static<typeof SelectTextParams>;
 
-export function createSelectTextTool(computer: ComputerInterface): ToolDefinition {
+export function createSelectTextTool(computer: ComputerInterface, observations: AppObservationKeys): ToolDefinition {
 	return defineTool({
 		name: "select_text",
 		label: "Computer Use: select text",
@@ -39,6 +40,7 @@ export function createSelectTextTool(computer: ComputerInterface): ToolDefinitio
 		parameters: SelectTextParams,
 		async execute(_toolCallId, params) {
 			const targetPid = await resolveAppPid(computer, params.app);
+			observations.assertCurrent(computer, targetPid, params.app);
 			const state = await observeAction(computer, targetPid, async () => {
 				await computer.selectText(targetPid, parseElementIndex(params.element_index), toSelectTextOptions(params));
 			});

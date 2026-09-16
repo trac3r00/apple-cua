@@ -27,6 +27,7 @@ import { execFileStdout, execFileStdoutBuffer } from "./exec-util.js";
 import { HostComputer, type HostComputerOptions } from "./host.js";
 import { parseImageDimensions, sniffImageMimeType } from "./image-format.js";
 import {
+	currentObservationKey,
 	extractAccessibilityTree,
 	focusedWindowIdForPid,
 	performActionByIndex,
@@ -328,6 +329,7 @@ export class MacOSHostComputer extends HostComputer {
 		this.lastAxTreeByPid.set(app.pid, { elements, truncated: tree.truncated, walkKey: tree.walkKey });
 		const contentKind = classifyContentKind(elements, { width: screenshot.width, height: screenshot.height });
 		const diffOnly = options?.diffOnly === true && previousTree !== undefined;
+		const observationKey = currentObservationKey(app.pid);
 
 		const state: AppState = {
 			app: app.name,
@@ -336,6 +338,7 @@ export class MacOSHostComputer extends HostComputer {
 			frontmost: app.isActive,
 			axAvailable: tree.axAvailable,
 			elements: diffOnly ? [] : elements,
+			...(observationKey === undefined ? {} : { observationKey }),
 			...(tree.truncated ? { elementsTruncated: true } : {}),
 			screenshotBase64: screenshot.data.toString("base64"),
 			screenshotWidth: screenshot.width,
@@ -449,6 +452,15 @@ export class MacOSHostComputer extends HostComputer {
 				return;
 			}
 			previous = current;
+		}
+	}
+
+	assertObservationCurrent(targetPid: number, observationKey: string): void {
+		const current = currentObservationKey(targetPid);
+		if (current === undefined || current !== observationKey) {
+			throw new Error(
+				"the observation these element ids came from is no longer the current one; call get_app_state again before acting",
+			);
 		}
 	}
 

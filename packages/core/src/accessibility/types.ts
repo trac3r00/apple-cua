@@ -58,6 +58,12 @@ export interface AppState {
 	screenshotMimeType?: "image/png" | "image/jpeg";
 	display: DisplayInfo;
 	/**
+	 * Key of the observation these element ids came from. A caller that intends to act on an id
+	 * passes this back so the driver can prove the ids are still the current observation rather
+	 * than ones an earlier walk produced.
+	 */
+	observationKey?: string;
+	/**
 	 * Whether the accessibility tree or the screenshot is the more reliable
 	 * perception channel for this screen ("ax" or "image"). When "image", the
 	 * tree is sparse or image-dominated, so prefer the screenshot (vision).

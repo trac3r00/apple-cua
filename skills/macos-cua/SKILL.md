@@ -126,7 +126,7 @@ human consent. The server cannot infer the user's intent or classify every UI co
 |---|---|---|
 | Stdio MCP | Autonomous OpenClaw, Hermes and other MCP clients | Context/token and pre-input policy enforced by this server |
 | CLI | Human-directed diagnostics or scripts with their own policy | Low-level; no persistent MCP observation-token contract |
-| Pi extension / core library | Integrations that implement their own orchestration | Do not assume the MCP guard applies automatically |
+| Pi extension / core library | Integrations that implement their own orchestration | Element and coordinate input must follow a `get_app_state` in the same session; the driver refuses input whose observation is no longer the current one, but token, viewport and post-action policy remain the harness's job |
 
 - [Installation and local permissions](references/installation.md)
 - [MCP and CLI usage](references/usage.md)

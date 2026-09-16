@@ -36,6 +36,12 @@ export interface ComputerInterface {
 	getScreenSize(): Promise<{ width: number; height: number }>;
 	getAppState(targetPid?: number, options?: AppStateOptions): Promise<AppState>;
 	/**
+	 * Refuses when `observationKey` is not the observation currently backing element ids for this
+	 * app. Callers hold the key from the state whose ids they are about to use; this is what stops
+	 * an index outliving the tree it was derived from and silently naming another control.
+	 */
+	assertObservationCurrent(targetPid: number, observationKey: string): void;
+	/**
 	 * Viewport that maps the most recent `get_app_state` window screenshot for
 	 * `targetPid` onto global logical screen coordinates, or undefined when no
 	 * window-scoped screenshot is available.

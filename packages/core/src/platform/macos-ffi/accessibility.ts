@@ -49,6 +49,14 @@ interface AXElementSnapshot {
 	readonly maxElements: number;
 	readonly scope: AXWalkScope;
 	readonly elements: readonly AXUIElementRef[];
+	/** What each observed id looked like, so an action can prove it still is that control. */
+	readonly identity: readonly ObservedElementShape[];
+}
+
+interface ObservedElementShape {
+	readonly role: string;
+	readonly label: string | null;
+	readonly y: number;
 }
 
 /**
@@ -373,7 +381,17 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 			};
 		}
 		if (!keepIndexSpace) {
-			replaceElementSnapshot(pid, { maxDepth, maxElements, scope: scope.descriptor, elements: snapshotElements });
+			replaceElementSnapshot(pid, {
+				maxDepth,
+				maxElements,
+				scope: scope.descriptor,
+				elements: snapshotElements,
+				identity: elements.map((element) => ({
+					role: element.role,
+					label: element.label,
+					y: Math.round(element.frame.y),
+				})),
+			});
 		}
 		return {
 			elements,
@@ -645,7 +663,14 @@ export function refetchElement(
 		if (cached === undefined) {
 			throw new Error(`element ${elementIndex} not found in snapshot`);
 		}
-		return cfRetain(cached);
+		const retained = cfRetain(cached);
+		try {
+			assertStillObservedControl(retained, snapshot.identity[elementIndex], elementIndex);
+			return retained;
+		} catch (error) {
+			releaseAXElement(retained);
+			throw error;
+		}
 	}
 
 	const root = createApplicationElement(pid);
@@ -661,7 +686,13 @@ export function refetchElement(
 			const cursor = { value: 0 };
 			const matched = findAXElement(subtreeRoot, elementIndex, 0, maxDepth, maxElements, cursor);
 			if (matched !== null) {
-				return matched;
+				try {
+					assertStillObservedControl(matched, snapshot?.identity[elementIndex], elementIndex);
+					return matched;
+				} catch (error) {
+					releaseAXElement(matched);
+					throw error;
+				}
 			}
 			throw new Error(`element ${elementIndex} not found`);
 		}
@@ -675,7 +706,13 @@ export function refetchElement(
 		for (const walkInput of walkInputs) {
 			const matched = findAXElement(walkInput, elementIndex, 0, maxDepth, maxElements, cursor);
 			if (matched !== null) {
-				return matched;
+				try {
+					assertStillObservedControl(matched, snapshot?.identity[elementIndex], elementIndex);
+					return matched;
+				} catch (error) {
+					releaseAXElement(matched);
+					throw error;
+				}
 			}
 		}
 		throw new Error(`element ${elementIndex} not found`);
@@ -864,6 +901,29 @@ function replaceElementSnapshot(pid: number, snapshot: AXElementSnapshot | undef
 	} else {
 		elementSnapshots.set(pid, snapshot);
 	}
+}
+
+/**
+ * An id only means the control the observation saw if the live element behind it still reads
+ * as that control. Virtualised lists destroy and rebuild rows, and a retained reference can
+ * outlive the row it described, so acting on an unverified id is how input lands on the wrong
+ * control. Refusing here costs one attribute read; mis-targeting costs the user's trust.
+ */
+function assertStillObservedControl(
+	element: AXUIElementRef,
+	observed: ObservedElementShape | undefined,
+	elementIndex: number,
+): void {
+	if (observed === undefined) {
+		return;
+	}
+	const facts = copyElementFacts(element, { useMultipleAttributes: true });
+	if (facts.role === observed.role && facts.label === observed.label && Math.round(facts.frame.y) === observed.y) {
+		return;
+	}
+	throw new Error(
+		`element ${elementIndex} is now ${facts.role} "${facts.label ?? ""}", not the observed control; observe the app again before acting`,
+	);
 }
 
 function findAXElement(

@@ -205,6 +205,10 @@ beforeEach(() => {
 	koffiMock.observableState.pressCount = 0;
 	koffiMock.observableState.selection = null;
 	if (koffiMock.textField.attributes !== undefined) koffiMock.textField.attributes["AXValue"] = "initial";
+	if (koffiMock.targetButton.attributes !== undefined) {
+		koffiMock.targetButton.attributes["AXRole"] = "AXButton";
+		koffiMock.targetButton.attributes["AXTitle"] = "Target Button";
+	}
 	koffiMock.accessibilityFunctions.AXIsProcessTrusted.mockReturnValue(true);
 	koffiMock.accessibilityFunctions.AXUIElementPerformAction.mockClear();
 	koffiMock.coreFoundationFunctions.CFRelease.mockClear();
@@ -330,6 +334,34 @@ describe("#given a settle poll #when it runs with a smaller budget #then the obs
 		expect(subtree.elements.map((element) => element.role)).toEqual(["AXButton"]);
 
 		performActionByIndex(process.pid, 0, "AXPress");
+		expect(koffiMock.observableState.pressCount).toBe(1);
+	});
+});
+
+describe("#given a snapshot whose control was recycled #when the observed id is acted on #then it is refused instead of acting", () => {
+	it("refuses a retained element that now reads as a different control", async () => {
+		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
+		const snapshot = extractAccessibilityTree(process.pid);
+		const button = snapshot.elements.find((element) => element.label === "Target Button");
+		expect(button).toBeDefined();
+
+		if (koffiMock.targetButton.attributes !== undefined) {
+			koffiMock.targetButton.attributes["AXRole"] = "AXStaticText";
+			koffiMock.targetButton.attributes["AXTitle"] = "Recycled Row";
+		}
+
+		expect(() => performActionByIndex(process.pid, button?.id ?? -1, "AXPress")).toThrow(/not the observed control/);
+		expect(koffiMock.observableState.pressCount).toBe(0);
+	});
+
+	it("still dispatches when the control is unchanged", async () => {
+		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
+		const snapshot = extractAccessibilityTree(process.pid);
+		const button = snapshot.elements.find((element) => element.label === "Target Button");
+		expect(button).toBeDefined();
+
+		performActionByIndex(process.pid, button?.id ?? -1, "AXPress");
+
 		expect(koffiMock.observableState.pressCount).toBe(1);
 	});
 });

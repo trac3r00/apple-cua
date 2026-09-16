@@ -85,7 +85,10 @@ export interface SetFieldUpdate {
 // biome-ignore lint/suspicious/noConfusingVoidType: a mutation may report how it dispatched input, or report nothing when its route is not known to it
 type Mutation = (targetPid: number, observation: InputObservation) => Promise<ActionDispatch | void>;
 type Validation = (observation: InputObservation) => void;
-type ObservedElementIdentity = ReadonlyMap<number, { readonly role: string; readonly label: string | null }>;
+type ObservedElementIdentity = ReadonlyMap<
+	number,
+	{ readonly role: string; readonly label: string | null; readonly y: number }
+>;
 
 /** A refusal to dispatch input: nothing was sent, and the caller must be told why. */
 class InputRefusal extends Error {
@@ -547,14 +550,21 @@ function observedElementIdentity(state: AppState): ObservedElementIdentity | und
 	if (state.treeOmitted === true) {
 		return undefined;
 	}
-	return new Map(state.elements.map((element) => [element.id, { role: element.role, label: element.label }] as const));
+	return new Map(
+		state.elements.map(
+			(element) =>
+				[element.id, { role: element.role, label: element.label, y: Math.round(element.frame.y) }] as const,
+		),
+	);
 }
 
 function sameElementIdentity(
-	observed: { readonly role: string; readonly label: string | null },
+	observed: { readonly role: string; readonly label: string | null; readonly y: number },
 	element: AXTreeElement,
 ): boolean {
-	return observed.role === element.role && observed.label === element.label;
+	return (
+		observed.role === element.role && observed.label === element.label && observed.y === Math.round(element.frame.y)
+	);
 }
 
 function skippedStep(elementIndex: number, requestedValue: string, reason: string): SetFieldStepReport {

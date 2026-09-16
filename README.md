@@ -273,7 +273,9 @@ reporting medians:
 The walk now runs in one round trip per element (attributes are read together), reads the
 parent window instead of the whole app when the target window is known, skips action reads
 for non-actionable roles, and enumerates running apps in-process rather than by spawning
-AppleScript. Main-display capture falls back to CoreGraphics when the ScreenCaptureKit path is
+AppleScript. Waiting for a settled UI is event-driven: an `AXObserver` on the app element
+replaces repeated 250-element poll walks, which cut a Finder observation from a 812 ms
+median to 537 ms over five warm runs on the same window. Main-display capture falls back to CoreGraphics when the ScreenCaptureKit path is
 unavailable; window capture falls back to `screencapture -l` plus `sips` when the native
 library or the window itself is not capturable.
 Observation is aimed at the app's focused window, resolved natively, so a multi-window app is

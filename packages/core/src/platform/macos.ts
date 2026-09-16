@@ -36,6 +36,7 @@ import {
 	typeIntoFocusedAXElement,
 } from "./macos-ffi/accessibility.js";
 import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
+import { createAxEventWaiter, waitForAxQuiet } from "./macos-ffi/ax-observer.js";
 import { type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
 import { createDisplaySleepAssertion } from "./macos-ffi/power.js";
 import {
@@ -62,6 +63,8 @@ const SCREENSHOT_MAX_BUFFER_BYTES = 100 * 1024 * 1024;
 const DEFAULT_APP_STATE_SETTLE_MILLISECONDS = 300;
 /** Interval between accessibility-tree polls while waiting for the UI to settle. */
 const UI_SETTLE_POLL_MILLISECONDS = 40;
+/** How long accessibility must stay silent before the event-driven settle call returns. */
+const AX_SETTLE_QUIET_MILLISECONDS = 60;
 /** Element budget for settle polls: enough to see the visible tree change, far cheaper to walk. */
 const SETTLE_SIGNATURE_MAX_ELEMENTS = 250;
 
@@ -405,6 +408,27 @@ export class MacOSHostComputer extends HostComputer {
 	 * technique: faster when the UI is already stable, more robust when it is still moving.
 	 */
 	private async waitForUiSettle(pid: number, settleMs: number, walkOptions: AccessibilityTreeOptions): Promise<void> {
+		if (settleMs <= 0) {
+			return;
+		}
+		// Accessibility notifications say when the app changes, so the common "nothing moved"
+		// case costs one quiet window instead of repeated signature walks, and changes past the
+		// signature cap are still noticed. Polling stays as the fallback when the observer is
+		// unavailable, and remains the source of truth whenever no notifications arrive.
+		const waiter = createAxEventWaiter(pid);
+		if (waiter !== null) {
+			try {
+				waitForAxQuiet(waiter, {
+					quietMs: AX_SETTLE_QUIET_MILLISECONDS,
+					deadlineMs: settleMs,
+					now: () => Date.now(),
+				});
+				return;
+			} finally {
+				waiter.release();
+			}
+		}
+
 		// Stability only needs the shape of the visible tree, so each poll walks a capped
 		// slice instead of the whole window; the observation that follows is a full walk.
 		const signatureOptions: AccessibilityTreeOptions = {

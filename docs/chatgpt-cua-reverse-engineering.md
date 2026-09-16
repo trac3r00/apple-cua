@@ -168,7 +168,7 @@ model is taught:
 | Technique | Where | Why it wins |
 |---|---|---|
 | JS-REPL batching, one `js` tool | §2 | Eliminates per-action model/tool round trips. |
-| Event-driven UI settle before capture | §5 (`needsUISettleBeforeSkyshot`, `onSettled`) | Faster than a fixed sleep when UI is already settled; more reliable than a fixed sleep when it is not. |
+| Event-driven UI settle before capture | §5 (`needsUISettleBeforeSkyshot`, `onSettled`) | Adopted: `AXObserver` quiet-period settle with a tree-polling fallback (`platform/macos-ffi/ax-observer.ts`). |
 | Skyshot groups screenshot+AX+revision | §5 | Helps relate observations; atomicity and stale-target guarantees remain unverified. |
 | AX diff as the default observation | §4, §6 | Token efficiency; model sees only what changed. |
 | AX-index actions, coordinate fallback | §4, §6 | Semantic targeting survives layout shifts; pixels only when needed. |
@@ -187,9 +187,11 @@ model is taught:
   Capture is still one-shot rather than a persistent per-window stream. Region requests crop
   the display image in CoreGraphics, so regions are PNG, and a display id can replace the
   main display; the dimensions the driver reports always match the encoded image.
-- `waitForUiSettle` polls AX trees at 40 ms intervals with a nominal 300 ms budget.
-  This is a local heuristic, not an event subscription or a recovered ChatGPT algorithm.
-  AX read cost can exceed the nominal budget; no comparative speed claim is established.
+- `waitForUiSettle` waits for accessibility to go quiet through an `AXObserver` subscribed to
+  the app element, so a settled UI costs one quiet window instead of repeated signature walks,
+  and changes past the 250-element signature cap are still noticed. It falls back to the
+  original 40 ms / 300 ms tree-polling heuristic when the observer or its registrations are
+  unavailable, and the deadline still bounds the wait either way.
 - `axChanges` contains element-level changes. `diffOnly` / `diff_only` returns an empty
   `elements` array after a prior snapshot; first capture is full. This is opt-in, and the
   screenshot is still captured. Changes in the tree are observations, not proof of success.

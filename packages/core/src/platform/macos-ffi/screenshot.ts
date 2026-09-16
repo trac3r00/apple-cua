@@ -2,7 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { KoffiFunc } from "koffi";
 import type { Rect } from "../../types/index.js";
-import { type CFTypeRef, cfRelease, withCFString } from "./corefoundation.js";
+import { type CFTypeRef, cfRelease, toCFString, withCFString } from "./corefoundation.js";
 import { koffi } from "./koffi.js";
 import { captureMainDisplayPngViaSck, isSckitAvailable } from "./sckit.js";
 
@@ -33,8 +33,11 @@ const imageIO = koffi.load("/System/Library/Frameworks/ImageIO.framework/ImageIO
 const coreFoundation = koffi.load("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation");
 
 const PNG_UNIFORM_TYPE = "public.png";
+const JPEG_UNIFORM_TYPE = "public.jpeg";
 const MAX_PIXEL_SIZE_KEY = "kCGImageDestinationImageMaxPixelSize";
+const LOSSY_QUALITY_KEY = "kCGImageDestinationLossyCompressionQuality";
 const CF_NUMBER_INT_TYPE = 9;
+const CF_NUMBER_DOUBLE_TYPE = 13;
 const SCK_WINDOW_FORMAT_PNG = 0;
 const SCK_WINDOW_FORMAT_JPEG = 1;
 const SCK_WINDOW_DEFAULT_QUALITY = 100;
@@ -280,14 +283,24 @@ export function computeDisplayCrop(
 	return { x, y, width: right - x, height: bottom - y };
 }
 
-export function captureDisplayPng(displayId: number, targetWidth: number, targetHeight: number): CapturedScreenshot {
+export type CapturedImageFormat = "png" | "jpeg";
+
+export function captureDisplayImage(
+	displayId: number,
+	targetWidth: number,
+	targetHeight: number,
+	format: CapturedImageFormat,
+	quality: number,
+): CapturedScreenshot {
 	if (targetWidth <= 0 || targetHeight <= 0) {
-		throw new Error(`captureDisplayPng requires positive dimensions, got ${targetWidth}x${targetHeight}`);
+		throw new Error(`captureDisplayImage requires positive dimensions, got ${targetWidth}x${targetHeight}`);
 	}
 
 	const maxPixelSize = Math.max(Math.round(targetWidth), Math.round(targetHeight));
 
-	if (displayId === CGMainDisplayID() && isSckitAvailable()) {
+	// The ScreenCaptureKit helper encodes PNG only, so a JPEG request takes the CoreGraphics
+	// path below. Both paths return the dimensions they actually produced.
+	if (format === "png" && displayId === CGMainDisplayID() && isSckitAvailable()) {
 		try {
 			const captured = captureMainDisplayPngViaSck(targetWidth, targetHeight);
 			if (captured !== null) {
@@ -300,10 +313,9 @@ export function captureDisplayPng(displayId: number, targetWidth: number, target
 	try {
 		const sourceWidth = CGImageGetWidth(sourceImage);
 		const sourceHeight = CGImageGetHeight(sourceImage);
-		const pngBytes = encodeImageAsPng(sourceImage, maxPixelSize);
 		const outputDimensions = computeAspectPreservedDimensions(sourceWidth, sourceHeight, maxPixelSize);
 		return {
-			data: pngBytes,
+			data: encodeImage(sourceImage, maxPixelSize, format, quality),
 			width: outputDimensions.width,
 			height: outputDimensions.height,
 		};
@@ -313,20 +325,22 @@ export function captureDisplayPng(displayId: number, targetWidth: number, target
 }
 
 export function captureMainDisplayPng(targetWidth: number, targetHeight: number): CapturedScreenshot {
-	return captureDisplayPng(CGMainDisplayID(), targetWidth, targetHeight);
+	return captureDisplayImage(CGMainDisplayID(), targetWidth, targetHeight, "png", 100);
 }
 
 /** Zooms a region of one display. CoreGraphics has no region-capture call, so the full display
  * image is taken and cropped in memory before encoding. */
-export function captureDisplayRegionPng(
+export function captureDisplayRegionImage(
 	displayId: number,
 	region: Rect,
 	targetWidth: number,
 	targetHeight: number,
+	format: CapturedImageFormat,
+	quality: number,
 ): CapturedScreenshot {
 	const maxPixelSize = Math.max(Math.round(targetWidth), Math.round(targetHeight));
 	if (maxPixelSize <= 0) {
-		throw new Error(`captureDisplayRegionPng requires positive dimensions, got ${targetWidth}x${targetHeight}`);
+		throw new Error(`captureDisplayRegionImage requires positive dimensions, got ${targetWidth}x${targetHeight}`);
 	}
 
 	const sourceImage = openDisplayImage(displayId);
@@ -345,7 +359,7 @@ export function captureDisplayRegionPng(
 		try {
 			const outputDimensions = computeAspectPreservedDimensions(crop.width, crop.height, maxPixelSize);
 			return {
-				data: encodeImageAsPng(cropped, maxPixelSize),
+				data: encodeImage(cropped, maxPixelSize, format, quality),
 				width: outputDimensions.width,
 				height: outputDimensions.height,
 			};
@@ -393,67 +407,85 @@ function computeAspectPreservedDimensions(
 	};
 }
 
-function encodeImageAsPng(image: CGImageRef, maxPixelSize: number): Buffer {
+function createCFNumberInt32(value: number): CFNumberRef {
+	const valueBytes = Buffer.alloc(4);
+	valueBytes.writeInt32LE(value, 0);
+	const reference = CFNumberCreate(null, CF_NUMBER_INT_TYPE, valueBytes);
+	if (reference === null) {
+		throw new Error("CFNumberCreate returned null for an integer property");
+	}
+	return reference;
+}
+
+function createCFNumberDouble(value: number): CFNumberRef {
+	const valueBytes = Buffer.alloc(8);
+	valueBytes.writeDoubleLE(value, 0);
+	const reference = CFNumberCreate(null, CF_NUMBER_DOUBLE_TYPE, valueBytes);
+	if (reference === null) {
+		throw new Error("CFNumberCreate returned null for a double property");
+	}
+	return reference;
+}
+
+function encodeImage(image: CGImageRef, maxPixelSize: number, format: CapturedImageFormat, quality: number): Buffer {
 	// ImageIO's max-pixel-size property resizes to the requested edge in both directions, so a
 	// small crop would be upscaled into invented pixels and a dimension mismatch. Clamp it to
 	// the source edge, which keeps the metadata this module reports equal to the real image.
 	const longestSourceEdge = Math.max(CGImageGetWidth(image), CGImageGetHeight(image));
 	const effectiveMaxPixelSize = Math.max(1, Math.min(Math.round(maxPixelSize), longestSourceEdge));
-	return withCFString(PNG_UNIFORM_TYPE, (pngType) =>
+
+	return withCFString(format === "jpeg" ? JPEG_UNIFORM_TYPE : PNG_UNIFORM_TYPE, (imageType) =>
 		withCFString(MAX_PIXEL_SIZE_KEY, (maxPixelSizeKey) => {
-			const valueBytes = Buffer.alloc(4);
-			valueBytes.writeInt32LE(effectiveMaxPixelSize, 0);
-
-			const maxPixelSizeValue = CFNumberCreate(null, CF_NUMBER_INT_TYPE, valueBytes);
-			if (maxPixelSizeValue === null) {
-				throw new Error("CFNumberCreate returned null for maxPixelSize");
+			const properties = CFDictionaryCreateMutable(null, 0, null, null);
+			if (properties === null) {
+				throw new Error("CFDictionaryCreateMutable returned null");
 			}
-
+			// The dictionary is created without retain callbacks, so every value has to outlive
+			// the encode call below instead of being released once it is set.
+			const propertyValues: CFTypeRef[] = [];
 			try {
-				const properties = CFDictionaryCreateMutable(null, 0, null, null);
-				if (properties === null) {
-					throw new Error("CFDictionaryCreateMutable returned null");
+				const maxPixelSizeValue = createCFNumberInt32(effectiveMaxPixelSize);
+				propertyValues.push(maxPixelSizeValue);
+				CFDictionarySetValue(properties, maxPixelSizeKey, maxPixelSizeValue);
+				if (format === "jpeg") {
+					const qualityKey = toCFString(LOSSY_QUALITY_KEY);
+					const qualityValue = createCFNumberDouble(Math.min(1, Math.max(0, quality / 100)));
+					propertyValues.push(qualityKey, qualityValue);
+					CFDictionarySetValue(properties, qualityKey, qualityValue);
 				}
 
+				const cfData = CFDataCreateMutable(null, 0);
+				if (cfData === null) {
+					throw new Error("CFDataCreateMutable returned null");
+				}
 				try {
-					CFDictionarySetValue(properties, maxPixelSizeKey, maxPixelSizeValue);
-
-					const cfData = CFDataCreateMutable(null, 0);
-					if (cfData === null) {
-						throw new Error("CFDataCreateMutable returned null");
+					const destination = CGImageDestinationCreateWithData(cfData, imageType, 1, null);
+					if (destination === null) {
+						throw new Error("CGImageDestinationCreateWithData returned null");
 					}
-
 					try {
-						const destination = CGImageDestinationCreateWithData(cfData, pngType, 1, null);
-						if (destination === null) {
-							throw new Error("CGImageDestinationCreateWithData returned null");
+						CGImageDestinationAddImage(destination, image, properties);
+						if (!CGImageDestinationFinalize(destination)) {
+							throw new Error("CGImageDestinationFinalize returned false");
 						}
-
-						try {
-							CGImageDestinationAddImage(destination, image, properties);
-							if (!CGImageDestinationFinalize(destination)) {
-								throw new Error("CGImageDestinationFinalize returned false");
-							}
-
-							const length = CFDataGetLength(cfData);
-							if (length <= 0) {
-								throw new Error(`PNG encode produced no bytes (length=${length})`);
-							}
-
-							const buffer = Buffer.alloc(length);
-							CFDataGetBytes(cfData, { location: 0, length }, buffer);
-							return buffer;
-						} finally {
-							cfRelease(destination);
+						const length = CFDataGetLength(cfData);
+						if (length <= 0) {
+							throw new Error(`Image encode produced no bytes (length=${length})`);
 						}
+						const buffer = Buffer.alloc(length);
+						CFDataGetBytes(cfData, { location: 0, length }, buffer);
+						return buffer;
 					} finally {
-						cfRelease(cfData);
+						cfRelease(destination);
 					}
 				} finally {
-					cfRelease(properties);
+					cfRelease(cfData);
 				}
 			} finally {
-				cfRelease(maxPixelSizeValue);
+				for (const value of propertyValues) {
+					cfRelease(value);
+				}
+				cfRelease(properties);
 			}
 		}),
 	);

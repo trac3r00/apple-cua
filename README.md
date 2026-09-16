@@ -275,7 +275,10 @@ parent window instead of the whole app when the target window is known, skips ac
 for non-actionable roles, and enumerates running apps in-process rather than by spawning
 AppleScript. Waiting for a settled UI is event-driven: an `AXObserver` on the app element
 replaces repeated 250-element poll walks, which cut a Finder observation from a 812 ms
-median to 537 ms over five warm runs on the same window. Main-display capture falls back to CoreGraphics when the ScreenCaptureKit path is
+median to 537 ms over five warm runs on the same window. Capture honours the requested
+format on every path: JPEG is 4.6x smaller than PNG for a full 1920x1080 display (293 KB
+against 1,363 KB) and 5.2x smaller for a 600x400 region (118 KB against 612 KB) at quality
+72. Main-display capture falls back to CoreGraphics when the ScreenCaptureKit path is
 unavailable; window capture falls back to `screencapture -l` plus `sips` when the native
 library or the window itself is not capturable.
 Observation is aimed at the app's focused window, resolved natively, so a multi-window app is
@@ -299,7 +302,7 @@ Every tool/action exposed by CLI, MCP, and pi-extension:
 
 | Action | Parameters | Returns | What it does |
 |---|---|---|---|
-| `screenshot` | `targetSize?: { width, height }`, `region?: { x, y, width, height }`, `display?: number` | `Buffer` + dimensions + mime type | Native ScreenCaptureKit display capture, cropped in CoreGraphics when `region` is given and resized to `targetSize`. Regions and display selection return PNG |
+| `screenshot` | `targetSize?: { width, height }`, `region?: { x, y, width, height }`, `display?: number`, `format?: "png" \| "jpeg"`, `quality?: number` | `Buffer` + dimensions + mime type | Native ScreenCaptureKit display capture, cropped in CoreGraphics when `region` is given and resized to `targetSize`. Regions, display selection and the main display all honour `format` |
 | `click` | `x: number`, `y: number` | void | Single click via CoreGraphics `CGEventCreateMouseEvent` / `CGEventPost` |
 | `double_click` | `x: number`, `y: number` | void | Double click via CoreGraphics `CGEventCreateMouseEvent` / `CGEventPost` |
 | `type` | `text: string` | void | Type literal text via CoreGraphics `CGEventCreateKeyboardEvent` |

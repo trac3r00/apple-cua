@@ -25,7 +25,7 @@ import type {
 import { type RunningAppInfo, collectAppUsage, getRunningMacOSApps } from "./app-list.js";
 import { execFileStdout, execFileStdoutBuffer } from "./exec-util.js";
 import { HostComputer, type HostComputerOptions } from "./host.js";
-import { parseImageDimensions, parsePngDimensions, sniffImageMimeType } from "./image-format.js";
+import { parseImageDimensions, sniffImageMimeType } from "./image-format.js";
 import {
 	extractAccessibilityTree,
 	focusedWindowIdForPid,
@@ -40,8 +40,8 @@ import { createAxEventWaiter, waitForAxQuiet } from "./macos-ffi/ax-observer.js"
 import { type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
 import { createDisplaySleepAssertion } from "./macos-ffi/power.js";
 import {
-	captureDisplayPng,
-	captureDisplayRegionPng,
+	captureDisplayImage,
+	captureDisplayRegionImage,
 	captureWindowImage,
 	getMainDisplayId,
 	getMainDisplayLogicalSize,
@@ -130,11 +130,13 @@ export class MacOSHostComputer extends HostComputer {
 			if (windowId !== undefined) {
 				throw new Error("region capture cannot be combined with a window target; capture the window instead");
 			}
-			const region = captureDisplayRegionPng(
+			const region = captureDisplayRegionImage(
 				this.displayId ?? getMainDisplayId(),
 				options.region,
 				size.width,
 				size.height,
+				options.format ?? "png",
+				options.quality ?? 72,
 			);
 			return {
 				data: region.data,
@@ -698,8 +700,14 @@ export async function captureMacOSScreenshot(
 	}
 
 	if (windowId === undefined) {
-		const captured = captureDisplayPng(displayId ?? getMainDisplayId(), targetSize.width, targetSize.height);
-		parsePngDimensions(captured.data);
+		const captured = captureDisplayImage(
+			displayId ?? getMainDisplayId(),
+			targetSize.width,
+			targetSize.height,
+			format,
+			quality,
+		);
+		parseImageDimensions(captured.data);
 		return captured.data;
 	}
 

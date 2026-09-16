@@ -185,8 +185,8 @@ model is taught:
   main-display capture falls back to `CGDisplayCreateImage` when that path is unavailable.
   A window the native path cannot capture falls back to `screencapture -l` plus `sips`.
   Capture is still one-shot rather than a persistent per-window stream. Region requests crop
-  the display image in CoreGraphics, so regions are PNG, and a display id can replace the
-  main display; the dimensions the driver reports always match the encoded image.
+  the display image in CoreGraphics and a display id can replace the main display; both honour
+  the requested encoding, and the dimensions the driver reports always match the encoded image.
 - `waitForUiSettle` waits for accessibility to go quiet through an `AXObserver` subscribed to
   the app element, so a settled UI costs one quiet window instead of repeated signature walks,
   and changes past the 250-element signature cap are still noticed. It falls back to the

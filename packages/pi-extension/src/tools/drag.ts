@@ -8,6 +8,7 @@ import {
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
+import type { AppObservationKeys } from "./observations.js";
 import { observedActionCompleteResult } from "./result.js";
 
 export const DragParams = Type.Object(
@@ -23,7 +24,7 @@ export const DragParams = Type.Object(
 
 export type DragInput = Static<typeof DragParams>;
 
-export function createDragTool(computer: ComputerInterface): ToolDefinition {
+export function createDragTool(computer: ComputerInterface, observations: AppObservationKeys): ToolDefinition {
 	return defineTool({
 		name: "drag",
 		label: "Computer Use: drag",
@@ -31,6 +32,7 @@ export function createDragTool(computer: ComputerInterface): ToolDefinition {
 		parameters: DragParams,
 		async execute(_toolCallId, params) {
 			const targetPid = await resolveAppPid(computer, params.app);
+			observations.assertCurrent(computer, targetPid, params.app);
 			const from = await resolveScreenPoint(computer, targetPid, { x: params.from_x, y: params.from_y });
 			const to = await resolveScreenPoint(computer, targetPid, { x: params.to_x, y: params.to_y });
 			const state = await observeAction(computer, targetPid, async () => {

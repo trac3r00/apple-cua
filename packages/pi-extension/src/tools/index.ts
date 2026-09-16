@@ -27,7 +27,7 @@ export function buildAllTools(options: ToolRegistrationOptions): ReadonlyArray<T
 		createPerformSecondaryActionTool(computer, observations),
 		createSetValueTool(computer, observations),
 		createSelectTextTool(computer, observations),
-		createDragTool(computer),
+		createDragTool(computer, observations),
 		createScrollTool(computer),
 		createTypeTextTool(computer),
 		createPressKeysTool(computer),

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ExtensionContext } from "../pi/index.js";
 import { createDragTool } from "./drag.js";
+import { AppObservationKeys } from "./observations.js";
 
 function createComputer(): ComputerInterface {
 	return {
@@ -61,7 +62,7 @@ function createComputer(): ComputerInterface {
 describe("#given drag tool factory #when built #then tool name is Codex-compatible", () => {
 	it("returns drag", () => {
 		const computer = createComputer();
-		const tool = createDragTool(computer);
+		const tool = createDragTool(computer, testObservations());
 
 		expect(tool.name).toBe("drag");
 	});
@@ -70,7 +71,7 @@ describe("#given drag tool factory #when built #then tool name is Codex-compatib
 describe("#given drag tool #when executed #then computer drag receives endpoints", () => {
 	it("drags from start to end", async () => {
 		const computer = createComputer();
-		const tool = createDragTool(computer);
+		const tool = createDragTool(computer, testObservations());
 
 		await tool.execute(
 			"tool-call",
@@ -92,7 +93,7 @@ describe("#given drag tool #when executed #then computer drag receives endpoints
 			screenshotWidth: 500,
 			screenshotHeight: 400,
 		});
-		const tool = createDragTool(computer);
+		const tool = createDragTool(computer, testObservations());
 
 		await tool.execute(
 			"tool-call",
@@ -108,7 +109,7 @@ describe("#given drag tool #when executed #then computer drag receives endpoints
 	it("passes both endpoints through unchanged when no screenshot viewport is known", async () => {
 		const computer = createComputer();
 		vi.spyOn(computer, "getScreenshotViewport").mockResolvedValue(undefined);
-		const tool = createDragTool(computer);
+		const tool = createDragTool(computer, testObservations());
 
 		await tool.execute(
 			"tool-call",
@@ -121,3 +122,9 @@ describe("#given drag tool #when executed #then computer drag receives endpoints
 		expect(computer.drag).toHaveBeenCalledWith({ from: { x: 11, y: 22 }, to: { x: 33, y: 44 } });
 	});
 });
+
+function testObservations(): AppObservationKeys {
+	const observations = new AppObservationKeys();
+	observations.record(1234, "0:test");
+	return observations;
+}

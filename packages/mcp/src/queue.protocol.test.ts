@@ -151,7 +151,7 @@ describe("per-app lanes #given two apps #when both are observed #then each keeps
 		});
 
 		expect(stale.isError).toBe(true);
-		expect(jsonPayload(stale).reason).toBe("stale-observation-token");
+		expect(jsonPayload(stale)["reason"]).toBe("stale-observation-token");
 		const current = await harness.client.callTool({
 			name: "set_value",
 			arguments: { app: "Finder", observation_token: second, element_index: "9", value: "safe" },

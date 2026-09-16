@@ -123,3 +123,61 @@ describe("FIFO token queue #given concurrent protocol calls #when work overlaps 
 function inputEffects(effects: readonly Effect[]): readonly Effect[] {
 	return effects.filter((effect) => effect.kind !== "close");
 }
+
+describe("per-app lanes #given two apps #when both are observed #then each keeps its own live token", () => {
+	it("accepts a mutation for one app after another app was observed", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
+		const finderToken = await observe(harness);
+		await observe(harness, "Other");
+
+		await harness.client.callTool({
+			name: "set_value",
+			arguments: { app: "Finder", observation_token: finderToken, element_index: "9", value: "safe" },
+		});
+
+		expect(inputEffects(harness.computer.effects)).toEqual([{ kind: "setValue", pid: 1234, id: 9, value: "safe" }]);
+	});
+
+	it("still invalidates an app's own previous token when that app is observed again", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
+		const first = await observe(harness);
+		const second = await observe(harness);
+
+		const stale = await harness.client.callTool({
+			name: "set_value",
+			arguments: { app: "Finder", observation_token: first, element_index: "9", value: "safe" },
+		});
+
+		expect(stale.isError).toBe(true);
+		expect(jsonPayload(stale).reason).toBe("stale-observation-token");
+		const current = await harness.client.callTool({
+			name: "set_value",
+			arguments: { app: "Finder", observation_token: second, element_index: "9", value: "safe" },
+		});
+		expect(current.isError).toBeFalsy();
+	});
+
+	it("lets another app's observation finish while an action is still in flight", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
+		const token = await observe(harness);
+		const entered = new Deferred<void>();
+		const gate = new Deferred<PreflightResult>();
+		harness.computer.preflightEntered = entered;
+		harness.computer.preflightGate = gate;
+
+		const action = harness.client.callTool({
+			name: "set_value",
+			arguments: { app: "Finder", observation_token: token, element_index: "9", value: "safe" },
+		});
+		await entered.promise;
+		await harness.client.callTool({ name: "get_app_state", arguments: { app: "Other" } });
+
+		expect(inputEffects(harness.computer.effects)).toEqual([]);
+		gate.resolve({ ok: true });
+		await action;
+		expect(inputEffects(harness.computer.effects)).toEqual([{ kind: "setValue", pid: 1234, id: 9, value: "safe" }]);
+	});
+});

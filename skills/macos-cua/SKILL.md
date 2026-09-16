@@ -112,7 +112,10 @@ when the needed target cannot be established.
 - Do not bypass a denied/stale/paused MCP action using the raw CLI, AppleScript, shell input
   synthesis, another computer tool or another MCP connection. Those would evade the guard.
 - Keep one active controller for the desktop. Do not drive this Mac from parallel agents or
-  separate MCP servers. The server queue does not serialize other processes or human input.
+  separate MCP servers. Within one server, work is queued per app: each app holds one live
+  observation token, and observing one app does not invalidate another app's token, so
+  independent apps can be observed and driven in parallel. The queue does not serialize other
+  processes or human input.
 
 ## Confirmation belongs to the user, not a token
 

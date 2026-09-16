@@ -94,7 +94,7 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	windowIdAfterAction: number | undefined;
 	windowBounds = { x: 300, y: 150, width: 1000, height: 800 };
 	private generation = 0;
-	private observation: InputObservation | undefined;
+	private readonly observations = new Map<number, InputObservation>();
 	private actionDispatched = false;
 
 	async getAppState(targetPid = 1234, options?: AppStateOptions): Promise<AppState> {
@@ -107,7 +107,7 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 		const error = this.stateError;
 		if (error !== undefined) {
 			this.stateError = undefined;
-			this.observation = undefined;
+			this.observations.delete(targetPid);
 			throw error;
 		}
 		const app = targetPid === 5678 ? "Other" : "Finder";
@@ -141,7 +141,7 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 				: {}),
 		};
 		this.generation += 1;
-		this.observation = {
+		this.observations.set(targetPid, {
 			generation: this.generation,
 			pid: targetPid,
 			bundleId,
@@ -149,14 +149,14 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 			windowBounds: { ...this.windowBounds },
 			screenshotViewport: { width: 500, height: 400, bounds: { ...this.windowBounds } },
 			observedElementIds: new Set(elements.map((element) => element.id)),
-		};
+		});
 		return state;
 	}
 
 	assertObservationCurrent(): void {}
 
 	getInputObservation(targetPid: number): InputObservation | undefined {
-		return this.observation?.pid === targetPid ? this.observation : undefined;
+		return this.observations.get(targetPid);
 	}
 
 	async preflightInput(expected: InputObservation): Promise<PreflightResult> {

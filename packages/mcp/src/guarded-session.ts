@@ -100,15 +100,17 @@ class InputRefusal extends Error {
 	}
 }
 
+interface LiveToken {
+	readonly token: string;
+	readonly observation: InputObservation;
+	readonly elements: ObservedElementIdentity | undefined;
+}
+
 export class GuardedSession {
-	private active:
-		| {
-				readonly token: string;
-				readonly observation: InputObservation;
-				readonly elements: ObservedElementIdentity | undefined;
-		  }
-		| undefined;
-	private tail: Promise<void> = Promise.resolve();
+	private readonly tokens = new Map<string, LiveToken>();
+	private readonly tokenByPid = new Map<number, string>();
+	private readonly tails = new Map<number, Promise<void>>();
+	private globalTail: Promise<void> = Promise.resolve();
 	private closed = false;
 	private closePromise: Promise<void> | undefined;
 
@@ -118,13 +120,13 @@ export class GuardedSession {
 	) {}
 
 	listApps(): Promise<ToolResult> {
-		return this.enqueue(async () => textResult(JSON.stringify(await this.computer.listApps(), null, 2)));
+		return this.enqueue(undefined, async () => textResult(JSON.stringify(await this.computer.listApps(), null, 2)));
 	}
 
-	observe(request: ObserveRequest): Promise<ToolResult> {
-		return this.enqueue(async () => {
-			this.active = undefined;
-			const targetPid = await resolveAppPid(this.computer, request.app);
+	async observe(request: ObserveRequest): Promise<ToolResult> {
+		const targetPid = await resolveAppPid(this.computer, request.app);
+		return this.enqueue(targetPid, async () => {
+			this.clearTokenFor(targetPid);
 			const state = await this.computer.getAppState(targetPid, {
 				...(request.diffOnly ? STRICT_DIFF_STATE_OPTIONS : STRICT_STATE_OPTIONS),
 				...(request.includeScreenshot === undefined ? {} : { includeScreenshot: request.includeScreenshot }),
@@ -149,7 +151,7 @@ export class GuardedSession {
 		action: Mutation,
 		options: MutationOptions = {},
 	): Promise<ToolResult> {
-		return this.enqueue(async () => {
+		return this.enqueue(this.laneForRequestedToken(token), async () => {
 			let expected: Awaited<ReturnType<typeof this.beginMutation>>;
 			try {
 				expected = await this.beginMutation(token, app, validate);
@@ -173,7 +175,7 @@ export class GuardedSession {
 					dispatch === undefined ? undefined : dispatch,
 				);
 			} catch (error: unknown) {
-				this.active = undefined;
+				this.clearTokenFor(expected.pid);
 				return postActionErrorResult(error);
 			}
 		});
@@ -185,7 +187,7 @@ export class GuardedSession {
 		updates: readonly SetFieldUpdate[],
 		options: MutationOptions = {},
 	): Promise<ToolResult> {
-		return this.enqueue(async () => {
+		return this.enqueue(this.laneForRequestedToken(token), async () => {
 			let expected: Awaited<ReturnType<typeof this.beginMutation>>;
 			try {
 				expected = await this.beginMutation(token, app, () => undefined);
@@ -263,7 +265,7 @@ export class GuardedSession {
 				const outcome = await this.readOutcome(expected.pid, expected.observation, options);
 				return observedSetFieldsResult(outcome.state, report, outcome.contextUnchanged, outcome.nextToken);
 			} catch (error: unknown) {
-				this.active = undefined;
+				this.clearTokenFor(expected.pid);
 				return postActionErrorResult(error, report);
 			}
 		});
@@ -271,17 +273,20 @@ export class GuardedSession {
 
 	invalidate(): void {
 		this.closed = true;
-		this.active = undefined;
+		this.tokens.clear();
+		this.tokenByPid.clear();
 	}
 
 	async close(): Promise<void> {
 		this.invalidate();
-		this.closePromise ??= this.tail.then(async () => this.computer.close());
+		this.closePromise ??= Promise.all([this.globalTail, ...this.tails.values()]).then(async () =>
+			this.computer.close(),
+		);
 		await this.closePromise;
 	}
 
 	verify(token: string, app: string, request: VerifyRequest): Promise<ToolResult> {
-		return this.enqueue(async () => {
+		return this.enqueue(this.laneForRequestedToken(token), async () => {
 			const active = this.consume(token);
 			const targetPid = await resolveAppPid(this.computer, app);
 			if (targetPid !== active.observation.pid) {
@@ -474,20 +479,38 @@ export class GuardedSession {
 
 	private issue(observation: InputObservation, elements: ObservedElementIdentity | undefined): string {
 		const token = randomUUID();
-		this.active = { token, observation, elements };
+		const previous = this.tokenByPid.get(observation.pid);
+		if (previous !== undefined) {
+			this.tokens.delete(previous);
+		}
+		this.tokens.set(token, { token, observation, elements });
+		this.tokenByPid.set(observation.pid, token);
 		return token;
 	}
 
-	private consume(token: string): {
-		readonly observation: InputObservation;
-		readonly elements: ObservedElementIdentity | undefined;
-	} {
-		const active = this.active;
-		if (active === undefined || active.token !== token) {
+	/** One live token per app: a new observation of that app invalidates its previous token only. */
+	private clearTokenFor(pid: number): void {
+		const token = this.tokenByPid.get(pid);
+		if (token !== undefined) {
+			this.tokens.delete(token);
+			this.tokenByPid.delete(pid);
+		}
+	}
+
+	private laneForRequestedToken(token: string): number | undefined {
+		return this.tokens.get(token)?.observation.pid;
+	}
+
+	private consume(token: string): LiveToken {
+		const live = this.tokens.get(token);
+		if (live === undefined) {
 			throw new Error("observation token is missing, stale, or already consumed");
 		}
-		this.active = undefined;
-		return { observation: active.observation, elements: active.elements };
+		this.tokens.delete(token);
+		if (this.tokenByPid.get(live.observation.pid) === token) {
+			this.tokenByPid.delete(live.observation.pid);
+		}
+		return live;
 	}
 
 	private assertOpen(): void {
@@ -496,15 +519,21 @@ export class GuardedSession {
 		}
 	}
 
-	private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-		const result = this.tail.then(async () => {
+	private enqueue<T>(lane: number | undefined, operation: () => Promise<T>): Promise<T> {
+		const previous = lane === undefined ? this.globalTail : (this.tails.get(lane) ?? Promise.resolve());
+		const result = previous.then(async () => {
 			this.assertOpen();
 			return await operation();
 		});
-		this.tail = result.then(
+		const settled = result.then(
 			() => undefined,
 			() => undefined,
 		);
+		if (lane === undefined) {
+			this.globalTail = settled;
+		} else {
+			this.tails.set(lane, settled);
+		}
 		return result;
 	}
 }

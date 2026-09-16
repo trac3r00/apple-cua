@@ -399,3 +399,61 @@ describe("#given MacOSInputController target routing", () => {
 		controller.close();
 	});
 });
+
+describe("#given background delivery #when a targeted pointer action runs #then the user focus and cursor are left alone", () => {
+	it("posts to the window without leasing focus or moving the cursor", async () => {
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
+		]);
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(1234, undefined, undefined, undefined, "background");
+
+		await controller.click({ x: 50, y: 70 });
+
+		const targetWindow = { id: 99, bounds: { x: 10, y: 20, width: 300, height: 200 } };
+		expect(skyLightMock.beginFocusWithoutRaise).not.toHaveBeenCalled();
+		expect(skyLightMock.restoreFrontProcessNoWindows).not.toHaveBeenCalled();
+		expect(coreGraphicsMock.warpCursorPosition).not.toHaveBeenCalled();
+		expect(coreGraphicsMock.postMouseEvent).toHaveBeenCalledWith(
+			expect.objectContaining({ targetPid: 1234, targetWindow }),
+		);
+		controller.close();
+	});
+
+	it("posts a drag to the window without leasing focus", async () => {
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
+		]);
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(1234, undefined, undefined, undefined, "background");
+
+		await controller.drag({ from: { x: 40, y: 60 }, to: { x: 140, y: 160 } });
+
+		expect(skyLightMock.beginFocusWithoutRaise).not.toHaveBeenCalled();
+		expect(coreGraphicsMock.warpCursorPosition).not.toHaveBeenCalled();
+		controller.close();
+	});
+});
+
+describe("#given background delivery #when an action would need the foreground #then it is refused", () => {
+	it("refuses a click with no target app instead of taking over the cursor", async () => {
+		const { MacOSInputController } = await import("./macos-input.js");
+		coreGraphicsMock.postMouseEvent.mockClear();
+		const controller = new MacOSInputController(undefined, undefined, undefined, undefined, "background");
+
+		await expect(controller.click({ x: 500, y: 300 })).rejects.toThrow(/background delivery cannot click/);
+
+		expect(coreGraphicsMock.postMouseEvent).not.toHaveBeenCalled();
+		controller.close();
+	});
+
+	it("refuses a drag with no target app", async () => {
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(undefined, undefined, undefined, undefined, "background");
+
+		await expect(controller.drag({ from: { x: 1, y: 2 }, to: { x: 3, y: 4 } })).rejects.toThrow(
+			/background delivery cannot drag/,
+		);
+		controller.close();
+	});
+});

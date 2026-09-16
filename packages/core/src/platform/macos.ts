@@ -51,6 +51,7 @@ import {
 import { selectTextByIndex } from "./macos-ffi/select-text.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
 import { MacOSInputController } from "./macos-input.js";
+import type { InputDelivery } from "./macos-input.js";
 import { currentOnscreenWindowIds } from "./macos-input.js";
 import { openWindowsForTargeting } from "./macos-open-windows.js";
 import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
@@ -75,6 +76,13 @@ export interface MacOSHostComputerOptions extends HostComputerOptions {
 	overlay?: PointerOverlay;
 	appApproval?: AppApprovalStore;
 	urlBlocklist?: readonly string[];
+	/**
+	 * "attended" keeps the current behaviour, where a targeted click may briefly take focus and
+	 * put it back. "background" refuses every route that would change the frontmost app or move
+	 * the cursor, so a run can proceed while the person keeps using the machine; actions that
+	 * need foreground delivery are refused instead of quietly taking over.
+	 */
+	delivery?: InputDelivery;
 }
 
 export class MacOSHostComputer extends HostComputer {
@@ -110,6 +118,7 @@ export class MacOSHostComputer extends HostComputer {
 			this.overlay,
 			undefined,
 			createDisplaySleepAssertion(),
+			options.delivery ?? "attended",
 		);
 		this.displayId = options.display;
 	}

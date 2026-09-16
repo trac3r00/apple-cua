@@ -283,6 +283,17 @@ unavailable; window capture falls back to `screencapture -l` plus `sips` when th
 library or the window itself is not capturable. Driver-level numbers, the conditions they were
 measured under, and the dimensions this driver does *not* measure are recorded in
 [`driver-scorecard.md`](./docs/driver-scorecard.md).
+
+## Working while the agent works
+
+Pass `--background` (CLI) or set `MACOS_CUA_DELIVERY=background` (MCP server) to keep a run out
+of your way: input goes to the target app's own window, so the frontmost app does not change and
+the cursor does not move. Anything that would need the foreground — a global click with no
+target app, or a route that has to lease focus — is refused with the action named instead of
+quietly taking over the machine. Verified on a live session: a background app was scrolled while
+the frontmost app and cursor stayed unchanged. Attended delivery is still the default, because a
+few apps only accept pointer input while they are frontmost.
+
 Observation is aimed at the app's focused window, resolved natively, so a multi-window app is
 not scoped by whatever order window enumeration returns; the chosen window id, its title and
 any alternatives travel back on the state, and input is validated against that same id.

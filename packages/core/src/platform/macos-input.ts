@@ -44,6 +44,8 @@ export function setOnscreenWindowIdsSourceForTesting(source: () => readonly numb
 	onscreenWindowIdsSource = source;
 }
 
+export type InputDelivery = "attended" | "background";
+
 // Inter-character delay for typeText. Posting keystrokes back-to-back outruns the
 // target app's event loop and drops characters; ~12ms lets each be consumed.
 const TYPE_CHARACTER_DELAY_MS = 12;
@@ -60,13 +62,16 @@ export class MacOSInputController {
 	private readonly postMouse: MousePost = async (kind, position, button, clickState, targetWindow) => {
 		postMouseEvent({ kind, position, button, clickState, targetPid: this.targetPid, targetWindow });
 	};
+	private readonly delivery: InputDelivery;
 
 	constructor(
 		targetPid?: number,
 		overlay: PointerOverlay = NOOP_POINTER_OVERLAY,
 		isLocked: () => boolean = isScreenLocked,
 		displaySleep: DisplaySleepAssertion = NOOP_DISPLAY_SLEEP,
+		delivery: InputDelivery = "attended",
 	) {
+		this.delivery = delivery;
 		this.overlay = overlay;
 		this.isLocked = isLocked;
 		this.displaySleep = displaySleep;
@@ -77,6 +82,27 @@ export class MacOSInputController {
 	private beforeInput(): void {
 		assertScreenUnlocked(this.isLocked());
 		this.displaySleep.acquire();
+	}
+
+	private get isBackground(): boolean {
+		return this.delivery === "background";
+	}
+
+	/**
+	 * Background delivery may only use routes that leave the user's session alone: no frontmost
+	 * app change and no cursor movement. Anything that would need either is refused with the
+	 * action named, because silently taking focus is how an unattended run interrupts the person
+	 * using the machine.
+	 */
+	private requireBackgroundTarget(action: string): void {
+		if (!this.isBackground) {
+			return;
+		}
+		if (this.targetPid === undefined) {
+			throw new Error(
+				`background delivery cannot ${action} without a target app: global input would take over the cursor and focus`,
+			);
+		}
 	}
 
 	private serialize<T>(run: () => Promise<T>): Promise<T> {
@@ -120,6 +146,7 @@ export class MacOSInputController {
 	async click(position: Point, button: MouseButton = "left"): Promise<void> {
 		await this.serialize(async () => {
 			this.beforeInput();
+			this.requireBackgroundTarget("click");
 			const targetWindow = await this.targetWindow(position);
 			this.requirePointerWindow(targetWindow);
 			this.lastTargetWindow = targetWindow;
@@ -128,6 +155,10 @@ export class MacOSInputController {
 				await postClick(this.postMouse, position, button, 1, targetWindow);
 				this.markPointer(position);
 			} else if (targetWindow !== undefined) {
+				if (this.isBackground) {
+					await postClick(this.postMouse, position, button, 1, targetWindow);
+					return;
+				}
 				await runFocusLeasedClick(targetWindow, position, button, this.postMouse);
 				this.markPointer(position);
 			}
@@ -137,6 +168,7 @@ export class MacOSInputController {
 	async doubleClick(position: Point): Promise<void> {
 		await this.serialize(async () => {
 			this.beforeInput();
+			this.requireBackgroundTarget("double click");
 			const targetWindow = await this.targetWindow(position);
 			this.requirePointerWindow(targetWindow);
 			this.lastTargetWindow = targetWindow;
@@ -145,6 +177,10 @@ export class MacOSInputController {
 				await postDoubleClick(this.postMouse, position, targetWindow);
 				this.markPointer(position);
 			} else if (targetWindow !== undefined) {
+				if (this.isBackground) {
+					await postDoubleClick(this.postMouse, position, targetWindow);
+					return;
+				}
 				await runFocusLeasedDoubleClick(targetWindow, position, this.postMouse);
 				this.markPointer(position);
 			}
@@ -226,6 +262,7 @@ export class MacOSInputController {
 	async drag(options: DragOptions): Promise<void> {
 		await this.serialize(async () => {
 			this.beforeInput();
+			this.requireBackgroundTarget("drag");
 			const targetWindow = await this.targetWindow(options.from);
 			this.requirePointerWindow(targetWindow);
 			this.lastTargetWindow = targetWindow;
@@ -234,6 +271,10 @@ export class MacOSInputController {
 				await postDragSequence(this.postMouse, options, targetWindow);
 				this.markPointer(options.to);
 			} else if (targetWindow !== undefined) {
+				if (this.isBackground) {
+					await postDragSequence(this.postMouse, options, targetWindow);
+					return;
+				}
 				await runFocusLeasedDrag(targetWindow, options, this.postMouse);
 				this.markPointer(options.to);
 			}

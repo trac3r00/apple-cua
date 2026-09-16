@@ -104,6 +104,11 @@ when the needed target cannot be established.
 - Do not infer failure from an unchanged tree and repeat a potentially non-idempotent action.
   Inspect a specific missing signal, resolve a visible blocker, or stop and explain what is
   uncertain. Do not loop through guessed variants or repeatedly refresh identical state.
+7. **Stay out of the way when asked.** With background delivery (`--background`, or
+   `MACOS_CUA_DELIVERY=background` for the MCP server) input goes to the app's own window: the
+   frontmost app and the cursor are left alone, and an action that would need the foreground is
+   refused rather than taking over the machine. Prefer it when a human is using the same Mac.
+
 - Do not bypass a denied/stale/paused MCP action using the raw CLI, AppleScript, shell input
   synthesis, another computer tool or another MCP connection. Those would evade the guard.
 - Keep one active controller for the desktop. Do not drive this Mac from parallel agents or

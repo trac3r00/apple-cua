@@ -25,6 +25,7 @@ type GlobalOptions = {
 	targetPid?: number;
 	targetBundleId?: string;
 	cursor?: boolean;
+	background?: boolean;
 };
 
 type MouseButton = "left" | "right" | "middle";
@@ -90,7 +91,11 @@ program
 		parsePositiveInteger,
 	)
 	.option("--target-bundle-id <id>", "deliver input to the running app with this bundle identifier")
-	.option("--no-cursor", "hide the synthetic white+blue cursor overlay (shown by default to mark where input lands)");
+	.option("--no-cursor", "hide the synthetic white+blue cursor overlay (shown by default to mark where input lands)")
+	.option(
+		"--background",
+		"deliver input without changing the frontmost app or moving the cursor; actions that need foreground delivery are refused",
+	);
 
 program
 	.command("screenshot")
@@ -523,7 +528,12 @@ async function withComputer(
 	// Commander sets `cursor` to false only when `--no-cursor` is passed; the overlay
 	// is shown by default. When hidden, inject the no-op overlay so no helper spawns.
 	const showCursor = program.opts<GlobalOptions>().cursor !== false;
-	const computer = new MacOSHostComputer(showCursor ? hostOptions : { ...hostOptions, overlay: NOOP_POINTER_OVERLAY });
+	const background = program.opts<GlobalOptions>().background === true;
+	const computer = new MacOSHostComputer({
+		...(background ? { delivery: "background" as const } : {}),
+		...hostOptions,
+		...(showCursor ? {} : { overlay: NOOP_POINTER_OVERLAY }),
+	});
 	try {
 		const targetPid = await resolveTargetPid();
 		computer.setTarget(targetPid);

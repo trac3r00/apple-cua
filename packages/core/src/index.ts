@@ -58,6 +58,7 @@ export { MacOSPermissions } from "./permission/macos.js";
 export { CloudComputer, type CloudComputerOptions } from "./platform/cloud.js";
 export { HostComputer, type HostComputerOptions } from "./platform/host.js";
 export { MacOSHostComputer, type MacOSHostComputerOptions } from "./platform/macos.js";
+export type { InputDelivery } from "./platform/macos-input.js";
 export { invokeMenu } from "./platform/macos-menu.js";
 export { setWindowFrame } from "./platform/macos-window-frame.js";
 export { readClipboard, writeClipboard } from "./platform/macos-ffi/pasteboard.js";

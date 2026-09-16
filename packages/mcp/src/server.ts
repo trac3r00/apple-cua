@@ -101,17 +101,18 @@ export function createMcpServer(
 		"get_app_state",
 		{
 			description:
-				"Read-only observation of one approved app window: screenshot, accessibility elements with their ids, and current input context. This is the only source of a first observation_token; it is issued per call and works exactly once, because it proves that the app, window and viewport were observed before input. Set diff_only=true to get only what changed since the previous observation of this app (the axChanges list), which costs far fewer tokens; the first observation of an app is always the full tree. Set include_screenshot=false when you only need to re-index elements before an element action: that skips the image entirely and is the cheapest observation. max_elements caps the tree for very large windows, and include_menu_bar=true adds application menu-bar items (they are excluded by default because they are not window content). Element ids reported here are the element_index values accepted by every mutation tool.",
+				"Read-only observation of one approved app window: screenshot, accessibility elements with their ids, and current input context. This is the only source of a first observation_token; it is issued per call and works exactly once, because it proves that the app, window and viewport were observed before input. Set diff_only=true to get only what changed since the previous observation of this app (the axChanges list), which costs far fewer tokens; the first observation of an app is always the full tree. Set include_screenshot=false when you only need to re-index elements before an element action: that skips the image entirely and is the cheapest observation. max_elements caps the tree for very large windows, subtree_of=<element id> observes just that element's subtree with ids restarting at 0 (the cheapest way to explore a capped tree), and include_menu_bar=true adds application menu-bar items (they are excluded by default because they are not window content). Element ids reported here are the element_index values accepted by every mutation tool.",
 			inputSchema: getAppStateSchema,
 			annotations: READ_ONLY_ANNOTATIONS,
 		},
-		async ({ app, diff_only, include_screenshot, max_elements, include_menu_bar }) =>
+		async ({ app, diff_only, include_screenshot, max_elements, include_menu_bar, subtree_of }) =>
 			await session.observe({
 				app,
 				diffOnly: diff_only === true,
 				...(include_screenshot === undefined ? {} : { includeScreenshot: include_screenshot }),
 				...(max_elements === undefined ? {} : { maxElements: max_elements }),
 				...(include_menu_bar === undefined ? {} : { includeMenuBar: include_menu_bar }),
+				...(subtree_of === undefined ? {} : { subtreeOf: subtree_of }),
 			}),
 	);
 

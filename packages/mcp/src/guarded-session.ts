@@ -51,6 +51,12 @@ export interface ObservationOptions {
 	readonly maxElements?: number;
 	/** Include the application menu bar, which is app chrome rather than window content. */
 	readonly includeMenuBar?: boolean;
+	/**
+	 * Observe only the subtree rooted at this element id from the previous observation of the
+	 * same app. Ids restart at 0 inside the subtree, which is how a capped or truncated tree is
+	 * explored a branch at a time instead of raising max_elements.
+	 */
+	readonly subtreeOf?: number;
 }
 
 export interface ObserveRequest extends ObservationOptions {
@@ -121,6 +127,7 @@ export class GuardedSession {
 				...(request.includeScreenshot === undefined ? {} : { includeScreenshot: request.includeScreenshot }),
 				...(request.maxElements === undefined ? {} : { maxElements: request.maxElements }),
 				...(request.includeMenuBar === undefined ? {} : { includeMenuBar: request.includeMenuBar }),
+				...(request.subtreeOf === undefined ? {} : { subtreeOf: request.subtreeOf }),
 			});
 			this.assertOpen();
 			const observation = this.computer.getInputObservation(targetPid);

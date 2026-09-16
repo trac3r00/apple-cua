@@ -60,12 +60,25 @@ interface AXWalkScope {
 	readonly windowId: number | undefined;
 	readonly includeMenuBar: boolean;
 	readonly scoped: boolean;
+	readonly subtreeOf: number | undefined;
 }
 
-const UNMATCHED_WINDOW_SCOPE: AXWalkScope = { windowId: undefined, includeMenuBar: true, scoped: false };
+const UNMATCHED_WINDOW_SCOPE: AXWalkScope = {
+	windowId: undefined,
+	includeMenuBar: true,
+	scoped: false,
+	subtreeOf: undefined,
+};
 
 function walkKeyFor(scope: AXWalkScope, maxDepth: number, maxElements: number): string {
-	return JSON.stringify([scope.scoped, scope.windowId ?? null, scope.includeMenuBar, maxDepth, maxElements]);
+	return JSON.stringify([
+		scope.scoped,
+		scope.windowId ?? null,
+		scope.includeMenuBar,
+		scope.subtreeOf ?? null,
+		maxDepth,
+		maxElements,
+	]);
 }
 
 function unavailableWalkKey(maxDepth: number, maxElements: number): string {
@@ -294,13 +307,29 @@ export interface AccessibilityTreeOptions {
 	readonly windowId?: number | undefined;
 	/** Include the menu bar, which is app-level rather than window content. Default false. */
 	readonly includeMenuBar?: boolean;
+	/**
+	 * Poll for change detection instead of observing. The walk still returns the capped
+	 * signature, but it does not replace the retained snapshot, so element ids from the last
+	 * real observation (including a `subtreeOf` anchor) keep resolving. Settle polls use this.
+	 */
+	readonly signatureOnly?: boolean;
+	/**
+	 * Walk only the subtree rooted at this element index from the previous observation of
+	 * the same app, instead of the window or whole application. Ids restart at 0 inside the
+	 * subtree, so a large tree can be explored a branch at a time without paying for the
+	 * whole tree in elements, latency or model tokens.
+	 */
+	readonly subtreeOf?: number | undefined;
 }
 
 export function extractAccessibilityTree(pid: number, options: AccessibilityTreeOptions = {}): AccessibilityTreeResult {
 	const maxDepth = options.maxDepth ?? DEFAULT_AX_MAX_DEPTH;
 	const maxElements = options.maxElements ?? DEFAULT_AX_MAX_ELEMENTS;
+	const keepIndexSpace = options.signatureOnly === true;
 	if (!AXIsProcessTrusted() || !isRunning(pid) || maxDepth < 0 || maxElements <= 0) {
-		replaceElementSnapshot(pid, undefined);
+		if (!keepIndexSpace) {
+			replaceElementSnapshot(pid, undefined);
+		}
 		return { elements: [], axAvailable: false, truncated: false, walkKey: unavailableWalkKey(maxDepth, maxElements) };
 	}
 
@@ -308,10 +337,15 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 	const walkRoots: AXUIElementRef[] = [];
 	const snapshotElements: AXUIElementRef[] = [];
 	try {
-		const scope = resolveWalkScope(root, options);
+		const scope =
+			options.subtreeOf === undefined
+				? resolveWalkScope(root, options)
+				: resolveSubtreeWalkScope(pid, options.subtreeOf, options);
 		walkRoots.push(...scope.roots);
 		if (scope.appChildren === 0) {
-			replaceElementSnapshot(pid, undefined);
+			if (!keepIndexSpace) {
+				replaceElementSnapshot(pid, undefined);
+			}
 			return {
 				elements: [],
 				axAvailable: false,
@@ -328,7 +362,9 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 		const walkInputs = scope.scoped ? scope.roots : [root];
 		walkElements(walkInputs, maxDepth, maxElements, elements, snapshotElements);
 		if (elements.length === 0) {
-			replaceElementSnapshot(pid, undefined);
+			if (!keepIndexSpace) {
+				replaceElementSnapshot(pid, undefined);
+			}
 			return {
 				elements: [],
 				axAvailable: false,
@@ -336,7 +372,9 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 				walkKey: unavailableWalkKey(maxDepth, maxElements),
 			};
 		}
-		replaceElementSnapshot(pid, { maxDepth, maxElements, scope: scope.descriptor, elements: snapshotElements });
+		if (!keepIndexSpace) {
+			replaceElementSnapshot(pid, { maxDepth, maxElements, scope: scope.descriptor, elements: snapshotElements });
+		}
 		return {
 			elements,
 			axAvailable: true,
@@ -407,10 +445,39 @@ function resolveWalkScope(root: AXUIElementRef, options: AccessibilityTreeOption
 
 	return {
 		roots: [...windows, ...attached],
-		descriptor: { windowId, includeMenuBar, scoped: true },
+		descriptor: { windowId, includeMenuBar, scoped: true, subtreeOf: undefined },
 		scoped: true,
 		appChildren,
 	};
+}
+
+function resolveSubtreeWalkScope(pid: number, subtreeOf: number, options: AccessibilityTreeOptions): ResolvedWalkScope {
+	if (!Number.isSafeInteger(subtreeOf) || subtreeOf < 0) {
+		throw new Error(`subtreeOf must be a non-negative integer, got ${subtreeOf}`);
+	}
+	const element = retainedElementForIndex(pid, subtreeOf);
+	if (element === undefined) {
+		throw new Error(
+			`element ${subtreeOf} is not part of the current observation of pid ${pid}; observe the app again before drilling into a subtree`,
+		);
+	}
+	return {
+		roots: [element],
+		descriptor: {
+			windowId: options.windowId,
+			includeMenuBar: options.includeMenuBar === true,
+			scoped: true,
+			subtreeOf,
+		},
+		scoped: true,
+		appChildren: 1,
+	};
+}
+
+function retainedElementForIndex(pid: number, elementIndex: number): AXUIElementRef | undefined {
+	const snapshot = elementSnapshots.get(pid);
+	const cached = snapshot?.elements[elementIndex];
+	return cached === undefined ? undefined : cfRetain(cached);
 }
 
 function windowIdOf(element: AXUIElementRef): number | undefined {
@@ -585,6 +652,19 @@ export function refetchElement(
 	const walkRoots: AXUIElementRef[] = [];
 	try {
 		const scope: AXWalkScope = snapshot?.scope ?? UNMATCHED_WINDOW_SCOPE;
+		if (scope.subtreeOf !== undefined) {
+			const subtreeRoot = retainedElementForIndex(pid, 0);
+			if (subtreeRoot === undefined) {
+				throw new Error(`element ${elementIndex} not found`);
+			}
+			walkRoots.push(subtreeRoot);
+			const cursor = { value: 0 };
+			const matched = findAXElement(subtreeRoot, elementIndex, 0, maxDepth, maxElements, cursor);
+			if (matched !== null) {
+				return matched;
+			}
+			throw new Error(`element ${elementIndex} not found`);
+		}
 		const resolved = resolveWalkScope(root, {
 			windowId: scope.windowId,
 			includeMenuBar: scope.includeMenuBar,

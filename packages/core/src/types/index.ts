@@ -50,6 +50,12 @@ export interface AppStateOptions {
 	 * candidate id from a previous observation when an app has several windows.
 	 */
 	windowId?: number;
+	/**
+	 * Observe only the subtree rooted at this element index from the previous observation of
+	 * the same app. Element ids restart at 0 inside the subtree, so a huge tree can be
+	 * explored one branch at a time instead of being truncated or dumped whole.
+	 */
+	subtreeOf?: number;
 }
 
 export interface KeyOptions {

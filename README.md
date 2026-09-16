@@ -282,11 +282,14 @@ any alternatives travel back on the state, and input is validated against that s
 
 The knobs that keep this tunable, all per call: `include_screenshot: false` skips the image
 and returns only element ids and geometry, which is the cheapest way to re-index before an
-element action; `max_elements` caps a very large tree and `include_menu_bar` adds application
-menus when they are part of the task. When a tree is capped the answer says so in
+element action; `max_elements` caps a very large tree, `subtree_of` re-observes just one
+branch with element ids restarting at 0, and `include_menu_bar` adds application menus when
+they are part of the task. When a tree is capped the answer says so in
 `elementsTruncated`, and a walk at a different budget is treated as a fresh baseline rather
 than diffed against a differently truncated one, so a diff never reports elements that were
-merely outside the budget as removed.
+merely outside the budget as removed. Drilling in with `subtree_of` costs what the branch
+costs: on a Finder window whose full tree is 718 elements, re-observing a row returned 10
+elements in 165 ms instead of roughly 810 ms for the window.
 
 ## Action surface
 

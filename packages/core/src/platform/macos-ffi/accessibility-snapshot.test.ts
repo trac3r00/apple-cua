@@ -254,6 +254,86 @@ describe("#given a window-scoped accessibility walk", () => {
 	});
 });
 
+describe("#given a subtree observation #when an element index from the previous walk is drilled into #then only that branch is returned", () => {
+	it("returns the subtree with ids restarting at zero", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+		const scoped = extractAccessibilityTree(process.pid, { windowId: 42 });
+		expect(scoped.elements.map((element) => element.role)).toEqual(["AXWindow", "AXTextField", "AXButton"]);
+
+		const subtree = extractAccessibilityTree(process.pid, { windowId: 42, subtreeOf: 2 });
+
+		expect(subtree.elements.map((element) => element.role)).toEqual(["AXButton"]);
+		expect(subtree.elements[0]?.id).toBe(0);
+		expect(subtree.elements[0]?.label).toBe("Target Button");
+		expect(subtree.walkKey).not.toBe(scoped.walkKey);
+	});
+
+	it("keeps the rooted element itself as id zero", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+		extractAccessibilityTree(process.pid, { windowId: 42 });
+
+		const subtree = extractAccessibilityTree(process.pid, { windowId: 42, subtreeOf: 0 });
+
+		expect(subtree.elements.map((element) => element.role)).toEqual(["AXWindow", "AXTextField", "AXButton"]);
+	});
+
+	it("re-anchors element ids so a later action resolves inside the subtree", async () => {
+		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
+		extractAccessibilityTree(process.pid, { windowId: 42 });
+		extractAccessibilityTree(process.pid, { windowId: 42, subtreeOf: 2 });
+
+		performActionByIndex(process.pid, 0, "AXPress");
+
+		expect(koffiMock.observableState.pressCount).toBe(1);
+	});
+});
+
+describe("#given a subtree request #when the index is not part of the observation #then it refuses and keeps the snapshot", () => {
+	it("rejects an index outside the last walk", async () => {
+		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
+		extractAccessibilityTree(process.pid, { windowId: 42 });
+
+		expect(() => extractAccessibilityTree(process.pid, { windowId: 42, subtreeOf: 99 })).toThrow(
+			/not part of the current observation/,
+		);
+
+		performActionByIndex(process.pid, 2, "AXPress");
+		expect(koffiMock.observableState.pressCount).toBe(1);
+	});
+
+	it("rejects a negative index", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+		extractAccessibilityTree(process.pid, { windowId: 42 });
+
+		expect(() => extractAccessibilityTree(process.pid, { windowId: 42, subtreeOf: -1 })).toThrow(/non-negative/);
+	});
+
+	it("rejects a subtree request before anything was observed", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+
+		expect(() => extractAccessibilityTree(process.pid, { subtreeOf: 0 })).toThrow(
+			/not part of the current observation/,
+		);
+	});
+});
+
+describe("#given a settle poll #when it runs with a smaller budget #then the observation index space survives", () => {
+	it("keeps element ids and the subtree anchor resolvable", async () => {
+		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
+		const observed = extractAccessibilityTree(process.pid, { windowId: 42 });
+		expect(observed.elements).toHaveLength(3);
+
+		const poll = extractAccessibilityTree(process.pid, { windowId: 42, maxElements: 1, signatureOnly: true });
+		expect(poll.elements).toHaveLength(1);
+
+		const subtree = extractAccessibilityTree(process.pid, { windowId: 42, subtreeOf: 2 });
+		expect(subtree.elements.map((element) => element.role)).toEqual(["AXButton"]);
+
+		performActionByIndex(process.pid, 0, "AXPress");
+		expect(koffiMock.observableState.pressCount).toBe(1);
+	});
+});
+
 describe("#given an AX element index from an accessibility snapshot", () => {
 	it("#when the live hierarchy shifts #then the action still targets the snapshotted element", async () => {
 		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");

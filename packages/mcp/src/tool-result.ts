@@ -340,7 +340,7 @@ export function postActionErrorResult(error: unknown, partial?: SetFieldsReport)
 }
 
 const TRUNCATED_ELEMENTS_NOTE =
-	"elements is capped at the driver's element budget, so controls further down the tree are missing; repeat get_app_state with a higher max_elements to see them";
+	"elements is capped at the driver's element budget, so controls further down the tree are missing; repeat get_app_state with a higher max_elements, or pass subtree_of with the id of a parent element to walk just that branch";
 
 function stateToolResult(
 	state: AppState,

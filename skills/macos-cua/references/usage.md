@@ -28,6 +28,8 @@ Read-only tools:
   element action. `max_elements` caps a very large tree; when the walk stops at the budget
   the answer sets `elementsTruncated` and a `note`, and a walk at a different budget is
   treated as a fresh baseline rather than diffed against a differently truncated tree.
+  `subtree_of: <element id>` observes only that element's branch, with element ids restarting
+  at 0 and the branch root as id 0, which is the cheap way into a capped or very large tree.
   `include_menu_bar: true` adds application menus when the task needs them. The answer names
   the window it scoped to (`windowId`, `windowTitle`) and lists `windowCandidates` when the
   app has several windows; `window_id` observes one specific candidate instead of the app's

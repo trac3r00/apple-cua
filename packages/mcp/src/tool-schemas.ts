@@ -37,6 +37,7 @@ export const getAppStateSchema = z.object({
 	include_screenshot: z.boolean().optional(),
 	max_elements: z.number().int().positive().optional(),
 	include_menu_bar: z.boolean().optional(),
+	subtree_of: z.number().int().nonnegative().optional(),
 });
 
 export const clickSchema = z.object({

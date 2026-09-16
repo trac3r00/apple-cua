@@ -278,6 +278,7 @@ export class MacOSHostComputer extends HostComputer {
 			...(options?.maxElements === undefined ? {} : { maxElements: options.maxElements }),
 			...(options?.includeMenuBar === undefined ? {} : { includeMenuBar: options.includeMenuBar }),
 			...(targetWindow === undefined ? {} : { windowId: targetWindow.id }),
+			...(options?.subtreeOf === undefined ? {} : { subtreeOf: options.subtreeOf }),
 		};
 		if (settleMs > 0) {
 			await this.waitForUiSettle(app.pid, settleMs, walkOptions);
@@ -409,6 +410,7 @@ export class MacOSHostComputer extends HostComputer {
 		const signatureOptions: AccessibilityTreeOptions = {
 			...walkOptions,
 			maxElements: SETTLE_SIGNATURE_MAX_ELEMENTS,
+			signatureOnly: true,
 		};
 		const deadline = Date.now() + settleMs;
 		let previous = normalizeAxTree(extractAccessibilityTree(pid, signatureOptions).elements);

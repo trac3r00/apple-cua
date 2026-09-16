@@ -29,6 +29,12 @@ export const GetAppStateParams = Type.Object(
 				description: "Include the application menu bar, which is app chrome rather than window content.",
 			}),
 		),
+		subtree_of: Type.Optional(
+			Type.Number({
+				description:
+					"Observe only the subtree rooted at this element id from the previous observation, with ids restarting at 0 inside the subtree. Use it to explore a capped or truncated tree one branch at a time.",
+			}),
+		),
 		window_id: Type.Optional(
 			Type.Number({
 				description:
@@ -54,6 +60,7 @@ export function createGetAppStateTool(computer: ComputerInterface): ToolDefiniti
 				...(params.include_screenshot === undefined ? {} : { includeScreenshot: params.include_screenshot }),
 				...(params.max_elements === undefined ? {} : { maxElements: params.max_elements }),
 				...(params.include_menu_bar === undefined ? {} : { includeMenuBar: params.include_menu_bar }),
+				...(params.subtree_of === undefined ? {} : { subtreeOf: params.subtree_of }),
 				...(params.window_id === undefined ? {} : { windowId: params.window_id }),
 			});
 			const content = [

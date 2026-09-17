@@ -34,6 +34,7 @@ const PROBE = argv.includes("--probe");
 const DIRECT = argv.includes("--direct");
 const ITERATIONS = Number(flag("iterations", 5));
 const OUT = flag("out", ".sisyphus/evidence/strategic-targeting-live.json");
+const BENCH_OUT = flag("bench-out", ".sisyphus/evidence/strategic-targeting-bench.json");
 
 /** Minimal MCP stdio client: newline-delimited JSON-RPC 2.0. */
 class McpClient {
@@ -244,6 +245,12 @@ async function main() {
 		});
 
 		const target = await chooseTarget(client, evidence);
+		evidence.target = {
+			query: target.query,
+			index: target.index,
+			elementIndex: target.elementIndex,
+			label: target.label,
+		};
 
 		const clicked = await timed(() =>
 			client.callTool("click_target", {
@@ -480,6 +487,14 @@ function writeEvidence(evidence) {
 	mkdirSync(path.dirname(outPath), { recursive: true });
 	writeFileSync(outPath, `${JSON.stringify(evidence, null, 2)}\n`);
 	console.log(`\nevidence: ${outPath}`);
+	if (evidence.bench === undefined) return;
+	const benchPath = path.isAbsolute(BENCH_OUT) ? BENCH_OUT : path.join(REPO, BENCH_OUT);
+	mkdirSync(path.dirname(benchPath), { recursive: true });
+	writeFileSync(
+		benchPath,
+		`${JSON.stringify({ startedAt: evidence.startedAt, finishedAt: evidence.finishedAt, server: evidence.server, spawnedVia: evidence.spawnedVia, app: evidence.app, target: evidence.target, bench: evidence.bench }, null, 2)}\n`,
+	);
+	console.log(`bench:    ${benchPath}`);
 }
 
 main().catch((error) => {

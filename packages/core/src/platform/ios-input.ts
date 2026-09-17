@@ -58,7 +58,7 @@ export interface SwipeOptions {
 	readonly steps?: number;
 }
 
-export interface ScrollOptions {
+export interface IOSScrollOptions {
 	/** Where the gesture lands. Only the scroll view under this point moves, so aim it at the list. */
 	readonly at: Point;
 	/** Positive reveals content further down; positive deltaX reveals content further right. */
@@ -312,7 +312,7 @@ export async function swipeMirroring(target: IOSInputTarget, options: SwipeOptio
  * is the gesture that moves a list. The caller must have proven the phone window owns the
  * point (see requireMirroringWindowAt); otherwise the scroll lands in whatever is in front.
  */
-export async function scrollMirroring(target: IOSInputTarget, options: ScrollOptions): Promise<void> {
+export async function scrollMirroring(target: IOSInputTarget, options: IOSScrollOptions): Promise<void> {
 	const steps = options.steps ?? SCROLL_DEFAULT_STEPS;
 	const deltaY = options.deltaY;
 	const deltaX = options.deltaX ?? 0;

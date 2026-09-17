@@ -61,6 +61,15 @@ export { MacOSHostComputer, type MacOSHostComputerOptions } from "./platform/mac
 export type { InputDelivery } from "./platform/macos-input.js";
 export { invokeMenu, type InvokeMenuResult } from "./platform/macos-menu.js";
 export { setWindowFrame } from "./platform/macos-window-frame.js";
+export {
+	type OcrBox,
+	type OcrTextObservation,
+	type RecognizeTextOptions,
+	filterByMinimumConfidence,
+	isVisionOcrAvailable,
+	recognizeTextInFile,
+	recognizeTextInImage,
+} from "./platform/macos-ffi/vision.js";
 export { renamedEnvironmentVariable } from "./platform/renamed-environment.js";
 export {
 	type ClipboardWriteInput,

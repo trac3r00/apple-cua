@@ -17,7 +17,7 @@
  */
 
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -33,6 +33,7 @@ const flag = (name, fallback) => {
 	return index === -1 ? fallback : argv[index + 1];
 };
 const PROBE = argv.includes("--probe");
+const TASKS = argv.includes("--tasks");
 const FOREGROUND_PROBE = argv.includes("--foreground-probe");
 const ITERATIONS = Number(flag("iterations", 15));
 const ACTIONS = Number(flag("actions", 10));
@@ -42,12 +43,13 @@ const TYPED_TEXT = "The quick brown fox jumps over the lazy dog. ";
 
 /** Minimal MCP stdio client: newline-delimited JSON-RPC 2.0. */
 class McpClient {
-	constructor({ name, command, args, cwd, envOverrides = {} }) {
+	constructor({ name, command, args, cwd, envOverrides = {}, requestTimeoutMs = 180_000 }) {
 		this.name = name;
 		this.command = command;
 		this.args = args;
 		this.cwd = cwd;
 		this.envOverrides = envOverrides;
+		this.requestTimeoutMs = requestTimeoutMs;
 		this.nextId = 1;
 		this.pending = new Map();
 		this.stderrTail = [];
@@ -94,7 +96,7 @@ class McpClient {
 		}
 	}
 
-	request(method, params, timeoutMs = 180_000) {
+	request(method, params, timeoutMs = this.requestTimeoutMs) {
 		const id = this.nextId++;
 		const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params });
 		return new Promise((resolve, reject) => {
@@ -372,6 +374,422 @@ function findCuaTextTarget(elements) {
 	return elements.find((element) => isText(element) && element?.element_token !== undefined);
 }
 
+// ---- task scenarios ---------------------------------------------------------------------
+
+const TASK_DIR = "/tmp/cua-task";
+const TASK_FILE = path.join(TASK_DIR, "s1.txt");
+const TASK_PAGE = path.join(TASK_DIR, "page.html");
+const TASK_SENTENCE = "apple-cua task shootout 7f3a";
+const TASK_HEADING = "CUA-TASK-HEADING-7f3a";
+
+/**
+ * The same task runs through each driver's own vocabulary; a PASS is decided by an oracle
+ * outside the driver's own answer (the file on disk, the page source, the folder, the system
+ * clipboard), and both drivers get the target app pre-activated by the harness as setup.
+ */
+function taskHaystack(result) {
+	const structured = result?.structuredContent;
+	return `${textOf(result)}\n${structured === undefined ? "" : JSON.stringify(structured)}`;
+}
+
+function pbpasteText() {
+	try {
+		return execFileSync("pbpaste", { encoding: "utf8", timeout: 10_000 });
+	} catch {
+		return "";
+	}
+}
+
+function appleTaskRunner(client) {
+	let calls = 0;
+	let bytes = 0;
+	let lastToken = "";
+	const errors = [];
+	const call = async (name, args) => {
+		calls += 1;
+		const result = await client.callTool(name, args);
+		bytes += account(result).responseBytes;
+		if (result?.isError === true) errors.push(textOf(result).slice(0, 140));
+		return result;
+	};
+	const observe = async (app) => {
+		const result = await call("get_app_state", { app, include_screenshot: false });
+		const parsed = appleObservationOf(result);
+		lastToken = typeof parsed?.observation_token === "string" ? parsed.observation_token : "";
+		return result;
+	};
+	const mutate = async (app, invoke) => {
+		if (lastToken === "") await observe(app);
+		const result = await invoke(lastToken);
+		const parsed = appleObservationOf(result);
+		lastToken = typeof parsed?.observation_token === "string" ? parsed.observation_token : "";
+		return result;
+	};
+	return {
+		stats: () => ({ calls, payload_bytes: bytes, ...(errors.length === 0 ? {} : { errors: errors.slice(0, 2) }) }),
+		reset: () => {
+			calls = 0;
+			bytes = 0;
+			lastToken = "";
+			errors.length = 0;
+		},
+		observe,
+		type: async (app, text) =>
+			await mutate(app, async (token) => await call("type_text", { app, observation_token: token, text })),
+		keys: async (app, keys) =>
+			await mutate(app, async (token) => await call("press_keys", { app, observation_token: token, keys })),
+		clipboard: async () => await call("clipboard_read", {}),
+		haystack: taskHaystack,
+	};
+}
+
+function cuaTaskRunner(client) {
+	let calls = 0;
+	let bytes = 0;
+	const errors = [];
+	const targets = new Map();
+	const call = async (name, args) => {
+		calls += 1;
+		const result = await client.callTool(name, args);
+		bytes += account(result).responseBytes;
+		if (result?.isError === true) errors.push(textOf(result).slice(0, 140));
+		return result;
+	};
+	const titlePreference = { TextEdit: ["s1.txt"] };
+	let lastRefresh = { windows: 0, error: null };
+	const refreshTargets = async () => {
+		const windows = await call("list_windows", {});
+		const onScreen = (windows?.structuredContent?.windows ?? []).filter(
+			(entry) => entry?.app_name !== undefined && entry.is_on_screen === true,
+		);
+		lastRefresh = {
+			windows: onScreen.length,
+			error: windows?.isError === true ? textOf(windows).slice(0, 200) : null,
+		};
+		for (const app of new Set(onScreen.map((entry) => entry.app_name))) {
+			const candidates = onScreen.filter((entry) => entry.app_name === app);
+			const preferred = (titlePreference[app] ?? []).flatMap((title) =>
+				candidates.filter((entry) => String(entry.title) === title),
+			);
+			const chosen = preferred[0] ?? candidates[0];
+			targets.set(app, { pid: chosen.pid, window_id: chosen.window_id, title: chosen.title });
+		}
+		return windows;
+	};
+	const ensureTarget = async (app) => {
+		let target = targets.get(app);
+		if (target === undefined) {
+			await refreshTargets();
+			target = targets.get(app);
+		}
+		if (target === undefined) throw new Error(`cua-driver has no on-screen window for ${app}`);
+		return target;
+	};
+	const refusedKeys = (result) => result?.isError === true && textOf(result).includes("same_pid_keyboard_ambiguity");
+	const staleWindow = (result) =>
+		result?.isError === true &&
+		/not a live window|window_id_not_found|window_owner_pid_mismatch/.test(textOf(result));
+	const withTarget = async (app, invoke) => {
+		const target = await ensureTarget(app);
+		const result = await invoke(target);
+		if (!staleWindow(result)) return result;
+		await refreshTargets();
+		return await invoke(await ensureTarget(app));
+	};
+	return {
+		stats: () => ({ calls, payload_bytes: bytes, ...(errors.length === 0 ? {} : { errors: errors.slice(0, 2) }) }),
+		reset: () => {
+			calls = 0;
+			bytes = 0;
+			errors.length = 0;
+		},
+		refreshTargets,
+		describeTargets: () => ({
+			targets: Object.fromEntries([...targets].map(([app, target]) => [app, target.title])),
+			last_refresh: lastRefresh,
+		}),
+		observe: async (app) =>
+			await withTarget(
+				app,
+				async (target) =>
+					await call("get_window_state", {
+						pid: target.pid,
+						window_id: target.window_id,
+						include_screenshot: false,
+					}),
+			),
+		type: async (app, text) =>
+			await withTarget(app, async (target) => {
+				const result = await call("type_text", { pid: target.pid, window_id: target.window_id, text });
+				if (!refusedKeys(result)) return result;
+				return await call("type_text", {
+					pid: target.pid,
+					window_id: target.window_id,
+					text,
+					delivery_mode: "foreground",
+				});
+			}),
+		pressKey: async (app, key, modifiers) =>
+			await withTarget(app, async (target) => {
+				const args = {
+					pid: target.pid,
+					window_id: target.window_id,
+					key,
+					...(modifiers === undefined ? {} : { modifiers }),
+				};
+				const result = await call("press_key", args);
+				if (!refusedKeys(result)) return result;
+				return await call("press_key", { ...args, delivery_mode: "foreground" });
+			}),
+		clipboard: async () => await call("clipboard_read", { include_text: true }),
+		haystack: taskHaystack,
+	};
+}
+
+async function dismissSheet(app) {
+	activateApp(app);
+	await new Promise((resolve) => setTimeout(resolve, 250));
+	try {
+		execFileSync("osascript", ["-e", 'tell application "System Events" to key code 53'], {
+			stdio: "pipe",
+			timeout: 10_000,
+		});
+	} catch {
+		// no sheet, or automation is unavailable
+	}
+	await new Promise((resolve) => setTimeout(resolve, 150));
+}
+
+function ensureTextEditDocument() {
+	try {
+		execFileSync("open", ["-e", TASK_FILE], { stdio: "pipe", timeout: 10_000 });
+	} catch {
+		// opening the document is a fixture precondition
+	}
+	try {
+		execFileSync("osascript", ["-e", 'tell application "TextEdit" to set index of window "s1.txt" to 1'], {
+			stdio: "pipe",
+			timeout: 10_000,
+		});
+	} catch {
+		// the document window may not be titled exactly s1.txt; the scenario reports what it finds
+	}
+	activateApp("TextEdit");
+}
+
+async function runTaskSuite(apple, cua, report) {
+	const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+	mkdirSync(TASK_DIR, { recursive: true });
+	writeFileSync(
+		TASK_PAGE,
+		`<!doctype html><html><head><title>cua task page</title></head><body><h1>${TASK_HEADING}</h1><p>apple-cua vs cua-driver task fixture.</p></body></html>\n`,
+	);
+	if (!existsSync(TASK_FILE)) writeFileSync(TASK_FILE, "");
+	// one TextEdit document only: the fixture's scratch window would make per-pid keys ambiguous
+	try {
+		execFileSync(
+			"osascript",
+			["-e", 'tell application "TextEdit" to close (every window whose name is "scratch.txt") saving no'],
+			{
+				stdio: "pipe",
+				timeout: 10_000,
+			},
+		);
+	} catch {
+		// the scratch window may already be closed
+	}
+	// a sheet left open by an earlier run makes its app's AX walk hang
+	activateApp("Finder");
+	await sleep(300);
+	try {
+		execFileSync("osascript", ["-e", 'tell application "System Events" to key code 53'], {
+			stdio: "pipe",
+			timeout: 10_000,
+		});
+	} catch {
+		// no sheet, or automation is unavailable
+	}
+	ensureTextEditDocument();
+	await sleep(1200);
+
+	const savedClipboard = pbpasteText();
+	const appleRunner = appleTaskRunner(apple);
+	const cuaRunner = cuaTaskRunner(cua);
+
+	const waitFor = async (check, deadlineMs) => {
+		const deadline = performance.now() + deadlineMs;
+		for (;;) {
+			const outcome = await check();
+			if (outcome.pass === true || performance.now() >= deadline) return outcome;
+			await sleep(700);
+		}
+	};
+
+	const specs = [
+		{
+			id: "textedit-fill-save",
+			run: async (runner, kind) => {
+				ensureTextEditDocument();
+				await dismissSheet("TextEdit");
+				await sleep(300);
+				const start = performance.now();
+				await runner.observe("TextEdit");
+				if (kind === "apple") {
+					await runner.keys("TextEdit", ["cmd+a"]);
+				} else {
+					await runner.pressKey("TextEdit", "a", ["cmd"]);
+				}
+				await runner.type("TextEdit", TASK_SENTENCE);
+				if (kind === "apple") {
+					await runner.keys("TextEdit", ["cmd+s"]);
+				} else {
+					await runner.pressKey("TextEdit", "s", ["cmd"]);
+				}
+				const seconds = (performance.now() - start) / 1000;
+				const content = readFileSync(TASK_FILE, "utf8");
+				return {
+					seconds,
+					pass: content.trim() === TASK_SENTENCE,
+					oracle: `file=${JSON.stringify(content.slice(0, 80))}`,
+				};
+			},
+		},
+		{
+			id: "clipboard-copy",
+			run: async (runner, kind) => {
+				ensureTextEditDocument();
+				await dismissSheet("TextEdit");
+				await sleep(300);
+				const start = performance.now();
+				await runner.observe("TextEdit");
+				if (kind === "apple") {
+					await runner.keys("TextEdit", ["cmd+a"]);
+					await runner.keys("TextEdit", ["cmd+c"]);
+				} else {
+					await runner.pressKey("TextEdit", "a", ["cmd"]);
+					await runner.pressKey("TextEdit", "c", ["cmd"]);
+				}
+				await sleep(150);
+				const clip = await runner.clipboard();
+				const seconds = (performance.now() - start) / 1000;
+				const system = pbpasteText();
+				return {
+					seconds,
+					pass: system.trim() === TASK_SENTENCE,
+					oracle: `pbpaste=${JSON.stringify(system.trim().slice(0, 60))}`,
+					note: runner.haystack(clip).includes(TASK_SENTENCE)
+						? "driver read-back shows the text"
+						: "driver read-back lacks the text",
+				};
+			},
+		},
+		{
+			id: "browser-navigate-read",
+			run: async (runner, kind) => {
+				await dismissSheet("Safari");
+				await sleep(600);
+				const url = `file://${TASK_PAGE}`;
+				const start = performance.now();
+				await runner.observe("Safari");
+				if (kind === "apple") {
+					await runner.keys("Safari", ["cmd+l"]);
+				} else {
+					await runner.pressKey("Safari", "l", ["cmd"]);
+				}
+				await runner.type("Safari", url);
+				if (kind === "apple") {
+					await runner.keys("Safari", ["Return"]);
+				} else {
+					await runner.pressKey("Safari", "return");
+				}
+				const outcome = await waitFor(async () => {
+					const observation = await runner.observe("Safari");
+					return { pass: runner.haystack(observation).includes(TASK_HEADING) };
+				}, 10_000);
+				const seconds = (performance.now() - start) / 1000;
+				return {
+					seconds,
+					pass: outcome.pass,
+					oracle: `page source has heading: ${readFileSync(TASK_PAGE, "utf8").includes(TASK_HEADING)}`,
+					note: outcome.pass ? undefined : "heading absent from the driver's read-back within 10 s",
+				};
+			},
+		},
+		{
+			id: "finder-navigate",
+			run: async (runner, kind) => {
+				await dismissSheet("Finder");
+				await sleep(300);
+				const start = performance.now();
+				await runner.observe("Finder");
+				if (kind === "apple") {
+					await runner.keys("Finder", ["shift+cmd+g"]);
+				} else {
+					await runner.pressKey("Finder", "g", ["shift", "cmd"]);
+				}
+				await runner.type("Finder", TASK_DIR);
+				if (kind === "apple") {
+					await runner.keys("Finder", ["Return"]);
+				} else {
+					await runner.pressKey("Finder", "return");
+				}
+				const outcome = await waitFor(async () => {
+					const observation = await runner.observe("Finder");
+					return { pass: runner.haystack(observation).includes("cua-task") };
+				}, 8_000);
+				const seconds = (performance.now() - start) / 1000;
+				return { seconds, pass: outcome.pass, oracle: `folder exists: ${existsSync(TASK_DIR)}` };
+			},
+		},
+	];
+
+	// the browser task runs last: its AX hang must not contaminate the other scenarios
+	const scenarioOrder = ["textedit-fill-save", "clipboard-copy", "finder-navigate", "browser-navigate-read"];
+
+	const results = { apple_cua: {}, cua_driver: {} };
+	for (const [driver, runner] of [
+		["apple_cua", appleRunner],
+		["cua_driver", cuaRunner],
+	]) {
+		if (driver === "cua_driver") {
+			await runner.refreshTargets();
+		}
+		for (const id of scenarioOrder) {
+			const spec = specs.find((entry) => entry.id === id);
+			if (spec === undefined) continue;
+			runner.reset();
+			if (driver === "cua_driver") await runner.refreshTargets();
+			let record;
+			try {
+				record = await spec.run(runner, driver === "apple_cua" ? "apple" : "cua");
+			} catch (error) {
+				record = { pass: false, error: String(error).slice(0, 400) };
+			}
+			results[driver][spec.id] = {
+				pass: record.pass === true,
+				seconds: round(record.seconds ?? 0),
+				...runner.stats(),
+				oracle: record.oracle,
+				...(record.note === undefined ? {} : { note: record.note }),
+				...(record.error === undefined ? {} : { error: record.error }),
+			};
+		}
+		if (driver === "cua_driver") results.cua_targets = runner.describeTargets();
+	}
+
+	try {
+		execFileSync("pbcopy", { input: savedClipboard, timeout: 10_000 });
+	} catch {
+		// restoring the clipboard is a courtesy, not a measurement
+	}
+	report.clipboard_restored = pbpasteText() === savedClipboard;
+	return {
+		setup: { dir: TASK_DIR, file: TASK_FILE, page: TASK_PAGE, sentence: TASK_SENTENCE, heading: TASK_HEADING },
+		...results,
+		clipboard_restored: report.clipboard_restored,
+	};
+}
+
 async function main() {
 	const report = {
 		started_at: new Date().toISOString(),
@@ -406,12 +824,21 @@ async function main() {
 		command: "node",
 		args: [APPLE_CUA_MCP],
 		cwd: APPLE_CUA_ROOT,
+		requestTimeoutMs: TASKS ? 60_000 : 180_000,
 		envOverrides: {
-			APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.finder,com.apple.TextEdit",
+			APPLE_CUA_ALLOWED_BUNDLE_IDS: TASKS
+				? "com.apple.finder,com.apple.TextEdit,com.apple.Safari"
+				: "com.apple.finder,com.apple.TextEdit",
 			APPLE_CUA_DELIVERY: "background",
 		},
 	});
-	const cua = new McpClient({ name: "cua-driver", command: CUA_DRIVER, args: ["mcp"], cwd: APPLE_CUA_ROOT });
+	const cua = new McpClient({
+		name: "cua-driver",
+		command: CUA_DRIVER,
+		args: ["mcp"],
+		cwd: APPLE_CUA_ROOT,
+		requestTimeoutMs: TASKS ? 60_000 : 180_000,
+	});
 	await apple.start();
 	await cua.start();
 
@@ -480,6 +907,15 @@ async function main() {
 				bounds: textEditTarget.bounds,
 			},
 		};
+
+		if (TASKS) {
+			report.tasks = await runTaskSuite(apple, cua, report);
+			report.finished_at = new Date().toISOString();
+			mkdirSync(path.dirname(OUT), { recursive: true });
+			writeFileSync(OUT, JSON.stringify(report, null, 2));
+			console.log(JSON.stringify(report, null, 2));
+			return;
+		}
 
 		if (PROBE) {
 			const appleFinder = await apple.callTool("get_app_state", { app: "Finder" });

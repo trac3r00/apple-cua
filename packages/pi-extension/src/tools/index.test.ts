@@ -96,6 +96,15 @@ describe("#given all tool factories #when built #then every Codex Computer Use t
 			"scroll",
 			"type_text",
 			"press_keys",
+			"ios_observe",
+			"ios_tap",
+			"ios_tap_text",
+			"ios_type_text",
+			"ios_press_keys",
+			"ios_scroll",
+			"ios_swipe",
+			"ios_home",
+			"ios_open_app",
 		]);
 	});
 });
@@ -107,6 +116,6 @@ describe("#given all tools #when registered #then pi.registerTool is called for 
 
 		registerAllTools(pi, { computer: createComputer() });
 
-		expect(registerToolSpy).toHaveBeenCalledTimes(10);
+		expect(registerToolSpy).toHaveBeenCalledTimes(19);
 	});
 });

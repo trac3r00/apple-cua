@@ -219,6 +219,15 @@ describe("#given default-on session_start #when invoked #then native computer an
 			"scroll",
 			"type_text",
 			"press_keys",
+			"ios_observe",
+			"ios_tap",
+			"ios_tap_text",
+			"ios_type_text",
+			"ios_press_keys",
+			"ios_scroll",
+			"ios_swipe",
+			"ios_home",
+			"ios_open_app",
 			"computer",
 		]);
 	});
@@ -243,6 +252,15 @@ describe("#given opt-out env var #when session_start runs #then native computer 
 			"scroll",
 			"type_text",
 			"press_keys",
+			"ios_observe",
+			"ios_tap",
+			"ios_tap_text",
+			"ios_type_text",
+			"ios_press_keys",
+			"ios_scroll",
+			"ios_swipe",
+			"ios_home",
+			"ios_open_app",
 		]);
 	});
 });
@@ -335,6 +353,15 @@ describe("#given enabled session #when model changes from native computer-use to
 			"scroll",
 			"type_text",
 			"press_keys",
+			"ios_observe",
+			"ios_tap",
+			"ios_tap_text",
+			"ios_type_text",
+			"ios_press_keys",
+			"ios_scroll",
+			"ios_swipe",
+			"ios_home",
+			"ios_open_app",
 		]);
 	});
 });

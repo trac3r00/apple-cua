@@ -65,6 +65,25 @@ in its MCP server definition instead of starting a competing manual instance. Ne
 controllers against the same desktop and expect the server's per-process queue to coordinate
 them. See [harnesses.md](harnesses.md) for complete configuration examples.
 
+Before the rename to apple-cua these were `MACOS_CUA_ALLOWED_BUNDLE_IDS` and
+`MACOS_CUA_DELIVERY`. Both names still work: the current name wins and the old one is honoured
+as a fallback, so an MCP block or shell profile written earlier keeps its allowlist and delivery
+mode. The same applies to `APPLE_CUA_DISABLE_COMPUTER_USE_BETA` and
+`APPLE_CUA_OPENAI_NATIVE_TRANSPORT` in the Pi extension.
+
+## iPhone Mirroring permissions
+
+The phone target needs two permissions on the **terminal or launcher that runs the server**, in
+addition to the ones above:
+
+- **Accessibility** for taps and keystrokes. Takes effect immediately.
+- **Screen Recording** for seeing the phone. Takes effect after that terminal restarts.
+
+The user must also pair iPhone Mirroring with the phone by hand once and unlock the phone while
+work is running; a locked phone pauses mirroring. A session that is `blocked` (an interstitial
+is on screen) or `not-running` is refused, with the message relayed to the user. apple-cua
+never taps through an interstitial and never types a password for the user.
+
 ## Optional CLI alias
 
 After building, either keep using `node /absolute/path/to/packages/cli/dist/cli.js` or create an

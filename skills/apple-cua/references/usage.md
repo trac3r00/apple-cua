@@ -143,6 +143,35 @@ error, unchanged/unavailable observation, unexpected window transition or missin
 stop input and observe explicitly again. A fresh read is for resolving uncertainty, not
 for automatically repeating a potentially non-idempotent action.
 
+## Phone: iPhone Mirroring
+
+The phone is a second target, driven through the macOS iPhone Mirroring window. Its session is
+checked before every action and reported as `ready`, `blocked`, `no-window` or
+`not-running`; anything other than `ready` is refused with what the user has to do about it.
+A `blocked` session (Unlock iPhone, iPhone in Use, paused, ended, Mac login) is the user's to
+clear: never tap Connect, never type a password, never retry in a loop.
+
+MCP tools: `ios_status`, `ios_observe`, `ios_screenshot`, `ios_tap`, `ios_tap_text`,
+`ios_long_press`, `ios_swipe`, `ios_scroll`, `ios_type_text`, `ios_press_keys`,
+`ios_home`, `ios_app_switcher`, `ios_open_app`. Every mutation needs an
+`observation_token` from the newest `ios_observe`; the token is single-use and the answer
+carries a fresh observation with a new token, so a decided follow-up does not need another read.
+
+CLI:
+
+```bash
+node packages/cli/dist/cli.js ios status
+node packages/cli/dist/cli.js --json ios observe
+node packages/cli/dist/cli.js ios tap-text "Settings"
+node packages/cli/dist/cli.js ios scroll down --amount 0.4
+node packages/cli/dist/cli.js ios type "hello"          # exact paste path
+node packages/cli/dist/cli.js ios key cmd+1             # Home
+```
+
+Directions are stated once and mean it: `scroll` says what you want to SEE (`scroll down`
+reveals content further down the list), `swipe` says which way the finger moves. A vertical
+touch-drag is dropped by macOS 26, so lists move with `scroll`.
+
 ## Human-directed CLI diagnostics
 
 From the checkout, use the built CLI directly (or a configured `apple-cua` alias):

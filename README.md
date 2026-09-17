@@ -256,6 +256,45 @@ await computer.close();
 
 All methods return Promises. The API is intentionally identical to the OpenAI `Computer` abstraction so you can drop it into an agent loop without translation.
 
+## The phone: a real iPhone through iPhone Mirroring
+
+apple-cua also drives a real iPhone, through the macOS iPhone Mirroring window. No jailbreak, no
+Xcode, nothing installed on the phone.
+
+- **Eyes**: Apple's Vision framework reads the window capture, so every visible string comes back
+  with a tap-ready centre in global screen points. The phone image is a video stream, which is
+  exactly why accessibility cannot see into it and OCR has to.
+- **Hands**: synthesized mouse and keyboard events delivered to the mirroring window's own
+  process, so the phone is driven **without bringing its window forward and without touching the
+  pointer**. A scroll borrows the pointer for the length of its gesture and puts it straight back.
+- **Session gating**: every action re-checks the session and refuses unless it is `ready`.
+  `blocked` (Unlock iPhone, iPhone in Use, connection paused or ended, Mac login), `no-window`
+  and `not-running` all come back with what the user has to do about it. Nothing taps through an
+  interstitial, and nothing types a password for you.
+
+\u0060\u0060\u0060bash
+apple-cua ios status          # ready | blocked | no-window | not-running
+apple-cua ios observe         # every visible string with a tap-ready centre
+apple-cua ios tap-text "Settings"
+apple-cua ios type "hello"    # exact: the paste path, past iOS autocorrect
+apple-cua ios scroll down --amount 0.4
+apple-cua ios home
+\u0060\u0060\u0060
+
+Two rules worth knowing before writing a loop:
+
+- `scroll(direction)` says what you want to **see** ("scroll down" reveals content further down
+  the list); `swipe(direction)` says which way the **finger** moves. macOS 26 drops vertical
+  touch-drags, so lists move with `scroll`, and `swipe` is for page turns and carousels.
+- One action, then one cheap check: `ios observe` returns every label with coordinates, and a
+  bounded re-observe beats a fixed sleep.
+
+Setup: pair iPhone Mirroring once by hand, grant the terminal **Accessibility** and **Screen
+Recording** (Screen Recording takes effect after the terminal restarts), and keep the phone
+unlocked while work runs. The MCP side exposes the same capability as token-guarded `ios_*`
+tools. Details:
+[`skills/apple-cua/references/ios-automation.md`](./skills/apple-cua/references/ios-automation.md).
+
 ## Observation cost
 
 Observation is the loop's dominant cost, so the driver keeps the cheap paths cheap. Measured

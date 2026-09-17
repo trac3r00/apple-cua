@@ -1,6 +1,6 @@
 ---
 name: apple-cua
-description: "Operate an explicitly authorized macOS app using the context-first apple-cua MCP server. Observe the app before input, use the returned observation token and element IDs, verify the intended result, and stop on uncertainty. Works with MCP-capable harnesses including OpenClaw and Hermes Agent; direct CLI use is a lower-level alternative, not a way around the guard."
+description: "Operate an explicitly authorized macOS app, or a real iPhone through iPhone Mirroring, using the context-first apple-cua MCP server. Observe before input, use the returned observation token and element IDs, verify the intended result, and stop on uncertainty. Works with MCP-capable harnesses including OpenClaw and Hermes Agent; direct CLI use is a lower-level alternative, not a way around the guard."
 ---
 
 # apple-cua: context before input
@@ -14,6 +14,25 @@ is unnecessary.
 embedded model, extra agent framework, cloud service, or API key is required by apple-cua.
 The MCP server must run on the Mac being controlled, in a logged-in graphical session.
 The harness supplies the model, task reasoning and user-confirmation channel.
+
+## Two targets: macOS apps and the phone
+
+The server drives two kinds of thing, and they are not interchangeable:
+
+- **macOS apps.** Eyes are the accessibility tree plus a window capture; hands are CGEvent input
+  targeted at one app's window. This is the default target and the one to prefer.
+- **A real iPhone**, through the macOS iPhone Mirroring window. Eyes are Apple's Vision OCR over
+  the capture (the phone image is a video stream, so accessibility sees nothing inside it) and
+  hands are synthesized events delivered to that window's own process. The phone is driven
+  without bringing its window forward.
+
+Use the phone only when the task genuinely needs the phone: an iOS-only app, something tied to
+the user's phone number or 2FA, or checking how something looks on the device. If a Mac app or a
+web page can do it, do it there. Before touching the phone, read
+[references/ios-automation.md](references/ios-automation.md): it holds the session states, the
+direction semantics, the decision loop, and the one rule that matters most, that a blocked
+session (Unlock iPhone, iPhone in Use, paused, ended) is the user's to clear and never something
+to tap through.
 
 ## Understand the task first
 
@@ -143,6 +162,7 @@ human consent. The server cannot infer the user's intent or classify every UI co
 | Pi extension / core library | Integrations that implement their own orchestration | Element and coordinate input must follow a `get_app_state` in the same session; the driver refuses input whose observation is no longer the current one, but token, viewport and post-action policy remain the harness's job |
 
 - [Installation and local permissions](references/installation.md)
+- [iPhone Mirroring automation](references/ios-automation.md)
 - [MCP and CLI usage](references/usage.md)
 - [OpenClaw/Hermes configuration](references/harnesses.md)
 - [Troubleshooting](references/troubleshooting.md)

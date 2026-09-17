@@ -11,6 +11,8 @@ const includeScreenshotSchema = z.boolean().optional();
 export const MAX_SET_FIELD_UPDATES = 10;
 /** Upper bound for one ordered action batch, so a single request stays reviewable. */
 export const MAX_RUN_STEPS = 10;
+/** Upper bound for the matches one element query answers with. */
+export const MAX_FIND_RESULTS = 25;
 
 export const emptySchema = z.object({});
 
@@ -64,12 +66,41 @@ const verifyCheckFields = {
 	label: z.string().optional(),
 };
 
-export const verifyStateSchema = z.object({
-	app: appSchema,
-	observation_token: observationTokenSchema,
+/**
+ * The outcome an action promises to produce, checked after it dispatched (and, with a timeout,
+ * polled until it holds). One shape is shared by verify_state, run_steps, and click_target so a
+ * check written for one call means the same thing in the others.
+ */
+const verifyExpectSchema = z.object({
 	checks: z.array(z.object(verifyCheckFields)).max(MAX_VERIFY_CHECKS).optional(),
 	window_title: z.string().optional(),
 	timeout_ms: z.number().int().positive().max(10_000).optional(),
+});
+
+/**
+ * One described element: every field given must hold. Role matching ignores the AX prefix and
+ * case; label matching collapses whitespace; the needles are case-insensitive substrings.
+ */
+export const elementQuerySchema = z
+	.object({
+		role: z.string().min(1).optional(),
+		label: z.string().min(1).optional(),
+		label_contains: z.string().min(1).optional(),
+		value_contains: z.string().min(1).optional(),
+		text: z.string().min(1).optional(),
+	})
+	.refine(
+		(query) =>
+			[query.role, query.label, query.label_contains, query.value_contains, query.text].some(
+				(field) => field !== undefined,
+			),
+		{ message: "a query needs at least one of role, label, label_contains, value_contains, or text" },
+	);
+
+export const verifyStateSchema = z.object({
+	app: appSchema,
+	observation_token: observationTokenSchema,
+	...verifyExpectSchema.shape,
 });
 
 export const getAppStateSchema = z.object({
@@ -98,6 +129,35 @@ export const clickSchema = z.object({
 	...clickFields,
 	full_state: fullStateSchema,
 	include_screenshot: includeScreenshotSchema,
+});
+
+export const findElementsSchema = z.object({
+	app: appSchema,
+	query: elementQuerySchema,
+	window_id: z.number().int().positive().optional(),
+	max_results: z.number().int().positive().max(MAX_FIND_RESULTS).optional(),
+	max_elements: z.number().int().positive().optional(),
+	include_screenshot: includeScreenshotSchema,
+});
+
+export const clickTargetSchema = z.object({
+	app: appSchema,
+	query: elementQuerySchema,
+	window_id: z.number().int().positive().optional(),
+	index: z.number().int().nonnegative().optional(),
+	timeout_ms: z.number().int().nonnegative().max(10_000).optional(),
+	press: z.enum(["auto", "accessibility", "pointer"]).optional(),
+	hover_first: z.boolean().optional(),
+	click_count: z.number().int().positive().optional(),
+	mouse_button: z.enum(["left", "right", "middle"]).optional(),
+	expect: verifyExpectSchema.optional(),
+	full_state: fullStateSchema,
+	include_screenshot: includeScreenshotSchema,
+});
+
+export const openAppSchema = z.object({
+	name: z.string().min(1),
+	timeout_ms: z.number().int().positive().max(30_000).optional(),
 });
 
 const performSecondaryActionFields = {
@@ -255,19 +315,16 @@ export const runStepsSchema = z.object({
 	app: appSchema,
 	observation_token: observationTokenSchema,
 	steps: z.array(runStepSchema).min(1).max(MAX_RUN_STEPS),
-	expect: z
-		.object({
-			checks: z.array(z.object(verifyCheckFields)).max(MAX_VERIFY_CHECKS).optional(),
-			window_title: z.string().optional(),
-			timeout_ms: z.number().int().positive().max(10_000).optional(),
-		})
-		.optional(),
+	expect: verifyExpectSchema.optional(),
 	full_state: fullStateSchema,
 	include_screenshot: includeScreenshotSchema,
 });
 
 export type ClickInput = z.infer<typeof clickSchema>;
+export type ClickTargetInput = z.infer<typeof clickTargetSchema>;
 export type DragInput = z.infer<typeof dragSchema>;
+export type FindElementsInput = z.infer<typeof findElementsSchema>;
+export type OpenAppInput = z.infer<typeof openAppSchema>;
 export type PressKeysInput = z.infer<typeof pressKeysSchema>;
 export type SelectTextInput = z.infer<typeof selectTextSchema>;
 export type SetFieldsInput = z.infer<typeof setFieldsSchema>;

@@ -1,14 +1,25 @@
 import { randomUUID } from "node:crypto";
-import { parseElementIndex, resolveAppPid } from "@apple-cua/core";
+import {
+	describeQuery,
+	matchElements,
+	openApplication,
+	parseElementIndex,
+	resolveAppPid,
+	suggestNearMisses,
+} from "@apple-cua/core";
 import type {
 	AXTreeElement,
+	AppOpenLauncher,
 	AppState,
+	ElementMatch,
+	ElementQuery,
 	GuardedComputerInterface,
 	InputObservation,
 	Point,
 	Rect,
 	TopLevelWindow,
 } from "@apple-cua/core";
+import type { ResolvedTargetClick } from "./mutation-actions.js";
 import {
 	type ActionDispatch,
 	type RunStepReport,
@@ -20,19 +31,29 @@ import {
 	type Verification,
 	type VerificationCheck,
 	type WindowEvent,
+	appNotRunningResult,
+	compactElement,
+	compactElementMatch,
 	describeElement,
 	observedActionResult,
 	observedRunStepsResult,
 	observedSetFieldsResult,
+	openAppResult,
 	postActionErrorResult,
 	refusalResult,
 	stateResult,
+	targetStateResult,
 	textResult,
 	verificationResult,
 } from "./tool-result.js";
 import type { RunStep } from "./tool-schemas.js";
 
 const VERIFY_POLL_INTERVAL_MILLISECONDS = 150;
+/** How long one targeting attempt waits before re-observing while it looks for its element. */
+const TARGET_POLL_INTERVAL_MILLISECONDS = 200;
+const DEFAULT_FIND_RESULTS = 5;
+const MAX_NEAR_MISSES = 5;
+const MAX_ALTERNATIVES = 3;
 
 function delayMilliseconds(milliseconds: number): Promise<void> {
 	return new Promise((resolve) => {
@@ -106,6 +127,43 @@ export interface SetFieldUpdate {
 	readonly value: string;
 }
 
+/** Dispatches one click on a control the session resolved by description. */
+export type ResolvedTargetDispatcher = (
+	targetPid: number,
+	observation: InputObservation,
+	target: ResolvedTargetClick,
+) => Promise<ActionDispatch>;
+
+export interface FindElementsRequest {
+	readonly app: string;
+	readonly query: ElementQuery;
+	readonly windowId?: number;
+	readonly maxResults?: number;
+	readonly maxElements?: number;
+	readonly includeScreenshot?: boolean;
+}
+
+export interface ClickTargetRequest {
+	readonly app: string;
+	readonly query: ElementQuery;
+	readonly index?: number;
+	/** How long to keep looking for the element before giving up; 0 acts on what is there now. */
+	readonly timeoutMs?: number;
+	readonly press?: "auto" | "accessibility" | "pointer";
+	readonly hoverFirst?: boolean;
+	readonly clickCount?: number;
+	readonly mouseButton?: "left" | "right" | "middle";
+	readonly expect?: VerifyRequest;
+	readonly fullState?: boolean;
+	readonly includeScreenshot?: boolean;
+	readonly windowId?: number;
+}
+
+export interface OpenAppRequest {
+	readonly name: string;
+	readonly timeoutMs?: number;
+}
+
 /**
  * Step-type knowledge the session needs to run a batch: which observed element a step
  * targets (if any), how to validate it against the token observation, and how to dispatch it.
@@ -151,6 +209,7 @@ export class GuardedSession {
 	constructor(
 		private readonly computer: GuardedComputerInterface,
 		private readonly windowProbe?: () => Promise<readonly TopLevelWindow[]>,
+		private readonly appLauncher?: AppOpenLauncher,
 	) {}
 
 	listApps(): Promise<ToolResult> {
@@ -196,12 +255,250 @@ export class GuardedSession {
 			});
 			this.assertOpen();
 			const observation = this.computer.getInputObservation(targetPid);
-			const token =
-				state.treeSkipped !== true && observation !== undefined && observationMatchesState(observation, state)
-					? this.issue(observation, observedElementIdentity(state))
-					: undefined;
+			const token = this.issueForObservation(observation, state);
 			return stateResult(state, token);
 		});
+	}
+
+	/**
+	 * Answer "what is this thing I am describing?" without spreading the whole tree: one
+	 * accessibility walk (no pixels unless asked), the ranked matches with their ids, and the
+	 * one-use token for those ids. A miss is an honest answer that names near misses.
+	 */
+	findElements(request: FindElementsRequest): Promise<ToolResult> {
+		return this.lookupApp(request.app, async (targetPid) =>
+			this.enqueue(targetPid, async () => {
+				this.clearTokenFor(targetPid);
+				const observed = await this.observeApp(targetPid, {
+					includeScreenshot: request.includeScreenshot === true,
+					...(request.windowId === undefined ? {} : { windowId: request.windowId }),
+					...(request.maxElements === undefined ? {} : { maxElements: request.maxElements }),
+				});
+				const query = describeQuery(request.query);
+				const matches = matchElements(observed.state.elements, request.query);
+				const found = matches.length > 0;
+				return targetStateResult(
+					observed.state,
+					{
+						found,
+						query,
+						matchCount: matches.length,
+						matches: matches
+							.slice(0, request.maxResults ?? DEFAULT_FIND_RESULTS)
+							.map((match) => compactElementMatch(match)),
+						...(found
+							? {}
+							: {
+									nearMisses: suggestNearMisses(observed.state.elements, request.query, MAX_NEAR_MISSES).map(
+										(element) => compactElement(element),
+									),
+									message: `no element matched ${query}; nothing was clicked or changed. The near misses name what this screen offers.`,
+								}),
+					},
+					{
+						token: this.issueForObservation(observed.observation, observed.state),
+						includeScreenshot: request.includeScreenshot === true,
+					},
+				);
+			}),
+		);
+	}
+
+	/**
+	 * Act on a described element in one call: resolve it, wait for it to appear when the caller
+	 * gave patience, dispatch through the route the control supports, and answer with the fresh
+	 * outcome. A miss dispatches nothing and names what the screen did offer.
+	 */
+	clickTarget(request: ClickTargetRequest, dispatchTarget: ResolvedTargetDispatcher): Promise<ToolResult> {
+		return this.lookupApp(request.app, async (targetPid) =>
+			this.enqueue(targetPid, async () => {
+				this.clearTokenFor(targetPid);
+				const startedAt = Date.now();
+				const deadline = startedAt + (request.timeoutMs ?? 0);
+				const includeScreenshot = request.includeScreenshot === true;
+				const observationOptions = {
+					includeScreenshot,
+					...(request.windowId === undefined ? {} : { windowId: request.windowId }),
+				};
+				const index = request.index ?? 0;
+				let attempts = 1;
+				let observed = await this.observeApp(targetPid, observationOptions);
+				let matches = matchElements(observed.state.elements, request.query);
+				let match: ElementMatch | undefined = matches[index];
+				while (match === undefined && Date.now() < deadline) {
+					await delayMilliseconds(Math.min(TARGET_POLL_INTERVAL_MILLISECONDS, Math.max(1, deadline - Date.now())));
+					this.assertOpen();
+					observed = await this.observeApp(targetPid, observationOptions);
+					attempts += 1;
+					matches = matchElements(observed.state.elements, request.query);
+					match = matches[index];
+				}
+				const query = describeQuery(request.query);
+				const waitedMs = Date.now() - startedAt;
+				if (match === undefined) {
+					return targetStateResult(
+						observed.state,
+						{
+							found: false,
+							actionDispatched: false,
+							query,
+							attempts,
+							waitedMs,
+							matchCount: matches.length,
+							alternatives: matches
+								.slice(0, MAX_ALTERNATIVES)
+								.map((candidate) => compactElement(candidate.element)),
+							nearMisses:
+								matches.length > 0
+									? []
+									: suggestNearMisses(observed.state.elements, request.query, MAX_NEAR_MISSES).map((element) =>
+											compactElement(element),
+										),
+							message:
+								matches.length > 0
+									? `no match at index ${index}; the alternatives are the matches that do exist. Nothing was dispatched.`
+									: `no element matched ${query} after ${attempts} observation(s); nothing was dispatched. The near misses name what this screen offers.`,
+						},
+						{
+							token: this.issueForObservation(observed.observation, observed.state),
+							includeScreenshot,
+							includeElements: request.fullState === true,
+						},
+					);
+				}
+				const target = match.element;
+				const observation = observed.observation;
+				if (observation === undefined) {
+					return refusalResult(
+						"no-observation",
+						"the accessibility walk produced no observation to act on; retry",
+					);
+				}
+				const preflight = await this.computer.preflightInput(observation);
+				if (!preflight.ok) {
+					this.clearTokenFor(targetPid);
+					return refusalResult(preflight.reason);
+				}
+				this.assertOpen();
+				const beforeAction = await this.captureWindowBaseline();
+				const dispatch = await dispatchTarget(targetPid, observation, {
+					elementIndex: target.id,
+					actions: target.actions,
+					frame: target.frame,
+					...(request.press === undefined ? {} : { press: request.press }),
+					...(request.hoverFirst === undefined ? {} : { hoverFirst: request.hoverFirst }),
+					...(request.clickCount === undefined ? {} : { clickCount: request.clickCount }),
+					...(request.mouseButton === undefined ? {} : { mouseButton: request.mouseButton }),
+				});
+				try {
+					if (request.expect?.timeoutMs !== undefined) {
+						await this.pollVerification(targetPid, request.expect);
+					}
+					const outcome = await this.readOutcome(targetPid, observation, {
+						fullState: request.fullState === true || (request.expect?.checks?.length ?? 0) > 0,
+						includeScreenshot,
+					});
+					const verification =
+						request.expect === undefined
+							? undefined
+							: await this.runChecks(targetPid, outcome.state, request.expect);
+					const windowEvents = await this.describeWindowSideEffects(beforeAction);
+					return observedActionResult(
+						outcome.state,
+						outcome.contextUnchanged,
+						outcome.nextToken,
+						windowEvents,
+						dispatch,
+						{
+							found: true,
+							query,
+							attempts,
+							waitedMs,
+							target: compactElementMatch(match),
+							matchCount: matches.length,
+							...(matches.length > 1
+								? {
+										alternatives: matches
+											.filter((candidate) => candidate.element.id !== target.id)
+											.slice(0, MAX_ALTERNATIVES)
+											.map((candidate) => compactElement(candidate.element)),
+									}
+								: {}),
+							...(verification === undefined ? {} : { verification }),
+						},
+					);
+				} catch (error: unknown) {
+					this.clearTokenFor(targetPid);
+					return postActionErrorResult(error, {
+						found: true,
+						query,
+						attempts,
+						target: compactElementMatch(match),
+					});
+				}
+			}),
+		);
+	}
+
+	/**
+	 * Open an app the way a person means it: bring it forward when it runs, launch it when it
+	 * does not, and wait until it is observable. Opening authorizes no observation and no input.
+	 */
+	openApp(request: OpenAppRequest): Promise<ToolResult> {
+		return this.enqueue(undefined, async () => {
+			const launcher = this.appLauncher;
+			if (launcher === undefined) {
+				return openAppResult({ opened: false, name: request.name }, "this session has no app launcher");
+			}
+			try {
+				const result = await openApplication(this.computer, request.name, {
+					launcher,
+					...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
+				});
+				return openAppResult({ opened: true, ...result }, undefined);
+			} catch (error: unknown) {
+				return openAppResult(
+					{ opened: false, name: request.name },
+					error instanceof Error ? error.message : String(error),
+				);
+			}
+		});
+	}
+
+	/** Resolve an app name to a pid, or answer honestly that it is not running. */
+	private async lookupApp(app: string, run: (targetPid: number) => Promise<ToolResult>): Promise<ToolResult> {
+		let targetPid: number;
+		try {
+			targetPid = await resolveAppPid(this.computer, app);
+		} catch (error: unknown) {
+			return appNotRunningResult(app, error instanceof Error ? error.message : String(error));
+		}
+		return await run(targetPid);
+	}
+
+	/**
+	 * One accessibility walk for a targeting call, without taking the app's lane, so a caller that
+	 * already holds it can poll with it. Pixels are captured only when the caller asked for them.
+	 */
+	private async observeApp(
+		targetPid: number,
+		options: { readonly includeScreenshot: boolean; readonly windowId?: number; readonly maxElements?: number },
+	): Promise<{ readonly state: AppState; readonly observation: InputObservation | undefined }> {
+		const state = await this.computer.getAppState(targetPid, {
+			...STRICT_STATE_OPTIONS,
+			includeScreenshot: options.includeScreenshot,
+			...(options.windowId === undefined ? {} : { windowId: options.windowId }),
+			...(options.maxElements === undefined ? {} : { maxElements: options.maxElements }),
+		});
+		this.assertOpen();
+		return { state, observation: this.computer.getInputObservation(targetPid) };
+	}
+
+	/** The one-use token for an observation whose element ids are current, or nothing when they are not. */
+	private issueForObservation(observation: InputObservation | undefined, state: AppState): string | undefined {
+		return observation !== undefined && state.treeSkipped !== true && observationMatchesState(observation, state)
+			? this.issue(observation, observedElementIdentity(state))
+			: undefined;
 	}
 
 	mutate(

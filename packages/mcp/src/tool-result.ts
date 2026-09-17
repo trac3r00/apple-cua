@@ -1,4 +1,4 @@
-import type { AXTreeElement, AppState, AxTreeChanges } from "@apple-cua/core";
+import type { AXTreeElement, AppState, AxTreeChanges, ElementMatch } from "@apple-cua/core";
 
 export type ToolContent =
 	| { readonly type: "text"; readonly text: string }
@@ -236,6 +236,7 @@ export function observedActionResult(
 	observationToken?: string,
 	windowEvents: readonly WindowEvent[] = [],
 	dispatch?: ActionDispatch,
+	extra: Record<string, unknown> = {},
 ): ToolResult {
 	const observationStatus = contextUnchanged ? axObservationStatus(state) : "context-changed";
 	const envelope = actionEnvelope({
@@ -246,6 +247,7 @@ export function observedActionResult(
 	return stateToolResult(
 		state,
 		{
+			...extra,
 			actionDispatched: true,
 			observationStatus,
 			paused: observationToken === undefined,
@@ -506,4 +508,126 @@ function axObservationStatus(state: AppState): "changed" | "unchanged" | "unavai
 		return "unavailable";
 	}
 	return summary.added + summary.removed + summary.changed === 0 ? "unchanged" : "changed";
+}
+
+/** A control as a targeting answer names it: an id the caller can act on, and what it is. */
+export interface CompactElement {
+	readonly element_index: string;
+	readonly role: string;
+	readonly label: string | null;
+	readonly value: string | null;
+	readonly frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+	readonly actions: readonly string[];
+}
+
+export interface CompactElementMatch extends CompactElement {
+	/** Which constraints this element satisfied, and the traits that lifted its rank. */
+	readonly matched_by: readonly string[];
+	readonly score: number;
+}
+
+export function compactElement(element: AXTreeElement): CompactElement {
+	return {
+		element_index: String(element.id),
+		role: element.role,
+		label: element.label,
+		value: element.value,
+		frame: element.frame,
+		actions: element.actions,
+	};
+}
+
+export function compactElementMatch(match: ElementMatch): CompactElementMatch {
+	return { ...compactElement(match.element), matched_by: match.matchedBy, score: match.score };
+}
+
+/**
+ * The answer to a described-element call: the observation context, the targeting payload, and the
+ * one-use token, with pixels only when the caller asked for them and the tree only when it asked
+ * for the whole state. A targeting answer stays about a kilobyte.
+ */
+export function targetStateResult(
+	state: AppState,
+	extra: Record<string, unknown>,
+	options: {
+		readonly token?: string | undefined;
+		readonly includeScreenshot?: boolean | undefined;
+		readonly includeElements?: boolean | undefined;
+	} = {},
+): ToolResult {
+	const payload: Record<string, unknown> = {
+		...observationContext(state),
+		...extra,
+		...(options.token === undefined ? {} : { observation_token: options.token }),
+		...(options.includeElements === true ? { elements: state.elements } : {}),
+	};
+	const content: ToolContent[] = [];
+	if (options.includeScreenshot === true && state.screenshotBase64.length > 0) {
+		content.push(stateImage(state));
+	}
+	content.push({ type: "text", text: JSON.stringify(payload, null, 2) });
+	return { content };
+}
+
+/**
+ * A targeting call against an app that is not running: nothing was observed and nothing was
+ * dispatched, and the answer names the verb that would have made it possible.
+ */
+export function appNotRunningResult(app: string, detail: string): ToolResult {
+	return {
+		isError: true,
+		content: [
+			{
+				type: "text",
+				text: JSON.stringify(
+					{
+						found: false,
+						actionDispatched: false,
+						effect: "refused" satisfies ActionEffect,
+						reason: "app-not-running",
+						app,
+						message: `${detail} Nothing was dispatched. Call open_app to launch or activate it, then retry.`,
+					},
+					null,
+					2,
+				),
+			},
+		],
+	};
+}
+
+/**
+ * The answer to open_app: either the app is now running and named, or the launch failed and the
+ * answer says what was attempted. Opening an app authorizes no observation and no input.
+ */
+export function openAppResult(payload: Record<string, unknown>, error: string | undefined): ToolResult {
+	const content: ToolContent[] = [
+		{
+			type: "text",
+			text: JSON.stringify(
+				{
+					...payload,
+					needsExplicitObservation: true,
+					...(error === undefined ? {} : { error, paused: true }),
+				},
+				null,
+				2,
+			),
+		},
+	];
+	return error === undefined ? { content } : { isError: true, content };
+}
+
+function observationContext(state: AppState): Record<string, unknown> {
+	return {
+		app: state.app,
+		bundleId: state.bundleId,
+		pid: state.pid,
+		frontmost: state.frontmost,
+		axAvailable: state.axAvailable,
+		...(state.windowId === undefined ? {} : { windowId: state.windowId }),
+		...(state.windowTitle === undefined ? {} : { windowTitle: state.windowTitle }),
+		...(state.windowBounds === undefined ? {} : { windowBounds: state.windowBounds }),
+		...(state.contentKind === undefined ? {} : { contentKind: state.contentKind }),
+	};
 }

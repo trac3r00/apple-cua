@@ -1,5 +1,19 @@
-import { clickPoint, parseElementIndex, pressElement, pressKeySequence, withTargetedApp } from "@apple-cua/core";
-import type { ComputerInterface, InputObservation, KeySequenceEntry, KeySequenceOptions, Point } from "@apple-cua/core";
+import {
+	AX_PRESS_ACTION,
+	clickPoint,
+	parseElementIndex,
+	pressElement,
+	pressKeySequence,
+	withTargetedApp,
+} from "@apple-cua/core";
+import type {
+	ComputerInterface,
+	ComputerUseMouseButton,
+	InputObservation,
+	KeySequenceEntry,
+	KeySequenceOptions,
+	Point,
+} from "@apple-cua/core";
 import { observedPointToScreen, validateElement, validatePoint } from "./guarded-session.js";
 import type { ActionDelivery, ActionDispatch } from "./tool-result.js";
 import type { ClickActionInput, DragActionInput, PressKeysActionInput, SelectTextActionInput } from "./tool-schemas.js";
@@ -41,6 +55,69 @@ export async function click(
 	}
 	await withTargetedApp(computer, targetPid, async () => {
 		await clickPoint(computer, point, input.mouse_button ?? "left", pressCount);
+	});
+	return { route: "synthetic_events", delivery: syntheticDelivery(computer) };
+}
+
+/** One control a caller described instead of naming by id, with the traits the route decision needs. */
+export interface ResolvedTargetClick {
+	readonly elementIndex: number;
+	readonly actions: readonly string[];
+	readonly frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+	readonly press?: "auto" | "accessibility" | "pointer" | undefined;
+	readonly hoverFirst?: boolean | undefined;
+	readonly clickCount?: number | undefined;
+	readonly mouseButton?: "left" | "right" | "middle" | undefined;
+}
+
+/**
+ * Click a control the caller resolved by description rather than by id: hover to it first when
+ * asked, then press it through its accessibility action when the control advertises one and the
+ * caller did not ask for the pointer route, or click its centre otherwise. Coordinates are only
+ * resolved on the routes that need them, so an offscreen but pressable control still works.
+ */
+export async function clickResolvedTarget(
+	computer: ComputerInterface,
+	targetPid: number,
+	observation: InputObservation,
+	target: ResolvedTargetClick,
+): Promise<ActionDispatch> {
+	const pressCount = Math.max(1, Math.trunc(target.clickCount ?? 1));
+	const button: ComputerUseMouseButton = target.mouseButton ?? "left";
+	const pointerRoute = target.press === "pointer" || button !== "left";
+	const accessibilityRoute =
+		target.press === "accessibility" || (!pointerRoute && target.actions.includes(AX_PRESS_ACTION));
+	const centre = {
+		x: target.frame.x + target.frame.width / 2,
+		y: target.frame.y + target.frame.height / 2,
+	};
+	if (accessibilityRoute) {
+		if (target.hoverFirst === true) {
+			await computer.move(observedPointToScreen(observation, centre));
+		}
+		for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
+			await pressElement(computer, targetPid, target.elementIndex);
+		}
+		return { route: "accessibility", delivery: "background" };
+	}
+	const centreScreen = observedPointToScreen(observation, centre);
+	if (target.hoverFirst === true) {
+		await computer.move(centreScreen);
+	}
+	if (button === "left") {
+		let pressedAll = true;
+		for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
+			if (!(await computer.pressAtPosition(targetPid, centreScreen))) {
+				pressedAll = false;
+				break;
+			}
+		}
+		if (pressedAll) {
+			return { route: "synthetic_events", delivery: "background" };
+		}
+	}
+	await withTargetedApp(computer, targetPid, async () => {
+		await clickPoint(computer, centreScreen, button, pressCount);
 	});
 	return { route: "synthetic_events", delivery: syntheticDelivery(computer) };
 }

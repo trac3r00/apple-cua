@@ -1,12 +1,21 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
-import { parseElementIndex, scrollElement } from "@apple-cua/core";
-import type { GuardedComputerInterface, TopLevelWindow } from "@apple-cua/core";
+import { parseElementIndex, scrollElement, spawnOpenLauncher } from "@apple-cua/core";
+import type { AppOpenLauncher, ElementQuery, GuardedComputerInterface, TopLevelWindow } from "@apple-cua/core";
 import { IPhoneMirroring } from "@apple-cua/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { GuardedSession, validateElement } from "./guarded-session.js";
-import { click, drag, pressKeys, selectText, typeText, validateClick, validateDrag } from "./mutation-actions.js";
+import {
+	click,
+	clickResolvedTarget,
+	drag,
+	pressKeys,
+	selectText,
+	typeText,
+	validateClick,
+	validateDrag,
+} from "./mutation-actions.js";
 import { createNativeComputer, createNativeWindowProbe } from "./native-policy.js";
 import { PhoneGuardSession, type PhoneToolSource } from "./phone-session.js";
 import { registerPhoneTools } from "./phone-tools.js";
@@ -15,9 +24,12 @@ import { SERVER_INFO } from "./server-info.js";
 import { createRunStepDriver } from "./step-actions.js";
 import {
 	clickSchema,
+	clickTargetSchema,
 	dragSchema,
 	emptySchema,
+	findElementsSchema,
 	getAppStateSchema,
+	openAppSchema,
 	performSecondaryActionSchema,
 	pressKeysSchema,
 	runStepsSchema,
@@ -38,6 +50,22 @@ const TOKEN_CONTRACT =
 	"Requires the one-use observation_token issued by the most recent get_app_state or by the previous mutation result; element_index is an id from that observation, never an array offset.";
 const OUTCOME_CONTRACT =
 	"Answers with the fresh post-action observation: what changed, the affected controls, and a new one-use observation_token when the input context is unchanged. The full accessibility tree is omitted unless full_state=true, and the post-action image is omitted unless include_screenshot=true, so a verified step stays cheap until the caller asks for pixels. When no observation_token is returned (paused=true or observationStatus=context-changed), call get_app_state before any further action.";
+
+function elementQueryFromInput(input: {
+	readonly role?: string | undefined;
+	readonly label?: string | undefined;
+	readonly label_contains?: string | undefined;
+	readonly value_contains?: string | undefined;
+	readonly text?: string | undefined;
+}): ElementQuery {
+	return {
+		...(input.role === undefined ? {} : { role: input.role }),
+		...(input.label === undefined ? {} : { label: input.label }),
+		...(input.label_contains === undefined ? {} : { labelContains: input.label_contains }),
+		...(input.value_contains === undefined ? {} : { valueContains: input.value_contains }),
+		...(input.text === undefined ? {} : { text: input.text }),
+	};
+}
 
 function outcomeOptions(input: {
 	readonly full_state?: boolean | undefined;
@@ -75,11 +103,13 @@ export function createMcpServer(
 	computer: GuardedComputerInterface | undefined = undefined,
 	windowProbe?: () => Promise<readonly TopLevelWindow[]>,
 	phoneSource: PhoneToolSource = new IPhoneMirroring(),
+	appLauncher?: AppOpenLauncher,
 ): McpServer {
 	const resolvedComputer = computer ?? createNativeComputer();
 	const session = new GuardedSession(
 		resolvedComputer,
 		windowProbe ?? (computer === undefined ? createNativeWindowProbe() : undefined),
+		appLauncher ?? (computer === undefined ? spawnOpenLauncher() : undefined),
 	);
 	const server = new ComputerMcpServer(session);
 
@@ -108,6 +138,21 @@ export function createMcpServer(
 			annotations: READ_ONLY_ANNOTATIONS,
 		},
 		async () => await session.listApps(),
+	);
+
+	server.registerTool(
+		"open_app",
+		{
+			description:
+				"Open an app the way a person means it: bring it forward when it is already running, launch it when it is not, and wait until it is observable, so the next observation sees a real window instead of racing the launch. Answers launched and activated with the pid and bundle id; opening an app authorizes no observation and no input, so follow it with get_app_state or find_elements. Fails honestly when an app never becomes observable, and launching is the only way to reach an app this driver cannot observe yet.",
+			inputSchema: openAppSchema,
+			annotations: MUTATION_ANNOTATIONS,
+		},
+		async (input) =>
+			await session.openApp({
+				name: input.name,
+				...(input.timeout_ms === undefined ? {} : { timeoutMs: input.timeout_ms }),
+			}),
 	);
 
 	server.registerTool(
@@ -156,6 +201,25 @@ export function createMcpServer(
 	);
 
 	server.registerTool(
+		"find_elements",
+		{
+			description:
+				"Read-only described-element query: resolve what the caller means — a role, a label, a piece of text — to the ids of the elements that match, without spreading the whole accessibility tree over the wire. Every field in query must hold (role ignores the AX prefix and case, label compares with whitespace collapsed, label_contains/value_contains/text are case-insensitive substrings); matches come back ranked, best first, each with matched_by evidence and its element_index. The answer carries the one-use observation_token for the ids it names, so a click can follow immediately, and found=false names near misses instead of failing blind. Cheap by construction: no screenshot unless include_screenshot=true.",
+			inputSchema: findElementsSchema,
+			annotations: READ_ONLY_ANNOTATIONS,
+		},
+		async (input) =>
+			await session.findElements({
+				app: input.app,
+				query: elementQueryFromInput(input.query),
+				...(input.window_id === undefined ? {} : { windowId: input.window_id }),
+				...(input.max_results === undefined ? {} : { maxResults: input.max_results }),
+				...(input.max_elements === undefined ? {} : { maxElements: input.max_elements }),
+				...(input.include_screenshot === undefined ? {} : { includeScreenshot: input.include_screenshot }),
+			}),
+	);
+
+	server.registerTool(
 		"click",
 		{
 			description: mutationDescription(
@@ -171,6 +235,46 @@ export function createMcpServer(
 				(observation) => validateClick(input, observation),
 				async (targetPid, observation) => await click(resolvedComputer, targetPid, observation, input),
 				outcomeOptions(input),
+			),
+	);
+
+	server.registerTool(
+		"click_target",
+		{
+			description: mutationDescription(
+				"Act on a described element in one call instead of the observe-scan-click-verify loop: observe the app, resolve the query, wait up to timeout_ms for the element to appear (patience is what makes a slow screen reliable), hover to it first when hover_first is set, press it through its AXPress action when the control advertises one — or click its centre when press=pointer, when the button is not left, or when there is no accessibility action to use — then answer with the fresh outcome. The answer names the target it resolved, the alternatives it did not click, the route and delivery that carried the input, and, with expect, whether the outcome verified. found=false means nothing matched within the patience given: no input was dispatched, the near misses name what the screen does offer, and the answer still carries the token for the ids it saw, so open-then-act flows compose from open_app and click_target alone.",
+			),
+			inputSchema: clickTargetSchema,
+			annotations: MUTATION_ANNOTATIONS,
+		},
+		async (input) =>
+			await session.clickTarget(
+				{
+					app: input.app,
+					query: elementQueryFromInput(input.query),
+					...(input.index === undefined ? {} : { index: input.index }),
+					...(input.timeout_ms === undefined ? {} : { timeoutMs: input.timeout_ms }),
+					...(input.press === undefined ? {} : { press: input.press }),
+					...(input.hover_first === undefined ? {} : { hoverFirst: input.hover_first }),
+					...(input.click_count === undefined ? {} : { clickCount: input.click_count }),
+					...(input.mouse_button === undefined ? {} : { mouseButton: input.mouse_button }),
+					...(input.window_id === undefined ? {} : { windowId: input.window_id }),
+					...(input.expect === undefined
+						? {}
+						: {
+								expect: {
+									...(input.expect.checks === undefined ? {} : { checks: input.expect.checks }),
+									...(input.expect.window_title === undefined
+										? {}
+										: { windowTitle: input.expect.window_title }),
+									...(input.expect.timeout_ms === undefined ? {} : { timeoutMs: input.expect.timeout_ms }),
+								},
+							}),
+					fullState: input.full_state === true,
+					includeScreenshot: input.include_screenshot === true,
+				},
+				async (targetPid, observation, target) =>
+					await clickResolvedTarget(resolvedComputer, targetPid, observation, target),
 			),
 	);
 

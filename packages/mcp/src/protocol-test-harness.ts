@@ -24,6 +24,7 @@ export type Effect =
 	| { readonly kind: "selectText"; readonly pid: number; readonly id: number }
 	| { readonly kind: "click"; readonly point: Point }
 	| { readonly kind: "drag"; readonly options: DragOptions }
+	| { readonly kind: "move"; readonly point: Point }
 	| { readonly kind: "type"; readonly text: string }
 	| { readonly kind: "key"; readonly key: string }
 	| { readonly kind: "invokeMenu"; readonly pid: number; readonly path: readonly string[] }
@@ -95,16 +96,21 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	syntheticRowCount = 0;
 	/** When true, state reports that the accessibility walk stopped at its element budget. */
 	elementsTruncated = false;
+	/** Called at the start of every accessibility walk, so a test can change the tree between polls. */
+	onStateCall: ((call: number) => void) | undefined;
 	/** Delivery mode the fake computer reports, mirroring the native driver's default. */
 	delivery: "attended" | "background" = "attended";
 	windowId = 71;
 	windowIdAfterAction: number | undefined;
 	windowBounds = { x: 300, y: 150, width: 1000, height: 800 };
 	private generation = 0;
+	private stateCalls = 0;
 	private readonly observations = new Map<number, InputObservation>();
 	private actionDispatched = false;
 
 	async getAppState(targetPid = 1234, options?: AppStateOptions): Promise<AppState> {
+		this.stateCalls += 1;
+		this.onStateCall?.(this.stateCalls);
 		this.stateOptions.push(options);
 		const gate = this.stateGate;
 		if (gate !== undefined) {
@@ -237,7 +243,9 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	async screenshot(_options?: ScreenshotOptions): Promise<ScreenshotResult> {
 		return { data: Buffer.from("png"), mimeType: "image/png", width: 1, height: 1 };
 	}
-	async move(_position: Point): Promise<void> {}
+	async move(position: Point): Promise<void> {
+		this.dispatch({ kind: "move", point: position });
+	}
 	async rightClick(point: Point): Promise<void> {
 		this.dispatch({ kind: "click", point });
 	}

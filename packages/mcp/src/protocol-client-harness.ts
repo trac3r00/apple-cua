@@ -1,4 +1,4 @@
-import type { TopLevelWindow } from "@apple-cua/core";
+import type { AppOpenLauncher, TopLevelWindow } from "@apple-cua/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
@@ -29,8 +29,9 @@ class InMemoryTransport implements Transport {
 export async function createHarness(
 	computer = new FakeGuardedComputer(),
 	windowProbe?: () => Promise<readonly TopLevelWindow[]>,
+	appLauncher?: AppOpenLauncher,
 ) {
-	const server = createMcpServer(computer, windowProbe);
+	const server = createMcpServer(computer, windowProbe, undefined, appLauncher);
 	const client = new Client({ name: "context-first-test", version: "0.1.0" });
 	const clientTransport = new InMemoryTransport();
 	const serverTransport = new InMemoryTransport();

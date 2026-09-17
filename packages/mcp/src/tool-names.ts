@@ -1,8 +1,11 @@
 export const TOOL_NAMES = [
 	"list_apps",
+	"open_app",
 	"list_windows",
 	"get_app_state",
+	"find_elements",
 	"click",
+	"click_target",
 	"perform_secondary_action",
 	"set_value",
 	"set_fields",

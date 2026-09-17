@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = process.env.STRATEGIC_SERVER ?? path.join(REPO, "packages/mcp/dist/server.js");
-const HELPER = "/Users/bob/src/apple-cua/packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp";
+const HELPER = process.env.STRATEGIC_HELPER ?? "/Users/bob/src/apple-cua/packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp";
 const APP = process.env.STRATEGIC_APP ?? "Finder";
 const TOOL_NAMES = ["open_app", "find_elements", "click_target"];
 

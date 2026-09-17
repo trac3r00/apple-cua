@@ -1,4 +1,5 @@
 import { IPhoneMirroring, requireMirroringSession } from "@apple-cua/core";
+import type { Static, TSchema } from "typebox";
 import { type ToolDefinition, defineTool } from "../pi/index.js";
 import { textResult } from "./result.js";
 
@@ -24,13 +25,13 @@ export class PhoneObservationKeys {
 	}
 }
 
-export function phoneTool(
+export function phoneTool<TSchemaType extends TSchema>(
 	name: string,
 	label: string,
 	description: string,
-	parameters: any,
+	parameters: TSchemaType,
 	keys: PhoneObservationKeys,
-	action: (phone: IPhoneMirroring, params: any) => Promise<unknown>,
+	action: (phone: IPhoneMirroring, params: Static<TSchemaType>) => Promise<unknown>,
 ): ToolDefinition {
 	return defineTool({
 		name,

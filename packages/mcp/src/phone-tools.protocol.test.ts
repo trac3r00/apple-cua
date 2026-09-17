@@ -43,11 +43,11 @@ describe("guarded iPhone Mirroring protocol", () => {
 		const phone = source();
 		const guard = new PhoneGuardSession(phone);
 		const observation = payload(await guard.observe());
-		const token = observation.observation_token as string;
+		const token = observation["observation_token"] as string;
 		const result = payload(await guard.consume(token, { x: 150, y: 250 }, async () => phone.tap(150, 250)));
 		expect(phone.calls).toEqual([{ x: 150, y: 250 }]);
-		expect(result.observation_token).toEqual(expect.any(String));
-		expect(result.observation_token).not.toBe(token);
+		expect(result["observation_token"]).toEqual(expect.any(String));
+		expect(result["observation_token"]).not.toBe(token);
 	});
 
 	it("refuses missing, reused, expired, and out-of-window tokens", async () => {
@@ -55,7 +55,7 @@ describe("guarded iPhone Mirroring protocol", () => {
 		const phone = source();
 		const guard = new PhoneGuardSession(phone, { now: () => now, ttlMs: 100 });
 		expect((await guard.consume(undefined, {}, async () => {})).isError).toBe(true);
-		const token = payload(await guard.observe()).observation_token as string;
+		const token = payload(await guard.observe())["observation_token"] as string;
 		expect((await guard.consume(token, { x: 99, y: 250 }, async () => {})).isError).toBe(true);
 		now = 101;
 		expect((await guard.consume(token, { x: 150, y: 250 }, async () => {})).isError).toBe(true);
@@ -64,18 +64,21 @@ describe("guarded iPhone Mirroring protocol", () => {
 	it("refuses a second use of a token that is still inside its lifetime", async () => {
 		const phone = source();
 		const guard = new PhoneGuardSession(phone, { now: () => 0, ttlMs: 100 });
-		const token = payload(await guard.observe()).observation_token as string;
+		const token = payload(await guard.observe())["observation_token"] as string;
 		expect((await guard.consume(token, { x: 150, y: 250 }, async () => phone.tap(150, 250))).isError).toBeFalsy();
 		const reused = payload(await guard.consume(token, { x: 150, y: 250 }, async () => phone.tap(150, 250)));
-		expect(reused.reason).toBe("phone-token-consumed");
+		expect(reused["reason"]).toBe("phone-token-consumed");
 		expect(phone.calls).toHaveLength(1);
 	});
 
 	it("uses the centre of matching text and reports visible text on failure", async () => {
 		const phone = source();
 		const guard = new PhoneGuardSession(phone);
-		const token = payload(await guard.observe()).observation_token as string;
+		const token = payload(await guard.observe())["observation_token"] as string;
 		const match = ready.texts[0];
+		if (match === undefined) {
+			throw new Error("the fixture text is missing");
+		}
 		await guard.consume(token, {}, async (observation) => {
 			const hit = observation.texts.find((text) => text.text === "Open");
 			if (hit === undefined) throw new Error("not found");
@@ -84,6 +87,6 @@ describe("guarded iPhone Mirroring protocol", () => {
 		expect(phone.calls).toEqual([{ x: match.x + match.width / 2, y: match.y + match.height / 2 }]);
 		const blocked = source({ ...ready, state: "blocked" });
 		const refusal = await new PhoneGuardSession(blocked).observe();
-		expect(payload(refusal).message).toContain(describeMirroringState("blocked"));
+		expect(payload(refusal)["message"]).toContain(describeMirroringState("blocked"));
 	});
 });

@@ -5,6 +5,7 @@ const observationTokenSchema = z.string().min(1);
 const elementIndexSchema = z.string();
 const coordinateSchema = z.number();
 const fullStateSchema = z.boolean().optional();
+const includeScreenshotSchema = z.boolean().optional();
 
 /** Upper bound for one verified field-update call, so a single request stays reviewable. */
 export const MAX_SET_FIELD_UPDATES = 10;
@@ -75,6 +76,9 @@ export const getAppStateSchema = z.object({
 	app: appSchema,
 	diff_only: z.boolean().optional(),
 	include_screenshot: z.boolean().optional(),
+	include_accessibility_tree: z.boolean().optional(),
+	window_id: z.number().int().positive().optional(),
+	settle_ms: z.number().int().nonnegative().optional(),
 	max_elements: z.number().int().positive().optional(),
 	include_menu_bar: z.boolean().optional(),
 	subtree_of: z.number().int().nonnegative().optional(),
@@ -93,6 +97,7 @@ export const clickSchema = z.object({
 	observation_token: observationTokenSchema,
 	...clickFields,
 	full_state: fullStateSchema,
+	include_screenshot: includeScreenshotSchema,
 });
 
 const performSecondaryActionFields = {
@@ -105,6 +110,7 @@ export const performSecondaryActionSchema = z.object({
 	observation_token: observationTokenSchema,
 	...performSecondaryActionFields,
 	full_state: fullStateSchema,
+	include_screenshot: includeScreenshotSchema,
 });
 
 const setValueFields = {
@@ -117,6 +123,7 @@ export const setValueSchema = z.object({
 	observation_token: observationTokenSchema,
 	...setValueFields,
 	full_state: fullStateSchema,
+	include_screenshot: includeScreenshotSchema,
 });
 
 export const setFieldsSchema = z.object({
@@ -132,6 +139,7 @@ export const setFieldsSchema = z.object({
 		.min(1)
 		.max(MAX_SET_FIELD_UPDATES),
 	full_state: fullStateSchema,
+	include_screenshot: includeScreenshotSchema,
 });
 
 const selectTextFields = {
@@ -147,6 +155,7 @@ export const selectTextSchema = z.object({
 	observation_token: observationTokenSchema,
 	...selectTextFields,
 	full_state: fullStateSchema,
+	include_screenshot: includeScreenshotSchema,
 });
 
 const dragFields = {
@@ -161,6 +170,7 @@ export const dragSchema = z.object({
 	observation_token: observationTokenSchema,
 	...dragFields,
 	full_state: fullStateSchema,
+	include_screenshot: includeScreenshotSchema,
 });
 
 const scrollFields = {
@@ -174,6 +184,7 @@ export const scrollSchema = z.object({
 	observation_token: observationTokenSchema,
 	...scrollFields,
 	full_state: fullStateSchema,
+	include_screenshot: includeScreenshotSchema,
 });
 
 const typeTextFields = {
@@ -185,6 +196,7 @@ export const typeTextSchema = z.object({
 	observation_token: observationTokenSchema,
 	...typeTextFields,
 	full_state: fullStateSchema,
+	include_screenshot: includeScreenshotSchema,
 });
 
 const keySequenceEntrySchema = z.union([
@@ -206,6 +218,7 @@ export const pressKeysSchema = z.object({
 	observation_token: observationTokenSchema,
 	...pressKeysFields,
 	full_state: fullStateSchema,
+	include_screenshot: includeScreenshotSchema,
 });
 
 /**
@@ -250,6 +263,7 @@ export const runStepsSchema = z.object({
 		})
 		.optional(),
 	full_state: fullStateSchema,
+	include_screenshot: includeScreenshotSchema,
 });
 
 export type ClickInput = z.infer<typeof clickSchema>;

@@ -1,7 +1,7 @@
 import { clickPoint, parseElementIndex, pressElement, pressKeySequence, withTargetedApp } from "@apple-cua/core";
 import type { ComputerInterface, InputObservation, KeySequenceEntry, KeySequenceOptions, Point } from "@apple-cua/core";
 import { observedPointToScreen, validateElement, validatePoint } from "./guarded-session.js";
-import type { ActionDispatch } from "./tool-result.js";
+import type { ActionDelivery, ActionDispatch } from "./tool-result.js";
 import type { ClickActionInput, DragActionInput, PressKeysActionInput, SelectTextActionInput } from "./tool-schemas.js";
 
 export function validateClick(input: ClickActionInput, observation: InputObservation): void {
@@ -42,7 +42,7 @@ export async function click(
 	await withTargetedApp(computer, targetPid, async () => {
 		await clickPoint(computer, point, input.mouse_button ?? "left", pressCount);
 	});
-	return { route: "synthetic_events", delivery: "background" };
+	return { route: "synthetic_events", delivery: syntheticDelivery(computer) };
 }
 
 export function validateDrag(input: DragActionInput, observation: InputObservation): void {
@@ -61,7 +61,7 @@ export async function drag(
 	await withTargetedApp(computer, targetPid, async () => {
 		await computer.drag({ from, to });
 	});
-	return { route: "synthetic_events", delivery: "background" };
+	return { route: "synthetic_events", delivery: syntheticDelivery(computer) };
 }
 
 export async function typeText(computer: ComputerInterface, targetPid: number, text: string): Promise<ActionDispatch> {
@@ -71,7 +71,7 @@ export async function typeText(computer: ComputerInterface, targetPid: number, t
 	await withTargetedApp(computer, targetPid, async () => {
 		await computer.type(text);
 	});
-	return { route: "synthetic_events", delivery: "background" };
+	return { route: "synthetic_events", delivery: syntheticDelivery(computer) };
 }
 
 export async function selectText(
@@ -97,7 +97,17 @@ export async function pressKeys(
 	await withTargetedApp(computer, targetPid, async () => {
 		await pressKeySequence(computer, input.keys.map(keySequenceEntryFromInput), keySequenceOptions(input));
 	});
-	return { route: "synthetic_events", delivery: "background" };
+	return { route: "synthetic_events", delivery: syntheticDelivery(computer) };
+}
+
+/**
+ * Delivery label for a synthetic-events action that travels through the input controller's
+ * target routing: attended delivery leases the foreground for it, background delivery posts to
+ * the target process without touching the frontmost app. Which route ran is decided above;
+ * this only names how the input travelled.
+ */
+function syntheticDelivery(computer: ComputerInterface): ActionDelivery {
+	return computer.delivery === "attended" ? "foreground" : "background";
 }
 
 function clickPointInput(x: number | undefined, y: number | undefined): Point {

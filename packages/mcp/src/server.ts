@@ -37,7 +37,14 @@ const SERVER_INSTRUCTIONS =
 const TOKEN_CONTRACT =
 	"Requires the one-use observation_token issued by the most recent get_app_state or by the previous mutation result; element_index is an id from that observation, never an array offset.";
 const OUTCOME_CONTRACT =
-	"Answers with the fresh post-action observation: what changed, the affected controls, and a new one-use observation_token when the input context is unchanged. The full accessibility tree is omitted unless full_state=true. When no observation_token is returned (paused=true or observationStatus=context-changed), call get_app_state before any further action.";
+	"Answers with the fresh post-action observation: what changed, the affected controls, and a new one-use observation_token when the input context is unchanged. The full accessibility tree is omitted unless full_state=true, and the post-action image is omitted unless include_screenshot=true, so a verified step stays cheap until the caller asks for pixels. When no observation_token is returned (paused=true or observationStatus=context-changed), call get_app_state before any further action.";
+
+function outcomeOptions(input: {
+	readonly full_state?: boolean | undefined;
+	readonly include_screenshot?: boolean | undefined;
+}): { readonly fullState: boolean; readonly includeScreenshot: boolean } {
+	return { fullState: input.full_state === true, includeScreenshot: input.include_screenshot === true };
+}
 
 function mutationDescription(specific: string): string {
 	return `${specific} ${TOKEN_CONTRACT} ${OUTCOME_CONTRACT}`;
@@ -104,18 +111,44 @@ export function createMcpServer(
 	);
 
 	server.registerTool(
+		"list_windows",
+		{
+			description:
+				"List the on-screen top-level windows this Mac is hosting: window id, owning pid, app name, title, and bounds in screen points. Use it to see what is open, to pick the window a coordinate action should target, and to check geometry before set_window_frame; an empty list means no window is currently on screen rather than that the machine has none. Listing windows authorizes nothing.",
+			inputSchema: emptySchema,
+			annotations: READ_ONLY_ANNOTATIONS,
+		},
+		async () => await session.listWindows(),
+	);
+
+	server.registerTool(
 		"get_app_state",
 		{
 			description:
-				"Read-only observation of one approved app window: screenshot, accessibility elements with their ids, and current input context. This is the only source of a first observation_token; it is issued per call and works exactly once, because it proves that the app, window and viewport were observed before input. Set diff_only=true to get only what changed since the previous observation of this app (the axChanges list), which costs far fewer tokens; the first observation of an app is always the full tree. Set include_screenshot=false when you only need to re-index elements before an element action: that skips the image entirely and is the cheapest observation. max_elements caps the tree for very large windows, subtree_of=<element id> observes just that element's subtree with ids restarting at 0 (the cheapest way to explore a capped tree), and include_menu_bar=true adds application menu-bar items (they are excluded by default because they are not window content). Element ids reported here are the element_index values accepted by every mutation tool.",
+				"Read-only observation of one approved app window: screenshot, accessibility elements with their ids, and current input context. This is the only source of a first observation_token; it is issued per call and works exactly once, because it proves that the app, window and viewport were observed before input. Set diff_only=true to get only what changed since the previous observation of this app (the axChanges list), which costs far fewer tokens; the first observation of an app is always the full tree. Set include_screenshot=false when you only need to re-index elements before an element action: that skips the image entirely and is the cheapest observation. Set include_accessibility_tree=false for the mirror image: skip the accessibility walk (and its settle wait) and get the window image with no elements and no token, the cheapest way to look at pixels. Pass window_id (a candidate id from windowCandidates, or one from list_windows) to observe that specific window of the app instead of its focused window. settle_ms caps the pre-capture UI settle wait (0 skips it), max_elements caps the tree for very large windows, subtree_of=<element id> observes just that element's subtree with ids restarting at 0 (the cheapest way to explore a capped tree), and include_menu_bar=true adds application menu-bar items (they are excluded by default because they are not window content). Element ids reported here are the element_index values accepted by every mutation tool.",
 			inputSchema: getAppStateSchema,
 			annotations: READ_ONLY_ANNOTATIONS,
 		},
-		async ({ app, diff_only, include_screenshot, max_elements, include_menu_bar, subtree_of }) =>
+		async ({
+			app,
+			diff_only,
+			include_screenshot,
+			include_accessibility_tree,
+			window_id,
+			settle_ms,
+			max_elements,
+			include_menu_bar,
+			subtree_of,
+		}) =>
 			await session.observe({
 				app,
 				diffOnly: diff_only === true,
 				...(include_screenshot === undefined ? {} : { includeScreenshot: include_screenshot }),
+				...(include_accessibility_tree === undefined
+					? {}
+					: { includeAccessibilityTree: include_accessibility_tree }),
+				...(window_id === undefined ? {} : { windowId: window_id }),
+				...(settle_ms === undefined ? {} : { settleMs: settle_ms }),
 				...(max_elements === undefined ? {} : { maxElements: max_elements }),
 				...(include_menu_bar === undefined ? {} : { includeMenuBar: include_menu_bar }),
 				...(subtree_of === undefined ? {} : { subtreeOf: subtree_of }),
@@ -137,7 +170,7 @@ export function createMcpServer(
 				input.app,
 				(observation) => validateClick(input, observation),
 				async (targetPid, observation) => await click(resolvedComputer, targetPid, observation, input),
-				{ fullState: input.full_state === true },
+				outcomeOptions(input),
 			),
 	);
 
@@ -160,7 +193,7 @@ export function createMcpServer(
 					await resolvedComputer.performAction(targetPid, index(), input.action);
 					return { route: "accessibility", delivery: "background" } as const;
 				},
-				{ fullState: input.full_state === true },
+				outcomeOptions(input),
 			);
 		},
 	);
@@ -184,7 +217,7 @@ export function createMcpServer(
 					await resolvedComputer.setValue(targetPid, index(), input.value);
 					return { route: "accessibility", delivery: "background" } as const;
 				},
-				{ fullState: input.full_state === true },
+				outcomeOptions(input),
 			);
 		},
 	);
@@ -199,9 +232,7 @@ export function createMcpServer(
 			annotations: MUTATION_ANNOTATIONS,
 		},
 		async (input) =>
-			await session.setFields(input.observation_token, input.app, input.updates, {
-				fullState: input.full_state === true,
-			}),
+			await session.setFields(input.observation_token, input.app, input.updates, outcomeOptions(input)),
 	);
 
 	server.registerTool(
@@ -226,7 +257,7 @@ export function createMcpServer(
 							...(input.expect.timeout_ms === undefined ? {} : { timeoutMs: input.expect.timeout_ms }),
 						},
 				createRunStepDriver(resolvedComputer),
-				{ fullState: input.full_state === true },
+				outcomeOptions(input),
 			),
 	);
 
@@ -246,7 +277,7 @@ export function createMcpServer(
 				input.app,
 				(observation) => validateElement(observation, index()),
 				async (targetPid) => await selectText(resolvedComputer, targetPid, index(), input),
-				{ fullState: input.full_state === true },
+				outcomeOptions(input),
 			);
 		},
 	);
@@ -264,7 +295,7 @@ export function createMcpServer(
 				input.app,
 				(observation) => validateDrag(input, observation),
 				async (targetPid, observation) => await drag(resolvedComputer, targetPid, observation, input),
-				{ fullState: input.full_state === true },
+				outcomeOptions(input),
 			),
 	);
 
@@ -285,7 +316,7 @@ export function createMcpServer(
 					await scrollElement(resolvedComputer, targetPid, index(), input.direction, input.pages ?? 1);
 					return { route: "accessibility", delivery: "background" } as const;
 				},
-				{ fullState: input.full_state === true },
+				outcomeOptions(input),
 			);
 		},
 	);
@@ -303,7 +334,7 @@ export function createMcpServer(
 				input.app,
 				() => undefined,
 				async (targetPid) => await typeText(resolvedComputer, targetPid, input.text),
-				{ fullState: input.full_state === true },
+				outcomeOptions(input),
 			),
 	);
 
@@ -320,7 +351,7 @@ export function createMcpServer(
 				input.app,
 				() => undefined,
 				async (targetPid) => await pressKeys(resolvedComputer, targetPid, input),
-				{ fullState: input.full_state === true },
+				outcomeOptions(input),
 			),
 	);
 

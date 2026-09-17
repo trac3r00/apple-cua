@@ -76,7 +76,11 @@ describe("set_fields #given observed text fields #when several values change #th
 			(options) => options?.settleMs !== undefined && options.requireWindow === true,
 		);
 		expect(verifyReads.length).toBeGreaterThanOrEqual(2);
-		expect(harness.computer.stateOptions.at(-1)).toEqual({ diffOnly: true, requireWindow: true });
+		expect(harness.computer.stateOptions.at(-1)).toEqual({
+			diffOnly: true,
+			requireWindow: true,
+			includeScreenshot: false,
+		});
 	});
 });
 

@@ -47,11 +47,25 @@ const FIELD_VERIFY_STATE_OPTIONS = { requireWindow: true, settleMs: 80 } as cons
 export interface MutationOptions {
 	/** Return the whole accessibility tree in the post-action observation instead of only the diff. */
 	readonly fullState?: boolean;
+	/**
+	 * Attach the post-action window image. The default answer is text-only so a verified step costs
+	 * about a kilobyte instead of a hundred, and callers ask for pixels only when pixels decide the
+	 * next step.
+	 */
+	readonly includeScreenshot?: boolean;
 }
 
 export interface ObservationOptions {
 	/** Omit the image: the cheapest way to re-index elements before an element action. */
 	readonly includeScreenshot?: boolean;
+	/**
+	 * Skip the accessibility walk and the settle wait, and answer with the capture only: the
+	 * cheapest observation, for previews and for callers that already hold the tree. No element
+	 * ids are produced, so no observation token is issued for it.
+	 */
+	readonly includeAccessibilityTree?: boolean;
+	/** Cap the settle wait before capture; 0 skips the wait for a UI the caller knows is still. */
+	readonly settleMs?: number;
 	/** Cap the accessibility elements returned for this observation. */
 	readonly maxElements?: number;
 	/** Include the application menu bar, which is app chrome rather than window content. */
@@ -62,6 +76,11 @@ export interface ObservationOptions {
 	 * explored a branch at a time instead of raising max_elements.
 	 */
 	readonly subtreeOf?: number;
+	/**
+	 * Observe this WindowServer window id instead of the app's focused window. Use a candidate
+	 * from `windowCandidates` when an app has several windows.
+	 */
+	readonly windowId?: number;
 }
 
 export interface ObserveRequest extends ObservationOptions {
@@ -138,6 +157,27 @@ export class GuardedSession {
 		return this.enqueue(undefined, async () => textResult(JSON.stringify(await this.computer.listApps(), null, 2)));
 	}
 
+	listWindows(): Promise<ToolResult> {
+		return this.enqueue(undefined, async () => {
+			const windows = this.windowProbe === undefined ? [] : await this.windowProbe();
+			return textResult(
+				JSON.stringify(
+					{
+						windows: windows.map((window) => ({
+							window_id: window.id,
+							pid: window.ownerPid,
+							app: window.ownerName,
+							title: window.title,
+							bounds: window.bounds,
+						})),
+					},
+					null,
+					2,
+				),
+			);
+		});
+	}
+
 	async observe(request: ObserveRequest): Promise<ToolResult> {
 		const targetPid = await resolveAppPid(this.computer, request.app);
 		return this.enqueue(targetPid, async () => {
@@ -145,6 +185,11 @@ export class GuardedSession {
 			const state = await this.computer.getAppState(targetPid, {
 				...(request.diffOnly ? STRICT_DIFF_STATE_OPTIONS : STRICT_STATE_OPTIONS),
 				...(request.includeScreenshot === undefined ? {} : { includeScreenshot: request.includeScreenshot }),
+				...(request.includeAccessibilityTree === undefined
+					? {}
+					: { includeAccessibilityTree: request.includeAccessibilityTree }),
+				...(request.settleMs === undefined ? {} : { settleMs: request.settleMs }),
+				...(request.windowId === undefined ? {} : { windowId: request.windowId }),
 				...(request.maxElements === undefined ? {} : { maxElements: request.maxElements }),
 				...(request.includeMenuBar === undefined ? {} : { includeMenuBar: request.includeMenuBar }),
 				...(request.subtreeOf === undefined ? {} : { subtreeOf: request.subtreeOf }),
@@ -152,7 +197,7 @@ export class GuardedSession {
 			this.assertOpen();
 			const observation = this.computer.getInputObservation(targetPid);
 			const token =
-				observation !== undefined && observationMatchesState(observation, state)
+				state.treeSkipped !== true && observation !== undefined && observationMatchesState(observation, state)
 					? this.issue(observation, observedElementIdentity(state))
 					: undefined;
 			return stateResult(state, token);
@@ -553,10 +598,10 @@ export class GuardedSession {
 		readonly nextToken: string | undefined;
 	}> {
 		this.assertOpen();
-		const state = await this.computer.getAppState(
-			targetPid,
-			options.fullState === true ? STRICT_STATE_OPTIONS : STRICT_DIFF_STATE_OPTIONS,
-		);
+		const state = await this.computer.getAppState(targetPid, {
+			...(options.fullState === true ? STRICT_STATE_OPTIONS : STRICT_DIFF_STATE_OPTIONS),
+			includeScreenshot: options.includeScreenshot === true,
+		});
 		this.assertOpen();
 		const current = this.computer.getInputObservation(targetPid);
 		const contextUnchanged =

@@ -1,5 +1,6 @@
 export const TOOL_NAMES = [
 	"list_apps",
+	"list_windows",
 	"get_app_state",
 	"click",
 	"perform_secondary_action",

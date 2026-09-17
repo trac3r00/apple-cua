@@ -93,7 +93,11 @@ describe("mutation routing #given every mutation tool #when token state varies #
 			needsExplicitObservation: false,
 		});
 		expect(payload["observation_token"]).toEqual(expect.any(String));
-		expect(harness.computer.stateOptions.at(-1)).toEqual({ diffOnly: true, requireWindow: true });
+		expect(harness.computer.stateOptions.at(-1)).toEqual({
+			diffOnly: true,
+			requireWindow: true,
+			includeScreenshot: false,
+		});
 		expect(payload["treeOmitted"]).toBe(true);
 		expect(payload["elements"]).toBeUndefined();
 
@@ -120,7 +124,7 @@ describe("post-action payload #given a mutation #when the caller asks for the fu
 
 		expect(payload["elements"]).toHaveLength(3);
 		expect(payload["treeOmitted"]).toBeUndefined();
-		expect(harness.computer.stateOptions.at(-1)).toEqual({ requireWindow: true });
+		expect(harness.computer.stateOptions.at(-1)).toEqual({ requireWindow: true, includeScreenshot: false });
 	});
 });
 

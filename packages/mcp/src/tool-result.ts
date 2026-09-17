@@ -419,13 +419,19 @@ export function postActionErrorResult(error: unknown, partial?: Record<string, u
 const TRUNCATED_ELEMENTS_NOTE =
 	"elements is capped at the driver's element budget, so controls further down the tree are missing; repeat get_app_state with a higher max_elements, or pass subtree_of with the id of a parent element to walk just that branch";
 
+const TREE_SKIPPED_NOTE =
+	"the accessibility tree was skipped for this capture-only observation (include_accessibility_tree=false), so no element ids were produced and no observation_token was issued; call get_app_state with the tree before any element action";
+
 function stateToolResult(
 	state: AppState,
 	extra: Record<string, unknown>,
 	options: { readonly boundDiff?: boolean } = {},
 ): ToolResult {
 	const payload: Record<string, unknown> = { ...state, screenshotBase64: undefined };
-	if (state.treeOmitted === true) {
+	if (state.treeSkipped === true) {
+		payload["elements"] = undefined;
+		payload["note"] = TREE_SKIPPED_NOTE;
+	} else if (state.treeOmitted === true) {
 		payload["elements"] = undefined;
 		payload["note"] = OMITTED_ELEMENTS_NOTE;
 		if (options.boundDiff === true) {

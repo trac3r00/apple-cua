@@ -95,6 +95,8 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	syntheticRowCount = 0;
 	/** When true, state reports that the accessibility walk stopped at its element budget. */
 	elementsTruncated = false;
+	/** Delivery mode the fake computer reports, mirroring the native driver's default. */
+	delivery: "attended" | "background" = "attended";
 	windowId = 71;
 	windowIdAfterAction: number | undefined;
 	windowBounds = { x: 300, y: 150, width: 1000, height: 800 };
@@ -117,11 +119,14 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 		}
 		const app = targetPid === 5678 ? "Other" : "Finder";
 		const bundleId = targetPid === 5678 ? "com.example.other" : "com.apple.finder";
-		const elements = this.currentElements();
+		const captureTree = options?.includeAccessibilityTree !== false;
+		const elements = captureTree ? this.currentElements() : [];
 		const previous = this.snapshotByPid.get(targetPid);
-		const axChanges = previous === undefined ? undefined : diffElements(previous, elements);
-		this.snapshotByPid.set(targetPid, elements);
-		const treeOmitted = options?.diffOnly === true && this.sawSnapshot.has(targetPid);
+		const axChanges = previous === undefined || !captureTree ? undefined : diffElements(previous, elements);
+		if (captureTree) {
+			this.snapshotByPid.set(targetPid, elements);
+		}
+		const treeOmitted = options?.diffOnly === true && captureTree && this.sawSnapshot.has(targetPid);
 		this.sawSnapshot.add(targetPid);
 		const state: AppState = {
 			app,
@@ -130,7 +135,8 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 			frontmost: true,
 			axAvailable: true,
 			elements: treeOmitted ? [] : elements,
-			screenshotBase64: Buffer.from("png-bytes").toString("base64"),
+			...(captureTree ? {} : { treeSkipped: true }),
+			screenshotBase64: options?.includeScreenshot === false ? "" : Buffer.from("png-bytes").toString("base64"),
 			screenshotWidth: 500,
 			screenshotHeight: 400,
 			screenshotMimeType: "image/png",
@@ -145,16 +151,18 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 					}
 				: {}),
 		};
-		this.generation += 1;
-		this.observations.set(targetPid, {
-			generation: this.generation,
-			pid: targetPid,
-			bundleId,
-			windowId: this.windowId,
-			windowBounds: { ...this.windowBounds },
-			screenshotViewport: { width: 500, height: 400, bounds: { ...this.windowBounds } },
-			observedElementIds: new Set(elements.map((element) => element.id)),
-		});
+		if (captureTree) {
+			this.generation += 1;
+			this.observations.set(targetPid, {
+				generation: this.generation,
+				pid: targetPid,
+				bundleId,
+				windowId: this.windowId,
+				windowBounds: { ...this.windowBounds },
+				screenshotViewport: { width: 500, height: 400, bounds: { ...this.windowBounds } },
+				observedElementIds: new Set(elements.map((element) => element.id)),
+			});
+		}
 		return state;
 	}
 

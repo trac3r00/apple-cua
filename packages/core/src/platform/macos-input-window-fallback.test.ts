@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
+import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
 
 interface TestWindow {
 	readonly id: number;
@@ -32,6 +33,8 @@ const fallbackMock = vi.hoisted(() => ({
 }));
 
 vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
+// The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
+setOpenWindowsSourceForTesting(() => undefined);
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/coregraphics.js", () => ({
 	K_CG_EVENT_FLAG_MASK_ALTERNATE: 0x00080000,

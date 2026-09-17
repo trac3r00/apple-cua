@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
+import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
 
 type ExecFileCallback = (error: Error | null, stdout: string | Buffer, stderr: string) => void;
 type ExecFileMock = (
@@ -23,6 +24,8 @@ const windowMock = vi.hoisted(() => ({
 	openWindows: vi.fn<() => Promise<readonly TestWindow[]>>(() => Promise.resolve([])),
 }));
 vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
+// The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
+setOpenWindowsSourceForTesting(() => undefined);
 
 const accessibilityMock = vi.hoisted(() => ({
 	extractAccessibilityTree: vi.fn(),

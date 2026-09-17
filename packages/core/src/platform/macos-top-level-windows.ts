@@ -13,13 +13,14 @@ export async function listTopLevelWindows(): Promise<readonly TopLevelWindow[]> 
 	const windows = await openWindowsForTargeting();
 	const summaries: TopLevelWindow[] = [];
 	for (const window of windows) {
-		if (window.owner === null || window.owner === undefined) {
+		const ownerPid = window.owner?.processId;
+		if (ownerPid === undefined) {
 			continue;
 		}
 		summaries.push({
 			id: window.id,
-			ownerPid: window.owner.processId,
-			ownerName: window.owner.name ?? "",
+			ownerPid,
+			ownerName: window.owner?.name ?? "",
 			title: window.title ?? "",
 			bounds: {
 				x: Math.round(window.bounds.x),

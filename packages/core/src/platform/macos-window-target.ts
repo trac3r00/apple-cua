@@ -1,10 +1,12 @@
-import type { openWindows } from "get-windows";
 import type { Point } from "../types/index.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
 
-type OpenWindowResult = Awaited<ReturnType<typeof openWindows>>[number];
-
-export type MacOSWindowInfo = {
+/**
+ * A window this driver can target. Deliberately its own shape rather than the helper binary's
+ * result type: the in-process WindowServer listing and the get-windows fallback both map into
+ * it, so callers do not depend on which one answered.
+ */
+export interface MacOSWindowInfo {
 	readonly id: number;
 	readonly bounds: {
 		readonly x: number;
@@ -14,8 +16,11 @@ export type MacOSWindowInfo = {
 	};
 	readonly owner?: {
 		readonly processId?: number;
+		readonly name?: string;
 	} | null;
-} & OpenWindowResult;
+	readonly title?: string | null;
+	readonly layer?: number | null;
+}
 
 export function visibleWindowsForPid(windows: readonly MacOSWindowInfo[], pid: number): readonly MacOSWindowInfo[] {
 	return windows.filter(

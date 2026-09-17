@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setRunningApplicationLookupForTesting } from "./app-list.js";
 import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
 import type { InputDelivery } from "./macos-input.js";
+import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
 
 interface TestWindow {
 	readonly id: number;
@@ -55,6 +56,8 @@ const screenshotMock = vi.hoisted(() => ({
 
 vi.mock("node:child_process", () => ({ execFile: childProcessMock.execFile }));
 vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
+// The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
+setOpenWindowsSourceForTesting(() => undefined);
 vi.mock("./macos-ffi/accessibility.js", () => accessibilityMock);
 vi.mock("./macos-ffi/screenshot.js", () => screenshotMock);
 

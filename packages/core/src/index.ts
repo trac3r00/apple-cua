@@ -67,6 +67,7 @@ export {
 	type RecognizeTextOptions,
 	filterByMinimumConfidence,
 	isVisionOcrAvailable,
+	readImagePixelSize,
 	recognizeTextInFile,
 	recognizeTextInImage,
 } from "./platform/macos-ffi/vision.js";

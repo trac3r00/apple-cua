@@ -87,6 +87,61 @@ const objcMsgSendAuthenticationMessage = objc.func("objc_msgSend", "void *", [
 const authenticationMessageClass = objcGetClass("SLSEventAuthenticationMessage");
 const authenticationMessageSelector = selRegisterName("messageWithEventRecord:pid:version:");
 const K_CPS_NO_WINDOWS = 0x400;
+const K_CPS_USER_GENERATED = 0x200;
+
+/** CGS event types, which share CGEventType's numbering for the mouse events we synthesize. */
+export const CGS_EVENT_LEFT_MOUSE_DOWN = 1;
+export const CGS_EVENT_LEFT_MOUSE_UP = 2;
+export const CGS_EVENT_LEFT_MOUSE_DRAGGED = 6;
+
+const EVENT_RECORD_LENGTH = 0xf8;
+const RECORD_LENGTH_OFFSET = 0x04;
+const RECORD_TYPE_OFFSET = 0x08;
+const RECORD_LOCATION_OFFSET = 0x10;
+const RECORD_WINDOW_LOCATION_OFFSET = 0x20;
+const RECORD_FLAG_OFFSET = 0x3a;
+const RECORD_WINDOW_ID_OFFSET = 0x3c;
+const RECORD_FLAG_VALUE = 0x10;
+
+/**
+ * One synthesized mouse event as the window server reads it: a fixed-length record addressed to
+ * a window, with the pointer located globally and in window coordinates. Written by hand because
+ * the layout is the documented yabai one; every field stays inside the buffer, so a wrong value
+ * is a no-op rather than a crash. Exported for its own unit test — the layout is the contract.
+ */
+export function buildMouseEventRecord(window: SkyLightTargetWindow, eventType: number, location: CGPoint): Buffer {
+	const record = Buffer.alloc(EVENT_RECORD_LENGTH);
+	record[RECORD_LENGTH_OFFSET] = EVENT_RECORD_LENGTH;
+	record[RECORD_FLAG_OFFSET] = RECORD_FLAG_VALUE;
+	record[RECORD_TYPE_OFFSET] = eventType;
+	record.writeUInt32LE(window.id, RECORD_WINDOW_ID_OFFSET);
+	record.writeDoubleLE(location.x, RECORD_LOCATION_OFFSET);
+	record.writeDoubleLE(location.y, RECORD_LOCATION_OFFSET + 8);
+	record.writeDoubleLE(location.x - window.bounds.x, RECORD_WINDOW_LOCATION_OFFSET);
+	record.writeDoubleLE(location.y - window.bounds.y, RECORD_WINDOW_LOCATION_OFFSET + 8);
+	return record;
+}
+
+/**
+ * Deliver one synthesized mouse event straight to a window's own process.
+ *
+ * This is the path that reaches an unfocused window: a CGEvent posted at global coordinates goes
+ * to whatever is frontmost, and posting one to a pid does not deliver mouse events at all. The
+ * window server, however, accepts a synthesized record addressed to the process and window, which
+ * is how a tap or a drag lands in a window the user never brought forward.
+ */
+export function postMouseEventRecordToWindow(
+	window: SkyLightTargetWindow,
+	eventType: number,
+	location: CGPoint,
+): boolean {
+	const targetPsn = processSerialNumberForWindow(window.id);
+	if (targetPsn === null) {
+		return false;
+	}
+	SLPSSetFrontProcessWithOptions(targetPsn, window.id, K_CPS_USER_GENERATED);
+	return SLPSPostEventRecordTo(targetPsn, buildMouseEventRecord(window, eventType, location)) === 0;
+}
 
 export function postSkyLightEventToPid(pid: number, event: CGEventRef): void {
 	SLEventPostToPid(pid, event);

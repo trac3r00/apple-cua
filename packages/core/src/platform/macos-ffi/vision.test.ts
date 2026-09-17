@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
 	type OcrTextObservation,
 	filterByMinimumConfidence,
+	readImagePixelSize,
 	recognizeTextInFile,
 	recognizeTextInImage,
 } from "./vision.js";
@@ -16,9 +17,7 @@ const twoByOne = fixture("ocr-sample-2x.png");
 function find(observations: readonly OcrTextObservation[], text: string): OcrTextObservation {
 	const hit = observations.find((observation) => observation.text === text);
 	if (hit === undefined) {
-		throw new Error(
-			`${text} was not recognised; saw ${JSON.stringify(observations.map((o) => o.text))}`,
-		);
+		throw new Error(`${text} was not recognised; saw ${JSON.stringify(observations.map((o) => o.text))}`);
 	}
 	return hit;
 }
@@ -61,6 +60,11 @@ describe.runIf(process.platform === "darwin")(
 			const ratio = center(firstAt2x.box).y / center(first.box).y;
 			expect(ratio).toBeGreaterThan(1.9);
 			expect(ratio).toBeLessThan(2.1);
+		});
+
+		it("reports the decoded pixel size, which is the scale a box has to be divided by", () => {
+			expect(readImagePixelSize(readFileSync(oneByOne))).toEqual({ width: 800, height: 400 });
+			expect(readImagePixelSize(readFileSync(twoByOne))).toEqual({ width: 1600, height: 800 });
 		});
 
 		it("reads the same fixture from raw bytes as it does from a path", () => {

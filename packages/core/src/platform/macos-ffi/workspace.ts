@@ -39,6 +39,12 @@ const msgBool = objc.func("objc_msgSend", "bool", ["void *", "void *"]) as Koffi
 const msgCString = objc.func("objc_msgSend", "str", ["void *", "void *"]) as KoffiFunc<
 	(receiver: object, selector: object) => string | null
 >;
+const msgBoolUnsignedInteger = objc.func("objc_msgSend", "bool", ["void *", "void *", "uint64_t"]) as KoffiFunc<
+	(receiver: object, selector: object, value: number) => boolean
+>;
+
+/** NSApplicationActivateIgnoringOtherApps. */
+const ACTIVATE_IGNORING_OTHER_APPS = 1 << 1;
 
 const autoreleasePoolClass = requireClass("NSAutoreleasePool");
 const bundleClass = requireClass("NSBundle");
@@ -46,6 +52,7 @@ const runningApplicationClass = requireClass("NSRunningApplication");
 const workspaceClass = requireClass("NSWorkspace");
 
 const activationPolicySelector = requireSelector("activationPolicy");
+const activateWithOptionsSelector = requireSelector("activateWithOptions:");
 const allocSelector = requireSelector("alloc");
 const bundleIdentifierSelector = requireSelector("bundleIdentifier");
 const bundleUrlSelector = requireSelector("bundleURL");
@@ -76,6 +83,28 @@ export interface WorkspaceRunningApplication {
 }
 
 export type RunningApplicationIdentifier = string | number;
+
+/**
+ * Bring a running application forward — the ⌘-Tab effect, without the window-level raise a
+ * specific window may need afterwards. Returns false when the process is not running or refuses
+ * to activate (a full-screen menu-bar app can take focus back within a second).
+ */
+export function activateApplication(pid: number): boolean {
+	if (!Number.isSafeInteger(pid) || pid <= 0) {
+		return false;
+	}
+	return withAutoreleasePool(() => {
+		const application = msgPointerProcessIdentifier(
+			runningApplicationClass,
+			runningApplicationWithProcessIdentifierSelector,
+			pid,
+		);
+		if (application === null) {
+			return false;
+		}
+		return msgBoolUnsignedInteger(application, activateWithOptionsSelector, ACTIVATE_IGNORING_OTHER_APPS);
+	});
+}
 
 export function getRunningApplications(): WorkspaceRunningApplication[] {
 	return withAutoreleasePool(() => {

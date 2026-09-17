@@ -2,7 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { DragOptions, Point } from "../types/index.js";
 import type { MouseButton } from "./macos-ffi/coregraphics.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
-import { dragSteps, interpolatePoint } from "./macos-input-drag.js";
+import { dragSteps, interpolatePointEased } from "./macos-input-drag.js";
 import { runFocusLeasedGesture } from "./macos-targeted-gesture.js";
 
 export type MousePost = (
@@ -43,7 +43,7 @@ export async function postDragSequence(
 	const steps = dragSteps(duration);
 	const delay = steps <= 1 ? 0 : duration / steps;
 	for (let step = 1; step <= steps; step += 1) {
-		const position = interpolatePoint(options.from, options.to, step / steps);
+		const position = interpolatePointEased(options.from, options.to, step / steps);
 		await post("drag", position, "left", 1, targetWindow);
 		if (delay > 0 && step < steps) {
 			await sleep(delay);

@@ -295,6 +295,28 @@ export function setStringAttributeValue(element: AXUIElementRef, attribute: stri
 	}
 }
 
+export interface AXElementFrame {
+	readonly x: number;
+	readonly y: number;
+	readonly width: number;
+	readonly height: number;
+}
+
+/**
+ * The frame an AX element reports on screen, or undefined when it reports neither a position nor
+ * a size. Opaque content — a video stream drawn into a window, for example — still has an AX
+ * window element with a frame, which is what makes it matchable against the WindowServer's own
+ * window list.
+ */
+export function elementFrame(element: AXUIElementRef): AXElementFrame | undefined {
+	const position = copyPointAttribute(element, K_AX_POSITION_ATTRIBUTE);
+	const size = copySizeAttribute(element, K_AX_SIZE_ATTRIBUTE);
+	if (position === null || size === null) {
+		return undefined;
+	}
+	return { x: position.x, y: position.y, width: size.width, height: size.height };
+}
+
 export function copyAttributeValue(element: AXUIElementRef, attribute: string): CFTypeRef | null {
 	return withCFString(attribute, (attributeReference) => {
 		const outValue: Array<CFTypeRef | null> = [null];
@@ -1107,7 +1129,12 @@ function copyActionNames(element: AXUIElementRef): string[] {
 	}
 }
 
-function copyOptionalAttributeValue(element: AXUIElementRef, attribute: string): CFTypeRef | null {
+/**
+ * Attribute read that answers "not there" instead of throwing. Prefer {@link copyAttributeValue}
+ * where the attribute is part of the contract, and this one where its absence is simply how a
+ * leaf element looks — AXChildren on a text label, for instance.
+ */
+export function copyOptionalAttributeValue(element: AXUIElementRef, attribute: string): CFTypeRef | null {
 	return withCFString(attribute, (attributeReference) => {
 		const outValue: Array<CFTypeRef | null> = [null];
 		const error = AXUIElementCopyAttributeValue(element, attributeReference, outValue);

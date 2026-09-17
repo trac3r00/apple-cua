@@ -56,7 +56,9 @@ interface VisionBindings {
 	>;
 	readonly setRecognitionLevel: KoffiFunc<(receiver: Pointer, selector: Pointer, level: number) => void>;
 	readonly setUsesLanguageCorrection: KoffiFunc<(receiver: Pointer, selector: Pointer, enabled: boolean) => void>;
-	readonly setRecognitionLanguages: KoffiFunc<(receiver: Pointer, selector: Pointer, languages: Pointer | null) => void>;
+	readonly setRecognitionLanguages: KoffiFunc<
+		(receiver: Pointer, selector: Pointer, languages: Pointer | null) => void
+	>;
 	readonly arrayWithCapacity: KoffiFunc<(receiver: Pointer, selector: Pointer, capacity: number) => Pointer | null>;
 	readonly addObject: KoffiFunc<(receiver: Pointer, selector: Pointer, value: Pointer) => void>;
 	readonly stringWithUtf8: KoffiFunc<(receiver: Pointer, selector: Pointer, bytes: Buffer) => Pointer | null>;
@@ -126,11 +128,49 @@ export function recognizeTextInImage(
 }
 
 /** Same as {@link recognizeTextInImage} for a file on disk. */
-export function recognizeTextInFile(
-	path: string,
-	options: RecognizeTextOptions = {},
-): readonly OcrTextObservation[] {
+export function recognizeTextInFile(path: string, options: RecognizeTextOptions = {}): readonly OcrTextObservation[] {
 	return recognizeTextInImage(readFileSync(path), options);
+}
+
+export interface ImagePixelSize {
+	readonly width: number;
+	readonly height: number;
+}
+
+/**
+ * Decoded pixel size of an encoded image. A capture can come back larger than the window that
+ * was asked for (Retina backing), so this is the scale a recognised box has to be divided by.
+ */
+export function readImagePixelSize(imageBytes: Buffer): ImagePixelSize {
+	const bound = requireBindings();
+	if (imageBytes.byteLength === 0) {
+		throw new Error("cannot read the size of an empty image buffer");
+	}
+	const data = bound.cfDataCreate(null, imageBytes, imageBytes.byteLength);
+	if (data === null) {
+		throw new Error("cannot copy the image bytes into a CFData");
+	}
+	try {
+		const source = bound.imageSourceCreateWithData(data, null);
+		if (source === null) {
+			throw new Error("cannot decode the image bytes; expected a PNG or JPEG image");
+		}
+		try {
+			const image = bound.imageSourceCreateImageAtIndex(source, 0, null);
+			if (image === null) {
+				throw new Error("cannot decode the image bytes; expected a PNG or JPEG image");
+			}
+			try {
+				return { width: bound.imageGetWidth(image), height: bound.imageGetHeight(image) };
+			} finally {
+				bound.cfRelease(image);
+			}
+		} finally {
+			bound.cfRelease(source);
+		}
+	} finally {
+		bound.cfRelease(data);
+	}
 }
 
 export function filterByMinimumConfidence(
@@ -175,7 +215,11 @@ function recognize(
 			options.usesLanguageCorrection ?? options.level !== "fast",
 		);
 		if (options.languages !== undefined && options.languages.length > 0) {
-			bound.setRecognitionLanguages(request, bound.selector("setRecognitionLanguages:"), languageArray(bound, options.languages));
+			bound.setRecognitionLanguages(
+				request,
+				bound.selector("setRecognitionLanguages:"),
+				languageArray(bound, options.languages),
+			);
 		}
 
 		const requests = bound.arrayWithCapacity(
@@ -305,7 +349,9 @@ function createBindings(): VisionBindings {
 	const objc = koffi.load(LIBOBJC);
 
 	const objcGetClass = objc.func("objc_getClass", "void *", ["str"]) as KoffiFunc<(name: string) => Pointer | null>;
-	const selRegisterName = objc.func("sel_registerName", "void *", ["str"]) as KoffiFunc<(name: string) => Pointer | null>;
+	const selRegisterName = objc.func("sel_registerName", "void *", ["str"]) as KoffiFunc<
+		(name: string) => Pointer | null
+	>;
 	const classForName = (name: string): Pointer => {
 		const klass = objcGetClass(name);
 		if (klass === null) {
@@ -333,10 +379,21 @@ function createBindings(): VisionBindings {
 	});
 
 	return {
-		cfDataCreate: coreFoundation.func("CFDataCreate", "void *", ["void *", "uint8_t *", "long"]) as VisionBindings["cfDataCreate"],
+		cfDataCreate: coreFoundation.func("CFDataCreate", "void *", [
+			"void *",
+			"uint8_t *",
+			"long",
+		]) as VisionBindings["cfDataCreate"],
 		cfRelease: coreFoundation.func("CFRelease", "void", ["void *"]) as VisionBindings["cfRelease"],
-		imageSourceCreateWithData: imageIo.func("CGImageSourceCreateWithData", "void *", ["void *", "void *"]) as VisionBindings["imageSourceCreateWithData"],
-		imageSourceCreateImageAtIndex: imageIo.func("CGImageSourceCreateImageAtIndex", "void *", ["void *", "ulong", "void *"]) as VisionBindings["imageSourceCreateImageAtIndex"],
+		imageSourceCreateWithData: imageIo.func("CGImageSourceCreateWithData", "void *", [
+			"void *",
+			"void *",
+		]) as VisionBindings["imageSourceCreateWithData"],
+		imageSourceCreateImageAtIndex: imageIo.func("CGImageSourceCreateImageAtIndex", "void *", [
+			"void *",
+			"ulong",
+			"void *",
+		]) as VisionBindings["imageSourceCreateImageAtIndex"],
 		imageGetWidth: imageIo.func("CGImageGetWidth", "ulong", ["void *"]) as VisionBindings["imageGetWidth"],
 		imageGetHeight: imageIo.func("CGImageGetHeight", "ulong", ["void *"]) as VisionBindings["imageGetHeight"],
 		classForName,
@@ -347,14 +404,32 @@ function createBindings(): VisionBindings {
 		stringClass: classForName("NSString"),
 		alloc: msgSend<VisionBindings["alloc"]>("void *", ["void *", "void *"]),
 		initTextRequest: msgSend<VisionBindings["initTextRequest"]>("void *", ["void *", "void *"]),
-		initHandlerWithImage: msgSend<VisionBindings["initHandlerWithImage"]>("void *", ["void *", "void *", "void *", "void *"]),
+		initHandlerWithImage: msgSend<VisionBindings["initHandlerWithImage"]>("void *", [
+			"void *",
+			"void *",
+			"void *",
+			"void *",
+		]),
 		setRecognitionLevel: msgSend<VisionBindings["setRecognitionLevel"]>("void", ["void *", "void *", "int64_t"]),
-		setUsesLanguageCorrection: msgSend<VisionBindings["setUsesLanguageCorrection"]>("void", ["void *", "void *", "bool"]),
-		setRecognitionLanguages: msgSend<VisionBindings["setRecognitionLanguages"]>("void", ["void *", "void *", "void *"]),
+		setUsesLanguageCorrection: msgSend<VisionBindings["setUsesLanguageCorrection"]>("void", [
+			"void *",
+			"void *",
+			"bool",
+		]),
+		setRecognitionLanguages: msgSend<VisionBindings["setRecognitionLanguages"]>("void", [
+			"void *",
+			"void *",
+			"void *",
+		]),
 		arrayWithCapacity: msgSend<VisionBindings["arrayWithCapacity"]>("void *", ["void *", "void *", "ulong"]),
 		addObject: msgSend<VisionBindings["addObject"]>("void", ["void *", "void *", "void *"]),
 		stringWithUtf8: msgSend<VisionBindings["stringWithUtf8"]>("void *", ["void *", "void *", "void *"]),
-		performRequests: objc.func("objc_msgSend", "bool", ["void *", "void *", "void *", koffi.out(koffi.pointer("void *"))]) as VisionBindings["performRequests"],
+		performRequests: objc.func("objc_msgSend", "bool", [
+			"void *",
+			"void *",
+			"void *",
+			koffi.out(koffi.pointer("void *")),
+		]) as VisionBindings["performRequests"],
 		release: msgSend<VisionBindings["release"]>("void", ["void *", "void *"]),
 		results: msgSend<VisionBindings["results"]>("void *", ["void *", "void *"]),
 		count: msgSend<VisionBindings["count"]>("ulong", ["void *", "void *"]),

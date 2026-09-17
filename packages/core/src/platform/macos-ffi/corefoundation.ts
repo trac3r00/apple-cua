@@ -93,6 +93,19 @@ const CFBooleanGetTypeID = coreFoundation.func("CFBooleanGetTypeID", "ulong", []
 
 const CFNullGetTypeID = coreFoundation.func("CFNullGetTypeID", "ulong", []) as KoffiFunc<() => number>;
 
+let cfDictionaryGetTypeIdBinding: KoffiFunc<() => number> | undefined;
+
+// Bound on first use rather than at module load: a harness that mocks this module should not have
+// to know about a function only the window listing needs.
+function cfDictionaryGetTypeId(): number {
+	if (cfDictionaryGetTypeIdBinding === undefined) {
+		cfDictionaryGetTypeIdBinding = coreFoundation.func("CFDictionaryGetTypeID", "ulong", []) as KoffiFunc<
+			() => number
+		>;
+	}
+	return cfDictionaryGetTypeIdBinding();
+}
+
 const CFBooleanGetValue = coreFoundation.func("CFBooleanGetValue", "bool", ["void *"]) as KoffiFunc<
 	(reference: CFBooleanRef) => boolean
 >;
@@ -184,6 +197,14 @@ export function isCFNumber(reference: CFTypeRef): reference is CFNumberRef {
 
 export function isCFBoolean(reference: CFTypeRef): reference is CFBooleanRef {
 	return cfGetTypeId(reference) === CFBooleanGetTypeID();
+}
+
+/**
+ * Type check before reading a nested dictionary. `kCGWindowBounds` arrives as one, and a value
+ * that merely claims to be a dictionary crashes inside CFDictionaryGetValue.
+ */
+export function isCFDictionary(reference: CFTypeRef): boolean {
+	return cfGetTypeId(reference) === cfDictionaryGetTypeId();
 }
 
 /** `kCFNull`, which `AXUIElementCopyMultipleAttributeValues` returns for unsupported attributes. */

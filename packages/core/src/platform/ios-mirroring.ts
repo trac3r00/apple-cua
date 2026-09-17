@@ -39,6 +39,8 @@ import {
 } from "./macos-ffi/corefoundation.js";
 import { captureWindowPng } from "./macos-ffi/screenshot.js";
 import { type OcrTextObservation, readImagePixelSize, recognizeTextInImage } from "./macos-ffi/vision.js";
+import { listWindows } from "./macos-ffi/window-list.js";
+import type { ListedWindow } from "./macos-ffi/window-list.js";
 import { activateApplication, findRunningApplication, getRunningApplications } from "./macos-ffi/workspace.js";
 import { type TopLevelWindow, listTopLevelWindows } from "./macos-top-level-windows.js";
 
@@ -139,6 +141,33 @@ const OCCLUSION_RECHECK_MILLISECONDS = 150;
  */
 export function selectMirroringWindow(windows: readonly TopLevelWindow[], pid: number): TopLevelWindow | undefined {
 	return windows.find((window) => window.ownerPid === pid && window.bounds.width > 0 && window.bounds.height > 0);
+}
+
+export interface MirroringWindowChoice {
+	readonly window: TopLevelWindow;
+	/** True when the window is not on the Space in front of the user right now. */
+	readonly offCurrentSpace: boolean;
+}
+
+/**
+ * Which of the app's windows is the phone, preferring the one the user can see.
+ *
+ * A phone window on another Space still exists, and the synthesized records this driver posts are
+ * addressed to the window itself, so it can still be driven. Reporting it as a disconnected phone
+ * sends the user hunting for a connection problem that is not there — measured the hard way when
+ * the terminal and the phone window sat on different Spaces.
+ */
+export function chooseMirroringWindow(
+	onCurrentSpace: readonly TopLevelWindow[],
+	anywhere: readonly TopLevelWindow[],
+	pid: number,
+): MirroringWindowChoice | undefined {
+	const visible = selectMirroringWindow(onCurrentSpace, pid);
+	if (visible !== undefined) {
+		return { window: visible, offCurrentSpace: false };
+	}
+	const parked = selectMirroringWindow(anywhere, pid);
+	return parked === undefined ? undefined : { window: parked, offCurrentSpace: true };
 }
 
 /**
@@ -253,14 +282,31 @@ export function toMirroringWindow(window: TopLevelWindow): MirroringWindow {
 	};
 }
 
-/** The phone window as the WindowServer currently lists it, or undefined. */
+/** The phone window, on this Space when it is here and on another one when it is not. */
 export async function findMirroringWindow(): Promise<MirroringWindow | undefined> {
 	const process = mirroringProcess();
 	if (process === undefined) {
 		return undefined;
 	}
-	const selected = selectMirroringWindow(await listTopLevelWindows(), process.pid);
-	return selected === undefined ? undefined : toMirroringWindow(selected);
+	const choice = chooseMirroringWindow(
+		toTopLevelWindows(listWindows({ onScreenOnly: true })),
+		toTopLevelWindows(listWindows({ onScreenOnly: false })),
+		process.pid,
+	);
+	return choice === undefined ? undefined : toMirroringWindow(choice.window);
+}
+
+function toTopLevelWindows(listed: readonly ListedWindow[] | undefined): readonly TopLevelWindow[] {
+	if (listed === undefined) {
+		return [];
+	}
+	return listed.map((window) => ({
+		id: window.id,
+		ownerPid: window.ownerPid,
+		ownerName: window.ownerName,
+		title: window.title,
+		bounds: window.bounds,
+	}));
 }
 
 /**

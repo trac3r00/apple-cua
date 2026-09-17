@@ -34,6 +34,7 @@ export {
 	type TopLevelWindow,
 	listTopLevelWindows,
 } from "./platform/macos-top-level-windows.js";
+export { type ListedWindow, listWindows } from "./platform/macos-ffi/window-list.js";
 export {
 	MAX_SCREENSHOT_LONG_EDGE,
 	type ScreenshotViewport,

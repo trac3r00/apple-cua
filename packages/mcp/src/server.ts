@@ -9,6 +9,7 @@ import { click, drag, pressKeys, selectText, typeText, validateClick, validateDr
 import { createNativeComputer, createNativeWindowProbe } from "./native-policy.js";
 import { registerPowerTools } from "./power-tools.js";
 import { SERVER_INFO } from "./server-info.js";
+import { createRunStepDriver } from "./step-actions.js";
 import {
 	clickSchema,
 	dragSchema,
@@ -16,6 +17,7 @@ import {
 	getAppStateSchema,
 	performSecondaryActionSchema,
 	pressKeysSchema,
+	runStepsSchema,
 	scrollSchema,
 	selectTextSchema,
 	setFieldsSchema,
@@ -196,6 +198,32 @@ export function createMcpServer(
 			await session.setFields(input.observation_token, input.app, input.updates, {
 				fullState: input.full_state === true,
 			}),
+	);
+
+	server.registerTool(
+		"run_steps",
+		{
+			description: mutationDescription(
+				"Run several actions in order in one bounded call (up to 10 steps), for sequences like fill-then-submit or open-menu-then-choose that would otherwise need one round trip per action. Every step is validated against the token observation up front; element steps are re-checked against a fresh observation right before they dispatch, and the batch stops at the first step that fails or whose element no longer matches, reporting per-step dispatched, skipped, or failed status with a reason. Element ids always refer to the token observation, so a batch cannot name elements that only appear after an earlier step ran. The optional expect block verifies the outcome in the same call: checks (element_index, exists, value, label) and window_title are evaluated against the post-batch tree, with timeout_ms polling for slow changes, exactly like verify_state.",
+			),
+			inputSchema: runStepsSchema,
+			annotations: MUTATION_ANNOTATIONS,
+		},
+		async (input) =>
+			await session.runSteps(
+				input.observation_token,
+				input.app,
+				input.steps,
+				input.expect === undefined
+					? undefined
+					: {
+							...(input.expect.checks === undefined ? {} : { checks: input.expect.checks }),
+							...(input.expect.window_title === undefined ? {} : { windowTitle: input.expect.window_title }),
+							...(input.expect.timeout_ms === undefined ? {} : { timeoutMs: input.expect.timeout_ms }),
+						},
+				createRunStepDriver(resolvedComputer),
+				{ fullState: input.full_state === true },
+			),
 	);
 
 	server.registerTool(

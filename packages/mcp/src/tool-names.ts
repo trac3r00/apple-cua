@@ -5,6 +5,7 @@ export const TOOL_NAMES = [
 	"perform_secondary_action",
 	"set_value",
 	"set_fields",
+	"run_steps",
 	"select_text",
 	"drag",
 	"scroll",

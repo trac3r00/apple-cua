@@ -54,7 +54,13 @@ merely to understand the "whole situation." Do not begin by clicking to discover
    For a multi-field edit (status plus sequence plus notes, for example), prefer one
    `set_fields` call over one round trip per field: it checks each observed id against a
    fresh observation before writing, reads each value back from the app, and stops at the
-   first field it cannot verify.
+   first field it cannot verify. For a mixed sequence (fill a field, press a key, click
+   submit), prefer one `run_steps` call over one round trip per action: it validates every
+   step up front, re-checks each element step against a fresh observation before dispatch,
+   stops at the first step that fails, and its optional `expect` block verifies the outcome
+   in the same call. Element ids in a batch still refer to the token observation, so a step
+   cannot target UI that only appears after an earlier step ran — use the returned
+   continuation token for that.
 5. **Inspect the result.** Post-action state is evidence to evaluate, not automatic proof
    of success. A mutation answers with what changed rather than the whole accessibility
    tree (`treeOmitted: true`; pass `full_state: true` when the complete tree is needed),

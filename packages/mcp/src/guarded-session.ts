@@ -11,14 +11,18 @@ import type {
 } from "@macos-cua/core";
 import {
 	type ActionDispatch,
+	type RunStepReport,
+	type RunStepsReport,
 	type SetFieldStepReport,
 	type SetFieldsReport,
+	type StepDispatch,
 	type ToolResult,
 	type Verification,
 	type VerificationCheck,
 	type WindowEvent,
 	describeElement,
 	observedActionResult,
+	observedRunStepsResult,
 	observedSetFieldsResult,
 	postActionErrorResult,
 	refusalResult,
@@ -26,6 +30,7 @@ import {
 	textResult,
 	verificationResult,
 } from "./tool-result.js";
+import type { RunStep } from "./tool-schemas.js";
 
 const VERIFY_POLL_INTERVAL_MILLISECONDS = 150;
 
@@ -80,6 +85,16 @@ export interface VerifyRequest {
 export interface SetFieldUpdate {
 	readonly element_index: string;
 	readonly value: string;
+}
+
+/**
+ * Step-type knowledge the session needs to run a batch: which observed element a step
+ * targets (if any), how to validate it against the token observation, and how to dispatch it.
+ */
+export interface RunStepDriver {
+	readonly elementIndex: (step: RunStep) => number | undefined;
+	readonly validate: (step: RunStep, observation: InputObservation) => void;
+	readonly dispatch: (step: RunStep, targetPid: number, observation: InputObservation) => Promise<StepDispatch>;
 }
 
 // biome-ignore lint/suspicious/noConfusingVoidType: a mutation may report how it dispatched input, or report nothing when its route is not known to it
@@ -266,7 +281,118 @@ export class GuardedSession {
 				return observedSetFieldsResult(outcome.state, report, outcome.contextUnchanged, outcome.nextToken);
 			} catch (error: unknown) {
 				this.clearTokenFor(expected.pid);
-				return postActionErrorResult(error, report);
+				return postActionErrorResult(error, { setFields: report });
+			}
+		});
+	}
+
+	runSteps(
+		token: string,
+		app: string,
+		steps: readonly RunStep[],
+		expect: VerifyRequest | undefined,
+		driver: RunStepDriver,
+		options: MutationOptions = {},
+	): Promise<ToolResult> {
+		return this.enqueue(this.laneForRequestedToken(token), async () => {
+			let expected: Awaited<ReturnType<typeof this.beginMutation>>;
+			try {
+				expected = await this.beginMutation(token, app, (observation) => {
+					for (const step of steps) {
+						driver.validate(step, observation);
+					}
+				});
+			} catch (error: unknown) {
+				const refused = this.refusalFrom(error);
+				if (refused !== undefined) {
+					return refused;
+				}
+				throw error;
+			}
+			const beforeAction = await this.captureWindowBaseline();
+			const reports: RunStepReport[] = [];
+			let uiChanged = false;
+			let stoppedEarly = false;
+
+			for (const [position, step] of steps.entries()) {
+				const elementIndex = driver.elementIndex(step);
+				if (elementIndex !== undefined) {
+					const baseline = await this.readFieldBaseline(expected.pid);
+					uiChanged = uiChanged || baseline.changed;
+					const element = baseline.elements.get(elementIndex);
+					if (element === undefined) {
+						reports.push(
+							skippedRunStep(
+								position,
+								step.type,
+								`element ${elementIndex} is not present in the latest observation`,
+							),
+						);
+						stoppedEarly = true;
+						break;
+					}
+					const observedIdentity = expected.elements?.get(elementIndex);
+					if (observedIdentity !== undefined && !sameElementIdentity(observedIdentity, element)) {
+						reports.push(
+							skippedRunStep(
+								position,
+								step.type,
+								`element ${elementIndex} is now ${element.role} "${element.label ?? ""}", not the observed control; re-observe`,
+							),
+						);
+						stoppedEarly = true;
+						break;
+					}
+				}
+
+				try {
+					const dispatch = await driver.dispatch(step, expected.pid, expected.observation);
+					reports.push({
+						step: position,
+						type: step.type,
+						input_dispatched: true,
+						status: "dispatched",
+						route: dispatch.route,
+						delivery: dispatch.delivery,
+						...(dispatch.detail === undefined ? {} : { detail: dispatch.detail }),
+					});
+				} catch (error: unknown) {
+					reports.push({
+						step: position,
+						type: step.type,
+						input_dispatched: false,
+						status: "failed",
+						reason: error instanceof Error ? error.message : String(error),
+					});
+					stoppedEarly = true;
+					break;
+				}
+			}
+
+			const report = summarizeRunSteps(reports, steps.length, stoppedEarly, uiChanged);
+			try {
+				if (expect?.timeoutMs !== undefined) {
+					await this.pollVerification(expected.pid, expect);
+				}
+				const outcome = await this.readOutcome(
+					expected.pid,
+					expected.observation,
+					expect?.checks !== undefined && expect.checks.length > 0 ? { ...options, fullState: true } : options,
+				);
+				const verification =
+					expect === undefined ? undefined : await this.runChecks(expected.pid, outcome.state, expect);
+				const windowEvents = await this.describeWindowSideEffects(beforeAction);
+				return observedRunStepsResult(
+					outcome.state,
+					report,
+					verification,
+					outcome.contextUnchanged,
+					outcome.nextToken,
+					windowEvents,
+				);
+			} catch (error: unknown) {
+				this.clearTokenFor(expected.pid);
+				return postActionErrorResult(error, { runSteps: report });
 			}
 		});
 	}
@@ -292,27 +418,35 @@ export class GuardedSession {
 			if (targetPid !== active.observation.pid) {
 				throw new Error("requested app does not match the token observation");
 			}
-			const deadline = Date.now() + (request.timeoutMs ?? 0);
-			for (;;) {
-				this.assertOpen();
-				const state = await this.computer.getAppState(targetPid, {
-					...STRICT_STATE_OPTIONS,
-					includeScreenshot: false,
-					settleMs: 0,
-				});
-				this.assertOpen();
-				const verification = await this.runChecks(targetPid, state, request);
-				if (verification.verified || Date.now() >= deadline) {
-					const observation = this.computer.getInputObservation(targetPid);
-					const nextToken =
-						observation !== undefined && observationMatchesState(observation, state)
-							? this.issue(observation, observedElementIdentity(state))
-							: undefined;
-					return verificationResult(verification, state, nextToken);
-				}
-				await delayMilliseconds(VERIFY_POLL_INTERVAL_MILLISECONDS);
-			}
+			const { state, verification } = await this.pollVerification(targetPid, request);
+			const observation = this.computer.getInputObservation(targetPid);
+			const nextToken =
+				observation !== undefined && observationMatchesState(observation, state)
+					? this.issue(observation, observedElementIdentity(state))
+					: undefined;
+			return verificationResult(verification, state, nextToken);
 		});
+	}
+
+	private async pollVerification(
+		targetPid: number,
+		request: VerifyRequest,
+	): Promise<{ readonly state: AppState; readonly verification: Verification }> {
+		const deadline = Date.now() + (request.timeoutMs ?? 0);
+		for (;;) {
+			this.assertOpen();
+			const state = await this.computer.getAppState(targetPid, {
+				...STRICT_STATE_OPTIONS,
+				includeScreenshot: false,
+				settleMs: 0,
+			});
+			this.assertOpen();
+			const verification = await this.runChecks(targetPid, state, request);
+			if (verification.verified || Date.now() >= deadline) {
+				return { state, verification };
+			}
+			await delayMilliseconds(VERIFY_POLL_INTERVAL_MILLISECONDS);
+		}
 	}
 
 	private async runChecks(pid: number, state: AppState, request: VerifyRequest): Promise<Verification> {
@@ -603,6 +737,31 @@ function skippedStep(elementIndex: number, requestedValue: string, reason: strin
 		input_dispatched: false,
 		status: "skipped",
 		reason,
+	};
+}
+
+function skippedRunStep(position: number, type: string, reason: string): RunStepReport {
+	return {
+		step: position,
+		type,
+		input_dispatched: false,
+		status: "skipped",
+		reason,
+	};
+}
+
+function summarizeRunSteps(
+	steps: readonly RunStepReport[],
+	requested: number,
+	stoppedEarly: boolean,
+	uiChanged: boolean,
+): RunStepsReport {
+	return {
+		requested,
+		completed: steps.filter((step) => step.input_dispatched).length,
+		stoppedEarly,
+		uiChanged,
+		steps,
 	};
 }
 

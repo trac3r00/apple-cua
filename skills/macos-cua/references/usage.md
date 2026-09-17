@@ -52,6 +52,18 @@ Mutation tools all require `observation_token` from the latest applicable state:
   value back from the app; the answer reports per-field `verified`/`unverified`/`skipped`
   status plus `requested`/`inputDispatched`/`verified` counts so dispatched input is never
   mistaken for a confirmed outcome. It stops at the first field it cannot verify.
+- `run_steps`: up to 10 actions in order in one call — `click`, `perform_secondary_action`,
+  `set_value`, `select_text`, `drag`, `scroll`, `type_text`, `press_keys`, `invoke_menu`,
+  `set_window_frame` or `clipboard_write` steps — for sequences like fill-then-submit that
+  would otherwise need one round trip per action. Every step is validated against the token
+  observation up front, element steps are re-checked against a fresh observation right before
+  they dispatch, and the batch stops at the first step that fails or whose element no longer
+  matches, reporting per-step `dispatched`/`skipped`/`failed` status with a reason. Element
+  ids always refer to the token observation, so a batch cannot name elements that only appear
+  after an earlier step ran; anything that must react to new UI needs the returned
+  continuation token. The optional `expect` block verifies the outcome in the same call with
+  the same checks as `verify_state` (`element_index` with `exists`/`value`/`label`,
+  `window_title`, `timeout_ms`).
 - `select_text`: exact text selection or caret placement in an observed text element.
 - `drag`: bounded start/end coordinates from the screenshot.
 - `scroll`: an observed scrollable element and direction.

@@ -9,11 +9,16 @@ const MUTATION_NAMES = [
 	"click",
 	"perform_secondary_action",
 	"set_value",
+	"set_fields",
+	"run_steps",
 	"select_text",
 	"drag",
 	"scroll",
 	"type_text",
 	"press_keys",
+	"invoke_menu",
+	"set_window_frame",
+	"clipboard_write",
 ] as const;
 
 let closeHarness: (() => Promise<void>) | undefined;

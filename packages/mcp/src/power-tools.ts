@@ -3,7 +3,8 @@ import type { GuardedComputerInterface, InputObservation, Rect } from "@macos-cu
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import type { GuardedSession } from "./guarded-session.js";
-import { type ToolResult, textResult } from "./tool-result.js";
+import { type StepDispatch, type ToolResult, textResult } from "./tool-result.js";
+import type { RunStep } from "./tool-schemas.js";
 
 const READ_ONLY_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false } as const;
 const MUTATION_ANNOTATIONS = { readOnlyHint: false, destructiveHint: true } as const;
@@ -42,7 +43,7 @@ const clipboardWriteSchema = z
 		},
 	);
 
-interface PowerComputerExtensions {
+export interface PowerComputerExtensions {
 	invokeMenu?(
 		pid: number,
 		path: readonly string[],
@@ -61,7 +62,35 @@ interface PowerComputerExtensions {
 	writeClipboard?(input: Parameters<typeof writeClipboard>[0]): ReturnType<typeof writeClipboard>;
 }
 
-type PowerComputer = GuardedComputerInterface & PowerComputerExtensions;
+export type PowerComputer = GuardedComputerInterface & PowerComputerExtensions;
+
+/** Dispatch the power-tool step types inside a run_steps batch; returns undefined for other types. */
+export async function dispatchPowerStep(
+	computer: GuardedComputerInterface,
+	step: RunStep,
+	targetPid: number,
+	observation: InputObservation,
+): Promise<StepDispatch | undefined> {
+	const powerComputer: PowerComputer = computer;
+	switch (step.type) {
+		case "invoke_menu": {
+			const report = await (powerComputer.invokeMenu?.(targetPid, step.path) ?? invokeMenu(targetPid, step.path));
+			return { route: "accessibility", delivery: "background", detail: report };
+		}
+		case "set_window_frame": {
+			const requested = { x: step.x, y: step.y, width: step.width, height: step.height };
+			const report = await setFrame(powerComputer, targetPid, observation, requested);
+			return { route: "synthetic_events", delivery: "background", detail: report };
+		}
+		case "clipboard_write": {
+			const writeInput = clipboardInput(step);
+			const report = powerComputer.writeClipboard?.(writeInput) ?? writeClipboard(writeInput);
+			return { route: "synthetic_events", delivery: "not_applicable", detail: report };
+		}
+		default:
+			return undefined;
+	}
+}
 
 export function registerPowerTools(
 	server: McpServer,
@@ -166,7 +195,7 @@ async function setFrame(
 		setWindowFrame(pid, observation.windowId, requested));
 }
 
-function clipboardInput(input: {
+export function clipboardInput(input: {
 	readonly text?: string | undefined;
 	readonly image_path?: string | undefined;
 	readonly file_path?: string | undefined;

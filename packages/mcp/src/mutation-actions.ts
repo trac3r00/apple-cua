@@ -2,9 +2,9 @@ import { clickPoint, parseElementIndex, pressElement, pressKeySequence, withTarg
 import type { ComputerInterface, InputObservation, KeySequenceEntry, KeySequenceOptions, Point } from "@macos-cua/core";
 import { observedPointToScreen, validateElement, validatePoint } from "./guarded-session.js";
 import type { ActionDispatch } from "./tool-result.js";
-import type { ClickInput, DragInput, PressKeysInput, SelectTextInput } from "./tool-schemas.js";
+import type { ClickActionInput, DragActionInput, PressKeysActionInput, SelectTextActionInput } from "./tool-schemas.js";
 
-export function validateClick(input: ClickInput, observation: InputObservation): void {
+export function validateClick(input: ClickActionInput, observation: InputObservation): void {
 	if (input.element_index !== undefined) {
 		validateElement(observation, parseElementIndex(input.element_index));
 		return;
@@ -16,7 +16,7 @@ export async function click(
 	computer: ComputerInterface,
 	targetPid: number,
 	observation: InputObservation,
-	input: ClickInput,
+	input: ClickActionInput,
 ): Promise<ActionDispatch> {
 	const pressCount = Math.max(1, Math.trunc(input.click_count ?? 1));
 	if (input.element_index !== undefined) {
@@ -45,7 +45,7 @@ export async function click(
 	return { route: "synthetic_events", delivery: "background" };
 }
 
-export function validateDrag(input: DragInput, observation: InputObservation): void {
+export function validateDrag(input: DragActionInput, observation: InputObservation): void {
 	validatePoint(observation, { x: input.from_x, y: input.from_y });
 	validatePoint(observation, { x: input.to_x, y: input.to_y });
 }
@@ -54,7 +54,7 @@ export async function drag(
 	computer: ComputerInterface,
 	targetPid: number,
 	observation: InputObservation,
-	input: DragInput,
+	input: DragActionInput,
 ): Promise<ActionDispatch> {
 	const from = observedPointToScreen(observation, { x: input.from_x, y: input.from_y });
 	const to = observedPointToScreen(observation, { x: input.to_x, y: input.to_y });
@@ -78,7 +78,7 @@ export async function selectText(
 	computer: ComputerInterface,
 	targetPid: number,
 	elementIndex: number,
-	input: SelectTextInput,
+	input: SelectTextActionInput,
 ): Promise<ActionDispatch> {
 	await computer.selectText(targetPid, elementIndex, {
 		selection: input.selection ?? "text",
@@ -92,7 +92,7 @@ export async function selectText(
 export async function pressKeys(
 	computer: ComputerInterface,
 	targetPid: number,
-	input: PressKeysInput,
+	input: PressKeysActionInput,
 ): Promise<ActionDispatch> {
 	await withTargetedApp(computer, targetPid, async () => {
 		await pressKeySequence(computer, input.keys.map(keySequenceEntryFromInput), keySequenceOptions(input));
@@ -107,14 +107,14 @@ function clickPointInput(x: number | undefined, y: number | undefined): Point {
 	return { x, y };
 }
 
-function keySequenceEntryFromInput(input: PressKeysInput["keys"][number]): KeySequenceEntry {
+function keySequenceEntryFromInput(input: PressKeysActionInput["keys"][number]): KeySequenceEntry {
 	if (typeof input === "string") {
 		return { key: input };
 	}
 	return input.hold_seconds === undefined ? { key: input.key } : { key: input.key, holdSeconds: input.hold_seconds };
 }
 
-function keySequenceOptions(input: PressKeysInput): KeySequenceOptions | undefined {
+function keySequenceOptions(input: PressKeysActionInput): KeySequenceOptions | undefined {
 	const holdSeconds = input.hold_seconds;
 	const intervalSeconds = input.interval_seconds;
 	if (holdSeconds !== undefined && intervalSeconds !== undefined) {

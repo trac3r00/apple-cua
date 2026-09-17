@@ -2,10 +2,13 @@ import type {
 	AXTreeElement,
 	AppState,
 	AppStateOptions,
+	ClipboardWriteInput,
+	ClipboardWriteResult,
 	ComputerCapabilities,
 	DragOptions,
 	GuardedComputerInterface,
 	InputObservation,
+	InvokeMenuResult,
 	KeyOptions,
 	Point,
 	PreflightResult,
@@ -23,6 +26,8 @@ export type Effect =
 	| { readonly kind: "drag"; readonly options: DragOptions }
 	| { readonly kind: "type"; readonly text: string }
 	| { readonly kind: "key"; readonly key: string }
+	| { readonly kind: "invokeMenu"; readonly pid: number; readonly path: readonly string[] }
+	| { readonly kind: "clipboardWrite"; readonly input: ClipboardWriteInput }
 	| { readonly kind: "close" };
 
 function diffElements(
@@ -206,6 +211,16 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	async key(key: string, _options?: KeyOptions): Promise<void> {
 		this.dispatch({ kind: "key", key });
 	}
+	async invokeMenu(pid: number, path: readonly string[]): Promise<InvokeMenuResult> {
+		this.dispatch({ kind: "invokeMenu", pid, path });
+		return { resolvedPath: path, action: "AXPress" };
+	}
+
+	writeClipboard(input: ClipboardWriteInput): ClipboardWriteResult {
+		this.dispatch({ kind: "clipboardWrite", input });
+		return { overwritten: true, writtenType: input.type, types: ["public.utf8-plain-text"] };
+	}
+
 	async close(): Promise<void> {
 		this.effects.push({ kind: "close" });
 	}

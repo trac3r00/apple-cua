@@ -125,6 +125,30 @@ export interface SetFieldsReport {
 	readonly steps: readonly SetFieldStepReport[];
 }
 
+/** How one batch step actually dispatched, plus any detail the dispatcher itself reports. */
+export interface StepDispatch extends ActionDispatch {
+	readonly detail?: unknown;
+}
+
+export interface RunStepReport {
+	readonly step: number;
+	readonly type: string;
+	readonly input_dispatched: boolean;
+	readonly status: "dispatched" | "skipped" | "failed";
+	readonly reason?: string;
+	readonly route?: ActionRoute;
+	readonly delivery?: ActionDelivery;
+	readonly detail?: unknown;
+}
+
+export interface RunStepsReport {
+	readonly requested: number;
+	readonly completed: number;
+	readonly stoppedEarly: boolean;
+	readonly uiChanged?: boolean;
+	readonly steps: readonly RunStepReport[];
+}
+
 export function verificationResult(verification: Verification, state: AppState, observationToken?: string): ToolResult {
 	const content: ToolContent[] = [
 		{
@@ -322,7 +346,60 @@ export function observedSetFieldsResult(
 	);
 }
 
-export function postActionErrorResult(error: unknown, partial?: SetFieldsReport): ToolResult {
+export function observedRunStepsResult(
+	state: AppState,
+	report: RunStepsReport,
+	verification: Verification | undefined,
+	contextUnchanged: boolean,
+	observationToken?: string,
+	windowEvents: readonly WindowEvent[] = [],
+): ToolResult {
+	const observationStatus = contextUnchanged ? axObservationStatus(state) : "context-changed";
+	const effect: ActionEffect =
+		verification?.verified === true
+			? "confirmed"
+			: report.completed > 0 && report.stoppedEarly
+				? "partial"
+				: report.completed === 0
+					? "refused"
+					: observationStatus === "unchanged"
+						? "suspected_noop"
+						: observationStatus === "changed"
+							? "observed_change"
+							: "unverifiable";
+	const routes = new Set<ActionRoute>(
+		report.steps.flatMap((step) => (step.input_dispatched && step.route !== undefined ? [step.route] : [])),
+	);
+	const deliveries = new Set<ActionDelivery>(
+		report.steps.flatMap((step) => (step.input_dispatched && step.delivery !== undefined ? [step.delivery] : [])),
+	);
+	const envelope = actionEnvelope({
+		dispatch: {
+			route: routes.size === 1 ? ([...routes][0] ?? "unknown") : "unknown",
+			delivery: deliveries.size === 1 ? ([...deliveries][0] ?? "unknown") : "unknown",
+		},
+		observationStatus,
+		windowEvents,
+		readbackConfirmed: verification?.verified === true,
+	});
+	return stateToolResult(
+		state,
+		{
+			actionDispatched: report.completed > 0,
+			observationStatus,
+			paused: observationToken === undefined,
+			needsExplicitObservation: observationToken === undefined,
+			runSteps: report,
+			...(verification === undefined ? {} : { verification }),
+			...envelopeFields({ ...envelope, effect }),
+			...(windowEvents.length === 0 ? {} : { windowEvents }),
+			...(observationToken === undefined ? {} : { observation_token: observationToken }),
+		},
+		{ boundDiff: true },
+	);
+}
+
+export function postActionErrorResult(error: unknown, partial?: Record<string, unknown>): ToolResult {
 	return textResult(
 		JSON.stringify(
 			{
@@ -330,7 +407,7 @@ export function postActionErrorResult(error: unknown, partial?: SetFieldsReport)
 				observationStatus: "error",
 				paused: true,
 				needsExplicitObservation: true,
-				...(partial === undefined ? {} : { setFields: partial }),
+				...(partial === undefined ? {} : partial),
 				error: error instanceof Error ? error.message : String(error),
 			},
 			null,

@@ -248,6 +248,34 @@ describe("#given an expect block #when click_target acts #then the outcome is ve
 		expect(verification["verified"]).toBe(true);
 		expect(payload["found"]).toBe(true);
 	});
+
+	it("keeps the answer compact: the verified outcome is a diff, not the whole tree", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
+
+		await harness.client.callTool({
+			name: "click_target",
+			arguments: {
+				app: "Finder",
+				query: { label: "Open" },
+				expect: { checks: [{ element_index: "9", exists: true }] },
+			},
+		});
+		expect(harness.computer.stateOptions.at(-1)).toMatchObject({ diffOnly: true, includeScreenshot: false });
+
+		const widened = await createHarness();
+		closeHarness = widened.close;
+		await widened.client.callTool({
+			name: "click_target",
+			arguments: {
+				app: "Finder",
+				query: { label: "Open" },
+				expect: { checks: [{ element_index: "9", exists: true }] },
+				full_state: true,
+			},
+		});
+		expect(widened.computer.stateOptions.at(-1)).not.toMatchObject({ diffOnly: true });
+	});
 });
 
 describe("#given a running app #when open_app runs #then it activates that app and answers without waiting", () => {

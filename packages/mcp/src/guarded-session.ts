@@ -210,7 +210,7 @@ export class GuardedSession {
 		private readonly computer: GuardedComputerInterface,
 		private readonly windowProbe?: () => Promise<readonly TopLevelWindow[]>,
 		private readonly appLauncher?: AppOpenLauncher,
-	) {}
+	) { }
 
 	listApps(): Promise<ToolResult> {
 		return this.enqueue(undefined, async () => textResult(JSON.stringify(await this.computer.listApps(), null, 2)));
@@ -289,11 +289,11 @@ export class GuardedSession {
 						...(found
 							? {}
 							: {
-									nearMisses: suggestNearMisses(observed.state.elements, request.query, MAX_NEAR_MISSES).map(
-										(element) => compactElement(element),
-									),
-									message: `no element matched ${query}; nothing was clicked or changed. The near misses name what this screen offers.`,
-								}),
+								nearMisses: suggestNearMisses(observed.state.elements, request.query, MAX_NEAR_MISSES).map(
+									(element) => compactElement(element),
+								),
+								message: `no element matched ${query}; nothing was clicked or changed. The near misses name what this screen offers.`,
+							}),
 					},
 					{
 						token: this.issueForObservation(observed.observation, observed.state),
@@ -352,8 +352,8 @@ export class GuardedSession {
 								matches.length > 0
 									? []
 									: suggestNearMisses(observed.state.elements, request.query, MAX_NEAR_MISSES).map((element) =>
-											compactElement(element),
-										),
+										compactElement(element),
+									),
 							message:
 								matches.length > 0
 									? `no match at index ${index}; the alternatives are the matches that do exist. Nothing was dispatched.`
@@ -391,17 +391,17 @@ export class GuardedSession {
 					...(request.mouseButton === undefined ? {} : { mouseButton: request.mouseButton }),
 				});
 				try {
-					if (request.expect?.timeoutMs !== undefined) {
-						await this.pollVerification(targetPid, request.expect);
-					}
-					const outcome = await this.readOutcome(targetPid, observation, {
-						fullState: request.fullState === true || (request.expect?.checks?.length ?? 0) > 0,
-						includeScreenshot,
-					});
+					// Verify against a dedicated read (the same shape verify_state uses) instead of against the
+					// outcome diff, which carries no tree: the answer then keeps the proof and the diff without
+					// shipping the whole accessibility tree back.
 					const verification =
 						request.expect === undefined
 							? undefined
-							: await this.runChecks(targetPid, outcome.state, request.expect);
+							: (await this.pollVerification(targetPid, request.expect)).verification;
+					const outcome = await this.readOutcome(targetPid, observation, {
+						fullState: request.fullState === true,
+						includeScreenshot,
+					});
 					const windowEvents = await this.describeWindowSideEffects(beforeAction);
 					return observedActionResult(
 						outcome.state,
@@ -418,11 +418,11 @@ export class GuardedSession {
 							matchCount: matches.length,
 							...(matches.length > 1
 								? {
-										alternatives: matches
-											.filter((candidate) => candidate.element.id !== target.id)
-											.slice(0, MAX_ALTERNATIVES)
-											.map((candidate) => compactElement(candidate.element)),
-									}
+									alternatives: matches
+										.filter((candidate) => candidate.element.id !== target.id)
+										.slice(0, MAX_ALTERNATIVES)
+										.map((candidate) => compactElement(candidate.element)),
+								}
 								: {}),
 							...(verification === undefined ? {} : { verification }),
 						},
@@ -775,7 +775,7 @@ export class GuardedSession {
 		request: VerifyRequest,
 	): Promise<{ readonly state: AppState; readonly verification: Verification }> {
 		const deadline = Date.now() + (request.timeoutMs ?? 0);
-		for (;;) {
+		for (; ;) {
 			this.assertOpen();
 			const state = await this.computer.getAppState(targetPid, {
 				...STRICT_STATE_OPTIONS,

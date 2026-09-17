@@ -408,7 +408,7 @@ function appleTaskRunner(client) {
 	const call = async (name, args) => {
 		calls += 1;
 		const result = await client.callTool(name, args);
-		bytes += account(result).responseBytes;
+		bytes += account(result).response_bytes;
 		if (result?.isError === true) errors.push(textOf(result).slice(0, 140));
 		return result;
 	};
@@ -451,7 +451,7 @@ function cuaTaskRunner(client) {
 	const call = async (name, args) => {
 		calls += 1;
 		const result = await client.callTool(name, args);
-		bytes += account(result).responseBytes;
+		bytes += account(result).response_bytes;
 		if (result?.isError === true) errors.push(textOf(result).slice(0, 140));
 		return result;
 	};

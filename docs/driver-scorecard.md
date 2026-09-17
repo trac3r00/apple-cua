@@ -80,12 +80,14 @@ measure, and this project therefore cannot claim:
 | Capture fidelity across displays, scales and occlusion | not measured |
 | Cold-start and multi-display behaviour | not measured |
 | Agent task success | no matched MacAgentBench or macbench run exists for this driver |
-| Comparison against any other driver | **no competitor publishes comparable numbers, and none has been run** |
+| Comparison against any other driver | **run on 2026-09-17**: see [`driver-shootout-cua.md`](./driver-shootout-cua.md) for the matched head-to-head against Cua Driver 0.28.2 |
 
 So the numbers above support statements of the form "on this machine, this observation took
 this long", and nothing stronger. Claims like fastest, most accurate, or best-in-class are not
-supported by this file, and the driver makes no latency comparison against cua-driver, Peekaboo,
-Skylight, agent-desktop, Ghost OS or any hosted service until both sides run the same fixtures.
+supported by this file. This file itself makes no latency comparison against cua-driver, Peekaboo,
+Skylight, agent-desktop, Ghost OS or any hosted service; the one comparison the project has run
+lives in [`driver-shootout-cua.md`](./driver-shootout-cua.md) and carries its own fixtures,
+versions and limits.
 
 ## Next measurements worth adding
 
@@ -93,6 +95,7 @@ Skylight, agent-desktop, Ghost OS or any hosted service until both sides run the
 2. A stale-target fixture that reuses an observation after the UI moved, to turn the protocol
    tests into a live refusal rate.
 3. Capture fidelity checks across Retina scales, secondary displays and occlusion.
-4. A matched head-to-head run against at least one other driver on identical fixtures.
+4. A task-level head-to-head (open this, fill that, verify the result) rather than latency alone,
+   so driver timings connect to task outcomes. The latency half exists now; the task half does not.
 5. macbench or MacAgentBench subsets with a fixed model and prompt set, to connect driver
    timings to task outcomes without conflating them.

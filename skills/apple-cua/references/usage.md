@@ -151,7 +151,7 @@ checked before every action and reported as `ready`, `blocked`, `no-window` or
 A `blocked` session (Unlock iPhone, iPhone in Use, paused, ended, Mac login) is the user's to
 clear: never tap Connect, never type a password, never retry in a loop.
 
-MCP tools: `ios_status`, `ios_observe`, `ios_screenshot`, `ios_tap`, `ios_tap_text`,
+MCP tools: `ios_observe`, `ios_screenshot`, `ios_tap`, `ios_tap_text`,
 `ios_long_press`, `ios_swipe`, `ios_scroll`, `ios_type_text`, `ios_press_keys`,
 `ios_home`, `ios_app_switcher`, `ios_open_app`. Every mutation needs an
 `observation_token` from the newest `ios_observe`; the token is single-use and the answer

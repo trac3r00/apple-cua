@@ -120,7 +120,8 @@ If `--target-pid` is used before a target window has been discovered, the comman
 
 Use the guarded stdio MCP server for autonomous desktop tasks. It works through ordinary
 MCP schemas and text/image results, without a Pi-specific extension or embedded agent.
-It must run on the Mac being controlled, with the actual launcher's macOS permissions.
+It must run on the Mac being controlled, with the macOS permissions of the process that runs
+it — or of the signed helper app below, which carries its own TCC identity.
 
 ```bash
 pnpm --filter @apple-cua/core --filter @apple-cua/mcp build
@@ -148,6 +149,23 @@ Merge configuration rather than replacing unrelated settings.
   }
 }
 ```
+
+For a grant that survives rebuilds, run the server through the signed helper app instead of
+`node` directly: the bundle carries its own TCC identity (`dev.applecua.mcp`), so Screen
+Recording and Accessibility attach to it rather than to whatever launched the server.
+
+```bash
+scripts/build-tcc-helper.sh
+grok mcp add apple-cua -s user \
+  -e APPLE_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit \
+  -e APPLE_CUA_DELIVERY=background \
+  -- /absolute/path/to/apple-cua/packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp \
+  /absolute/path/to/apple-cua/packages/mcp/dist/server.js
+```
+
+The first run prompts for Screen Recording and Accessibility for "apple-cua MCP"; grant both in
+System Settings and restart the server. Rebuilding the helper changes its signature, so macOS
+asks again. The helper bundles the `node` on `PATH` at build time (`APPLE_CUA_NODE` overrides).
 
 **Context-first contract (MCP migration):**
 
@@ -327,11 +345,15 @@ measured under, and the dimensions this driver does *not* measure are recorded i
 
 Pass `--background` (CLI) or set `APPLE_CUA_DELIVERY=background` (MCP server) to keep a run out
 of your way: input goes to the target app's own window, so the frontmost app does not change and
-the cursor does not move. Anything that would need the foreground — a global click with no
-target app, or a route that has to lease focus — is refused with the action named instead of
-quietly taking over the machine. Verified on a live session: a background app was scrolled while
-the frontmost app and cursor stayed unchanged. Attended delivery is still the default, because a
-few apps only accept pointer input while they are frontmost.
+the cursor does not move. Background delivery also drops the frontmost requirement on input: the
+driver clicks, types and scrolls a window you are not looking at, while the target app must still
+be approved and its window identity and bounds must still match the observation. Anything that
+would need the foreground — a global click with no target app, or a route that has to lease focus —
+is refused with the action named instead of quietly taking over the machine. Attended delivery is
+still the default and still requires the frontmost app, because a few apps only accept pointer
+input while they are frontmost. Verified on a live session against Cua Driver 0.28.2: a background
+click landed with the frontmost app and the real cursor untouched, and the action answer cost
+1.4 KB instead of 121 KB because the post-action image is now opt-in (`include_screenshot: true`).
 
 Observation is aimed at the app's focused window, resolved natively, so a multi-window app is
 not scoped by whatever order window enumeration returns; the chosen window id, its title and
@@ -339,14 +361,18 @@ any alternatives travel back on the state, and input is validated against that s
 
 The knobs that keep this tunable, all per call: `include_screenshot: false` skips the image
 and returns only element ids and geometry, which is the cheapest way to re-index before an
-element action; `max_elements` caps a very large tree, `subtree_of` re-observes just one
-branch with element ids restarting at 0, and `include_menu_bar` adds application menus when
-they are part of the task. When a tree is capped the answer says so in
-`elementsTruncated`, and a walk at a different budget is treated as a fresh baseline rather
-than diffed against a differently truncated one, so a diff never reports elements that were
-merely outside the budget as removed. Drilling in with `subtree_of` costs what the branch
-costs: on a Finder window whose full tree is 718 elements, re-observing a row returned 10
-elements in 165 ms instead of roughly 810 ms for the window.
+element action; `include_accessibility_tree: false` is the mirror image — skip the accessibility
+walk and its settle wait and get the window image with no elements and no observation token, the
+cheapest way to look at pixels; `settle_ms` caps the pre-capture UI settle wait (0 skips it);
+`max_elements` caps a very large tree, `subtree_of` re-observes just one branch with element ids
+restarting at 0, and `include_menu_bar` adds application menus when they are part of the task.
+When a tree is capped the answer says so in `elementsTruncated`, and a walk at a different budget
+is treated as a fresh baseline rather than diffed against a differently truncated one, so a diff
+never reports elements that were merely outside the budget as removed. `list_windows` names every
+on-screen top-level window with its id, pid, app, title and bounds so an agent can pick its target
+before observing instead of guessing. Drilling in with `subtree_of` costs what the branch costs:
+on a Finder window whose full tree is 718 elements, re-observing a row returned 10 elements in
+165 ms instead of roughly 810 ms for the window.
 
 ## Action surface
 
@@ -459,13 +485,15 @@ Standards: ultra-strict TypeScript, ESM with `.js` imports, Biome formatting, Vi
 |---|---|---|---|
 | Language | Python | Rust + proprietary plugin | TypeScript |
 | Sandbox | VM / container / cloud | Host macOS (permission-scoped) | Host macOS (permission-scoped) |
-| Screenshot latency | ~500 ms + encode + transport | Native frame interval + local IPC | Native one-shot screenshot fallback |
-| Input latency | HTTP → guest → pynput | Native CGEvent / Apple Events | Native CoreGraphics CGEvent via koffi (~microseconds per event) |
+| Screenshot latency | VM path ~500 ms + encode + transport; host-native Cua Driver measures 499 ms p50 full window observation, 174 ms capture-only | Native frame interval + local IPC | 447 ms p50 full Finder observation over MCP (378 ms TextEdit), 405 ms AX-only, 319 ms capture-only (measured 2026-09-17) |
+| Input latency | VM path HTTP → guest → pynput; host-native Cua Driver measures 1.0-1.4 s p50 per MCP action | Native CGEvent / Apple Events | Event posting stays native CoreGraphics via koffi; the full MCP action measures 2.4 s p50 for a click and 1.8 s to type 45 characters, including preflight, delivery and the fresh observation it returns, and a verified step answers in 1.4 KB instead of 121 KB (n=3, measured 2026-09-17) |
 | Portability | Linux, macOS, Windows, Android, cloud | macOS only | macOS only (stubs for VM/cloud) |
 | Open source | Full SDK | Plugin host OSS, Computer Use plugin proprietary | Fully open source |
 | Agent integration | Any Python agent | Codex desktop only | CLI, MCP, pi-extension, or any TS agent |
 
 Full analysis: [`codex-cua-comparison.md`](./codex-cua-comparison.md).
+Measured head-to-head against Cua Driver 0.28.2 (latency, payloads, background delivery):
+[`docs/driver-shootout-cua.md`](./docs/driver-shootout-cua.md).
 
 ## License
 

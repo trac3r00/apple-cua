@@ -89,7 +89,7 @@ invitation to clear it for them.
 
 ## Surfaces
 
-- MCP: `ios_status`, `ios_observe`, `ios_screenshot`, `ios_tap`, `ios_tap_text`, `ios_long_press`,
+- MCP: `ios_observe`, `ios_screenshot`, `ios_tap`, `ios_tap_text`, `ios_long_press`,
   `ios_swipe`, `ios_scroll`, `ios_type_text`, `ios_press_keys`, `ios_home`, `ios_app_switcher`,
   `ios_open_app`. Every mutation requires an `observation_token` from the newest `ios_observe`,
   the token is single-use, and the answer carries a fresh observation so a follow-up decision

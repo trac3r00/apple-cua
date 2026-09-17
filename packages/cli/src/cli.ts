@@ -15,6 +15,7 @@ import type {
 	ScrollOptions,
 } from "@apple-cua/core";
 import { Command } from "commander";
+import { registerIosCommands } from "./ios.js";
 
 type PackageJson = {
 	version: string;
@@ -484,6 +485,8 @@ appsCommand
 			});
 		},
 	);
+
+registerIosCommands(program, { isJsonOutput });
 
 await program.parseAsync().catch(handleError);
 

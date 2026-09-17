@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
+import { type MirroringSessionState, formatIosStatus } from "./ios.js";
 
 type PackageJson = {
 	version: string;
@@ -60,6 +61,7 @@ describe("apple-cua CLI", () => {
 			"screen",
 			"permissions",
 			"windows",
+			"ios",
 		];
 
 		// when
@@ -86,6 +88,73 @@ describe("apple-cua CLI", () => {
 
 		// then
 		expect(expectedStatuses).toContain(result.stdout.trim());
+	});
+});
+
+describe("apple-cua CLI iOS commands", () => {
+	it("#given the iOS command group #when help runs #then every iPhone command is listed", async () => {
+		// given
+		const expectedCommands = [
+			"status",
+			"observe",
+			"screenshot",
+			"tap",
+			"tap-text",
+			"long-press",
+			"swipe",
+			"scroll",
+			"type",
+			"key",
+			"home",
+			"app-switcher",
+			"open-app",
+		];
+
+		// when
+		const result = await runCli(["ios", "--help"]);
+
+		// then
+		for (const command of expectedCommands) {
+			expect(result.stdout).toMatch(new RegExp(`^\\s+${command}(?:[ <]|$)`, "m"));
+		}
+	});
+
+	it.each([
+		["ready", 0, "connected and ready"],
+		["blocked", 1, "interstitial"],
+		["no-window", 1, "Connect your phone"],
+		["not-running", 1, "open the iPhone Mirroring app"],
+	] as const)(
+		"#given a %s session #when status is formatted #then its exit code and guidance are stable",
+		(state: MirroringSessionState, exitCode: 0 | 1, message: string) => {
+			// when
+			const output = formatIosStatus(state);
+			const rendered = output.lines.join("\n");
+
+			// then
+			expect(output.exitCode).toBe(exitCode);
+			expect(output.lines[0]).toBe(state);
+			expect(rendered).toContain("iPhone Mirroring");
+			expect(rendered).toContain(message);
+			if (state === "blocked") {
+				expect(rendered).toMatch(/will not tap Connect/i);
+				expect(rendered).not.toMatch(/(?:please|should|must) tap (?:the )?Connect/i);
+			}
+		},
+	);
+
+	it("#given the local Mac #when iOS status runs #then it reports a state or actionable mirroring guidance", async () => {
+		// when
+		const result = await runCliAllowingFailure(["ios", "status"]);
+		const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+
+		// then
+		expect(output).not.toBe("");
+		if (result.exitCode === 0) {
+			expect(result.stdout).toMatch(/ready|blocked|no-window|not-running/);
+		} else {
+			expect(output).toContain("iPhone Mirroring");
+		}
 	});
 });
 

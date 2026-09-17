@@ -22,7 +22,7 @@ const ffiMock = vi.hoisted(() => {
 		["NSWorkspace", { type: "class", name: "NSWorkspace" }],
 	]);
 	const string = (value: string) => ({ type: "string", value });
-	const send = vi.fn((receiver: unknown, selector: unknown, value?: unknown): unknown => {
+	const sendImplementation = (receiver: unknown, selector: unknown, value?: unknown): unknown => {
 		if (selector === "alloc") return poolAllocation;
 		if (receiver === poolAllocation && selector === "init") return pool;
 		if (receiver === pool && selector === "release") return null;
@@ -54,7 +54,8 @@ const ffiMock = vi.hoisted(() => {
 		if (receiver === finderUrl && selector === "path") return string("/System/Library/CoreServices/Finder.app");
 		if (isString(receiver) && selector === "UTF8String") return receiver.value;
 		return null;
-	});
+	};
+	const send = vi.fn(sendImplementation);
 	const func = vi.fn((name: string) => {
 		if (name === "objc_getClass") return (className: string) => classes.get(className) ?? null;
 		if (name === "sel_registerName") return (selector: string) => selector;
@@ -67,6 +68,7 @@ const ffiMock = vi.hoisted(() => {
 		},
 		pool,
 		send,
+		sendImplementation,
 	};
 
 	function isArray(value: unknown): value is { readonly type: "array"; readonly values: readonly object[] } {
@@ -116,5 +118,25 @@ describe("#given a pid, bundle identifier, or application name #when looking up 
 		expect(application?.pid).toBe(489);
 		expect(ffiMock.send).not.toHaveBeenCalledWith(expect.anything(), "runningApplications");
 		expect(ffiMock.send).toHaveBeenCalledWith(ffiMock.pool, "release");
+	});
+});
+
+describe("#given the indexed AppKit query answers with nothing #when looking up a bundle identifier #then the enumeration still finds the app", () => {
+	it("falls back to runningApplications instead of reporting a running app as missing", () => {
+		const original = ffiMock.sendImplementation;
+		ffiMock.send.mockImplementation((receiver: unknown, selector: unknown, value?: unknown): unknown =>
+			selector === "runningApplicationsWithBundleIdentifier:"
+				? { type: "array", values: [] }
+				: original(receiver, selector, value),
+		);
+
+		const application = findRunningApplication("com.apple.finder");
+
+		expect(application?.pid).toBe(489);
+		expect(ffiMock.send).toHaveBeenCalledWith(expect.anything(), "runningApplications");
+	});
+
+	it("still answers nothing for a bundle identifier that is not running", () => {
+		expect(findRunningApplication("com.apple-cua.definitely-not-running")).toBeUndefined();
 	});
 });

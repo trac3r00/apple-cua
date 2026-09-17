@@ -134,15 +134,21 @@ export function findRunningApplication(
 			return undefined;
 		}
 		const bundleIdReference = nsString(bundleId);
-		const applications = msgPointerObject(
+		const indexed = msgPointerObject(
 			runningApplicationClass,
 			runningApplicationsWithBundleIdentifierSelector,
 			bundleIdReference,
 		);
-		if (applications === null) {
-			return undefined;
+		if (indexed !== null) {
+			const match = readApplicationArray(indexed).find((application) => application.bundleId === bundleId);
+			if (match !== undefined) {
+				return match;
+			}
 		}
-		return readApplicationArray(applications).find((application) => application.bundleId === bundleId);
+		// AppKit's indexed lookup answers with an empty set now and then on a loaded machine, which
+		// would report a running app as missing and disable a whole turn; the enumeration is the
+		// second, independent source for the same question. It stays off the fast path on purpose.
+		return getRunningApplications().find((application) => application.bundleId === bundleId);
 	});
 }
 
@@ -191,17 +197,24 @@ function resolveBundleIdentifier(bundleIdOrName: string): string | undefined {
 	if (directMatches !== null && msgUnsignedInteger(directMatches, countSelector) > 0) {
 		return bundleIdOrName;
 	}
-
 	const applicationPath = msgPointerObject(
 		sharedWorkspace(),
 		fullPathForApplicationSelector,
 		nsString(bundleIdOrName),
 	);
-	if (applicationPath === null) {
-		return undefined;
+	if (applicationPath !== null) {
+		const bundle = msgPointerObject(bundleClass, bundleWithPathSelector, applicationPath);
+		const resolved = bundle === null ? undefined : nonEmptyStringProperty(bundle, bundleIdentifierSelector);
+		if (resolved !== undefined) {
+			return resolved;
+		}
 	}
-	const bundle = msgPointerObject(bundleClass, bundleWithPathSelector, applicationPath);
-	return bundle === null ? undefined : nonEmptyStringProperty(bundle, bundleIdentifierSelector);
+	// AppKit's indexed query answers with an empty set now and then on a loaded machine, and a
+	// bundle identifier has no path to fall back on, so a running app would be reported as missing.
+	// The enumeration knows the same ids; it runs only when everything else came up empty.
+	return getRunningApplications().some((application) => application.bundleId === bundleIdOrName)
+		? bundleIdOrName
+		: undefined;
 }
 
 function runningApplicationsWithBundleIdentifier(bundleId: string): object | null {

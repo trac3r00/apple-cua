@@ -2,11 +2,14 @@
 import { fileURLToPath } from "node:url";
 import { parseElementIndex, scrollElement } from "@apple-cua/core";
 import type { GuardedComputerInterface, TopLevelWindow } from "@apple-cua/core";
+import { IPhoneMirroring } from "@apple-cua/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { GuardedSession, validateElement } from "./guarded-session.js";
 import { click, drag, pressKeys, selectText, typeText, validateClick, validateDrag } from "./mutation-actions.js";
 import { createNativeComputer, createNativeWindowProbe } from "./native-policy.js";
+import { PhoneGuardSession, type PhoneToolSource } from "./phone-session.js";
+import { registerPhoneTools } from "./phone-tools.js";
 import { registerPowerTools } from "./power-tools.js";
 import { SERVER_INFO } from "./server-info.js";
 import { createRunStepDriver } from "./step-actions.js";
@@ -64,6 +67,7 @@ class ComputerMcpServer extends McpServer {
 export function createMcpServer(
 	computer: GuardedComputerInterface | undefined = undefined,
 	windowProbe?: () => Promise<readonly TopLevelWindow[]>,
+	phoneSource: PhoneToolSource = new IPhoneMirroring(),
 ): McpServer {
 	const resolvedComputer = computer ?? createNativeComputer();
 	const session = new GuardedSession(
@@ -321,6 +325,7 @@ export function createMcpServer(
 	);
 
 	registerPowerTools(server, session, resolvedComputer);
+	registerPhoneTools(server, new PhoneGuardSession(phoneSource), phoneSource);
 	return server;
 }
 

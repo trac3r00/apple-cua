@@ -13,6 +13,47 @@ export const MAX_RUN_STEPS = 10;
 
 export const emptySchema = z.object({});
 
+export const iosObserveSchema = z.object({});
+export const iosScreenshotSchema = z.object({ path: z.string().min(1).optional() });
+const phoneToken = { observation_token: observationTokenSchema };
+const phonePoint = { x: z.number().finite(), y: z.number().finite() };
+export const iosTapSchema = z.object({ ...phoneToken, ...phonePoint });
+export const iosTapTextSchema = z.object({
+	...phoneToken,
+	query: z.string().min(1),
+	index: z.number().int().nonnegative().optional(),
+	exact: z.boolean().optional(),
+});
+export const iosLongPressSchema = z.object({
+	...phoneToken,
+	...phonePoint,
+	duration_ms: z.number().positive().optional(),
+});
+const directions = z.enum(["up", "down", "left", "right"]);
+const at = { at: z.object(phonePoint).optional() };
+export const iosSwipeSchema = z.object({
+	...phoneToken,
+	direction: directions,
+	distance: z.number().positive().optional(),
+	kind: z.enum(["flick", "drag"]).optional(),
+	...at,
+});
+export const iosScrollSchema = z.object({
+	...phoneToken,
+	direction: directions,
+	amount: z.number().positive().optional(),
+	...at,
+});
+export const iosTypeTextSchema = z.object({
+	...phoneToken,
+	text: z.string(),
+	mode: z.enum(["paste", "keystrokes"]).optional(),
+});
+export const iosPressKeysSchema = z.object({ ...phoneToken, combo: z.string().min(1) });
+export const iosHomeSchema = z.object({ ...phoneToken });
+export const iosAppSwitcherSchema = z.object({ ...phoneToken });
+export const iosOpenAppSchema = z.object({ ...phoneToken, name: z.string().min(1) });
+
 const MAX_VERIFY_CHECKS = 10;
 
 const verifyCheckFields = {

@@ -1,4 +1,4 @@
-import type { AppState } from "../accessibility/types.js";
+import type { AppInfo, AppState } from "../accessibility/types.js";
 import { resolveElementCoordinate } from "../platform/macos-accessibility.js";
 import type { AppStateOptions, ScrollOptions } from "../types/index.js";
 import type { ComputerInterface } from "./interface.js";
@@ -54,6 +54,27 @@ const MODIFIER_ALIASES = new Map<string, KeyModifier>([
 	["shift", "shift"],
 ]);
 
+/**
+ * The app a name, bundle id, or partial app name refers to: an exact name or bundle-id match
+ * wins, a partial match follows, and undefined means nothing in the list matches.
+ */
+export function findMatchingApp(apps: readonly AppInfo[], app: string): AppInfo | undefined {
+	const normalizedApp = app.trim().toLowerCase();
+	const exactMatch = apps.find((candidate) => {
+		const name = candidate.name.toLowerCase();
+		const bundleId = candidate.bundleId.toLowerCase();
+		return name === normalizedApp || bundleId === normalizedApp;
+	});
+	if (exactMatch !== undefined) {
+		return exactMatch;
+	}
+	return apps.find((candidate) => {
+		const name = candidate.name.toLowerCase();
+		const bundleId = candidate.bundleId.toLowerCase();
+		return name.includes(normalizedApp) || bundleId.includes(normalizedApp);
+	});
+}
+
 export async function resolveAppPid(computer: ComputerInterface, app: string): Promise<number> {
 	const normalizedApp = app.trim().toLowerCase();
 	if (normalizedApp.length === 0) {
@@ -65,26 +86,11 @@ export async function resolveAppPid(computer: ComputerInterface, app: string): P
 		return numericPid;
 	}
 
-	const apps = await computer.listApps();
-	const exactMatch = apps.find((candidate) => {
-		const name = candidate.name.toLowerCase();
-		const bundleId = candidate.bundleId.toLowerCase();
-		return name === normalizedApp || bundleId === normalizedApp;
-	});
-	if (exactMatch !== undefined) {
-		return exactMatch.pid;
+	const match = findMatchingApp(await computer.listApps(), app);
+	if (match === undefined) {
+		throw new Error(`No running app matched "${app}"`);
 	}
-
-	const fuzzyMatch = apps.find((candidate) => {
-		const name = candidate.name.toLowerCase();
-		const bundleId = candidate.bundleId.toLowerCase();
-		return name.includes(normalizedApp) || bundleId.includes(normalizedApp);
-	});
-	if (fuzzyMatch !== undefined) {
-		return fuzzyMatch.pid;
-	}
-
-	throw new Error(`No running app matched "${app}"`);
+	return match.pid;
 }
 
 export async function getAppStateForApp(

@@ -2,9 +2,17 @@ export type * from "./accessibility/types.js";
 export { classifyContentKind, type ContentKind } from "./accessibility/content-kind.js";
 export { diffAxTreeChanges, type AxTreeChanges } from "./accessibility/diff.js";
 export {
+	type ElementMatch,
+	type ElementQuery,
+	describeQuery,
+	matchElements,
+	suggestNearMisses,
+} from "./accessibility/element-query.js";
+export {
 	AX_PRESS_ACTION,
 	axScrollActionFor,
 	clickPoint,
+	findMatchingApp,
 	getAppStateForApp,
 	observeAction,
 	parseElementIndex,
@@ -61,6 +69,15 @@ export { HostComputer, type HostComputerOptions } from "./platform/host.js";
 export { MacOSHostComputer, type MacOSHostComputerOptions } from "./platform/macos.js";
 export type { InputDelivery } from "./platform/macos-input.js";
 export { invokeMenu, type InvokeMenuResult } from "./platform/macos-menu.js";
+export {
+	type AppLister,
+	type AppOpenLauncher,
+	type OpenApplicationOptions,
+	type OpenApplicationResult,
+	openApplication,
+	openArguments,
+	spawnOpenLauncher,
+} from "./platform/macos-open-app.js";
 export { setWindowFrame } from "./platform/macos-window-frame.js";
 export {
 	type OcrBox,

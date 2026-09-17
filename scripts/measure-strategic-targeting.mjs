@@ -32,6 +32,8 @@ const flag = (name, fallback) => {
 };
 const PROBE = argv.includes("--probe");
 const DIRECT = argv.includes("--direct");
+const FIND = flag("find", undefined);
+const AXPRESS_ONLY = argv.includes("--axpress-only");
 const ITERATIONS = Number(flag("iterations", 5));
 const OUT = flag("out", ".sisyphus/evidence/strategic-targeting-live.json");
 const BENCH_OUT = flag("bench-out", ".sisyphus/evidence/strategic-targeting-bench.json");
@@ -169,6 +171,132 @@ function createClient() {
 	return { client, via: useHelper ? `signed helper ${HELPER}` : `node ${SERVER}` };
 }
 
+/**
+ * A live proof of the accessibility route, self-contained in a throwaway Finder window: open one
+ * (cmd+N), give it history (cmd+up), then click "back" and "forward" by description. Both
+ * advertise AXPress, so a route of "accessibility" is the dispatch path being exercised, and the
+ * window title changing back and forth is the visible effect. The window is closed at the end.
+ */
+async function liveAxPressScenario(client, evidence) {
+	if (APP !== "Finder") {
+		return;
+	}
+	const startedAt = performance.now();
+	let bytes = 0;
+	const step = { step: "live_axpress", milliseconds: 0, bytes: 0 };
+
+	const before = await finderWindowIds(client);
+	const opened = await pressKeys(client, "Finder", ["cmd+n"]);
+	bytes += opened.bytes;
+	const windowId = await waitForEndpoint(async () => {
+		const ids = await finderWindowIds(client);
+		return ids.find((id) => !before.includes(id));
+	}, "a new Finder window");
+	if (windowId === undefined) {
+		step.status = "failed";
+		step.reason = "cmd+N did not produce a new Finder window";
+		step.milliseconds = Math.round(performance.now() - startedAt);
+		evidence.steps.push(step);
+		console.log("live AXPress: FAILED to open a throwaway window");
+		return;
+	}
+	step.windowId = windowId;
+
+	const seeded = await pressKeys(client, "Finder", ["cmd+up"], windowId);
+	bytes += seeded.bytes;
+	const titleStart = await windowTitle(client, windowId);
+	try {
+		const back = await clickByLabel(client, "back", windowId);
+		bytes += back.bytes;
+		step.back = back.step;
+		const forward = await clickByLabel(client, "forward", windowId);
+		bytes += forward.bytes;
+		step.forward = forward.step;
+		step.titles = { start: titleStart, afterBack: back.step.titleAfter, afterForward: forward.step.titleAfter };
+		step.status =
+			back.step.found === true &&
+			back.step.route === "accessibility" &&
+			back.step.titleAfter !== titleStart &&
+			forward.step.route === "accessibility" &&
+			forward.step.titleAfter !== back.step.titleAfter
+				? "verified"
+				: "unverified";
+		console.log(
+			`live AXPress: back -> ${JSON.stringify(back.step.titleAfter)} (${back.step.route}), forward -> ${JSON.stringify(forward.step.titleAfter)} (${forward.step.route}) [${step.status}]`,
+		);
+	} finally {
+		const closed = await pressKeys(client, "Finder", ["cmd+w"], windowId);
+		bytes += closed.bytes;
+		const stillOpen = await waitForEndpoint(async () => {
+			const ids = await finderWindowIds(client);
+			return ids.includes(windowId) ? undefined : "closed";
+		}, "the throwaway window to close");
+		step.cleanup = { closed: stillOpen === "closed", windowId };
+	}
+	step.milliseconds = Math.round(performance.now() - startedAt);
+	step.bytes = bytes;
+	evidence.steps.push(step);
+}
+
+async function finderWindowIds(client) {
+	const result = await client.callTool("list_windows", {});
+	const windows = payload(result).json?.windows ?? [];
+	return windows.filter((window) => window.app === "Finder").map((window) => window.window_id);
+}
+
+/** Send a key chord to an app, refreshing the observation token the press requires. */
+async function pressKeys(client, app, keys, windowId) {
+	const state = await client.callTool(
+		"get_app_state",
+		windowId === undefined ? { app } : { app, window_id: windowId },
+	);
+	const token = payload(state).json?.observation_token;
+	const pressed = await client.callTool("press_keys", { app, observation_token: token, keys });
+	return { pressed: payload(pressed).json, bytes: contentBytes(state) + contentBytes(pressed) };
+}
+
+async function windowTitle(client, windowId) {
+	const state = await client.callTool("get_app_state", { app: "Finder", window_id: windowId });
+	return payload(state).json?.windowTitle ?? null;
+}
+
+async function clickByLabel(client, label, windowId) {
+	const result = await client.callTool("click_target", {
+		app: "Finder",
+		window_id: windowId,
+		query: { role: "button", label },
+	});
+	const clicked = payload(result).json;
+	return {
+		bytes: contentBytes(result),
+		step: {
+			label,
+			found: clicked?.found,
+			route: clicked?.route,
+			dispatched: clicked?.actionDispatched,
+			target: clicked?.target ?? null,
+			titleAfter: clicked?.windowTitle ?? null,
+			isError: result.isError === true,
+		},
+	};
+}
+
+/** Poll a real UI change with a deadline; the script's own waiting, never the product's. */
+async function waitForEndpoint(read, description) {
+	const deadline = Date.now() + 5_000;
+	for (;;) {
+		const value = await read();
+		if (value !== undefined && value !== null) {
+			return value;
+		}
+		if (Date.now() >= deadline) {
+			console.log(`live AXPress: timed out waiting for ${description}`);
+			return undefined;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 150));
+	}
+}
+
 async function main() {
 	prepareFixture();
 	const { client, via } = createClient();
@@ -190,6 +318,30 @@ async function main() {
 		evidence.strategicToolsPresent = TOOL_NAMES.filter((name) => names.includes(name));
 		console.log(`server ${init?.serverInfo?.name} v${init?.serverInfo?.version} — ${names.length} tools via ${via}`);
 		console.log(`strategic tools present: ${evidence.strategicToolsPresent.join(", ")}`);
+
+		if (FIND !== undefined) {
+			const query = JSON.parse(FIND);
+			const found = await timed(() => client.callTool("find_elements", { app: APP, query, max_results: 12 }));
+			const foundPayload = payload(found.value);
+			console.log(
+				`find_elements ${JSON.stringify(query)} -> found=${foundPayload.json?.found} ${found.milliseconds}ms`,
+			);
+			if (foundPayload.raw !== undefined) console.log(`  RAW: ${foundPayload.raw}`);
+			for (const match of foundPayload.json?.matches ?? []) {
+				console.log(
+					`  ${match.element_index} ${match.role} label=${JSON.stringify(match.label)} value=${JSON.stringify(match.value)} actions=${JSON.stringify(match.actions)} frame=${JSON.stringify(match.frame)}`,
+				);
+			}
+			evidence.steps.push({
+				step: "find",
+				query,
+				milliseconds: found.milliseconds,
+				payload: foundPayload.json,
+				raw: foundPayload.raw,
+			});
+			writeEvidence(evidence);
+			return;
+		}
 
 		if (PROBE) {
 			const state = await timed(() => client.callTool("get_app_state", { app: APP }));
@@ -230,6 +382,14 @@ async function main() {
 					raw: foundPayload.raw,
 				});
 			}
+			writeEvidence(evidence);
+			return;
+		}
+
+		if (AXPRESS_ONLY) {
+			const open = await timed(() => client.callTool("open_app", { name: APP }));
+			evidence.steps.push({ step: "open_app", milliseconds: open.milliseconds, payload: payload(open.value).json });
+			await liveAxPressScenario(client, evidence);
 			writeEvidence(evidence);
 			return;
 		}
@@ -312,6 +472,9 @@ async function main() {
 		console.log(
 			`click_target role-hint miss -> found=${guidedPayload?.found} nearMisses=${guidedPayload?.nearMisses?.length} dispatched=${guidedPayload?.actionDispatched} ${guided.milliseconds}ms`,
 		);
+
+		// ---- Live accessibility-route proof: a real AXPress click that visibly navigates and restores ----
+		await liveAxPressScenario(client, evidence);
 
 		// ---- Speed and stability: strategic path vs robot loop (criterion 8) ----
 		const runs = [];

@@ -82,7 +82,7 @@ describe("#given window-targeted screenshot capture #when a windowId is provided
 		expect(result).toBe(fakePng);
 		expect(childProcessMock.execFile).toHaveBeenCalledWith(
 			"sh",
-			expect.arrayContaining(["macos-cua-screenshot", "1920", "1080"]),
+			expect.arrayContaining(["apple-cua-screenshot", "1920", "1080"]),
 			expect.objectContaining({ encoding: "buffer" }),
 			expect.any(Function),
 		);

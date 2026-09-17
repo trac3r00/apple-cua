@@ -1,4 +1,4 @@
-import type { ComputerInterface, Point, ScrollOptions } from "@macos-cua/core";
+import type { ComputerInterface, Point, ScrollOptions } from "@apple-cua/core";
 
 import { ComputerUseError, type ComputerUseResult } from "./anthropic-computer-use.js";
 import { type DisplayConfig, unscaleCoord } from "./computer-use/coords.js";
@@ -119,7 +119,7 @@ function parseDrag(
 		throw new ComputerUseError("invalid_arguments", "drag requires at least one path point");
 	}
 	if (path.length > 2) {
-		process.stderr.write("macos-cua: collapsed OpenAI drag path to endpoints\n");
+		process.stderr.write("apple-cua: collapsed OpenAI drag path to endpoints\n");
 	}
 	return {
 		from: parsePosition(from.x, from.y, "drag.path[0]", display),

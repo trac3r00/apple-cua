@@ -361,7 +361,7 @@ static int drain_bytes(const char *buf, ssize_t n, char *line, size_t cap, size_
 }
 
 // Persistent daemon mode: a unix-domain socket server so the overlay outlives
-// any single CLI command (each macos-cua verb is its own process). Singleton:
+// any single CLI command (each apple-cua verb is its own process). Singleton:
 // if a daemon already owns the socket, exit. Self-terminates after idle timeout.
 static void *socket_reader(void *arg) {
 	char *path = (char *)arg;

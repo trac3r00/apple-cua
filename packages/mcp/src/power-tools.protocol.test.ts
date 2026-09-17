@@ -1,4 +1,4 @@
-import type { Rect } from "@macos-cua/core";
+import type { Rect } from "@apple-cua/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, jsonPayload, jsonText, observe } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";

@@ -1,4 +1,4 @@
-import type { ComputerInterface } from "@macos-cua/core";
+import type { ComputerInterface } from "@apple-cua/core";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ExtensionContext } from "../pi/index.js";
@@ -64,14 +64,14 @@ describe("#given type_text tool #when AX focused element accepts the write #then
 		// when
 		await tool.execute(
 			"tool-call",
-			{ app: "TextEdit", text: "macos-cua" },
+			{ app: "TextEdit", text: "apple-cua" },
 			undefined,
 			undefined,
 			{} as ExtensionContext,
 		);
 
 		// then
-		expect(computer.typeIntoFocused).toHaveBeenCalledWith(9001, "macos-cua");
+		expect(computer.typeIntoFocused).toHaveBeenCalledWith(9001, "apple-cua");
 		expect(computer.type).not.toHaveBeenCalled();
 		expect(computer.setTarget).not.toHaveBeenCalled();
 	});

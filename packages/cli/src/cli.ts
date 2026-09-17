@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { MacOSHostComputer, NOOP_POINTER_OVERLAY, createCursorOverlay, getAppStateForApp } from "@macos-cua/core";
+import { MacOSHostComputer, NOOP_POINTER_OVERLAY, createCursorOverlay, getAppStateForApp } from "@apple-cua/core";
 import type {
 	ComputerInterface,
 	KeyOptions,
@@ -13,7 +13,7 @@ import type {
 	PointerMode,
 	ScreenshotOptions,
 	ScrollOptions,
-} from "@macos-cua/core";
+} from "@apple-cua/core";
 import { Command } from "commander";
 
 type PackageJson = {
@@ -81,7 +81,7 @@ const packageJson: PackageJson = readPackageJson();
 const program = new Command();
 
 program
-	.name("macos-cua")
+	.name("apple-cua")
 	.description("Native macOS computer-use control with Codex-style app-targeted tools.")
 	.version(packageJson.version)
 	.option("--json", "print machine-readable JSON output")
@@ -351,7 +351,7 @@ permissionsCommand
 	.action(async (kind: PermissionKind) => {
 		const permissions = await loadPermissions();
 		if (permissions === null) {
-			throw new Error("MacOSPermissions is not available in @macos-cua/core yet");
+			throw new Error("MacOSPermissions is not available in @apple-cua/core yet");
 		}
 		await permissions.request(kind);
 		writeOutput({ ok: true, kind }, `Requested ${kind} permission`);
@@ -754,13 +754,13 @@ async function loadPermissions(): Promise<PermissionController | null> {
 async function loadWindows(): Promise<unknown> {
 	const windowsConstructor = await loadOptionalConstructor("MacOSWindows");
 	if (windowsConstructor === null) {
-		throw new Error("MacOSWindows is not available in @macos-cua/core yet");
+		throw new Error("MacOSWindows is not available in @apple-cua/core yet");
 	}
 	return new windowsConstructor();
 }
 
 async function loadOptionalConstructor(exportName: string): Promise<Constructor | null> {
-	const coreExports = Object.fromEntries(Object.entries(await import("@macos-cua/core")));
+	const coreExports = Object.fromEntries(Object.entries(await import("@apple-cua/core")));
 	const exportedValue = coreExports[exportName];
 	return isConstructor(exportedValue) ? exportedValue : null;
 }

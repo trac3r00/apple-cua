@@ -4,7 +4,7 @@
 
 Codex Computer Use is not implemented in the open-source `codex-rs` tree as a hard-coded screenshot/click/keyboard tool. The public Rust repository is a plugin host: it exposes feature/discovery plumbing and loads plugin manifests/MCP servers. The actual desktop Computer Use implementation is distributed as the proprietary bundled marketplace plugin `computer-use@openai-bundled`; public issue evidence places it at `Codex.app/Contents/Resources/plugins/openai-bundled/plugins/computer-use` and shows its MCP server launching `SkyComputerUseClient mcp`, likely coordinating with `SkyComputerUseService`. The fast path is therefore a local macOS-native helper path: Codex app/Rust plugin host → local MCP/native helper → Screen Recording/Accessibility/CoreGraphics-style capture and control on the real host. By contrast, trycua/cua’s portable sandbox path is intentionally multi-hop: Python agent → sandbox wrapper → HTTP/WebSocket JSON → in-guest FastAPI → PIL screenshot/pynput input → base64 JSON/SSE → client decode/re-encode → next model call, with a default 500 ms post-action screenshot delay. Codex is faster because it trades hard VM isolation for host-native execution, macOS GPU-backed capture (ScreenCaptureKit/IOSurface/Metal class APIs where used), fewer IPC hops, no QEMU/Docker/VNC framebuffer boundary, and fewer repeated base64/image transcodes.
 
-Accuracy note for the local `macos-cua` port: our current extension is close to SkyComputerUse on vocabulary, but not yet on perceptual fidelity. The most likely reason clicks and screen recognition feel worse is not only model quality; it is host signal quality. SkyComputerUse appears to ship richer app/window/display context and action feedback (`codexDisplay`, `axText`, `cursor_before`, `cursor_after`, `ComputerUseIPCScreenshot`, WindowServer/Accessibility/CoreGraphics strings in the local 1.0.809 binary). `macos-cua` currently gives the model a 1280-long-edge screenshot plus a shallow AX tree, then maps model pixels back to logical points. That downscale, weaker text/UI semantics, and limited post-action verification make small controls, dense text, Retina coordinates, and inactive-window targeting easier to miss.
+Accuracy note for the local `apple-cua` port: our current extension is close to SkyComputerUse on vocabulary, but not yet on perceptual fidelity. The most likely reason clicks and screen recognition feel worse is not only model quality; it is host signal quality. SkyComputerUse appears to ship richer app/window/display context and action feedback (`codexDisplay`, `axText`, `cursor_before`, `cursor_after`, `ComputerUseIPCScreenshot`, WindowServer/Accessibility/CoreGraphics strings in the local 1.0.809 binary). `apple-cua` currently gives the model a 1280-long-edge screenshot plus a shallow AX tree, then maps model pixels back to logical points. That downscale, weaker text/UI semantics, and limited post-action verification make small controls, dense text, Retina coordinates, and inactive-window targeting easier to miss.
 
 ## Confidence labels used below
 
@@ -336,13 +336,13 @@ Codex and cua optimize different isolation axes:
 - **Codex:** isolates sensitive capabilities by macOS permissions, Codex per-app approvals, plugin process boundaries, and product policy constraints. It uses the real host. This is fast and faithful to the user’s installed apps, but it is not a VM sandbox.
 - **cua:** can isolate the target computer inside Docker/QEMU/Lume/cloud sandboxes. Public Cua docs emphasize that sandbox activity does not modify the host. This is stronger environmental isolation, but it adds runtime startup, display remoting, guest agent, transport, and screenshot serialization overhead.
 
-## 5. Why SkyComputerUse is likely more accurate than `macos-cua`
+## 5. Why SkyComputerUse is likely more accurate than `apple-cua`
 
-This section compares the private OpenAI/SkyComputerUse desktop plugin against the local TypeScript `macos-cua` port, not against trycua/cua’s VM sandbox path. The private implementation cannot be fully audited from source, so each claim below is labeled as either local bundle evidence, local `macos-cua` source evidence, or inference.
+This section compares the private OpenAI/SkyComputerUse desktop plugin against the local TypeScript `apple-cua` port, not against trycua/cua’s VM sandbox path. The private implementation cannot be fully audited from source, so each claim below is labeled as either local bundle evidence, local `apple-cua` source evidence, or inference.
 
 ### 5.1 Perception pipeline: pixels plus semantic context
 
-SkyComputerUse appears to expose a richer perception packet than `macos-cua` currently does.
+SkyComputerUse appears to expose a richer perception packet than `apple-cua` currently does.
 
 Local bundle evidence from `computer-use/1.0.809` strings includes:
 
@@ -357,20 +357,20 @@ Local bundle evidence from `computer-use/1.0.809` strings includes:
 - `cursor_before` and `cursor_after`
 - A `select_text`-style tool description: “Select text inside a text element, or place the text cursor before or after it. Provide text exactly as it appears in the accessibility tree, including any Markdown formatting. If the text is not unique, provide surrounding prefix or suffix text to disambiguate it.”
 
-`macos-cua` source evidence:
+`apple-cua` source evidence:
 
 - The pi-extension native computer path resolves model screenshots to a 1280px long edge: `packages/pi-extension/src/computer-use/coords.ts`.
 - `get_app_state` returns one screenshot plus a JSON AX tree: `packages/pi-extension/src/tools/get-app-state.ts`.
 - The AX tree fields are limited to role, label, value, frame, actions, and children: `packages/core/src/accessibility/types.ts`.
 - The AX extractor reads a bounded tree, defaulting to max depth 10 and max 2,000 elements: `packages/core/src/platform/macos-ffi/accessibility.ts`.
 
-Inference: SkyComputerUse likely gives the model more than “downscaled bitmap + flat-ish AX JSON.” The strings point to a display abstraction (`codexDisplay`), richer AX text channel (`axText`), frontmost-window IPC, and action feedback. `macos-cua` currently has no OCR/Vision pass, no text-disambiguation helper, no semantic grouping of AX nodes, and no explicit “what changed after action” feedback beyond the next screenshot. That means screen recognition quality depends heavily on whether the model can read a 1280-long-edge image and a shallow AX dump.
+Inference: SkyComputerUse likely gives the model more than “downscaled bitmap + flat-ish AX JSON.” The strings point to a display abstraction (`codexDisplay`), richer AX text channel (`axText`), frontmost-window IPC, and action feedback. `apple-cua` currently has no OCR/Vision pass, no text-disambiguation helper, no semantic grouping of AX nodes, and no explicit “what changed after action” feedback beyond the next screenshot. That means screen recognition quality depends heavily on whether the model can read a 1280-long-edge image and a shallow AX dump.
 
 ### 5.2 Screenshot fidelity and coordinate precision
 
 The most concrete accuracy gap is screenshot resolution and coordinate mapping.
 
-`macos-cua` source evidence:
+`apple-cua` source evidence:
 
 - The model-facing screenshot is capped at 1280 long edge, and coordinates are rounded during unscale: `packages/pi-extension/src/computer-use/coords.ts`.
 - Full-display screenshots can use the native SCK path, but app/window screenshots still go through `screencapture -l` plus `sips` resize: `packages/core/src/platform/macos.ts`.
@@ -382,13 +382,13 @@ SkyComputerUse evidence and inference:
 - Public OpenAI computer-use guidance favors higher-detail screenshots where available, and the local Sky bundle contains display/window IPC strings.
 - If SkyComputerUse keeps a native display/window representation internally and only compresses at the tool boundary, it can preserve small-text and small-control fidelity better than a fixed 1280-long-edge image.
 
-Practical effect: small buttons, thin disclosure arrows, dense table cells, Retina-scaled controls, and partially occluded window contents can be visible enough in SkyComputerUse but ambiguous in `macos-cua`. A one-pixel model-space error at 1280-long-edge becomes a multi-point host click error after unscale on large displays; rounding makes this worse around narrow targets.
+Practical effect: small buttons, thin disclosure arrows, dense table cells, Retina-scaled controls, and partially occluded window contents can be visible enough in SkyComputerUse but ambiguous in `apple-cua`. A one-pixel model-space error at 1280-long-edge becomes a multi-point host click error after unscale on large displays; rounding makes this worse around narrow targets.
 
 ### 5.3 Click, keyboard, scroll execution and targeting
 
-`macos-cua` now has a stronger host-native action path than the first draft of this report described: click is AX-first when possible, keyboard events use authenticated SkyLight delivery plus CoreGraphics owner delivery, and scroll combines AX page actions with a targeted wheel-event fallback. This closes some action-delivery gaps, but SkyComputerUse still appears more stateful around action feedback.
+`apple-cua` now has a stronger host-native action path than the first draft of this report described: click is AX-first when possible, keyboard events use authenticated SkyLight delivery plus CoreGraphics owner delivery, and scroll combines AX page actions with a targeted wheel-event fallback. This closes some action-delivery gaps, but SkyComputerUse still appears more stateful around action feedback.
 
-`macos-cua` source evidence:
+`apple-cua` source evidence:
 
 - The Codex-compatible `click` tool can click an AX `element_index`, or click screenshot coordinates: `packages/pi-extension/src/tools/click.ts`.
 - For coordinate left clicks, it first tries `AXUIElementCopyElementAtPosition` and `AXPress`; if that fails, it falls back to synthetic pointer input: `packages/core/src/platform/macos-ffi/accessibility.ts` and `packages/pi-extension/src/tools/click.ts`.
@@ -401,13 +401,13 @@ SkyComputerUse local bundle evidence:
 
 - Strings include `cursor_before`, `cursor_after`, `ComputerUseIPCFrontmostWindow`, `windowNumberAtPoint:belowWindowWithWindowNumber:`, `WindowServerEvent`, `WindowServerCaptureOptions`, `AXUIElement`, `AccessibilitySPI`, and `CGEventAPI`.
 
-Inference: SkyComputerUse likely maintains stronger per-action state: frontmost/target window identity, cursor-before/cursor-after telemetry, and possibly post-click validation/retry or at least richer feedback to the model. `macos-cua` now does better delivery routing for key/scroll/click, but still returns a lightweight `{ ok: true }`. It does not yet verify that the target app visibly changed, that the target window stayed stable, or that an animation/scroll completed.
+Inference: SkyComputerUse likely maintains stronger per-action state: frontmost/target window identity, cursor-before/cursor-after telemetry, and possibly post-click validation/retry or at least richer feedback to the model. `apple-cua` now does better delivery routing for key/scroll/click, but still returns a lightweight `{ ok: true }`. It does not yet verify that the target app visibly changed, that the target window stayed stable, or that an animation/scroll completed.
 
 ### 5.4 App/window session fidelity
 
-SkyComputerUse appears to have an explicit app/window IPC layer. `macos-cua` approximates this from public APIs.
+SkyComputerUse appears to have an explicit app/window IPC layer. `apple-cua` approximates this from public APIs.
 
-`macos-cua` source evidence:
+`apple-cua` source evidence:
 
 - `get_app_state` resolves the app, remembers a visible target window, captures a window screenshot, then extracts AX tree: `packages/core/src/platform/macos.ts`.
 - Window screenshots use `screencapture -l <windowId>` for targeted capture: `packages/core/src/platform/macos.ts`.
@@ -418,9 +418,9 @@ SkyComputerUse evidence:
 - Local bundle strings include `ComputerUseIPCFrontmostWindow`, `ComputerUseIPCAppStartCaptureAnimationDisplay`, `WindowServerCaptureOptions`, and `WindowServerSPI`.
 - The service is a separate `SkyComputerUseService` app, with a client launched through MCP.
 
-Inference: SkyComputerUse likely owns a more coherent “session” object around app/window/display capture. It can know which window is frontmost or selected through a service-level IPC contract, while `macos-cua` recomputes/refreshes window identity from available public window lists and AX state. That difference matters when windows move, sheets open, popovers appear, or an app has multiple similar windows.
+Inference: SkyComputerUse likely owns a more coherent “session” object around app/window/display capture. It can know which window is frontmost or selected through a service-level IPC contract, while `apple-cua` recomputes/refreshes window identity from available public window lists and AX state. That difference matters when windows move, sheets open, popovers appear, or an app has multiple similar windows.
 
-### 5.5 Current `macos-cua` improvement backlog for accuracy
+### 5.5 Current `apple-cua` improvement backlog for accuracy
 
 Priority order if the goal is to close the SkyComputerUse gap:
 
@@ -432,7 +432,7 @@ Priority order if the goal is to close the SkyComputerUse gap:
 6. **Use native window capture consistently:** replace the `screencapture -l` + `sips` targeted path with a ScreenCaptureKit/WindowServer-backed window capture path where possible, preserving Retina detail and avoiding shell resize artifacts.
 7. **Calibrate coordinate transforms:** report and test logical points, backing pixel scale, model image size, and capture crop/origin in one structure; add fixture tests for Retina/non-Retina, multiple displays, moved windows, and rounded edge coordinates.
 
-Bottom line: `macos-cua` is already close on action vocabulary and host-native latency, but SkyComputerUse likely wins on **stateful perception**. The next accuracy work should focus less on raw event posting and more on the evidence packet the model sees before and after each action.
+Bottom line: `apple-cua` is already close on action vocabulary and host-native latency, but SkyComputerUse likely wins on **stateful perception**. The next accuracy work should focus less on raw event posting and more on the evidence packet the model sees before and after each action.
 
 ## 6. Risk model trade-off
 

@@ -136,7 +136,7 @@ describe("#given OpenAI drag and keypress actions #when executed #then paths and
 		await executeOpenAIComputerAction({ type: "keypress", keys: ["Control", "c"] }, computer, DISPLAY);
 
 		expect(computer.drag).toHaveBeenCalledWith({ from: { x: 2, y: 4 }, to: { x: 10, y: 12 } });
-		expect(stderrWrite).toHaveBeenCalledWith("macos-cua: collapsed OpenAI drag path to endpoints\n");
+		expect(stderrWrite).toHaveBeenCalledWith("apple-cua: collapsed OpenAI drag path to endpoints\n");
 		expect(computer.key).toHaveBeenCalledWith("c", { modifiers: ["control"] });
 		expect(normalizeOpenAIKeys(["Meta", "Enter"])).toEqual({ modifiers: ["command"], key: "enter" });
 	});

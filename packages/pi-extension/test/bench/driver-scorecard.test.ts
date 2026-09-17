@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { MacOSHostComputer } from "@macos-cua/core";
+import { MacOSHostComputer } from "@apple-cua/core";
 import { describe, expect, it } from "vitest";
 
 import { describeBenchmarkEnvironment, measureToolDescriptors, summarize } from "./measure.js";

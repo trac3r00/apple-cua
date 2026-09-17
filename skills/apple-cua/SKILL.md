@@ -1,9 +1,9 @@
 ---
-name: macos-cua
-description: "Operate an explicitly authorized macOS app using the context-first macos-cua MCP server. Observe the app before input, use the returned observation token and element IDs, verify the intended result, and stop on uncertainty. Works with MCP-capable harnesses including OpenClaw and Hermes Agent; direct CLI use is a lower-level alternative, not a way around the guard."
+name: apple-cua
+description: "Operate an explicitly authorized macOS app using the context-first apple-cua MCP server. Observe the app before input, use the returned observation token and element IDs, verify the intended result, and stop on uncertainty. Works with MCP-capable harnesses including OpenClaw and Hermes Agent; direct CLI use is a lower-level alternative, not a way around the guard."
 ---
 
-# macos-cua: context before input
+# apple-cua: context before input
 
 Use this skill when the user actually asks you to operate their Mac. A request to explain,
 inspect code, or suggest an action is not permission to perform that action. Prefer an
@@ -11,7 +11,7 @@ appropriate read-only API, file reader, or existing purpose-built tool when desk
 is unnecessary.
 
 **Use the guarded stdio MCP server for autonomous operation.** No Pi-specific extension,
-embedded model, extra agent framework, cloud service, or API key is required by macos-cua.
+embedded model, extra agent framework, cloud service, or API key is required by apple-cua.
 The MCP server must run on the Mac being controlled, in a logged-in graphical session.
 The harness supplies the model, task reasoning and user-confirmation channel.
 
@@ -31,7 +31,7 @@ merely to understand the "whole situation." Do not begin by clicking to discover
 
 1. **Discover only as needed.** `list_apps` reports running apps. Listing an app does not
    authorize reading or controlling it. The host must configure its bundle ID in
-   `MACOS_CUA_ALLOWED_BUNDLE_IDS`; never edit that policy to approve yourself.
+   `APPLE_CUA_ALLOWED_BUNDLE_IDS`; never edit that policy to approve yourself.
 2. **Observe the chosen app.** Call `get_app_state` and read its screenshot, accessibility
    elements, target metadata and any local app guidance. Identify the relevant field/control,
    blocking dialog, current value and expected next state before choosing an action. Spend
@@ -111,7 +111,7 @@ when the needed target cannot be established.
   Inspect a specific missing signal, resolve a visible blocker, or stop and explain what is
   uncertain. Do not loop through guessed variants or repeatedly refresh identical state.
 7. **Stay out of the way when asked.** With background delivery (`--background`, or
-   `MACOS_CUA_DELIVERY=background` for the MCP server) input goes to the app's own window: the
+   `APPLE_CUA_DELIVERY=background` for the MCP server) input goes to the app's own window: the
    frontmost app and the cursor are left alone, and an action that would need the foreground is
    refused rather than taking over the machine. Prefer it when a human is using the same Mac.
 

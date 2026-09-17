@@ -1,5 +1,5 @@
-import { parseElementIndex, scrollElement } from "@macos-cua/core";
-import type { GuardedComputerInterface, InputObservation } from "@macos-cua/core";
+import { parseElementIndex, scrollElement } from "@apple-cua/core";
+import type { GuardedComputerInterface, InputObservation } from "@apple-cua/core";
 import type { RunStepDriver } from "./guarded-session.js";
 import { validateElement } from "./guarded-session.js";
 import { click, drag, pressKeys, selectText, typeText, validateClick, validateDrag } from "./mutation-actions.js";

@@ -1,11 +1,11 @@
 {
-	"name": "@macos-cua/cli",
+	"name": "@apple-cua/cli",
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Command-line interface for macOS computer control",
 	"keywords": ["macos", "automation", "cli", "computer-use"],
 	"bin": {
-		"macos-cua": "./dist/cli.js"
+		"apple-cua": "./dist/cli.js"
 	},
 	"scripts": {
 		"build": "tsgo",
@@ -13,7 +13,7 @@
 		"test": "vitest --run"
 	},
 	"dependencies": {
-		"@macos-cua/core": "workspace:*",
+		"@apple-cua/core": "workspace:*",
 		"commander": "^12.0.0"
 	},
 	"devDependencies": {

@@ -1,4 +1,4 @@
-import type { AXTreeElement, AppState, AxTreeChanges } from "@macos-cua/core";
+import type { AXTreeElement, AppState, AxTreeChanges } from "@apple-cua/core";
 
 export type ToolContent =
 	| { readonly type: "text"; readonly text: string }

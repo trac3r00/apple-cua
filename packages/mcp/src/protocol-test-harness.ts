@@ -16,7 +16,7 @@ import type {
 	ScreenshotResult,
 	ScrollOptions,
 	SelectTextOptions,
-} from "@macos-cua/core";
+} from "@apple-cua/core";
 
 export type Effect =
 	| { readonly kind: "performAction"; readonly pid: number; readonly id: number; readonly action: string }

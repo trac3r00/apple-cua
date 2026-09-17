@@ -30,7 +30,7 @@ function imageSummary(data) {
 }
 
 async function captureCli(windowId) {
-	const directory = await mkdtemp(join(tmpdir(), "macos-cua-window-measure-"));
+	const directory = await mkdtemp(join(tmpdir(), "apple-cua-window-measure-"));
 	const capturedPath = join(directory, "captured.png");
 	const resizedPath = join(directory, "resized.png");
 	try {
@@ -111,7 +111,7 @@ function selectWindow(windows) {
 }
 
 async function normalizedBgra(data) {
-	const directory = await mkdtemp(join(tmpdir(), "macos-cua-window-compare-"));
+	const directory = await mkdtemp(join(tmpdir(), "apple-cua-window-compare-"));
 	const input = join(directory, "input.png");
 	const output = join(directory, "output.bmp");
 	try {

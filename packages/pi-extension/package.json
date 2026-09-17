@@ -1,5 +1,5 @@
 {
-	"name": "@macos-cua/pi-extension",
+	"name": "@apple-cua/pi-extension",
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Pi coding agent extension for macOS computer control",
@@ -21,7 +21,7 @@
 		"test": "vitest --run"
 	},
 	"dependencies": {
-		"@macos-cua/core": "workspace:*",
+		"@apple-cua/core": "workspace:*",
 		"pngjs": "7.0.0",
 		"typebox": "1.1.38"
 	},

@@ -1,5 +1,5 @@
-import { invokeMenu, readClipboard, setWindowFrame, writeClipboard } from "@macos-cua/core";
-import type { GuardedComputerInterface, InputObservation, Rect } from "@macos-cua/core";
+import { invokeMenu, readClipboard, setWindowFrame, writeClipboard } from "@apple-cua/core";
+import type { GuardedComputerInterface, InputObservation, Rect } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import type { GuardedSession } from "./guarded-session.js";

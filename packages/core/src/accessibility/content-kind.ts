@@ -2,7 +2,7 @@ import type { AXTreeElement } from "./types.js";
 
 /**
  * Whether the accessibility tree or the screenshot is the more reliable
- * perception channel for the current screen. This is the macos-cua analogue of
+ * perception channel for the current screen. This is the apple-cua analogue of
  * ChatGPT computer-use's `SkyshotClassifier` ("determine if Skyshot contains
  * image or not"): when the screen is image-heavy the AX tree carries little
  * actionable structure, so the model should lean on the screenshot (vision);

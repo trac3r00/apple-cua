@@ -1,4 +1,4 @@
-import type { ComputerInterface } from "@macos-cua/core";
+import type { ComputerInterface } from "@apple-cua/core";
 import { Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";

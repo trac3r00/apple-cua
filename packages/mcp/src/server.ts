@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
-import { parseElementIndex, scrollElement } from "@macos-cua/core";
-import type { GuardedComputerInterface, TopLevelWindow } from "@macos-cua/core";
+import { parseElementIndex, scrollElement } from "@apple-cua/core";
+import type { GuardedComputerInterface, TopLevelWindow } from "@apple-cua/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { GuardedSession, validateElement } from "./guarded-session.js";

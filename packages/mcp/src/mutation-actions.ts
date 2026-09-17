@@ -1,5 +1,5 @@
-import { clickPoint, parseElementIndex, pressElement, pressKeySequence, withTargetedApp } from "@macos-cua/core";
-import type { ComputerInterface, InputObservation, KeySequenceEntry, KeySequenceOptions, Point } from "@macos-cua/core";
+import { clickPoint, parseElementIndex, pressElement, pressKeySequence, withTargetedApp } from "@apple-cua/core";
+import type { ComputerInterface, InputObservation, KeySequenceEntry, KeySequenceOptions, Point } from "@apple-cua/core";
 import { observedPointToScreen, validateElement, validatePoint } from "./guarded-session.js";
 import type { ActionDispatch } from "./tool-result.js";
 import type { ClickActionInput, DragActionInput, PressKeysActionInput, SelectTextActionInput } from "./tool-schemas.js";

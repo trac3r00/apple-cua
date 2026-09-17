@@ -1,5 +1,5 @@
 import os from "node:os";
-import type { ComputerInterface } from "@macos-cua/core";
+import type { ComputerInterface } from "@apple-cua/core";
 
 import { anthropicComputerToolSchema } from "../../src/anthropic-computer-use.js";
 import { buildAllTools } from "../../src/tools/index.js";

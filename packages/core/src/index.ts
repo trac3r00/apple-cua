@@ -61,6 +61,7 @@ export { MacOSHostComputer, type MacOSHostComputerOptions } from "./platform/mac
 export type { InputDelivery } from "./platform/macos-input.js";
 export { invokeMenu, type InvokeMenuResult } from "./platform/macos-menu.js";
 export { setWindowFrame } from "./platform/macos-window-frame.js";
+export { renamedEnvironmentVariable } from "./platform/renamed-environment.js";
 export {
 	type ClipboardWriteInput,
 	type ClipboardWriteResult,

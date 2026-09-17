@@ -1,6 +1,6 @@
 # Installation and local permissions
 
-macos-cua runs on the Mac being controlled, in its logged-in graphical session. Autonomous
+apple-cua runs on the Mac being controlled, in its logged-in graphical session. Autonomous
 harnesses should use the guarded MCP server. See [harness configuration](harnesses.md) for
 OpenClaw/Hermes examples and the required local app allowlist.
 
@@ -11,7 +11,7 @@ capture/cursor components. The host also needs normal macOS desktop permissions.
 
 ```bash
 pnpm install
-pnpm --filter @macos-cua/core --filter @macos-cua/cli --filter @macos-cua/mcp build
+pnpm --filter @apple-cua/core --filter @apple-cua/cli --filter @apple-cua/mcp build
 node packages/cli/dist/cli.js --help
 ```
 
@@ -52,12 +52,12 @@ node packages/cli/dist/cli.js --json apps list
 
 ## Configure MCP app approval
 
-The host owner sets `MACOS_CUA_ALLOWED_BUNDLE_IDS` to exact approved bundle IDs. Empty or
+The host owner sets `APPLE_CUA_ALLOWED_BUNDLE_IDS` to exact approved bundle IDs. Empty or
 unset defaults to no approved apps. The server does not expose an approval tool to the model.
 Example for a host-authorized TextEdit task:
 
 ```bash
-MACOS_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit node packages/mcp/dist/server.js
+APPLE_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit node packages/mcp/dist/server.js
 ```
 
 Normally the harness starts this process and owns stdin/stdout. Configure the same environment

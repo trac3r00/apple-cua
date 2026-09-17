@@ -1,4 +1,4 @@
-import type { ComputerInterface, Point } from "@macos-cua/core";
+import type { ComputerInterface, Point } from "@apple-cua/core";
 
 import type { ComputerToolInput } from "./anthropic-payload.js";
 export {

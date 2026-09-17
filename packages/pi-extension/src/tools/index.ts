@@ -1,4 +1,4 @@
-import type { ComputerInterface } from "@macos-cua/core";
+import type { ComputerInterface } from "@apple-cua/core";
 import type { ExtensionAPI, ToolDefinition } from "../pi/index.js";
 
 import { createClickTool } from "./click.js";

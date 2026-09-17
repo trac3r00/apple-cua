@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the libsckit.dylib helper for @macos-cua/core.
+# Build the libsckit.dylib helper for @apple-cua/core.
 #
 # Requires:
 #   - clang (Xcode Command Line Tools)

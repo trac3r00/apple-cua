@@ -1,4 +1,4 @@
-import { AppApprovalStore } from "@macos-cua/core";
+import { AppApprovalStore } from "@apple-cua/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { allowedBundleIdsFromEnvironment } from "./native-policy.js";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";

@@ -1,4 +1,4 @@
-# macos-cua
+# apple-cua
 
 Native macOS computer-use control, designed for the OpenAI computer-use action vocabulary. Host-native (CGEvent / ScreenCaptureKit-class) speed, no VM sandbox required.
 
@@ -9,11 +9,11 @@ Native macOS computer-use control, designed for the OpenAI computer-use action v
 
 OpenAI Codex Computer Use is fast because it runs on the host with macOS-native APIs (ScreenCaptureKit, CoreGraphics, local MCP stdio). By contrast, [trycua/cua](https://github.com/trycua/cua) is portable but slow because of the multi-hop VM/HTTP/PIL pipeline: Python agent loop, 500 ms post-action screenshot delay, HTTP/WebSocket JSON to a guest FastAPI server, PIL encode, base64 SSE, client decode/re-encode. Codex removes the VM boundary and repeated image serialization; cua keeps it for sandbox isolation.
 
-`macos-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same app-oriented `list_apps / get_app_state / click / type_text / press_keys / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs: ScreenCaptureKit for window and main-display capture, `koffi`-bound CoreGraphics for global input, Accessibility for app state/actions, and SkyLight/AppKit FFI for app-targeted window sessions. No Docker, no QEMU, no VNC, no bundled helper service, no cloud API key.
+`apple-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same app-oriented `list_apps / get_app_state / click / type_text / press_keys / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs: ScreenCaptureKit for window and main-display capture, `koffi`-bound CoreGraphics for global input, Accessibility for app state/actions, and SkyLight/AppKit FFI for app-targeted window sessions. No Docker, no QEMU, no VNC, no bundled helper service, no cloud API key.
 
 The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-comparison.md). If you need strong VM isolation, use cua. If you need low-latency host-native control, use this.
 
-| | Codex | cua | macos-cua |
+| | Codex | cua | apple-cua |
 |---|---|---|---|
 | Runs on | Host Mac | VM / container / cloud | Host Mac |
 | Needs VM | No | Yes (default) | No |
@@ -28,10 +28,10 @@ The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-co
 
 ```bash
 git clone <repo>
-cd macos-cua
+cd apple-cua
 pnpm install
-pnpm --filter @macos-cua/core build
-pnpm --filter @macos-cua/cli build
+pnpm --filter @apple-cua/core build
+pnpm --filter @apple-cua/cli build
 ./packages/cli/dist/cli.js --version
 ./packages/cli/dist/cli.js screenshot -o /tmp/shot.png
 ```
@@ -43,34 +43,34 @@ Expected output:
 Screenshot saved to /tmp/shot.png
 ```
 
-If the PNG is 0 bytes or black, grant Screen Recording permission to your terminal in **System Settings → Privacy & Security → Screen Recording**. See [`skills/macos-cua/references/installation.md`](./skills/macos-cua/references/installation.md) for the full permission walkthrough.
+If the PNG is 0 bytes or black, grant Screen Recording permission to your terminal in **System Settings → Privacy & Security → Screen Recording**. See [`skills/apple-cua/references/installation.md`](./skills/apple-cua/references/installation.md) for the full permission walkthrough.
 
 ## The four surfaces
 
 ### CLI
 
-The `macos-cua` binary is a thin `commander.js` wrapper over `MacOSHostComputer`.
+The `apple-cua` binary is a thin `commander.js` wrapper over `MacOSHostComputer`.
 
 ```bash
 # Screenshot (main display)
-macos-cua screenshot -o shot.png
+apple-cua screenshot -o shot.png
 
 # Region of a display, in global screen points
-macos-cua screenshot -o shot.png -r 100,100,800,600
+apple-cua screenshot -o shot.png -r 100,100,800,600
 
 # A specific display id instead of the main display
-macos-cua screenshot -o shot.png --display 58
+apple-cua screenshot -o shot.png --display 58
 
 # Click and type
-macos-cua click -x 500 -y 300
-macos-cua type "Hello, world"
+apple-cua click -x 500 -y 300
+apple-cua type "Hello, world"
 
 # Key chord
-macos-cua key cmd --modifiers cmd,shift
+apple-cua key cmd --modifiers cmd,shift
 
 # Query state
-macos-cua cursor
-macos-cua screen
+apple-cua cursor
+apple-cua screen
 ```
 
 Sample output:
@@ -96,14 +96,14 @@ SAFARI_PID=$(pgrep -x Safari)
 
 # 2. focus Safari's address bar, type the URL, and press Return
 # each CLI call primes the visible target window before dispatch
-macos-cua --target-pid "$SAFARI_PID" key l -m cmd
-macos-cua --target-pid "$SAFARI_PID" type "https://example.com"
-macos-cua --target-pid "$SAFARI_PID" key Return
+apple-cua --target-pid "$SAFARI_PID" key l -m cmd
+apple-cua --target-pid "$SAFARI_PID" type "https://example.com"
+apple-cua --target-pid "$SAFARI_PID" key Return
 
 # click/scroll/drag Safari content while Slack stays frontmost
-macos-cua --target-pid "$SAFARI_PID" click -x 500 -y 300
-macos-cua --target-pid "$SAFARI_PID" scroll --direction down --amount 5
-macos-cua --target-pid "$SAFARI_PID" drag --from-x 100 --from-y 100 --to-x 300 --to-y 300
+apple-cua --target-pid "$SAFARI_PID" click -x 500 -y 300
+apple-cua --target-pid "$SAFARI_PID" scroll --direction down --amount 5
+apple-cua --target-pid "$SAFARI_PID" drag --from-x 100 --from-y 100 --to-x 300 --to-y 300
 ```
 
 If `--target-pid` is used before a target window has been discovered, the command fails with a clear app-session error instead of falling back to the global path.
@@ -123,26 +123,26 @@ MCP schemas and text/image results, without a Pi-specific extension or embedded 
 It must run on the Mac being controlled, with the actual launcher's macOS permissions.
 
 ```bash
-pnpm --filter @macos-cua/core --filter @macos-cua/mcp build
-MACOS_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit node packages/mcp/dist/server.js
+pnpm --filter @apple-cua/core --filter @apple-cua/mcp build
+APPLE_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit node packages/mcp/dist/server.js
 ```
 
 The host owner configures exact approved bundle IDs through
-`MACOS_CUA_ALLOWED_BUNDLE_IDS`. **Missing or empty means no apps are approved**; the agent
+`APPLE_CUA_ALLOWED_BUNDLE_IDS`. **Missing or empty means no apps are approved**; the agent
 cannot approve itself. App approval does not authorize every operation inside the app.
 
 A Claude Desktop-style server configuration is below. Other clients use different root
-keys; see the [OpenClaw and Hermes setup guide](skills/macos-cua/references/harnesses.md).
+keys; see the [OpenClaw and Hermes setup guide](skills/apple-cua/references/harnesses.md).
 Merge configuration rather than replacing unrelated settings.
 
 ```json
 {
   "mcpServers": {
-    "macos-cua": {
+    "apple-cua": {
       "command": "node",
-      "args": ["/absolute/path/to/macos-cua/packages/mcp/dist/server.js"],
+      "args": ["/absolute/path/to/apple-cua/packages/mcp/dist/server.js"],
       "env": {
-        "MACOS_CUA_ALLOWED_BUNDLE_IDS": "com.apple.TextEdit"
+        "APPLE_CUA_ALLOWED_BUNDLE_IDS": "com.apple.TextEdit"
       }
     }
   }
@@ -200,7 +200,7 @@ Use element `id` values from the observation, not array positions or guessed coo
 The server refuses a missing target window instead of substituting the full desktop. Its queue
 covers only that server instance, not other agents, raw CLI callers or human input.
 
-Load the [portable agent skill](skills/macos-cua/SKILL.md) alongside the MCP tools. Raw CLI/core
+Load the [portable agent skill](skills/apple-cua/SKILL.md) alongside the MCP tools. Raw CLI/core
 and the Pi extension remain low-level interfaces; the MCP guard does not automatically apply
 to them. This migration intentionally rejects old unobserved mutation calls.
 
@@ -212,7 +212,7 @@ Install into a [pi coding agent](https://github.com/badlogic/pi-mono/tree/main/p
 pi install file://./packages/pi-extension
 ```
 
-Loading the extension auto-enables native computer-use for Anthropic Messages and OpenAI Responses models. Anthropic requests receive the `computer-use-2025-01-24` native `computer` tool plus the required beta header/body fields and a short system prompt. OpenAI Responses requests receive only `{ "type": "computer" }` in `payload.tools` — no headers, no `extra_body`, and no extra system prompt. No configuration is required; advanced users can opt out of both providers with `MACOS_CUA_DISABLE_COMPUTER_USE_BETA=1` (`true`, `yes`, and `on` also work).
+Loading the extension auto-enables native computer-use for Anthropic Messages and OpenAI Responses models. Anthropic requests receive the `computer-use-2025-01-24` native `computer` tool plus the required beta header/body fields and a short system prompt. OpenAI Responses requests receive only `{ "type": "computer" }` in `payload.tools` — no headers, no `extra_body`, and no extra system prompt. No configuration is required; advanced users can opt out of both providers with `APPLE_CUA_DISABLE_COMPUTER_USE_BETA=1` (`true`, `yes`, and `on` also work).
 
 The extension resolves the host display in logical macOS points, captures model-facing screenshots at a 2560px long edge (2560x1440 on large 16:9 displays), declares those dimensions to Anthropic, and unscales returned model coordinates back to logical points before dispatching clicks, moves, and drags. OpenAI Responses uses the same screenshot invariant: model coordinates are always in the image space the model received, while `MacOSHostComputer` still receives logical points.
 
@@ -234,10 +234,10 @@ The extension default-exports a pi extension factory and keeps these tools avail
 
 ### Programmatic API
 
-Import `MacOSHostComputer` from `@macos-cua/core` and drive macOS directly:
+Import `MacOSHostComputer` from `@apple-cua/core` and drive macOS directly:
 
 ```typescript
-import { MacOSHostComputer } from "@macos-cua/core";
+import { MacOSHostComputer } from "@apple-cua/core";
 
 const computer = new MacOSHostComputer();
 
@@ -286,7 +286,7 @@ measured under, and the dimensions this driver does *not* measure are recorded i
 
 ## Working while the agent works
 
-Pass `--background` (CLI) or set `MACOS_CUA_DELIVERY=background` (MCP server) to keep a run out
+Pass `--background` (CLI) or set `APPLE_CUA_DELIVERY=background` (MCP server) to keep a run out
 of your way: input goes to the target app's own window, so the frontmost app does not change and
 the cursor does not move. Anything that would need the foreground — a global click with no
 target app, or a route that has to lease focus — is refused with the action named instead of
@@ -336,7 +336,7 @@ macOS gates screen capture, input synthesis, and app lookup behind separate perm
 
 Permission is per-binary. If you switch from iTerm2 to Ghostty, you must re-grant for the new app.
 
-Full walkthrough: [`skills/macos-cua/references/installation.md`](./skills/macos-cua/references/installation.md).
+Full walkthrough: [`skills/apple-cua/references/installation.md`](./skills/apple-cua/references/installation.md).
 
 ## Architecture
 
@@ -344,7 +344,7 @@ Full walkthrough: [`skills/macos-cua/references/installation.md`](./skills/macos
 +----------------------------------------------------------+
 |  Agent / CLI / MCP client / pi session                   |
 |  +----------------------------------------------------+  |
-|  |  @macos-cua/core                                   |  |
+|  |  @apple-cua/core                                   |  |
 |  |   ComputerInterface (abstract)                     |  |
 |  |   +-- HostComputer  (macOS implemented)            |  |
 |  |   +-- VMComputer    (stub: QEMU/Lume/VirtualBox)     |  |
@@ -367,11 +367,11 @@ Full walkthrough: [`skills/macos-cua/references/installation.md`](./skills/macos
 
 | Package | Path | Role |
 |---|---|---|
-| `@macos-cua/core` | [`packages/core`](./packages/core) | `ComputerInterface` + platform abstractions (`HostComputer`, `VMComputer`, `CloudComputer`) + `MacOSHostComputer` implementation |
-| `@macos-cua/cli` | [`packages/cli`](./packages/cli) | `commander.js` binary (`macos-cua`) |
-| `@macos-cua/mcp` | [`packages/mcp`](./packages/mcp) | MCP stdio server (`macos-cua-mcp`) exposing Codex Computer Use tools |
-| `@macos-cua/pi-extension` | [`packages/pi-extension`](./packages/pi-extension) | Pi coding-agent extension with Codex-compatible Computer Use tools |
-| `skills/macos-cua` | [`skills/macos-cua`](./skills/macos-cua) | OpenCode-style skill definition + installation reference |
+| `@apple-cua/core` | [`packages/core`](./packages/core) | `ComputerInterface` + platform abstractions (`HostComputer`, `VMComputer`, `CloudComputer`) + `MacOSHostComputer` implementation |
+| `@apple-cua/cli` | [`packages/cli`](./packages/cli) | `commander.js` binary (`apple-cua`) |
+| `@apple-cua/mcp` | [`packages/mcp`](./packages/mcp) | MCP stdio server (`apple-cua-mcp`) exposing Codex Computer Use tools |
+| `@apple-cua/pi-extension` | [`packages/pi-extension`](./packages/pi-extension) | Pi coding-agent extension with Codex-compatible Computer Use tools |
+| `skills/apple-cua` | [`skills/apple-cua`](./skills/apple-cua) | OpenCode-style skill definition + installation reference |
 
 ## Roadmap
 
@@ -406,17 +406,17 @@ pnpm build
 Per-package builds:
 
 ```bash
-pnpm --filter @macos-cua/core build
-pnpm --filter @macos-cua/cli build
-pnpm --filter @macos-cua/mcp build
-pnpm --filter @macos-cua/pi-extension build
+pnpm --filter @apple-cua/core build
+pnpm --filter @apple-cua/cli build
+pnpm --filter @apple-cua/mcp build
+pnpm --filter @apple-cua/pi-extension build
 ```
 
 Standards: ultra-strict TypeScript, ESM with `.js` imports, Biome formatting, Vitest, tabs, line width 120. See [`AGENTS.md`](./AGENTS.md) for the full convention.
 
 ## Comparison vs cua / codex
 
-| Dimension | cua | codex | macos-cua |
+| Dimension | cua | codex | apple-cua |
 |---|---|---|---|
 | Language | Python | Rust + proprietary plugin | TypeScript |
 | Sandbox | VM / container / cloud | Host macOS (permission-scoped) | Host macOS (permission-scoped) |

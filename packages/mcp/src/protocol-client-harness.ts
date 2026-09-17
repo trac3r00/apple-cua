@@ -1,4 +1,4 @@
-import type { TopLevelWindow } from "@macos-cua/core";
+import type { TopLevelWindow } from "@apple-cua/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";

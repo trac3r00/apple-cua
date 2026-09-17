@@ -18,7 +18,7 @@ export interface PointerOverlay {
 
 // A transport carries newline-terminated commands ("set x y\n", "highlight ...\n",
 // "hide\n") to the overlay. The default transport talks to a persistent unix-socket
-// daemon so the cursor survives across separate CLI commands (each macos-cua verb is
+// daemon so the cursor survives across separate CLI commands (each apple-cua verb is
 // its own short-lived process); tests inject a fake transport to capture commands.
 export interface OverlayTransport {
 	send(command: string): void;
@@ -45,7 +45,7 @@ const overlayBinaryCandidatePaths: readonly string[] = [
 // One shared daemon per user, keyed by a stable socket path. The daemon vanishes
 // this many seconds after the last command, so it cleans itself up when a session
 // ends but stays put while commands keep arriving.
-const overlaySocketPath = join(tmpdir(), "macos-cua-cursor.sock");
+const overlaySocketPath = join(tmpdir(), "apple-cua-cursor.sock");
 // Long enough to stay visible across a multi-step agent session (vision steps take
 // a few seconds each) so the cursor glides continuously instead of fading out and
 // back in between commands; still self-cleans when the session truly ends.

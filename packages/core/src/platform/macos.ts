@@ -776,12 +776,12 @@ async function captureWindowScreenshotViaCli(
 			: 'sips -z "$2" "$1" "$tmp" --out "$out" >/dev/null';
 	const script = [
 		"set -eu",
-		'tmp=$(mktemp "${TMPDIR:-/tmp}/macos-cua-shot.XXXXXX")',
+		'tmp=$(mktemp "${TMPDIR:-/tmp}/apple-cua-shot.XXXXXX")',
 		'out=""',
 		'cleanup() { rm -f "$tmp"; if [ -n "$out" ]; then rm -f "$out"; fi; }',
 		"trap cleanup EXIT",
 		captureCommand,
-		'out=$(mktemp "${TMPDIR:-/tmp}/macos-cua-shot-resized.XXXXXX")',
+		'out=$(mktemp "${TMPDIR:-/tmp}/apple-cua-shot-resized.XXXXXX")',
 		resizeCommand,
 		'cat "$out"',
 	].join("\n");
@@ -790,7 +790,7 @@ async function captureWindowScreenshotViaCli(
 		[
 			"-c",
 			script,
-			"macos-cua-screenshot",
+			"apple-cua-screenshot",
 			String(targetSize.width),
 			String(targetSize.height),
 			format,

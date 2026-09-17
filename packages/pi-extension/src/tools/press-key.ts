@@ -6,7 +6,7 @@ import {
 	pressKeySequence,
 	resolveAppPid,
 	withTargetedApp,
-} from "@macos-cua/core";
+} from "@apple-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";

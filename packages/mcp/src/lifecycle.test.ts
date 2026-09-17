@@ -1,4 +1,4 @@
-import type { AppState, AppStateOptions } from "@macos-cua/core";
+import type { AppState, AppStateOptions } from "@apple-cua/core";
 import { describe, expect, it } from "vitest";
 import { GuardedSession } from "./guarded-session.js";
 import { jsonPayload } from "./protocol-client-harness.js";

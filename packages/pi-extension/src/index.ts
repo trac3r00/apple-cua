@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { MacOSHostComputer } from "@macos-cua/core";
+import { MacOSHostComputer, renamedEnvironmentVariable } from "@apple-cua/core";
 import { Type } from "typebox";
 
 import {
@@ -42,12 +42,14 @@ interface ComputerUseModel {
 	readonly id?: string;
 }
 
-const DISABLE_COMPUTER_USE_BETA_ENV = "MACOS_CUA_DISABLE_COMPUTER_USE_BETA";
-const OPENAI_NATIVE_TRANSPORT_ENV = "MACOS_CUA_OPENAI_NATIVE_TRANSPORT";
+const DISABLE_COMPUTER_USE_BETA_ENV = "APPLE_CUA_DISABLE_COMPUTER_USE_BETA";
+const DISABLE_COMPUTER_USE_BETA_LEGACY_ENV = "MACOS_CUA_DISABLE_COMPUTER_USE_BETA";
+const OPENAI_NATIVE_TRANSPORT_ENV = "APPLE_CUA_OPENAI_NATIVE_TRANSPORT";
+const OPENAI_NATIVE_TRANSPORT_LEGACY_ENV = "MACOS_CUA_OPENAI_NATIVE_TRANSPORT";
 
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(sourceDirectory, "..");
-const skillPath = path.resolve(packageRoot, "../../skills/macos-cua/SKILL.md");
+const skillPath = path.resolve(packageRoot, "../../skills/apple-cua/SKILL.md");
 const computerFallbackToolSchema = Type.Union([
 	computerToolSchema,
 	openaiComputerToolSchema,
@@ -65,7 +67,9 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
 		const computer = new MacOSHostComputer();
 		const display = resolveDisplayConfig(await computer.getScreenSize());
-		const enabled = !isOptedOut(process.env[DISABLE_COMPUTER_USE_BETA_ENV]);
+		const enabled = !isOptedOut(
+			renamedEnvironmentVariable(DISABLE_COMPUTER_USE_BETA_ENV, DISABLE_COMPUTER_USE_BETA_LEGACY_ENV),
+		);
 		state = { computer, display, enabled };
 		registerAllTools(pi, { computer });
 
@@ -179,7 +183,7 @@ function shouldInjectOpenAINativeComputerUse(model: ComputerUseModel | undefined
 	if (!isDirectOpenAIEndpoint(model.baseUrl)) {
 		return false;
 	}
-	if (isTruthyFlag(process.env[OPENAI_NATIVE_TRANSPORT_ENV])) {
+	if (isTruthyFlag(renamedEnvironmentVariable(OPENAI_NATIVE_TRANSPORT_ENV, OPENAI_NATIVE_TRANSPORT_LEGACY_ENV))) {
 		return true;
 	}
 	warnOpenAINativeTransportUnavailable(model.id);
@@ -201,7 +205,7 @@ function warnOpenAINativeTransportUnavailable(modelId: string | undefined): void
 	}
 	openAINativeTransportWarningEmitted = true;
 	process.stderr.write(
-		`macos-cua: keeping semantic tools for ${modelId ?? "this model"}; the installed pi-ai transport handles only function_call/function_call_output items, not computer_call/computer_call_output. ` +
+		`apple-cua: keeping semantic tools for ${modelId ?? "this model"}; the installed pi-ai transport handles only function_call/function_call_output items, not computer_call/computer_call_output. ` +
 			`Set ${OPENAI_NATIVE_TRANSPORT_ENV}=1 to force the native computer tool once the transport supports it.\n`,
 	);
 }

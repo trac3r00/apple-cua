@@ -1,5 +1,5 @@
 import os from "node:os";
-import { MacOSHostComputer } from "@macos-cua/core";
+import { MacOSHostComputer } from "@apple-cua/core";
 import { describe, expect, it } from "vitest";
 
 const BASELINE_LIVE = process.env["BASELINE_LIVE"] === "1";

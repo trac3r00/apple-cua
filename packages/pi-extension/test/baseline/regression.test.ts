@@ -1,4 +1,4 @@
-import type { ComputerInterface } from "@macos-cua/core";
+import type { ComputerInterface } from "@apple-cua/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionContext } from "../../src/pi/index.js";
 import { createClickTool } from "../../src/tools/click.js";

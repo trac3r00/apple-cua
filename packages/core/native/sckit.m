@@ -1,4 +1,4 @@
-// sckit.m — ScreenCaptureKit FFI shim for @macos-cua/core
+// sckit.m — ScreenCaptureKit FFI shim for @apple-cua/core
 //
 // Build: see build.sh in the same directory.
 //

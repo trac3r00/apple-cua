@@ -1,6 +1,6 @@
 # Architecture and guard boundaries
 
-macos-cua supplies local macOS observation and input primitives. It does not contain a model
+apple-cua supplies local macOS observation and input primitives. It does not contain a model
 or a second autonomous agent. The harness owns task interpretation, choosing actions, user
 confirmation and deciding whether the requested outcome is satisfied.
 
@@ -11,7 +11,7 @@ OpenClaw / Hermes / another MCP client
      -> read-only approval/app/window preflight
      -> existing native action
      -> post-action observation / continuation or pause
-        -> @macos-cua/core / MacOSHostComputer
+        -> @apple-cua/core / MacOSHostComputer
 ```
 
 The CLI and Pi extension are separate low-level entry points into core. They do not
@@ -29,7 +29,7 @@ orchestration itself; it must not use that route to evade a denied MCP action.
 - No autonomous retry. Failed, unavailable, unchanged or unexpected context pauses input;
   a subsequent action needs deliberate fresh observation/authority.
 
-`MACOS_CUA_ALLOWED_BUNDLE_IDS` is host configuration, not a tool argument or model-granted
+`APPLE_CUA_ALLOWED_BUNDLE_IDS` is host configuration, not a tool argument or model-granted
 permission. Tokens do not prove consent. Neither AX changes nor a successful dispatch prove
 that an external operation completed. The harness must inspect the specific outcome and
 ask the human before irreversible/external actions.

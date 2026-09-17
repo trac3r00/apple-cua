@@ -11,8 +11,8 @@ observation, so an index can never outlive the tree it was read from.
 Build core and MCP, then let the harness own the stdio process:
 
 ```bash
-pnpm --filter @macos-cua/core --filter @macos-cua/mcp build
-MACOS_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit node packages/mcp/dist/server.js
+pnpm --filter @apple-cua/core --filter @apple-cua/mcp build
+APPLE_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit node packages/mcp/dist/server.js
 ```
 
 The app allowlist is host-controlled. Missing/empty approval denies inspection/input; see
@@ -145,7 +145,7 @@ for automatically repeating a potentially non-idempotent action.
 
 ## Human-directed CLI diagnostics
 
-From the checkout, use the built CLI directly (or a configured `macos-cua` alias):
+From the checkout, use the built CLI directly (or a configured `apple-cua` alias):
 
 ```bash
 node packages/cli/dist/cli.js --help
@@ -166,7 +166,7 @@ keeps per-app snapshots.
 For a separate screenshot artifact:
 
 ```bash
-SHOT=$(mktemp -t macos-cua-shot.XXXXXX)
+SHOT=$(mktemp -t apple-cua-shot.XXXXXX)
 node packages/cli/dist/cli.js screenshot -o "$SHOT"
 ```
 
@@ -178,12 +178,12 @@ CLI syntax (only use input verbs for an explicitly authorized, observed target):
 
 | Action | Syntax |
 |---|---|
-| Click | `macos-cua click <x> <y>`; `-x`/`-y` aliases also supported |
-| Drag | `macos-cua drag <fromX> <fromY> <toX> <toY>` |
-| Type | `macos-cua type "literal text"` |
-| Key chord | `macos-cua key s -m cmd` |
-| Scroll | `macos-cua scroll --direction down --amount 5` |
-| Cursor/screen metadata | `macos-cua cursor`, `macos-cua screen` |
+| Click | `apple-cua click <x> <y>`; `-x`/`-y` aliases also supported |
+| Drag | `apple-cua drag <fromX> <fromY> <toX> <toY>` |
+| Type | `apple-cua type "literal text"` |
+| Key chord | `apple-cua key s -m cmd` |
+| Scroll | `apple-cua scroll --direction down --amount 5` |
+| Cursor/screen metadata | `apple-cua cursor`, `apple-cua screen` |
 
 Use `--target-pid` or `--target-bundle-id` deliberately; do not guess the focused app.
 Raw CLI coordinates are global logical screen points, not necessarily screenshot pixels.
@@ -193,14 +193,14 @@ one guarded MCP connection instead.
 
 ## Pi extension and direct library
 
-The optional Pi extension and `@macos-cua/core` remain available for integrations that supply
+The optional Pi extension and `@apple-cua/core` remain available for integrations that supply
 their own policy. They are not prerequisites for OpenClaw or Hermes. Installing the extension
 does not turn its provider-native computer tool or raw library calls into guarded MCP calls.
 
 For direct programmatic reads, release the computer in `finally`:
 
 ```typescript
-import { MacOSHostComputer } from "@macos-cua/core";
+import { MacOSHostComputer } from "@apple-cua/core";
 
 const computer = new MacOSHostComputer();
 try {

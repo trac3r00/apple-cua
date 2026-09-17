@@ -1,4 +1,4 @@
-import type { AXTreeElement, AppState } from "@macos-cua/core";
+import type { AXTreeElement, AppState } from "@apple-cua/core";
 import { describe, expect, it } from "vitest";
 import { observedActionResult, observedSetFieldsResult } from "./tool-result.js";
 

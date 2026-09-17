@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { parseElementIndex, resolveAppPid } from "@macos-cua/core";
+import { parseElementIndex, resolveAppPid } from "@apple-cua/core";
 import type {
 	AXTreeElement,
 	AppState,
@@ -8,7 +8,7 @@ import type {
 	Point,
 	Rect,
 	TopLevelWindow,
-} from "@macos-cua/core";
+} from "@apple-cua/core";
 import {
 	type ActionDispatch,
 	type RunStepReport,

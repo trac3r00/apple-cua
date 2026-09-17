@@ -1,4 +1,4 @@
-import type { AppState } from "@macos-cua/core";
+import type { AppState } from "@apple-cua/core";
 import { describe, expect, it } from "vitest";
 import { observedActionCompleteResult } from "./result.js";
 

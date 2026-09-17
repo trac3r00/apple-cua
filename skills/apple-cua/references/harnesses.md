@@ -11,11 +11,11 @@ If the harness drops images, do not pretend to inspect them; use supported AX ta
 
 ## Local prerequisites
 
-From the macos-cua checkout:
+From the apple-cua checkout:
 
 ```bash
 pnpm install
-pnpm --filter @macos-cua/core --filter @macos-cua/mcp build
+pnpm --filter @apple-cua/core --filter @apple-cua/mcp build
 ```
 
 Use the absolute path to `packages/mcp/dist/server.js` below. The `node` command must resolve
@@ -30,7 +30,7 @@ Grant permissions through the human-operated System Settings interface.
 
 ## Host-controlled app approval
 
-`MACOS_CUA_ALLOWED_BUNDLE_IDS` is a comma-separated list of exact bundle IDs. IDs are trimmed
+`APPLE_CUA_ALLOWED_BUNDLE_IDS` is a comma-separated list of exact bundle IDs. IDs are trimmed
 and compared case-insensitively. For example, `com.apple.TextEdit` permits TextEdit; it does
 not permit every app or every action inside TextEdit.
 
@@ -52,11 +52,11 @@ Merge into the existing OpenClaw configuration; do not replace unrelated setting
 {
   "mcp": {
     "servers": {
-      "macos-cua": {
+      "apple-cua": {
         "command": "node",
-        "args": ["/absolute/path/to/macos-cua/packages/mcp/dist/server.js"],
+        "args": ["/absolute/path/to/apple-cua/packages/mcp/dist/server.js"],
         "env": {
-          "MACOS_CUA_ALLOWED_BUNDLE_IDS": "com.apple.TextEdit"
+          "APPLE_CUA_ALLOWED_BUNDLE_IDS": "com.apple.TextEdit"
         },
         "supportsParallelToolCalls": false,
         "requestTimeoutMs": 120000
@@ -76,12 +76,12 @@ Merge into `~/.hermes/config.yaml`:
 
 ```yaml
 mcp_servers:
-  macos-cua:
+  apple-cua:
     command: node
     args:
-      - /absolute/path/to/macos-cua/packages/mcp/dist/server.js
+      - /absolute/path/to/apple-cua/packages/mcp/dist/server.js
     env:
-      MACOS_CUA_ALLOWED_BUNDLE_IDS: com.apple.TextEdit
+      APPLE_CUA_ALLOWED_BUNDLE_IDS: com.apple.TextEdit
     supports_parallel_tool_calls: false
     timeout: 120
 ```
@@ -91,7 +91,7 @@ actually returned by discovery, not hardcoded unprefixed names.
 
 ## Task-context instructions
 
-Install/load the portable `skills/macos-cua/SKILL.md` and its relative `references` directory
+Install/load the portable `skills/apple-cua/SKILL.md` and its relative `references` directory
 through the harness's skill mechanism, or add its short operating contract to the agent's
 instructions. The server also supplies MCP initialization instructions, but not every client
 will show them to a model. The enforced token/approval checks do not depend on the model
@@ -111,7 +111,7 @@ A token does not prove understanding or human consent. The server serializes its
 transactions; separate server instances, raw CLI callers and human input remain outside
 that queue. Avoid multiple desktop controllers.
 
-## Migration from older macos-cua MCP clients
+## Migration from older apple-cua MCP clients
 
 - All mutation tools now require `observation_token`, including `press_keys`.
 - First call `get_app_state`; use the token returned in its JSON result.

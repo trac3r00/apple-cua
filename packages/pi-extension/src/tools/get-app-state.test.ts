@@ -1,4 +1,4 @@
-import type { AppState, ComputerInterface } from "@macos-cua/core";
+import type { AppState, ComputerInterface } from "@apple-cua/core";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ExtensionContext } from "../pi/index.js";

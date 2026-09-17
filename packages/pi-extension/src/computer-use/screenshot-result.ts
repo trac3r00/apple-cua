@@ -1,4 +1,4 @@
-import type { ComputerInterface, Point, ScreenshotResult } from "@macos-cua/core";
+import type { ComputerInterface, Point, ScreenshotResult } from "@apple-cua/core";
 import { PNG } from "pngjs";
 
 import type { ComputerUseResult } from "../anthropic-computer-use.js";

@@ -1,4 +1,4 @@
-// Kept in sync with MAX_SCREENSHOT_LONG_EDGE in @macos-cua/core computer/viewport.ts
+// Kept in sync with MAX_SCREENSHOT_LONG_EDGE in @apple-cua/core computer/viewport.ts
 // so the screenshot the model sees and the coordinates it returns share one scale.
 const MAX_MODEL_LONG_EDGE = 2560;
 

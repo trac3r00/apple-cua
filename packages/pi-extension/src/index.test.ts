@@ -48,8 +48,15 @@ const macOSHostComputerMock = vi.hoisted(() => {
 	};
 });
 
-vi.mock("@macos-cua/core", () => ({
+vi.mock("@apple-cua/core", () => ({
 	MacOSHostComputer: macOSHostComputerMock.constructor,
+	// Same contract as the real helper: the current name wins, the pre-rename name still applies,
+	// and an empty value counts as unset. The helper's own semantics are unit-tested in core; this
+	// mock exists so the extension test can assert which names it asks for.
+	renamedEnvironmentVariable: (primary: string, legacy: string, environment: NodeJS.ProcessEnv = process.env) => {
+		const value = environment[primary];
+		return value !== undefined && value !== "" ? value : environment[legacy];
+	},
 }));
 
 import macosCuaExtension from "./index.js";
@@ -115,7 +122,7 @@ function createMockPi(): MockPi {
 }
 
 beforeEach(() => {
-	process.env["MACOS_CUA_DISABLE_COMPUTER_USE_BETA"] = undefined;
+	process.env["APPLE_CUA_DISABLE_COMPUTER_USE_BETA"] = undefined;
 	vi.clearAllMocks();
 	macOSHostComputerMock.instance.getScreenSize.mockResolvedValue({ width: 2560, height: 1440 });
 	macOSHostComputerMock.instance.close.mockResolvedValue(undefined);
@@ -219,7 +226,7 @@ describe("#given default-on session_start #when invoked #then native computer an
 
 describe("#given opt-out env var #when session_start runs #then native computer tool is not registered", () => {
 	it("keeps only the Codex-compatible tools", async () => {
-		process.env["MACOS_CUA_DISABLE_COMPUTER_USE_BETA"] = "1";
+		process.env["APPLE_CUA_DISABLE_COMPUTER_USE_BETA"] = "1";
 		const pi = createMockPi();
 		macosCuaExtension(pi);
 
@@ -352,7 +359,7 @@ describe("#given enabled session #when model changes to direct OpenAI Responses 
 	});
 
 	it("adds computer back for direct OpenAI native computer-use once the operator opts in", async () => {
-		vi.stubEnv("MACOS_CUA_OPENAI_NATIVE_TRANSPORT", "1");
+		vi.stubEnv("APPLE_CUA_OPENAI_NATIVE_TRANSPORT", "1");
 		try {
 			const pi = createMockPi();
 			macosCuaExtension(pi);
@@ -375,8 +382,49 @@ describe("#given enabled session #when model changes to direct OpenAI Responses 
 	});
 });
 
+describe("#given the pre-rename opt-out variable #when session_start runs #then the native computer tool stays suppressed", () => {
+	it("keeps honouring MACOS_CUA_DISABLE_COMPUTER_USE_BETA after the rename", async () => {
+		vi.stubEnv("APPLE_CUA_DISABLE_COMPUTER_USE_BETA", "");
+		vi.stubEnv("MACOS_CUA_DISABLE_COMPUTER_USE_BETA", "1");
+		try {
+			const pi = createMockPi();
+			macosCuaExtension(pi);
+
+			await runSessionStart(pi);
+
+			expect(pi.registeredTools.map((tool) => tool.name)).not.toContain("computer");
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+});
+
+describe("#given the pre-rename native transport variable #when the OpenAI payload hook runs #then the native computer tool is still opted in", () => {
+	it("keeps honouring MACOS_CUA_OPENAI_NATIVE_TRANSPORT after the rename", async () => {
+		vi.stubEnv("APPLE_CUA_OPENAI_NATIVE_TRANSPORT", "");
+		vi.stubEnv("MACOS_CUA_OPENAI_NATIVE_TRANSPORT", "1");
+		try {
+			const pi = createMockPi();
+			macosCuaExtension(pi);
+			await runSessionStart(pi);
+			const computerFunction = { type: "function", name: "computer", parameters: { anyOf: [] } };
+			const shellTool = { type: "function", name: "shell" };
+
+			const result = runBeforeProviderRequest(
+				pi,
+				{ api: "openai-responses", provider: "openai", baseUrl: "https://api.openai.com/v1" },
+				{ tools: [computerFunction, shellTool] },
+			);
+
+			expect(result).toEqual({ tools: [shellTool, { type: "computer" }] });
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+});
+
 describe("#given resources_discover #when invoked #then macOS skill path is returned", () => {
-	it("returns the macos-cua skill path", async () => {
+	it("returns the apple-cua skill path", async () => {
 		const pi = createMockPi();
 		macosCuaExtension(pi);
 		const resourcesDiscover = pi.handlers.get("resources_discover");
@@ -385,7 +433,7 @@ describe("#given resources_discover #when invoked #then macOS skill path is retu
 		const result = await resourcesDiscover?.();
 
 		expect(result).toEqual({
-			skillPaths: [expect.stringContaining("skills/macos-cua/SKILL.md")],
+			skillPaths: [expect.stringContaining("skills/apple-cua/SKILL.md")],
 		});
 	});
 });
@@ -437,7 +485,7 @@ describe("#given enabled session and OpenAI Responses #when provider payload hoo
 	});
 
 	it("appends the OpenAI computer tool for direct OpenAI when the transport is opted in", async () => {
-		vi.stubEnv("MACOS_CUA_OPENAI_NATIVE_TRANSPORT", "1");
+		vi.stubEnv("APPLE_CUA_OPENAI_NATIVE_TRANSPORT", "1");
 		try {
 			const pi = createMockPi();
 			macosCuaExtension(pi);

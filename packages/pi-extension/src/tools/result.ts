@@ -1,4 +1,4 @@
-import type { AppState, Point } from "@macos-cua/core";
+import type { AppState, Point } from "@apple-cua/core";
 import type { AgentToolResult } from "../pi/index.js";
 
 const ACTION_COMPLETE_TEXT = "Action completed. Call `get_app_state` to fetch the updated UI state.";

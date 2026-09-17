@@ -1,6 +1,6 @@
 # Driver scorecard
 
-Driver-level numbers for macos-cua, measured by the harness in
+Driver-level numbers for apple-cua, measured by the harness in
 `packages/pi-extension/test/bench/driver-scorecard.test.ts`.
 
 Most computer-use projects publish agent or task scores. Almost none publish driver-level

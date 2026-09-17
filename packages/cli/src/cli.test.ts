@@ -29,7 +29,7 @@ function runCliAllowingFailure(args: string[]) {
 	});
 }
 
-describe("macos-cua CLI", () => {
+describe("apple-cua CLI", () => {
 	it("#given package metadata #when --version runs #then it prints the package version", async () => {
 		// given
 		const expectedVersion = packageJson.version;
@@ -89,7 +89,7 @@ describe("macos-cua CLI", () => {
 	});
 });
 
-describe("macos-cua CLI screenshot capture options", () => {
+describe("apple-cua CLI screenshot capture options", () => {
 	it("#given the screenshot command #when help runs #then region and display selection are documented", async () => {
 		// when
 		const result = await runCli(["screenshot", "--help"]);
@@ -101,7 +101,7 @@ describe("macos-cua CLI screenshot capture options", () => {
 
 	it("#given a malformed region #when screenshot runs #then it fails before capturing", async () => {
 		// when
-		const result = await runCliAllowingFailure(["screenshot", "-o", "/tmp/macos-cua-unused.png", "-r", "1,2,3"]);
+		const result = await runCliAllowingFailure(["screenshot", "-o", "/tmp/apple-cua-unused.png", "-r", "1,2,3"]);
 
 		// then
 		expect(result.exitCode).not.toBe(0);

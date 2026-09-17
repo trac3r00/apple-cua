@@ -1,4 +1,4 @@
-import { type ComputerInterface, getAppStateForApp } from "@macos-cua/core";
+import { type ComputerInterface, getAppStateForApp } from "@apple-cua/core";
 import { type Static, Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";

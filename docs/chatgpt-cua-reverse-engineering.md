@@ -6,7 +6,7 @@ notarized by OpenAI OpCo. Analysis performed 2026-09-11 against the on-disk bund
 
 Confidence: shipped JS/types establish the tool contract. Native symbols establish that
 capabilities exist, not their exact algorithms, defaults, synchronization guarantees or
-performance. The macos-cua changes are independent implementations, not proof of identical
+performance. The apple-cua changes are independent implementations, not proof of identical
 ChatGPT model intelligence or speed. See §8 for current limitations and corrections.
 
 This supersedes `codex-cua-comparison.md`, which analyzed the older Codex.app 1.0.809 era
@@ -177,7 +177,7 @@ model is taught:
 | SkyshotClassifier image detection | §5 | Picks AX-text vs vision perception per screen. |
 | `post_action_sleep_ms`, fixed `mouse_size_px` | §4 (full-desktop) | Deterministic action pacing; a visible cursor in every screenshot. |
 
-## 8. Current macos-cua implementation and limitations
+## 8. Current apple-cua implementation and limitations
 
 - `getAppState` supports window viewport remapping and normalized AX trees. Display and
   window capture are both native ScreenCaptureKit now: window frames come from

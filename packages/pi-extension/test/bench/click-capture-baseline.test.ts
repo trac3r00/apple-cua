@@ -80,7 +80,7 @@ describe("#given live click + screenshot benchmark #when executed with real MacO
 			return;
 		}
 
-		const { MacOSHostComputer } = await import("@macos-cua/core");
+		const { MacOSHostComputer } = await import("@apple-cua/core");
 		const computer = new MacOSHostComputer();
 		const timings: number[] = [];
 

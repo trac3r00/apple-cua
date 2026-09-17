@@ -1,4 +1,4 @@
-import type { ComputerInterface } from "@macos-cua/core";
+import type { ComputerInterface } from "@apple-cua/core";
 
 /** Tracks the observation backing element ids per app, so an index cannot outlive its tree. */
 export class AppObservationKeys {

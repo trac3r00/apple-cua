@@ -36,6 +36,15 @@ Read-only tools:
   the window it scoped to (`windowId`, `windowTitle`) and lists `windowCandidates` when the
   app has several windows; `window_id` observes one specific candidate instead of the app's
   focused window.
+- `find_elements`: resolves a description of a control — `role`, `label`, `label_contains`,
+  `value_contains`, `text`, all of which must hold — against the app's live accessibility tree
+  and answers the ranked matches with their `element_index`, geometry and `matched_by`
+  evidence, plus the one-use `observation_token` for those ids. A miss answers `found: false`
+  with `nearMisses` (candidates sharing words with the query, or, when a role was given, that
+  role's own controls in reading order) instead of failing blind. `max_results` bounds the
+  list, `max_elements` widens the walk, `window_id` picks a window, and no screenshot is
+  captured unless `include_screenshot: true` — the cheap way to answer "what is this thing I
+  am describing?" without spreading the whole tree.
 - `verify_state`: re-reads the app freshly (no cached tree, no screenshot) and answers per
   expectation with `verified` plus the `actual` value found: `element_index` alone checks
   the element still exists, `exists: false` checks it is gone, `value`/`label` compare text,
@@ -43,9 +52,24 @@ Read-only tools:
   every check passes or the deadline passes. Requires the latest `observation_token` and
   returns a fresh one.
 
-Mutation tools all require `observation_token` from the latest applicable state:
+- `open_app`: brings a running app forward or launches it when it is not running, and waits
+  until it is observable before answering `launched`/`activated` with its pid and bundle id.
+  It needs no `observation_token` and authorizes no observation and no input — call
+  `get_app_state` or `find_elements` next. It is the only way to reach an app this server
+  cannot observe yet.
+
+Mutation tools all require `observation_token` from the latest applicable state, except
+`click_target`, which observes for itself:
 
 - `click`: an observed element ID or screenshot coordinates.
+- `click_target`: acts on a described element in one call — observes the app, resolves the
+  same query shape as `find_elements`, waits up to `timeout_ms` for the element to appear,
+  hovers to it first when `hover_first` is set, dispatches by AXPress when the control
+  advertises that action (or `press: "auto"`/`"pointer"`, a non-left `mouse_button`, or a
+  `click_count` that needs the pointer), reads the outcome, and verifies the optional
+  `expect` block in the same answer. It answers `found: false` with the near misses and no
+  input dispatched when nothing matched within the patience given, and it reports the target
+  it resolved plus the `alternatives` it did not click.
 - `perform_secondary_action`: an action advertised for the observed AX element.
 - `set_value`: a supported editable element's value.
 - `set_fields`: up to 10 observed element values in one call, each verified by reading the

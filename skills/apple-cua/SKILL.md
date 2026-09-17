@@ -50,7 +50,9 @@ merely to understand the "whole situation." Do not begin by clicking to discover
 
 1. **Discover only as needed.** `list_apps` reports running apps. Listing an app does not
    authorize reading or controlling it. The host must configure its bundle ID in
-   `APPLE_CUA_ALLOWED_BUNDLE_IDS`; never edit that policy to approve yourself.
+   `APPLE_CUA_ALLOWED_BUNDLE_IDS`; never edit that policy to approve yourself. When the app the
+   task needs is not running, `open_app` activates it in place or launches it and waits until it
+   is observable — opening an app is not authorization either, so observe it before acting.
 2. **Observe the chosen app.** Call `get_app_state` and read its screenshot, accessibility
    elements, target metadata and any local app guidance. Identify the relevant field/control,
    blocking dialog, current value and expected next state before choosing an action. Spend
@@ -58,7 +60,10 @@ merely to understand the "whole situation." Do not begin by clicking to discover
    without the image (the cheapest re-index before an element action), `diff_only: true`
    returns only what changed since the previous observation, `max_elements` caps a huge tree
    (the answer then sets `elementsTruncated`, so you know the tree is partial), and
-   `include_menu_bar: true` adds application menus only when the task needs them.
+   `include_menu_bar: true` adds application menus only when the task needs them. When you
+   already know what you are looking for, describe it instead of buying the whole tree:
+   `find_elements` resolves a role/label/text description against the live tree and answers the
+   ranked matches with their ids and the token for them, or `found: false` with near misses.
 3. **Use the actual observation.** Every mutating MCP call requires the returned
    `observation_token`. `element_index` is an element's returned **`id`**, never its array
    position. IDs/tokens from earlier observations, other apps or previous sessions are invalid.
@@ -70,6 +75,12 @@ merely to understand the "whole situation." Do not begin by clicking to discover
    `click` by ID, or an advertised secondary action). Use coordinates only when visual
    inspection justifies them; they must lie inside the exact screenshot received. Do not
    guess IDs, action names, coordinates, shortcuts or the meaning of an unfamiliar control.
+   When you can describe the control you want instead of naming it, prefer one `click_target`
+   call over observe-scan-click-verify: it observes, resolves the description, waits up to
+   `timeout_ms` for the element to appear, hovers to it first when `hover_first` is set,
+   presses it through its AXPress action when the control advertises one (or clicks its centre
+   when it does not), and with `expect` verifies the outcome in the same answer — a miss
+   dispatches nothing and names the near misses instead.
    For a multi-field edit (status plus sequence plus notes, for example), prefer one
    `set_fields` call over one round trip per field: it checks each observed id against a
    fresh observation before writing, reads each value back from the app, and stops at the

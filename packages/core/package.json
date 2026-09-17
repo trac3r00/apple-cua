@@ -3,6 +3,8 @@
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Platform-abstracted computer-use interfaces",
+	"keywords": ["computer-use", "macos", "accessibility", "screencapturekit", "coregraphics", "koffi"],
+	"license": "MIT",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
 	"exports": {
@@ -30,6 +32,9 @@
 		"get-windows": "9.3.0",
 		"koffi": "2.16.2",
 		"node-mac-permissions": "2.5.0"
+	},
+	"engines": {
+		"node": ">=20.0.0"
 	},
 	"devDependencies": {
 		"typescript": "^5.7.0",

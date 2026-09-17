@@ -1,9 +1,15 @@
 # apple-cua
 
+<img src="./packages/mcp/assets/appicon.png" alt="apple-cua app icon: a cursor over a window on an indigo tile" width="120" align="right" />
+
 Native macOS computer-use control, designed for the OpenAI computer-use action vocabulary. Host-native (CGEvent / ScreenCaptureKit-class) speed, no VM sandbox required.
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js >=20](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
+[![platform: macOS 13+](https://img.shields.io/badge/platform-macOS%2013%2B-blue.svg)](#permissions)
+[![MCP: stdio server](https://img.shields.io/badge/MCP-stdio%20server-6f42c1.svg)](#mcp-server)
+
+**Contents** — [Why this exists](#why-this-exists) · [Quickstart](#quickstart) · [The four surfaces](#the-four-surfaces) · [MCP server](#mcp-server) · [Targeting by description](#targeting-elements-by-description) · [Observation cost](#observation-cost) · [Action surface](#action-surface) · [Permissions](#permissions) · [Architecture](#architecture) · [Repository layout](#repository-layout) · [Roadmap](#roadmap) · [Development](#development) · [Comparison](#comparison-vs-cua--codex) · [License](#license)
 
 ## Why this exists
 
@@ -164,8 +170,12 @@ grok mcp add apple-cua -s user \
 ```
 
 The first run prompts for Screen Recording and Accessibility for "apple-cua MCP"; grant both in
-System Settings and restart the server. Rebuilding the helper changes its signature, so macOS
-asks again. The helper bundles the `node` on `PATH` at build time (`APPLE_CUA_NODE` overrides).
+System Settings and restart the server. The helper bundles a self-contained `node` (Homebrew's build
+links `libnode.dylib` and cannot be copied into a bundle), resolved in this order: `APPLE_CUA_NODE`,
+then the first standalone node on `PATH`, then `~/.local/bin/node` and `/usr/local/bin/node` — and the
+build fails loudly when none of them is self-contained. Ad-hoc signing gives each rebuild a new code
+identity, so macOS asks for the two grants again after a rebuild; set `APPLE_CUA_SIGN_IDENTITY` to a
+stable certificate to keep one identity across builds.
 
 **Context-first contract (MCP migration):**
 
@@ -221,6 +231,23 @@ covers only that server instance, not other agents, raw CLI callers or human inp
 Load the [portable agent skill](skills/apple-cua/SKILL.md) alongside the MCP tools. Raw CLI/core
 and the Pi extension remain low-level interfaces; the MCP guard does not automatically apply
 to them. This migration intentionally rejects old unobserved mutation calls.
+
+#### Targeting elements by description
+
+A caller that knows *what* it wants but not where it is does not have to buy the whole tree. Three
+tools take a description and do the resolving server-side:
+
+| Tool | What it does |
+|---|---|
+| `find_elements` | Resolves a query — `role`, `label`, `label_contains`, `value_contains`, `text`, all fields AND-ed, role matching case- and `AX`-prefix-insensitive — against the live tree and answers ranked matches with their `element_index`, geometry, `matched_by` evidence and the one-use `observation_token` for those ids. `found: false` names `nearMisses` (candidates sharing words with the query, or a role's own controls in reading order) instead of failing blind. No screenshot unless `include_screenshot: true`. |
+| `click_target` | One call does observe → resolve → wait up to `timeout_ms` for the element to appear → optional `hover_first` → dispatch → verify: it presses through the element's own `AXPress` action when the control advertises one, and clicks the element centre otherwise (`press: "pointer"`, a non-left `mouse_button`, or a `click_count` that needs the pointer). The answer names the target it resolved, the `alternatives` it did not click, the `route`/`delivery` that carried the input, and the `expect` verification. `found: false` dispatches nothing. |
+| `open_app` | Brings a running app forward or launches it and waits until it is observable, answering `launched`/`activated` with the pid and bundle id. Opening an app authorizes no observation and no input. |
+
+Measured on this machine against the loop an agent otherwise runs (`get_app_state` → pick an id →
+`click` → `verify_state`), same TextEdit text area, five runs each, medians, server through the
+signed helper: **283 ms and 1,839 bytes for one `click_target`** against **694 ms and 47,750 bytes for
+the three-call loop**, both verified 5/5 and resolving the same element every run. The full transcript
+and the AXPress-route proof live in [`.sisyphus/evidence/`](./.sisyphus/evidence).
 
 ### pi-extension
 
@@ -438,6 +465,19 @@ Full walkthrough: [`skills/apple-cua/references/installation.md`](./skills/apple
 | `@apple-cua/pi-extension` | [`packages/pi-extension`](./packages/pi-extension) | Pi coding-agent extension with Codex-compatible Computer Use tools |
 | `skills/apple-cua` | [`skills/apple-cua`](./skills/apple-cua) | OpenCode-style skill definition + installation reference |
 
+## Repository layout
+
+| Path | What lives there |
+|---|---|
+| [`packages/core`](./packages/core) | Platform-abstracted interfaces, the native macOS computer, the guarded token layer, and targeting (`matchElements`, `openApplication`) |
+| [`packages/mcp`](./packages/mcp) | The stdio MCP server (33 tools) and `assets/appicon.png` for the signed helper bundle |
+| [`packages/cli`](./packages/cli) | The `apple-cua` command line |
+| [`packages/pi-extension`](./packages/pi-extension) | Pi coding-agent tools, including native Anthropic/OpenAI computer-use shapes |
+| [`skills/apple-cua`](./skills/apple-cua) | The portable agent skill: workflow, usage, permissions, harness setup |
+| [`docs`](./docs) | Research and head-to-head write-ups ([driver shootout](./docs/driver-shootout-cua.md), [scorecard](./docs/driver-scorecard.md), [OMO/Grok integration](./docs/omo-cua-hand.md)) |
+| [`scripts`](./scripts) | The signed helper build, the evidence harnesses (`measure-cua-shootout`, `measure-strategic-targeting`), and fixture generators |
+| `.sisyphus/evidence` | Raw transcripts and measurement artifacts the docs cite |
+
 ## Roadmap
 
 | Feature | Status | Notes |
@@ -466,6 +506,9 @@ pnpm test
 
 # Build all packages
 pnpm build
+
+# Build the signed helper bundle (macOS app icon + TCC identity)
+./scripts/build-tcc-helper.sh
 ```
 
 Per-package builds:
@@ -479,14 +522,17 @@ pnpm --filter @apple-cua/pi-extension build
 
 Standards: ultra-strict TypeScript, ESM with `.js` imports, Biome formatting, Vitest, tabs, line width 120. See [`AGENTS.md`](./AGENTS.md) for the full convention.
 
+CI runs the same `pnpm check` on `macos-latest` (lint, package and test typechecks, then the full
+Vitest suite) — see [`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
+
 ## Comparison vs cua / codex
 
 | Dimension | cua | codex | apple-cua |
 |---|---|---|---|
 | Language | Python | Rust + proprietary plugin | TypeScript |
 | Sandbox | VM / container / cloud | Host macOS (permission-scoped) | Host macOS (permission-scoped) |
-| Screenshot latency | VM path ~500 ms + encode + transport; host-native Cua Driver measures 499 ms p50 full window observation, 174 ms capture-only | Native frame interval + local IPC | 447 ms p50 full Finder observation over MCP (378 ms TextEdit), 405 ms AX-only, 319 ms capture-only (measured 2026-09-17) |
-| Input latency | VM path HTTP → guest → pynput; host-native Cua Driver measures 1.0-1.4 s p50 per MCP action | Native CGEvent / Apple Events | Event posting stays native CoreGraphics via koffi; the full MCP action measures 2.4 s p50 for a click and 1.8 s to type 45 characters, including preflight, delivery and the fresh observation it returns, and a verified step answers in 1.4 KB instead of 121 KB (n=3, measured 2026-09-17) |
+| Screenshot latency | VM path ~500 ms + encode + transport; host-native Cua Driver measures 436 ms p50 full window observation, 175 ms capture-only | Native frame interval + local IPC | 417 ms p50 full Finder observation over MCP (413 ms TextEdit), 386 ms AX-only, 297 ms capture-only (n=15, measured 2026-09-17) |
+| Input latency | VM path HTTP → guest → pynput; host-native Cua Driver measures 1.4 s p50 per MCP action | Native CGEvent / Apple Events | Event posting stays native CoreGraphics via koffi; the full MCP action measures 1.8 s p50 for a click, 1.5 s to type 45 characters and 1.5 s for one key press, including preflight, delivery and the fresh observation it returns (n=10, measured 2026-09-17), and a verified step answers in 1.4 KB instead of 121 KB. A described-element `click_target` answers in 283 ms and 1.8 KB end to end. |
 | Portability | Linux, macOS, Windows, Android, cloud | macOS only | macOS only (stubs for VM/cloud) |
 | Open source | Full SDK | Plugin host OSS, Computer Use plugin proprietary | Fully open source |
 | Agent integration | Any Python agent | Codex desktop only | CLI, MCP, pi-extension, or any TS agent |

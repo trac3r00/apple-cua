@@ -3,6 +3,7 @@
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Pi coding agent extension for macOS computer control",
+	"license": "MIT",
 	"keywords": ["pi-extension", "pi-mono", "macos", "computer-use"],
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -35,5 +36,8 @@
 	"peerDependencies": {
 		"@mariozechner/pi-ai": "*",
 		"@mariozechner/pi-coding-agent": "*"
+	},
+	"engines": {
+		"node": ">=20.0.0"
 	}
 }

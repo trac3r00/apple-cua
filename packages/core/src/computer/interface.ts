@@ -3,6 +3,7 @@ import type {
 	AppStateOptions,
 	ComputerCapabilities,
 	DragOptions,
+	InputDelivery,
 	KeyOptions,
 	Point,
 	ScreenshotOptions,
@@ -20,6 +21,12 @@ export interface ScreenshotResult {
 
 export interface ComputerInterface {
 	readonly capabilities: ComputerCapabilities;
+	/**
+	 * How this computer delivers input: "attended" may lease the foreground for a targeted
+	 * action, "background" posts to the target process without touching the frontmost app.
+	 * Platforms that do not distinguish the two leave it undefined.
+	 */
+	readonly delivery?: InputDelivery;
 
 	screenshot(options?: ScreenshotOptions): Promise<ScreenshotResult>;
 	setTarget(pid?: number): void;

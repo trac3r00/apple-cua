@@ -1,6 +1,6 @@
 import { assertScreenUnlocked } from "../computer/lock-guard.js";
 import { VirtualPointer } from "../computer/virtual-pointer.js";
-import type { DragOptions, KeyOptions, Point, ScrollOptions } from "../types/index.js";
+import type { DragOptions, InputDelivery, KeyOptions, Point, ScrollOptions } from "../types/index.js";
 import { readRealCursorPosition } from "./macos-cursor.js";
 import {
 	type MouseButton,
@@ -26,6 +26,7 @@ import {
 import { modifierFlags, virtualKeyCodeFor } from "./macos-keycodes.js";
 import { openWindowsForTargeting } from "./macos-open-windows.js";
 import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
+import type { MacOSWindowInfo } from "./macos-window-target.js";
 import { resolveTargetWindow } from "./macos-window-target.js";
 
 /**
@@ -44,7 +45,8 @@ export function setOnscreenWindowIdsSourceForTesting(source: () => readonly numb
 	onscreenWindowIdsSource = source;
 }
 
-export type InputDelivery = "attended" | "background";
+/** Re-exported for callers that import the delivery mode beside the input controller. */
+export type { InputDelivery };
 
 // Inter-character delay for typeText. Posting keystrokes back-to-back outruns the
 // target app's event loop and drops characters; ~12ms lets each be consumed.
@@ -122,12 +124,18 @@ export class MacOSInputController {
 		this.lastTargetWindow = pid === undefined ? undefined : this.targetWindowsByPid.get(pid);
 	}
 
-	async rememberTargetWindow(pid: number, windowId?: number): Promise<SkyLightTargetWindow | undefined> {
+	async rememberTargetWindow(
+		pid: number,
+		windowId?: number,
+		windows?: readonly MacOSWindowInfo[],
+	): Promise<SkyLightTargetWindow | undefined> {
 		if (!Number.isSafeInteger(pid) || pid <= 0) {
 			throw new Error("target pid must be a positive integer");
 		}
 		const targetWindow =
-			windowId === undefined ? await this.visibleWindowForPid(pid) : await this.windowByIdForPid(pid, windowId);
+			windowId === undefined
+				? await this.visibleWindowForPid(pid, undefined, windows)
+				: await this.windowByIdForPid(pid, windowId, windows);
 		if (targetWindow !== undefined) {
 			this.targetWindowsByPid.set(pid, targetWindow);
 			if (this.targetPid === pid) {
@@ -313,18 +321,26 @@ export class MacOSInputController {
 		return targetWindow;
 	}
 
-	private async visibleWindowForPid(pid: number, position?: Point): Promise<SkyLightTargetWindow | undefined> {
-		const windows = await openWindowsForTargeting();
-		const resolution = resolveTargetWindow(windows, pid, currentOnscreenWindowIds(), position);
+	private async visibleWindowForPid(
+		pid: number,
+		position?: Point,
+		windows?: readonly MacOSWindowInfo[],
+	): Promise<SkyLightTargetWindow | undefined> {
+		const list = windows ?? (await openWindowsForTargeting());
+		const resolution = resolveTargetWindow(list, pid, currentOnscreenWindowIds(), position);
 		if (resolution.kind === "resolved") {
 			return resolution.window;
 		}
-		return await selectSystemEventsTargetWindow(windows, pid, position);
+		return await selectSystemEventsTargetWindow(list, pid, position);
 	}
 
-	private async windowByIdForPid(pid: number, windowId: number): Promise<SkyLightTargetWindow | undefined> {
-		const windows = await openWindowsForTargeting();
-		const resolution = resolveTargetWindow(windows, pid, currentOnscreenWindowIds(), undefined, windowId);
+	private async windowByIdForPid(
+		pid: number,
+		windowId: number,
+		windows?: readonly MacOSWindowInfo[],
+	): Promise<SkyLightTargetWindow | undefined> {
+		const list = windows ?? (await openWindowsForTargeting());
+		const resolution = resolveTargetWindow(list, pid, currentOnscreenWindowIds(), undefined, windowId);
 		return resolution.kind === "resolved" ? resolution.window : undefined;
 	}
 

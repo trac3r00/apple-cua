@@ -77,6 +77,12 @@ export interface AppState {
 	 */
 	treeOmitted?: boolean;
 	/**
+	 * True when `elements` is empty because the caller asked for a capture-only observation
+	 * (`includeAccessibilityTree: false`) rather than because the app exposed no tree. Consumers
+	 * that need element ids must ask for a tree observation.
+	 */
+	treeSkipped?: boolean;
+	/**
 	 * True when the accessibility walk stopped at the element budget, so `elements`
 	 * is a prefix of the real tree rather than all of it. Raise `max_elements` to see
 	 * the rest.

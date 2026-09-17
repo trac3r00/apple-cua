@@ -41,6 +41,12 @@ export interface AppStateOptions {
 	 * observation costs no screenshot time or image tokens. Default true.
 	 */
 	includeScreenshot?: boolean;
+	/**
+	 * Skip the accessibility walk and the settle wait, and return the capture only: the cheapest
+	 * observation, for previews and for callers that already hold the tree. No element ids are
+	 * produced, so the answer cannot authorize element actions. Default true.
+	 */
+	includeAccessibilityTree?: boolean;
 	/** Cap the number of accessibility elements walked. Defaults to the driver's own cap. */
 	maxElements?: number;
 	/** Include the application menu bar in the tree. Default false for window-scoped observations. */
@@ -57,6 +63,13 @@ export interface AppStateOptions {
 	 */
 	subtreeOf?: number;
 }
+
+/**
+ * How input reaches its target: "attended" delivery may briefly lease the foreground for a
+ * targeted action (reported as foreground delivery), "background" posts to the target process
+ * without touching the frontmost app.
+ */
+export type InputDelivery = "attended" | "background";
 
 export interface KeyOptions {
 	readonly modifiers?: ReadonlyArray<"command" | "option" | "control" | "shift" | "cmd" | "alt" | "ctrl">;

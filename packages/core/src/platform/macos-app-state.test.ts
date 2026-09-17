@@ -125,6 +125,21 @@ beforeEach(() => {
 	});
 });
 
+describe("#given one observation #when the driver resolves its target window and its inventory #then it enumerates the window list once", () => {
+	it("calls the window enumeration once per observation instead of once per consumer", async () => {
+		windowMock.openWindows.mockClear();
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, title: "Documents", owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS },
+		]);
+		const computer = new MacOSHostComputer();
+
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+		expect(state.windowId).toBe(99);
+		expect(windowMock.openWindows.mock.calls.length).toBe(1);
+	});
+});
+
 describe("#given a target window #when get_app_state captures it #then the screenshot is sized to the window aspect", () => {
 	it("captures the window at full fidelity up to the 2560 long-edge cap, not the full screen", async () => {
 		const computer = new MacOSHostComputer();

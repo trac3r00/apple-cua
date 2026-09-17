@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setRunningApplicationLookupForTesting } from "./app-list.js";
 import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
+import type { InputDelivery } from "./macos-input.js";
 
 interface TestWindow {
 	readonly id: number;
@@ -93,7 +94,12 @@ function deferred<T>(): {
 	};
 }
 
-function approvedComputer(options: { readonly urlBlocklist?: readonly string[] } = {}): MacOSHostComputer {
+function approvedComputer(
+	options: {
+		readonly urlBlocklist?: readonly string[];
+		readonly delivery?: InputDelivery;
+	} = {},
+): MacOSHostComputer {
 	return new MacOSHostComputer({
 		appApproval: new AppApprovalStore([BUNDLE_ID]),
 		overlay: NOOP_POINTER_OVERLAY,
@@ -370,11 +376,44 @@ describe("MacOSHostComputer preflightInput", () => {
 	});
 
 	it("rejects when the observed app is no longer frontmost", async () => {
-		const computer = approvedComputer();
+		const computer = approvedComputer({});
 		const expected = await observe(computer);
 		runtime.apps = [{ name: "Finder", bundleId: BUNDLE_ID, pid: TARGET_PID, isActive: false }];
 
 		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason: "app-not-frontmost" });
+	});
+
+	it("approves a target that is not frontmost when delivery is background", async () => {
+		const computer = approvedComputer({ delivery: "background" });
+		const expected = await observe(computer);
+		runtime.apps = [{ name: "Finder", bundleId: BUNDLE_ID, pid: TARGET_PID, isActive: false }];
+
+		expect(await computer.preflightInput(expected)).toEqual({ ok: true });
+	});
+
+	it("still rejects a revoked approval in background delivery when the app is not frontmost", async () => {
+		const approval = new AppApprovalStore([BUNDLE_ID]);
+		const computer = new MacOSHostComputer({
+			appApproval: approval,
+			delivery: "background",
+			overlay: NOOP_POINTER_OVERLAY,
+		});
+		const expected = await observe(computer);
+		runtime.apps = [{ name: "Finder", bundleId: BUNDLE_ID, pid: TARGET_PID, isActive: false }];
+		approval.deny(BUNDLE_ID);
+
+		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason: "app-not-approved" });
+	});
+
+	it("still rejects a changed window in background delivery when the app is not frontmost", async () => {
+		const computer = approvedComputer({ delivery: "background" });
+		const expected = await observe(computer);
+		runtime.apps = [{ name: "Finder", bundleId: BUNDLE_ID, pid: TARGET_PID, isActive: false }];
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, owner: { processId: TARGET_PID }, bounds: { ...WINDOW_BOUNDS, width: 801 } },
+		]);
+
+		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason: "window-bounds-changed" });
 	});
 
 	it.each([

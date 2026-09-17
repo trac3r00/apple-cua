@@ -56,6 +56,7 @@ import { currentOnscreenWindowIds } from "./macos-input.js";
 import { openWindowsForTargeting } from "./macos-open-windows.js";
 import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
 import { resolveTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
+import type { MacOSWindowInfo } from "./macos-window-target.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -101,6 +102,7 @@ export class MacOSHostComputer extends HostComputer {
 	>();
 	private readonly observedAxPids = new Set<number>();
 	private readonly appApproval: AppApprovalStore | undefined;
+	readonly delivery: InputDelivery;
 	private readonly urlBlocklist: readonly string[];
 	private readonly overlay: PointerOverlay;
 	private readonly displayId: number | undefined;
@@ -111,6 +113,7 @@ export class MacOSHostComputer extends HostComputer {
 	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
 		this.appApproval = options.appApproval;
+		this.delivery = options.delivery ?? "attended";
 		this.urlBlocklist = options.urlBlocklist ?? [];
 		this.overlay = options.overlay ?? createCursorOverlay();
 		this.input = new MacOSInputController(
@@ -118,7 +121,7 @@ export class MacOSHostComputer extends HostComputer {
 			this.overlay,
 			undefined,
 			createDisplaySleepAssertion(),
-			options.delivery ?? "attended",
+			this.delivery,
 		);
 		this.displayId = options.display;
 	}
@@ -241,10 +244,13 @@ export class MacOSHostComputer extends HostComputer {
 	 * travels back on the state so input can be checked against the same window instead of a
 	 * fresh guess.
 	 */
-	private async describeWindowsForPid(pid: number): Promise<readonly WindowInventoryEntry[]> {
+	private async describeWindowsForPid(
+		pid: number,
+		windows?: readonly MacOSWindowInfo[],
+	): Promise<readonly WindowInventoryEntry[]> {
 		try {
-			const windows = await openWindowsForTargeting();
-			return visibleWindowsForPid(windows, pid).map((window) => ({
+			const list = windows ?? (await openWindowsForTargeting());
+			return visibleWindowsForPid(list, pid).map((window) => ({
 				id: window.id,
 				title: window.title ?? "",
 				bounds: {
@@ -262,18 +268,19 @@ export class MacOSHostComputer extends HostComputer {
 	private async resolveObservationWindow(
 		pid: number,
 		requestedWindowId?: number,
+		windows?: readonly MacOSWindowInfo[],
 	): Promise<SkyLightTargetWindow | undefined> {
 		if (requestedWindowId !== undefined) {
-			return await this.input.rememberTargetWindow(pid, requestedWindowId);
+			return await this.input.rememberTargetWindow(pid, requestedWindowId, windows);
 		}
 		const focusedWindowId = focusedWindowIdForPid(pid);
 		if (focusedWindowId !== undefined) {
-			const focusedWindow = await this.input.rememberTargetWindow(pid, focusedWindowId);
+			const focusedWindow = await this.input.rememberTargetWindow(pid, focusedWindowId, windows);
 			if (focusedWindow !== undefined) {
 				return focusedWindow;
 			}
 		}
-		return await this.input.rememberTargetWindow(pid);
+		return await this.input.rememberTargetWindow(pid, undefined, windows);
 	}
 
 	private async captureAppState(targetPid?: number, options?: AppStateOptions): Promise<AppState> {
@@ -282,11 +289,12 @@ export class MacOSHostComputer extends HostComputer {
 		const app = resolveTargetApp(apps, targetPid);
 		this.assertAppApproved(app);
 		await this.assertBrowserUrlAllowed(app, options?.requireWindow === true);
-		const targetWindow = await this.resolveObservationWindow(app.pid, options?.windowId);
+		const windows = await openWindowsForTargeting();
+		const windowInventory = await this.describeWindowsForPid(app.pid, windows);
+		const targetWindow = await this.resolveObservationWindow(app.pid, options?.windowId, windows);
 		if (options?.requireWindow === true && targetWindow === undefined) {
 			throw new Error(`No visible target window available for pid ${app.pid}`);
 		}
-		const windowInventory = await this.describeWindowsForPid(app.pid);
 		const targetWindowTitle = windowInventory.find((entry) => entry.id === targetWindow?.id)?.title;
 		const windowCandidates = windowInventory.length > 1 ? windowInventory : undefined;
 		this.observedAxPids.add(app.pid);
@@ -296,7 +304,8 @@ export class MacOSHostComputer extends HostComputer {
 			...(targetWindow === undefined ? {} : { windowId: targetWindow.id }),
 			...(options?.subtreeOf === undefined ? {} : { subtreeOf: options.subtreeOf }),
 		};
-		if (settleMs > 0) {
+		const captureTree = options?.includeAccessibilityTree !== false;
+		if (settleMs > 0 && captureTree) {
 			await this.waitForUiSettle(app.pid, settleMs, walkOptions);
 		}
 		// Scope the screenshot to the target window at its own aspect ratio (capped),
@@ -309,11 +318,11 @@ export class MacOSHostComputer extends HostComputer {
 			options?.includeScreenshot === false
 				? { data: Buffer.alloc(0), mimeType: "image/png" as const, width: size.width, height: size.height }
 				: await this.captureScreenshot({ targetSize: size, format: "jpeg" }, targetWindow?.id);
-		const tree = extractAccessibilityTree(app.pid, walkOptions);
+		const tree = captureTree ? extractAccessibilityTree(app.pid, walkOptions) : undefined;
 		const display = resolveDisplayInfo();
 		const appInstructions = resolveAppInstructions(app.name, app.bundleId);
 
-		let elements = tree.elements;
+		let elements = tree?.elements ?? [];
 		let windowBounds: ScreenshotViewport["windowBounds"] | undefined;
 		if (targetWindow !== undefined) {
 			const viewport: ScreenshotViewport = {
@@ -323,7 +332,7 @@ export class MacOSHostComputer extends HostComputer {
 			};
 			this.lastViewportByPid.set(app.pid, viewport);
 			windowBounds = viewport.windowBounds;
-			elements = remapElementFramesToScreenshot(tree.elements, viewport);
+			elements = tree === undefined ? [] : remapElementFramesToScreenshot(tree.elements, viewport);
 			if (!this.highlightedApps.has(app.pid)) {
 				this.highlightedApps.add(app.pid);
 				this.overlay.highlight(viewport.windowBounds);
@@ -333,12 +342,17 @@ export class MacOSHostComputer extends HostComputer {
 		}
 		elements = normalizeAxTree(elements);
 		const previousTree = this.lastAxTreeByPid.get(app.pid);
-		const comparable = previousTree !== undefined && previousTree.walkKey === tree.walkKey;
+		const comparable = tree !== undefined && previousTree !== undefined && previousTree.walkKey === tree.walkKey;
 		const axChangeSummary = comparable ? diffAxTreesByKey(previousTree.elements, elements) : undefined;
 		const axChanges = comparable ? diffAxTreeChanges(previousTree.elements, elements) : undefined;
-		this.lastAxTreeByPid.set(app.pid, { elements, truncated: tree.truncated, walkKey: tree.walkKey });
-		const contentKind = classifyContentKind(elements, { width: screenshot.width, height: screenshot.height });
-		const diffOnly = options?.diffOnly === true && previousTree !== undefined;
+		if (tree !== undefined) {
+			this.lastAxTreeByPid.set(app.pid, { elements, truncated: tree.truncated, walkKey: tree.walkKey });
+		}
+		const contentKind =
+			tree === undefined
+				? undefined
+				: classifyContentKind(elements, { width: screenshot.width, height: screenshot.height });
+		const diffOnly = options?.diffOnly === true && previousTree !== undefined && tree !== undefined;
 		const observationKey = currentObservationKey(app.pid);
 
 		const state: AppState = {
@@ -346,16 +360,17 @@ export class MacOSHostComputer extends HostComputer {
 			bundleId: app.bundleId,
 			pid: app.pid,
 			frontmost: app.isActive,
-			axAvailable: tree.axAvailable,
+			axAvailable: tree?.axAvailable ?? true,
 			elements: diffOnly ? [] : elements,
 			...(observationKey === undefined ? {} : { observationKey }),
-			...(tree.truncated ? { elementsTruncated: true } : {}),
+			...(tree?.truncated === true ? { elementsTruncated: true } : {}),
 			screenshotBase64: screenshot.data.toString("base64"),
 			screenshotWidth: screenshot.width,
 			screenshotHeight: screenshot.height,
 			screenshotMimeType: screenshot.mimeType,
 			display,
-			contentKind,
+			...(contentKind === undefined ? {} : { contentKind }),
+			...(tree === undefined ? { treeSkipped: true } : {}),
 			...(axChangeSummary !== undefined ? { axChangeSummary } : {}),
 			...(axChanges !== undefined ? { axChanges } : {}),
 			...(diffOnly ? { treeOmitted: true } : {}),
@@ -367,7 +382,7 @@ export class MacOSHostComputer extends HostComputer {
 		};
 		if (targetWindow === undefined) {
 			this.inputObservations.delete(app.pid);
-		} else {
+		} else if (tree !== undefined) {
 			this.observationGeneration += 1;
 			this.inputObservations.set(app.pid, {
 				generation: this.observationGeneration,
@@ -555,7 +570,10 @@ export class MacOSHostComputer extends HostComputer {
 			throw error;
 		}
 		const app = apps.find((candidate) => candidate.pid === expected.pid);
-		if (app === undefined || !app.isActive) {
+		// Background delivery routes every action to the target process, so a window the user is
+		// not looking at is a legal target and the refusal would defeat the mode. Attended delivery
+		// may still take focus, so it keeps requiring the frontmost app.
+		if (app === undefined || (!app.isActive && this.delivery !== "background")) {
 			return { ok: false, reason: "app-not-frontmost" };
 		}
 		if (app.bundleId !== expected.bundleId) {

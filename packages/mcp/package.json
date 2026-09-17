@@ -5,6 +5,11 @@
 	"description": "Model Context Protocol server for macOS computer control",
 	"keywords": ["mcp", "model-context-protocol", "computer-use", "macos", "automation"],
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/bob01933/bob-cua.git",
+		"directory": "packages/mcp"
+	},
 	"bin": {
 		"apple-cua-mcp": "./dist/server.js"
 	},

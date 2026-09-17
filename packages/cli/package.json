@@ -4,6 +4,11 @@
 	"type": "module",
 	"description": "Command-line interface for macOS computer control",
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/bob01933/bob-cua.git",
+		"directory": "packages/cli"
+	},
 	"keywords": ["macos", "automation", "cli", "computer-use"],
 	"bin": {
 		"apple-cua": "./dist/cli.js"

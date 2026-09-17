@@ -4,6 +4,11 @@
 	"type": "module",
 	"description": "Pi coding agent extension for macOS computer control",
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/bob01933/bob-cua.git",
+		"directory": "packages/pi-extension"
+	},
 	"keywords": ["pi-extension", "pi-mono", "macos", "computer-use"],
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",

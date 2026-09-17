@@ -5,6 +5,11 @@
 	"description": "Platform-abstracted computer-use interfaces",
 	"keywords": ["computer-use", "macos", "accessibility", "screencapturekit", "coregraphics", "koffi"],
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/bob01933/bob-cua.git",
+		"directory": "packages/core"
+	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
 	"exports": {

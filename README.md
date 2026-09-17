@@ -33,7 +33,7 @@ The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-co
 ## Quickstart
 
 ```bash
-git clone <repo>
+git clone https://github.com/bob01933/bob-cua.git
 cd apple-cua
 pnpm install
 pnpm --filter @apple-cua/core build

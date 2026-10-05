@@ -1,0 +1,47 @@
+{
+	"schema": "bench-v2",
+	"started_at": "2026-09-22T00:00:00.000Z",
+	"env": {
+		"commit": "abc12345",
+		"dirty": false,
+		"macos": "26.0",
+		"machine": "Fixture Mac",
+		"screen_locked": false,
+		"driver_versions": { "apple": "0.1.0", "cua": "0.28.2" }
+	},
+	"runs": 1,
+	"results": [
+		{
+			"iteration": 1,
+			"driver": "apple",
+			"scenario": "textedit-fill-save",
+			"pass": true,
+			"seconds": 2,
+			"calls": 4,
+			"text_bytes": 400,
+			"image_base64_bytes": 600,
+			"estimated_tokens": 130,
+			"image_tokens": 30,
+			"gave_up": false,
+			"false_done": false,
+			"human_ask": false,
+			"error_class": null
+		},
+		{
+			"iteration": 1,
+			"driver": "cua",
+			"scenario": "textedit-fill-save",
+			"pass": false,
+			"seconds": 4,
+			"calls": 6,
+			"text_bytes": 200,
+			"image_base64_bytes": 800,
+			"estimated_tokens": 90,
+			"image_tokens": 40,
+			"gave_up": true,
+			"false_done": false,
+			"human_ask": false,
+			"error_class": "timeout"
+		}
+	]
+}

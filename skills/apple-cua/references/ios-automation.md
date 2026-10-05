@@ -99,5 +99,9 @@ invitation to clear it for them.
 - Library: `IPhoneMirroring` in `@apple-cua/core` (`observe`, `waitForSettle`, `tap`, `tapText`,
   `longPress`, `swipe`, `scroll`, `pressKeys`, `typeText`, `home`, `appSwitcher`, `openApp`).
 
-Delivery defaults to background: the phone is driven without taking focus, and the pointer is
-touched only for a scroll, then put straight back.
+The MCP server registers these tools only with `APPLE_CUA_IPHONE=1`.
+
+Delivery defaults to background: the phone is driven without taking focus or the pointer. A scroll
+would have to borrow the pointer (macOS routes wheel events by pointer position), so in background
+`ios_scroll` refuses unless you pass `borrow_pointer: true`; prefer `ios_swipe` while the person is
+working. `ios_press_keys` briefly makes the phone window key and then returns focus.

@@ -24,7 +24,8 @@ The server drives two kinds of thing, and they are not interchangeable:
 - **A real iPhone**, through the macOS iPhone Mirroring window. Eyes are Apple's Vision OCR over
   the capture (the phone image is a video stream, so accessibility sees nothing inside it) and
   hands are synthesized events delivered to that window's own process. The phone is driven
-  without bringing its window forward.
+  without bringing its window forward. The `ios_*` tools exist only when the host started the
+  server with `APPLE_CUA_IPHONE=1`; if they are missing, the phone is not available to you.
 
 Use the phone only when the task genuinely needs the phone: an iOS-only app, something tied to
 the user's phone number or 2FA, or checking how something looks on the device. If a Mac app or a
@@ -64,6 +65,16 @@ merely to understand the "whole situation." Do not begin by clicking to discover
    already know what you are looking for, describe it instead of buying the whole tree:
    `find_elements` resolves a role/label/text description against the live tree and answers the
    ranked matches with their ids and the token for them, or `found: false` with near misses.
+   Two fields describe the Mac around the app. `systemPrompts` lists dialogs macOS itself has on
+   screen (a permission request, a password sheet, a system alert; `list_windows` reports them
+   too): only the person can answer them, so never click into one — call `ask_user` and name
+   what it asks for. `screenshotNote` means this server lacks Screen Recording, so the answer
+   has elements but no image; ask the user to grant it rather than retrying the capture.
+   With background delivery an app behind the person's keeps its window commands disabled:
+   Cmd+A, Cmd+C and Cmd+V in a text field are done through accessibility, an enabled menu
+   shortcut is pressed as its menu item, and anything else (Cmd+S, Cmd+W) is refused with the
+   reason instead of silently doing nothing. Replace a field's text with `set_value`, and call
+   `ask_user` when a window command such as Save genuinely needs the app in front.
 3. **Use the actual observation.** Every mutating MCP call requires the returned
    `observation_token`. `element_index` is an element's returned **`id`**, never its array
    position. IDs/tokens from earlier observations, other apps or previous sessions are invalid.
@@ -85,12 +96,42 @@ merely to understand the "whole situation." Do not begin by clicking to discover
    `set_fields` call over one round trip per field: it checks each observed id against a
    fresh observation before writing, reads each value back from the app, and stops at the
    first field it cannot verify. For a mixed sequence (fill a field, press a key, click
-   submit), prefer one `run_steps` call over one round trip per action: it validates every
-   step up front, re-checks each element step against a fresh observation before dispatch,
-   stops at the first step that fails, and its optional `expect` block verifies the outcome
-   in the same call. Element ids in a batch still refer to the token observation, so a step
-   cannot target UI that only appears after an earlier step ran — use the returned
-   continuation token for that.
+   submit), prefer one `run_steps` call (up to 20 steps) over one round trip per action: it
+   validates every step up front, re-checks each element step against a fresh observation
+   before dispatch, stops at the first step that fails, and its optional `expect` block
+   verifies the outcome in the same call. A step can name its element by `element_index` from
+   the token observation or by `target` (a role/label/text query, `target_index` for the nth
+   match) resolved against a fresh read right before it runs, so one batch can open a sheet
+   and then fill it. A `wait_for` step (`target`, `gone: true`, and/or `window_title`) waits
+   for the screen instead of a guessed sleep. To work in several apps at once, `observe_apps`
+   observes them in one call and `run_parallel` runs one batch per app, concurrently under
+   background delivery. Pass `element_format: "table"` to `get_app_state`/`observe_apps` to
+   get one tab-separated row per element, about a fifth of the JSON size.
+   When the flow needs loops, branches on a value read from the screen, or a computed answer,
+   use one `run_script` call: a JavaScript body where `apple.app(name)` returns a handle with
+   `observe`, `find`, `verify` and the run_steps actions (`click`, `setValue`, `type`, `press`,
+   `scroll`, `selectText`, `menu`, `secondaryAction`, `waitFor`, `step`). Every action still goes
+   through the token, approval, preflight and verification path; a refusal throws a
+   `ScriptActionError` the script may catch, and the call answers `{ok, value, log, actions}`.
+   Query targets re-resolve against a fresh read before each action, so controls an app rebuilds
+   after every press (SwiftUI keypads) never go stale. `read_only: true` blocks every mutation.
+   For a person-paced sequence (click a field, type, Tab, type, Return, or several buttons in a row),
+   use `app.chain([...])` (or `pace: "fast"` on `run_steps`/`run_parallel`/`app.batch`): targets
+   resolve against one read, steps go out back to back with only the stop switch and window identity
+   checked between them, and one read plus the `expect` block verifies the end state. Intermediate
+   states are not read, so use the default verified pace when a step depends on what the previous
+   one produced and the chain cannot name it up front. When the control may be off screen, give the
+   step a `find` block (`find: { scroll_within, direction, max_pages, vision }`, or in run_script
+   `app.click({ text: "test1" }, { scrollWithin, maxPages, vision })`): it scrolls the area page by
+   page in the background, re-checks the accessibility tree (and on-screen text when Screen
+   Recording is granted and `vision` allows) after each page, and clicks as soon as the target
+   shows, all inside the same step. The step reports `found.found_by` (`accessibility` or `vision`)
+   and `pages_scrolled`; a vision-only hit can only be clicked, not written to. Modifier keys work
+   on clicks and drags (`modifiers: ["command"]` for Cmd-click); a scroll with modifiers is
+   refused because those wheel events do not land in background apps. Actions on different apps in one script
+   (`Promise.all`) run concurrently; actions on one app stay in order.
+   Under the lean profile (`get_capabilities` reports `server.toolset: "lean"`) the only action
+   tool is `run_script`; the individual action tools named above are not registered.
 5. **Inspect the result.** Post-action state is evidence to evaluate, not automatic proof
    of success. A mutation answers with what changed rather than the whole accessibility
    tree (`treeOmitted: true`; pass `full_state: true` when the complete tree is needed),
@@ -118,13 +159,25 @@ merely to understand the "whole situation." Do not begin by clicking to discover
 7. **Continue only with fresh authority.** Tokens are single-use. Use a returned continuation
    token only after reading the new state. A paused/error result or missing token requires
    an explicit fresh `get_app_state` before another action. Never replay the old request.
-8. **Stop when done.** Once the requested outcome is verified, stop interacting. Do not
-   keep exploring, clicking or "checking again" without a new reason.
+8. **Done means verified.** Report a task done only after a passing `verify_state` or
+   `expect` check (or `effect: "confirmed"`) shows the requested outcome; a dispatched action
+   is not a finished task. When a route fails, the answer's `fallback`/`escalation` names the
+   next rung; when only a person can unblock it (locked Mac, login, an ambiguous target, a
+   missing value), call `ask_user` instead of guessing or giving up. Once the outcome is
+   verified, stop interacting.
+
+- `ask_user` asks for human help via client elicitation or returns a question to relay; accepted handoffs with `app` return fresh app state.
 
 A refused call is not a failure to retry blindly: `effect: "refused"` with
 `actionDispatched: false` means nothing was sent, and `reason` plus `escalation` say what to do
 instead — re-observe after `stale_observation`, pick the window again after `no_window_target`,
 and stop for `permission_required` rather than working around policy.
+
+`reason: "user-stopped"` means the person pressed the stop switch (holding Control+Option+Command,
+or `apple-cua stop`): stop acting at once, do not retry, and tell them. Only they resume, with
+`apple-cua resume`. When a call fails for a reason you cannot explain, call `get_capabilities`
+once: it reports permissions, a locked or remote session, the delivery mode, the approved apps,
+the stop state, and `advice` naming what to tell the person.
 
 The server serializes reads and action transactions and checks current app approval,
 foreground target/window and observation validity before input. It rejects missing or
@@ -140,10 +193,12 @@ when the needed target cannot be established.
 - Do not infer failure from an unchanged tree and repeat a potentially non-idempotent action.
   Inspect a specific missing signal, resolve a visible blocker, or stop and explain what is
   uncertain. Do not loop through guessed variants or repeatedly refresh identical state.
-7. **Stay out of the way when asked.** With background delivery (`--background`, or
-   `APPLE_CUA_DELIVERY=background` for the MCP server) input goes to the app's own window: the
-   frontmost app and the cursor are left alone, and an action that would need the foreground is
-   refused rather than taking over the machine. Prefer it when a human is using the same Mac.
+7. **Stay out of the way.** The MCP server uses background delivery by default (the CLI takes
+   `--background`; `APPLE_CUA_DELIVERY=attended` opts out): input goes to the app's own window,
+   the frontmost app and the person's cursor are left alone, `open_app` launches without bringing
+   the app forward, and an action that would need the foreground is refused rather than taking
+   over the machine. A drawn agent cursor shows every action without touching the real pointer
+   (`APPLE_CUA_CURSOR=off` hides it).
 
 - Do not bypass a denied/stale/paused MCP action using the raw CLI, AppleScript, shell input
   synthesis, another computer tool or another MCP connection. Those would evade the guard.

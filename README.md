@@ -177,6 +177,28 @@ build fails loudly when none of them is self-contained. Ad-hoc signing gives eac
 identity, so macOS asks for the two grants again after a rebuild; set `APPLE_CUA_SIGN_IDENTITY` to a
 stable certificate to keep one identity across builds.
 
+Beyond observe-and-act tools, the server offers `run_script` (one JavaScript body that loops, branches and
+reads while every action stays token-guarded and verified), `get_capabilities` (permissions, locked or remote
+session, delivery mode, approved apps, stop state and advice in one read-only call), and its operating guide
+as MCP resources (`skill://apple-cua/SKILL.md` and `skill://apple-cua/references/*.md`).
+
+Actions combine the way a person's hands do. `modifiers` holds Command, Shift, Option or Control through a
+background click or drag (Cmd-click to add to a selection, Shift-click to extend it). `pace: "fast"` (or
+`app.chain([...])` in `run_script`) sends a person-paced sequence back to back with one verified read at the
+end: on Calculator a click costs about 33 ms in a chain against 103-121 ms one by one. A step's `find` block
+scrolls a list while it looks for the target, by accessibility or on-screen text, and clicks it the moment it
+shows: "scroll, click test1, Cmd-click test2" in a 152-row background Finder list took 2 calls and 3.3 s
+instead of 7 calls and 7.4 s.
+
+Pick how much the agent loads with `APPLE_CUA_TOOLSET`. `full` (the default) registers every desktop tool;
+`lean` registers nine — `get_capabilities`, `list_apps`, `list_windows`, `open_app`, `get_app_state`,
+`find_elements`, `verify_state`, `run_script` and `ask_user` — and does everything else through `run_script`.
+The iPhone tools are opt-in with `APPLE_CUA_IPHONE=1` under either profile. Measured on the tool list an agent
+loads every session: lean 9 tools / 11.5 KB, full 26 / 38 KB, full with iPhone 38 / 45 KB, against 38 tools /
+52 KB before (lean saves about 10k tokens per session). `run_steps` and `run_parallel` publish one flat step
+schema and still validate every step against the strict per-type schema before anything is dispatched; a test
+holds the byte budgets.
+
 **Context-first contract (MCP migration):**
 
 1. The harness understands the user's goal, target and intended result before choosing input.
@@ -311,7 +333,10 @@ Xcode, nothing installed on the phone.
   exactly why accessibility cannot see into it and OCR has to.
 - **Hands**: synthesized mouse and keyboard events delivered to the mirroring window's own
   process, so the phone is driven **without bringing its window forward and without touching the
-  pointer**. A scroll borrows the pointer for the length of its gesture and puts it straight back.
+  pointer**. The one exception is a scroll: macOS sends wheel events to the window under the real pointer, so
+  a scroll would have to borrow it. Under background delivery `ios_scroll` therefore refuses unless the agent
+  passes `borrow_pointer: true` (the pointer then moves for the gesture and is put straight back); `ios_swipe`
+  never touches it.
 - **Session gating**: every action re-checks the session and refuses unless it is `ready`.
   `blocked` (Unlock iPhone, iPhone in Use, connection paused or ended, Mac login), `no-window`
   and `not-running` all come back with what the user has to do about it. Nothing taps through an
@@ -370,15 +395,36 @@ measured under, and the dimensions this driver does *not* measure are recorded i
 
 ## Working while the agent works
 
-Pass `--background` (CLI) or set `APPLE_CUA_DELIVERY=background` (MCP server) to keep a run out
-of your way: input goes to the target app's own window, so the frontmost app does not change and
-the cursor does not move. Background delivery also drops the frontmost requirement on input: the
+The MCP server runs in background delivery by default (set `APPLE_CUA_DELIVERY=attended` to opt
+out); the CLI takes `--background`. Background delivery keeps a run out of your way: input goes
+to the target app's own window, so the frontmost app does not change and the cursor does not
+move, and `open_app` launches apps with `open -g` so they do not come forward either. Background delivery also drops the frontmost requirement on input: the
 driver clicks, types and scrolls a window you are not looking at, while the target app must still
 be approved and its window identity and bounds must still match the observation. Anything that
 would need the foreground — a global click with no target app, or a route that has to lease focus —
-is refused with the action named instead of quietly taking over the machine. Attended delivery is
-still the default and still requires the frontmost app, because a few apps only accept pointer
-input while they are frontmost. Verified on a live session against Cua Driver 0.28.2: a background
+is refused with the action named instead of quietly taking over the machine. Attended delivery
+still requires the frontmost app, because a few apps only accept pointer input while they are
+frontmost.
+
+To stop it, hold Control+Option+Command together (or run `apple-cua stop`): every apple-cua server on the
+Mac refuses further input with `user-stopped`, a running `run_steps` or `run_script` batch stops before
+its next step, and reads keep working so the agent can tell you what it was doing. Only you resume, with
+`apple-cua resume` (`apple-cua stop-status` shows the state). The switch is a file
+(`~/.apple-cua/stop.json`, or `$APPLE_CUA_STATE_DIR`), so one press stops every agent at once. The chord is
+read from the keyboard's hardware state and needs no extra permission. The direct CLI input commands (`click`,
+`type`, `key`, `drag`, `scroll`, the `apps` writes and the `ios` input commands) refuse too, with exit code 1.
+
+Some apps bring themselves forward when background input reaches them (Finder on Go to Folder, Safari on a
+web field). A watcher on its own thread checks every 10 ms and hands the front straight back to your app, and
+stops for good if you switch apps yourself. Measured on a background Finder Go to Folder, the target held the
+front for 440-675 ms before and 0-14 ms after (four trials, sampled every 2 ms).
+
+To see what it is doing, apple-cua draws its own agent cursor: a click-through arrow pointer modelled on Cua
+Driver's default theme (blue fill, white outline, soft glow, tip exactly on the target) on a
+floating overlay that glides to every action — pointer clicks, accessibility presses, value
+writes, text selection, typing and scrolls — ripples on each press, and pulses while the agent
+reads an observation. It is drawn, not your real cursor, so it works in background delivery
+without moving your pointer. Set `APPLE_CUA_CURSOR=off` to hide it. Verified on a live session against Cua Driver 0.28.2: a background
 click landed with the frontmost app and the real cursor untouched, and the action answer cost
 1.4 KB instead of 121 KB because the post-action image is now opt-in (`include_screenshot: true`).
 
@@ -536,6 +582,10 @@ Vitest suite) — see [`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
 | Portability | Linux, macOS, Windows, Android, cloud | macOS only | macOS only (stubs for VM/cloud) |
 | Open source | Full SDK | Plugin host OSS, Computer Use plugin proprietary | Fully open source |
 | Agent integration | Any Python agent | Codex desktop only | CLI, MCP, pi-extension, or any TS agent |
+
+What apple-cua took from Codex computer use, Cua Driver and OmO's `computer` tool (`run_script`, the stop
+switch, `get_capabilities`, skill resources), with a measured three-way Calculator run:
+[`docs/unified-cua.md`](./docs/unified-cua.md).
 
 Full analysis: [`codex-cua-comparison.md`](./codex-cua-comparison.md).
 Measured head-to-head against Cua Driver 0.28.2 (latency, payloads, background delivery):

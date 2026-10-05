@@ -44,6 +44,7 @@ import {
 	scrollToVisibleByIndex,
 	setValueByIndex,
 	typeIntoFocusedAXElement,
+	windowTitlesForPid,
 } from "./macos-ffi/accessibility.js";
 import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
 import { createAxEventWaiter, waitForAxQuiet } from "./macos-ffi/ax-observer.js";
@@ -78,9 +79,11 @@ import {
 	commandChordMask,
 	findMenuKeyEquivalent,
 	invokeMenu,
+	invokeWindowMenu,
 	normalizeMenuPath,
 	planBackgroundKeyEquivalent,
 	pressMenuItem,
+	waitForKeyEquivalentEnabled,
 } from "./macos-menu.js";
 import { openWindowsForTargeting } from "./macos-open-windows.js";
 import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
@@ -257,13 +260,21 @@ export class MacOSHostComputer extends HostComputer {
 			if (commandChordMask(modifiers) === 0 && key.toLowerCase() === "a" && this.selectAllInTextField(pid)) {
 				return;
 			}
+			const item = findMenuKeyEquivalent(pid, key, modifiers);
 			const plan = planBackgroundKeyEquivalent({
-				frontmost: applicationIsFrontmost(pid),
+				// An app this driver told it is active reports itself frontmost while the person still uses
+				// another app, so its chords are carried out the background way all the same.
+				frontmost: applicationIsFrontmost(pid) && !this.input.holdsActivation(pid),
 				key,
 				modifiers,
-				item: findMenuKeyEquivalent(pid, key, modifiers),
+				item,
 			});
-			if (await this.runBackgroundKeyPlan(pid, plan)) {
+			const chord = { key, modifiers };
+			if (plan.kind === "refuse" && item !== undefined) {
+				await this.pressKeyEquivalent(pid, chord, item.path, plan.message);
+				return;
+			}
+			if (await this.runBackgroundKeyPlan(pid, plan, chord)) {
 				return;
 			}
 		}
@@ -274,7 +285,9 @@ export class MacOSHostComputer extends HostComputer {
 	 * Invoke a menu path. Edit > Select All, Copy, Cut and Paste are done on the focused native text
 	 * field through accessibility: AppKit validates those items only while their menu is shown, so
 	 * their AXEnabled flag says "disabled" even when the command would run, and pressing the item in a
-	 * background app does nothing. Every other path is pressed as a menu item.
+	 * background app does nothing. Every other path is pressed as a menu item, for the window the app
+	 * was last observed in: a menu command acts on the app's key window, and an app in the background is
+	 * told it is active when that is what keeps the command disabled (see invokeWindowMenu).
 	 */
 	async invokeMenu(targetPid: number, path: readonly string[]): Promise<InvokeMenuResult> {
 		const normalized = normalizeMenuPath(path);
@@ -285,7 +298,70 @@ export class MacOSHostComputer extends HostComputer {
 				return { resolvedPath: normalized, action: "accessibility" };
 			}
 		}
-		return await invokeMenu(targetPid, normalized);
+		const window = this.observedWindow(targetPid);
+		if (window === undefined) {
+			return await invokeMenu(targetPid, normalized);
+		}
+		return await invokeWindowMenu(targetPid, normalized, (disabled, run) =>
+			this.input.withWindowCommand(targetPid, window, disabled, run),
+		);
+	}
+
+	/** The window the latest observation of `pid` is scoped to: where window commands for the app are aimed. */
+	private observedWindow(pid: number): SkyLightTargetWindow | undefined {
+		const observation = this.inputObservations.get(pid);
+		return observation === undefined ? undefined : { id: observation.windowId, bounds: observation.windowBounds };
+	}
+
+	/**
+	 * Press the menu item a Command chord stands for, in an app behind the person's. macOS validates window
+	 * commands against their app being active, and the enabled flags and titles an inactive app reports are
+	 * only what it last validated, so the app is told it is active for the observed window and the item the
+	 * chord names is pressed once it reads enabled (looked up again by its key, since re-validating can
+	 * retitle it). `refusal` (given when the item read disabled) is raised with nothing sent when the app
+	 * could not be told so (no observed window to aim at); an item that stays disabled even with the app
+	 * told it is active is refused as well.
+	 */
+	private async pressKeyEquivalent(
+		pid: number,
+		chord: { readonly key: string; readonly modifiers: readonly string[] },
+		path: readonly string[],
+		refusal: string | undefined,
+	): Promise<void> {
+		const window = this.observedWindow(pid);
+		const outcome =
+			window === undefined
+				? "not-held"
+				: await this.input.withWindowCommand(
+						pid,
+						window,
+						() => true,
+						async (held): Promise<"pressed" | "not-held" | "still-disabled"> => {
+							if (!held) {
+								return "not-held";
+							}
+							const enabled = await waitForKeyEquivalentEnabled(pid, chord.key, chord.modifiers);
+							if (enabled === undefined) {
+								return "still-disabled";
+							}
+							pressMenuItem(pid, enabled.path);
+							return "pressed";
+						},
+					);
+		if (outcome === "not-held") {
+			// The app was not told it is active: an item that read enabled is pressed as before, one that read
+			// disabled is refused.
+			if (refusal !== undefined) {
+				throw new Error(refusal);
+			}
+			pressMenuItem(pid, path);
+			return;
+		}
+		if (outcome === "still-disabled") {
+			throw new Error(
+				`${[...chord.modifiers, chord.key].join("+")} would do nothing: ${path.join(" > ")} stays disabled for this window even with the app told it is active, so no key was sent. Use set_value for text, or call ask_user if the person needs to run the command.`,
+			);
+		}
 	}
 
 	/** True when the Edit command ran on the focused native text field; false hands it to the menu. */
@@ -327,12 +403,16 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	/** Carries out a Command chord for a background app; false hands the chord back to real key events. */
-	private async runBackgroundKeyPlan(pid: number, plan: BackgroundKeyPlan): Promise<boolean> {
+	private async runBackgroundKeyPlan(
+		pid: number,
+		plan: BackgroundKeyPlan,
+		chord: { readonly key: string; readonly modifiers: readonly string[] },
+	): Promise<boolean> {
 		switch (plan.kind) {
 			case "keys":
 				return false;
 			case "menu":
-				pressMenuItem(pid, plan.path);
+				await this.pressKeyEquivalent(pid, chord, plan.path, undefined);
 				return true;
 			case "select-all":
 				if (this.selectAllInTextField(pid)) {
@@ -409,7 +489,7 @@ export class MacOSHostComputer extends HostComputer {
 	): Promise<readonly WindowInventoryEntry[]> {
 		try {
 			const list = windows ?? (await openWindowsForTargeting());
-			return visibleWindowsForPid(list, pid).map((window) => ({
+			const entries = visibleWindowsForPid(list, pid).map((window) => ({
 				id: window.id,
 				title: window.title ?? "",
 				bounds: {
@@ -419,6 +499,12 @@ export class MacOSHostComputer extends HostComputer {
 					height: Math.round(window.bounds.height),
 				},
 			}));
+			if (!entries.some((entry) => entry.title === "")) {
+				return entries;
+			}
+			// The WindowServer hides titles from a process without Screen Recording; the app names its own windows.
+			const titles = appWindowTitles(pid);
+			return entries.map((entry) => (entry.title === "" ? { ...entry, title: titles.get(entry.id) ?? "" } : entry));
 		} catch {
 			return [];
 		}
@@ -966,6 +1052,15 @@ export class MacOSHostComputer extends HostComputer {
 			}
 			this.observedAxPids.clear();
 		}
+	}
+}
+
+/** The app's own titles for its windows; an app that cannot answer leaves them untitled. */
+function appWindowTitles(pid: number): ReadonlyMap<number, string> {
+	try {
+		return windowTitlesForPid(pid);
+	} catch {
+		return new Map();
 	}
 }
 

@@ -24,6 +24,9 @@ import { koffi } from "./macos-ffi/koffi.js";
 
 const MENU_SETTLE_MILLISECONDS = 80;
 const ACTION_PRIORITY = ["AXPress", "AXPick", "AXShowMenu", "AXOpen"] as const;
+/** How long, at most, an item may take to become enabled after its app is told it is active (~1.5 s). */
+const MENU_ENABLE_POLLS = 60;
+const MENU_ENABLE_POLL_MILLISECONDS = 25;
 
 const applicationServices = koffi.load("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices");
 const AX_UI_ELEMENT_REF = koffi.pointer("AXUIElementRefForMenu", koffi.opaque());
@@ -321,6 +324,116 @@ export function applicationIsFrontmost(
 	} finally {
 		accessibility.release(application);
 	}
+}
+
+/**
+ * Whether the item at `path` is enabled, read without opening any menu; undefined when it cannot be
+ * resolved that way (a submenu that only fills while it is shown).
+ */
+export function menuItemEnabled(
+	pid: number,
+	path: readonly string[],
+	accessibility: MenuAccessibility = nativeMenuAccessibility,
+): boolean | undefined {
+	const application = accessibility.createApplication(pid);
+	try {
+		let item: AXUIElementRef;
+		try {
+			item = resolvePrefix(application, path, accessibility);
+		} catch {
+			return undefined;
+		}
+		try {
+			return accessibility.booleanAttribute(item, "AXEnabled") !== false;
+		} finally {
+			accessibility.release(item);
+		}
+	} finally {
+		accessibility.release(application);
+	}
+}
+
+/**
+ * Wait, bounded, for the item at `path` to read enabled. An app told it is active re-validates its menus on
+ * its next pass through its event loop, not at once, and re-validating retitles items as well as enabling
+ * them (Save… becomes Save once a saved document's window is main), so an item that does not resolve yet
+ * is waited for too. True once it reads enabled; false when it stays disabled (the command does not apply
+ * to that window right now) or never resolves without opening a menu.
+ */
+export async function waitForMenuItemEnabled(
+	pid: number,
+	path: readonly string[],
+	accessibility: MenuAccessibility = nativeMenuAccessibility,
+): Promise<boolean> {
+	for (let poll = 0; ; poll += 1) {
+		if (menuItemEnabled(pid, path, accessibility) === true) {
+			return true;
+		}
+		if (poll >= MENU_ENABLE_POLLS) {
+			return false;
+		}
+		await accessibility.delay(MENU_ENABLE_POLL_MILLISECONDS);
+	}
+}
+
+/**
+ * The menu item a Command chord stands for, waited for (bounded, as waitForMenuItemEnabled) until it reads
+ * enabled in an app just told it is active. It is looked up by its key on every poll, since re-validating
+ * can retitle it. Undefined when none turns up enabled in time.
+ */
+export async function waitForKeyEquivalentEnabled(
+	pid: number,
+	key: string,
+	modifiers: readonly string[],
+	accessibility: MenuAccessibility = nativeMenuAccessibility,
+): Promise<MenuKeyEquivalent | undefined> {
+	for (let poll = 0; ; poll += 1) {
+		const item = findMenuKeyEquivalent(pid, key, modifiers, accessibility);
+		if (item?.enabled === true) {
+			return item;
+		}
+		if (poll >= MENU_ENABLE_POLLS) {
+			return undefined;
+		}
+		await accessibility.delay(MENU_ENABLE_POLL_MILLISECONDS);
+	}
+}
+
+/**
+ * Runs a window command for the window it is meant for (MacOSInputController.withWindowCommand): it asks
+ * `wantsActivation` whether an app behind the person's should be told it is active first, and tells
+ * `command` whether the app is held active while it runs.
+ */
+export type WindowMenuRunner = (
+	wantsActivation: () => boolean,
+	command: (held: boolean) => Promise<InvokeMenuResult>,
+) => Promise<InvokeMenuResult>;
+
+/**
+ * Invoke a menu path for one window of an app that may sit behind the person's. macOS validates window
+ * commands (Save, Close, New Folder) against their app being active: in the background they read
+ * disabled, and the enabled flags and titles an inactive app reports are only what it last validated, so
+ * they are no evidence either way. When the app has the path's menu, it is therefore told it is active
+ * first (the runner tells the person's own frontmost app nothing), and the item is pressed once it reads
+ * enabled under its re-validated title. An item that stays disabled is refused with the reason: nothing
+ * is pressed that would not run.
+ */
+export async function invokeWindowMenu(
+	pid: number,
+	path: readonly string[],
+	runWindowCommand: WindowMenuRunner,
+	accessibility: MenuAccessibility = nativeMenuAccessibility,
+): Promise<InvokeMenuResult> {
+	const normalizedPath = normalizeMenuPath(path);
+	return await runWindowCommand(
+		() => menuItemEnabled(pid, normalizedPath.slice(0, 1), accessibility) !== undefined,
+		async (held) => {
+			if (held) {
+				await waitForMenuItemEnabled(pid, normalizedPath, accessibility);
+			}
+			return await invokeMenu(pid, normalizedPath, accessibility);
+		},
+	);
 }
 
 export type BackgroundKeyPlan =

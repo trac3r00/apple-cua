@@ -443,8 +443,10 @@ export function observedRunStepsResult(
 	windowEvents: readonly WindowEvent[] = [],
 ): ToolResult {
 	const observationStatus = contextUnchanged ? axObservationStatus(state) : "context-changed";
+	// A wait dispatches no input: a run of waits that were all satisfied confirmed what it waited for.
+	const waitedOnly = report.steps.length > 0 && report.steps.every((step) => step.status === "satisfied");
 	const effect: ActionEffect =
-		verification?.verified === true
+		verification?.verified === true || waitedOnly
 			? "confirmed"
 			: report.completed > 0 && report.stoppedEarly
 				? "partial"

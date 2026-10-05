@@ -1,5 +1,5 @@
 import { Script, createContext } from "node:vm";
-import type { ElementQuery, GuardedComputerInterface } from "@apple-cua/core";
+import type { ElementQuery, GuardedComputerInterface, TopLevelWindow } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import type { GuardedSession, RunPace, RunStepDriver, VerifyCheckRequest, VerifyRequest } from "./guarded-session.js";
@@ -28,7 +28,8 @@ export const runScriptSchema = z.object({
 
 const RUN_SCRIPT_DESCRIPTION = `Run a whole flow in ONE call as the body of an async JavaScript function (loops, branches, reads) instead of a round trip per action. Nothing persists across calls. Every action goes through the guarded mutation path (token, allowlist/approval, preflight, read-back). NOT a security sandbox: no require/process/import, but the code has the calling agent's trust; never run untrusted code.
 API (all async; target = element id (number|string) or query {role,label,label_contains,value_contains,text,index}):
-const app = apple.app("Finder"); await apple.apps();
+const app = apple.app("Finder"); await apple.apps(); await apple.windows("TextEdit") // list_windows entries, titled
+apple.app("TextEdit",{window:"b.txt"}) // or a window_id: observations, actions, menus and keys act on that window, never the app's focused one; a title matches exactly, else a unique part
 app.observe({diffOnly?,maxElements?}) // get_app_state JSON, remembers the token
 app.find({role?,label?,label_contains?,value_contains?,text?}) // find_elements JSON
 app.click(target,{clickCount?,mouseButton?,modifiers?}); app.setValue(target,value); app.type(text); app.press(keys); app.selectText(target,text,{prefix?,suffix?,selection?}); app.secondaryAction(target,"AXShowMenu"); app.menu(["File","New Tab"]); app.scroll(target,direction,pages?) // modifiers refused
@@ -304,6 +305,60 @@ function formatLogValue(value: unknown): string {
 	}
 }
 
+/** Which window of its app a handle acts on: a title (exact, else a unique part of one, any case) or a window id. */
+type WindowSelector = string | number;
+
+/** What one `apple.app(...)` handle acts on. */
+interface AppTarget {
+	readonly app: string;
+	readonly window: WindowSelector | undefined;
+	/** The id `window` resolved to; kept while that window stays open, even when its title changes. */
+	windowId: number | undefined;
+}
+
+/** What an action's answer means for the run's tokens. */
+interface ExecScope {
+	/** The window the action's observation was bound to; undefined when it followed the app's focused window. */
+	readonly windowId?: number | undefined;
+	/** A listing that observes nothing leaves the app's live token alone. */
+	readonly keepsTokens?: boolean;
+}
+
+function appTarget(app: string, options: unknown): AppTarget {
+	if (options !== undefined && !isRecord(options)) {
+		throw invalid('apple.app options are an object such as { window: "Report.txt" }');
+	}
+	const window = pick(options, "window");
+	if (window === undefined) {
+		return { app, window: undefined, windowId: undefined };
+	}
+	if (typeof window === "string" && window.trim() !== "") {
+		return { app, window, windowId: undefined };
+	}
+	if (typeof window === "number" && Number.isSafeInteger(window) && window > 0) {
+		return { app, window, windowId: window };
+	}
+	throw invalid("window is a window title (or a unique part of one) or a window_id from apple.windows()");
+}
+
+/** The window an observation made for this handle is bound to: undefined when it follows the focused window. */
+function boundId(target: AppTarget): number | undefined {
+	return target.window === undefined ? undefined : target.windowId;
+}
+
+/** A live token belongs to a handle when it was observed on the handle's own window (or both follow the focused one). */
+function sameBinding(target: AppTarget, windowId: number | undefined): boolean {
+	return target.window === undefined ? windowId === undefined : windowId !== undefined && windowId === target.windowId;
+}
+
+function describeTarget(target: AppTarget): string {
+	return target.window === undefined ? target.app : `${target.app} window ${JSON.stringify(target.window)}`;
+}
+
+function windowOption(windowId: number | undefined): { readonly windowId?: number } {
+	return windowId === undefined ? {} : { windowId };
+}
+
 /** One script run: owns the per-app tokens, serializes actions, and records what happened. */
 class ScriptRun {
 	readonly actions: ActionRecord[] = [];
@@ -311,7 +366,7 @@ class ScriptRun {
 	logDropped = 0;
 	lastImage: ToolContent | undefined;
 	lastFailure: ActionRecord | undefined;
-	private readonly tokens = new Map<string, string>();
+	private readonly tokens = new Map<string, { readonly token: string; readonly windowId: number | undefined }>();
 	private readonly tails = new Map<string, Promise<unknown>>();
 	private nextAction = 1;
 
@@ -371,7 +426,12 @@ class ScriptRun {
 		return next;
 	}
 
-	private async exec(app: string, kind: string, call: () => Promise<ToolResult>): Promise<unknown> {
+	private async exec(
+		app: string,
+		kind: string,
+		call: () => Promise<ToolResult>,
+		scope: ExecScope = {},
+	): Promise<unknown> {
 		if (this.signal.aborted) {
 			throw this.stopped();
 		}
@@ -387,16 +447,20 @@ class ScriptRun {
 		try {
 			result = await call();
 		} catch (error: unknown) {
-			this.tokens.delete(key);
+			if (scope.keepsTokens !== true) {
+				this.tokens.delete(key);
+			}
 			this.lastFailure = record("error");
 			throw new ScriptActionError(errorMessage(error), { kind: "error" });
 		}
 		const { payload, image } = parseResult(result);
-		const token = pick(payload, "observation_token");
-		if (typeof token === "string") {
-			this.tokens.set(key, token);
-		} else {
-			this.tokens.delete(key);
+		if (scope.keepsTokens !== true) {
+			const token = pick(payload, "observation_token");
+			if (typeof token === "string") {
+				this.tokens.set(key, { token, windowId: scope.windowId });
+			} else {
+				this.tokens.delete(key);
+			}
 		}
 		if (this.options.includeScreenshot && image !== undefined) {
 			this.lastImage = image;
@@ -414,57 +478,144 @@ class ScriptRun {
 		return payload;
 	}
 
-	private async tokenFor(app: string, needsIds: boolean): Promise<string> {
-		const key = app.toLowerCase();
+	private async tokenFor(target: AppTarget, needsIds: boolean): Promise<string> {
+		const key = target.app.toLowerCase();
 		const existing = this.tokens.get(key);
-		if (existing !== undefined) {
-			return existing;
+		if (existing !== undefined && sameBinding(target, existing.windowId)) {
+			return existing.token;
 		}
 		if (needsIds) {
 			throw new ScriptActionError(
-				`no live observation of ${app}: call observe() or find() before acting on an element id or coordinates`,
+				`no live observation of ${describeTarget(target)}: call observe() or find() before acting on an element id or coordinates`,
 				{ kind: "refused", refused: "needs-observation" },
 			);
 		}
-		await this.exec(app, "observe", () => this.session.observe({ app, diffOnly: false, includeScreenshot: false }));
+		const windowId = await this.windowIdFor(target);
+		await this.exec(
+			target.app,
+			"observe",
+			() =>
+				this.session.observe({
+					app: target.app,
+					diffOnly: false,
+					includeScreenshot: false,
+					...windowOption(windowId),
+				}),
+			{ windowId },
+		);
 		const fresh = this.tokens.get(key);
 		if (fresh === undefined) {
-			throw new ScriptActionError(`observing ${app} returned no observation token`, {
+			throw new ScriptActionError(`observing ${describeTarget(target)} returned no observation token`, {
 				kind: "refused",
 				refused: "needs-observation",
 			});
 		}
-		return fresh;
+		return fresh.token;
 	}
 
-	observe(app: string, options: unknown): Promise<unknown> {
-		const maxElements = pick(options, "maxElements");
-		return this.queue(app, () =>
-			this.exec(app, "observe", () =>
-				this.session.observe({
-					app,
-					diffOnly: pick(options, "diffOnly") === true,
-					includeScreenshot: this.options.includeScreenshot,
-					...(typeof maxElements === "number" ? { maxElements } : {}),
-				}),
-			),
+	/**
+	 * The window a bound handle acts on: the one it resolved to before, while that window is still open
+	 * (its title may have changed since, as a document's does once edited), else the one window whose
+	 * title is `window` exactly or, failing that, contains it in any case. No match, or several, is refused
+	 * with the app's windows named. Undefined for a handle that follows the app's focused window.
+	 */
+	private async windowIdFor(target: AppTarget): Promise<number | undefined> {
+		const selector = target.window;
+		if (typeof selector !== "string") {
+			return selector;
+		}
+		let windows: readonly TopLevelWindow[];
+		try {
+			windows = (await this.session.windowsOf(target.app)).windows;
+		} catch (error: unknown) {
+			throw this.refuseWindow(target, errorMessage(error), "app-not-running");
+		}
+		if (target.windowId !== undefined && windows.some((window) => window.id === target.windowId)) {
+			return target.windowId;
+		}
+		const exact = windows.filter((window) => window.title === selector);
+		const part = selector.toLowerCase();
+		const matches = exact.length > 0 ? exact : windows.filter((window) => window.title.toLowerCase().includes(part));
+		const [only, ...others] = matches;
+		if (only !== undefined && others.length === 0) {
+			target.windowId = only.id;
+			return only.id;
+		}
+		const listed = windows.map((window) => `${window.id} ${JSON.stringify(window.title)}`).join(", ") || "none";
+		throw this.refuseWindow(
+			target,
+			only === undefined
+				? `no ${target.app} window title matches ${JSON.stringify(selector)}; its windows: ${listed}`
+				: `${matches.length} ${target.app} windows match ${JSON.stringify(selector)}; name one exactly or by window_id. Its windows: ${listed}`,
+			only === undefined ? "window-not-found" : "window-ambiguous",
 		);
 	}
 
-	find(app: string, query: unknown, options: unknown): Promise<unknown> {
+	/** A window binding that cannot be resolved: recorded as a refused action, and nothing is dispatched. */
+	private refuseWindow(target: AppTarget, message: string, refused: string): ScriptActionError {
+		const entry = { n: this.nextAction++, app: target.app, kind: "window", ms: 0, status: `refused:${refused}` };
+		this.actions.push(entry);
+		this.lastFailure = entry;
+		return new ScriptActionError(message, { kind: "refused", refused });
+	}
+
+	observe(target: AppTarget, options: unknown): Promise<unknown> {
+		const maxElements = pick(options, "maxElements");
+		return this.queue(target.app, async () => {
+			const windowId = await this.windowIdFor(target);
+			return await this.exec(
+				target.app,
+				"observe",
+				() =>
+					this.session.observe({
+						app: target.app,
+						diffOnly: pick(options, "diffOnly") === true,
+						includeScreenshot: this.options.includeScreenshot,
+						...(typeof maxElements === "number" ? { maxElements } : {}),
+						...windowOption(windowId),
+					}),
+				{ windowId },
+			);
+		});
+	}
+
+	find(target: AppTarget, query: unknown, options: unknown): Promise<unknown> {
 		const maxResults = pick(options, "maxResults");
 		const maxElements = pick(options, "maxElements");
-		return this.queue(app, () =>
-			this.exec(app, "find", () =>
-				this.session.findElements({
-					app,
-					query: toElementQuery(queryFields(query)),
-					includeScreenshot: this.options.includeScreenshot,
-					...(typeof maxResults === "number" ? { maxResults: Math.min(maxResults, MAX_FIND_RESULTS) } : {}),
-					...(typeof maxElements === "number" ? { maxElements } : {}),
-				}),
-			),
-		);
+		return this.queue(target.app, async () => {
+			const windowId = await this.windowIdFor(target);
+			return await this.exec(
+				target.app,
+				"find",
+				() =>
+					this.session.findElements({
+						app: target.app,
+						query: toElementQuery(queryFields(query)),
+						includeScreenshot: this.options.includeScreenshot,
+						...(typeof maxResults === "number" ? { maxResults: Math.min(maxResults, MAX_FIND_RESULTS) } : {}),
+						...(typeof maxElements === "number" ? { maxElements } : {}),
+						...windowOption(windowId),
+					}),
+				{ windowId },
+			);
+		});
+	}
+
+	/** Every on-screen window, or `app`'s, as list_windows answers (titles filled in from the apps). */
+	windows(app: unknown): Promise<unknown> {
+		if (app !== undefined && (typeof app !== "string" || app === "")) {
+			throw invalid("apple.windows takes an app name, or nothing for every app's windows");
+		}
+		const label = app ?? "*";
+		return this.queue(label, async () => {
+			const payload = await this.exec(
+				label,
+				"list_windows",
+				() => this.session.listWindows(app === undefined ? {} : { app }),
+				{ keepsTokens: true },
+			);
+			return pick(payload, "windows") ?? [];
+		});
 	}
 
 	apps(): Promise<unknown> {
@@ -492,7 +643,7 @@ class ScriptRun {
 	}
 
 	private async runParsed(
-		app: string,
+		target: AppTarget,
 		kind: string,
 		steps: readonly RunStep[],
 		expectOptions: unknown,
@@ -501,24 +652,28 @@ class ScriptRun {
 		const expectInput = pick(expectOptions, "expect");
 		const expectation =
 			expectInput === undefined ? undefined : verifyRequestFrom(pick(expectInput, "checks"), expectInput);
-		const token = await this.tokenFor(app, steps.some(needsObservedIds));
-		return await this.exec(app, kind, () =>
-			this.session.runSteps(
-				token,
-				app,
-				steps,
-				expectation,
-				this.driver,
-				{ fullState: false, includeScreenshot: this.options.includeScreenshot, retainTree: true },
-				{ signal: this.signal, ...(pace === undefined ? {} : { pace }) },
-			),
+		const token = await this.tokenFor(target, steps.some(needsObservedIds));
+		return await this.exec(
+			target.app,
+			kind,
+			() =>
+				this.session.runSteps(
+					token,
+					target.app,
+					steps,
+					expectation,
+					this.driver,
+					{ fullState: false, includeScreenshot: this.options.includeScreenshot, retainTree: true },
+					{ signal: this.signal, ...(pace === undefined ? {} : { pace }) },
+				),
+			{ windowId: boundId(target) },
 		);
 	}
 
-	step(app: string, raw: StepObject, expectOptions?: unknown): Promise<unknown> {
-		return this.queue(app, async () => {
-			const step = this.parseStep(app, raw);
-			return await this.runParsed(app, step.type, [step], expectOptions);
+	step(target: AppTarget, raw: StepObject, expectOptions?: unknown): Promise<unknown> {
+		return this.queue(target.app, async () => {
+			const step = this.parseStep(target.app, raw);
+			return await this.runParsed(target, step.type, [step], expectOptions);
 		});
 	}
 
@@ -526,8 +681,8 @@ class ScriptRun {
 	 * Several steps in one guarded call: one token, one preflight, one outcome read, stops at the first failure.
 	 * With pace "fast" they dispatch back to back, guarded by cheap checks instead of a read before each step.
 	 */
-	batch(app: string, raws: unknown, options?: unknown, forcedPace?: RunPace): Promise<unknown> {
-		return this.queue(app, async () => {
+	batch(target: AppTarget, raws: unknown, options?: unknown, forcedPace?: RunPace): Promise<unknown> {
+		return this.queue(target.app, async () => {
 			const requested = pick(options, "pace");
 			if (requested !== undefined && requested !== "fast" && requested !== "verified") {
 				throw invalid('pace is "verified" or "fast"');
@@ -540,17 +695,19 @@ class ScriptRun {
 				if (!isRecord(raw)) {
 					throw invalid("each batch entry is a step object such as apple.steps.click({label:'OK'})");
 				}
-				return this.parseStep(app, raw);
+				return this.parseStep(target.app, raw);
 			});
-			return await this.runParsed(app, "batch", steps, options, pace);
+			return await this.runParsed(target, "batch", steps, options, pace);
 		});
 	}
 
-	verify(app: string, checks: unknown, options: unknown): Promise<unknown> {
-		return this.queue(app, async () => {
+	verify(target: AppTarget, checks: unknown, options: unknown): Promise<unknown> {
+		return this.queue(target.app, async () => {
 			const request = verifyRequestFrom(checks, options);
-			const token = await this.tokenFor(app, request.checks !== undefined && request.checks.length > 0);
-			return await this.exec(app, "verify", () => this.session.verify(token, app, request));
+			const token = await this.tokenFor(target, request.checks !== undefined && request.checks.length > 0);
+			return await this.exec(target.app, "verify", () => this.session.verify(token, target.app, request), {
+				windowId: boundId(target),
+			});
 		});
 	}
 }
@@ -624,12 +781,13 @@ const stepBuilders = Object.freeze({
 	},
 });
 
-function makeAppHandle(run: ScriptRun, app: string): Readonly<Record<string, unknown>> {
-	const act = (raw: StepObject, options?: unknown): Promise<unknown> => run.step(app, raw, options);
+function makeAppHandle(run: ScriptRun, target: AppTarget): Readonly<Record<string, unknown>> {
+	const act = (raw: StepObject, options?: unknown): Promise<unknown> => run.step(target, raw, options);
 	return Object.freeze({
-		name: app,
-		observe: (options?: unknown) => run.observe(app, options),
-		find: (query: unknown, options?: unknown) => run.find(app, query, options),
+		name: target.app,
+		...(target.window === undefined ? {} : { window: target.window }),
+		observe: (options?: unknown) => run.observe(target, options),
+		find: (query: unknown, options?: unknown) => run.find(target, query, options),
 		click: (target: unknown, options?: unknown) => act(stepBuilders.click(target, options)),
 		setValue: (target: unknown, value: unknown, options?: unknown) =>
 			act(stepBuilders.setValue(target, value, options)),
@@ -649,9 +807,9 @@ function makeAppHandle(run: ScriptRun, app: string): Readonly<Record<string, unk
 			}
 			return act(raw, options);
 		},
-		batch: (raws: unknown, options?: unknown) => run.batch(app, raws, options),
-		chain: (raws: unknown, options?: unknown) => run.batch(app, raws, options, "fast"),
-		verify: (checks?: unknown, options?: unknown) => run.verify(app, checks, options),
+		batch: (raws: unknown, options?: unknown) => run.batch(target, raws, options),
+		chain: (raws: unknown, options?: unknown) => run.batch(target, raws, options, "fast"),
+		verify: (checks?: unknown, options?: unknown) => run.verify(target, checks, options),
 	});
 }
 
@@ -770,13 +928,14 @@ export function registerScriptTools(
 				controller.signal,
 			);
 			const apple = Object.freeze({
-				app: (name: unknown) => {
+				app: (name: unknown, options?: unknown) => {
 					if (typeof name !== "string" || name === "") {
 						throw invalid("apple.app needs an app name string");
 					}
-					return makeAppHandle(run, name);
+					return makeAppHandle(run, appTarget(name, options));
 				},
 				apps: () => run.apps(),
+				windows: (name?: unknown) => run.windows(name),
 				steps: stepBuilders,
 			});
 			try {

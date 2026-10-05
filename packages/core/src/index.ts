@@ -42,6 +42,9 @@ export type {
 export type { ComputerInterface, ScreenshotResult, WindowTextRead } from "./computer/interface.js";
 export {
 	type TopLevelWindow,
+	type TopLevelWindowOptions,
+	type WindowProbe,
+	fillWindowTitles,
 	listTopLevelWindows,
 } from "./platform/macos-top-level-windows.js";
 export { type ListedWindow, listWindows } from "./platform/macos-ffi/window-list.js";

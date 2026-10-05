@@ -1,5 +1,5 @@
 import { AppApprovalStore, MacOSHostComputer, listTopLevelWindows, renamedEnvironmentVariable } from "@apple-cua/core";
-import type { GuardedComputerInterface, InputDelivery, TopLevelWindow } from "@apple-cua/core";
+import type { GuardedComputerInterface, InputDelivery, WindowProbe } from "@apple-cua/core";
 
 export function allowedBundleIdsFromEnvironment(value: string | undefined): readonly string[] {
 	return (value ?? "")
@@ -36,6 +36,6 @@ export function createNativeComputer(): GuardedComputerInterface {
 	});
 }
 
-export function createNativeWindowProbe(): (() => Promise<readonly TopLevelWindow[]>) | undefined {
+export function createNativeWindowProbe(): WindowProbe | undefined {
 	return process.platform === "darwin" ? listTopLevelWindows : undefined;
 }

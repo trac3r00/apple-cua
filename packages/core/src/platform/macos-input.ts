@@ -9,6 +9,7 @@ import {
 	focusedWindowIsModal,
 	focusedWindowShowsFilePanel,
 	raiseWindowInApp,
+	windowTitlesForPid,
 } from "./macos-ffi/accessibility.js";
 import {
 	type MouseButton,
@@ -21,7 +22,12 @@ import { NOOP_POINTER_OVERLAY, type PointerOverlay } from "./macos-ffi/cursor-ov
 import { filePanelServicePid } from "./macos-ffi/file-panel-service.js";
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";
 import { type DisplaySleepAssertion, NOOP_DISPLAY_SLEEP } from "./macos-ffi/power.js";
-import { type SkyLightTargetWindow, focusGuardFor, setWindowAppActive } from "./macos-ffi/skylight.js";
+import {
+	type SkyLightTargetWindow,
+	focusGuardFor,
+	frontProcessSerialNumber,
+	setProcessAppActive,
+} from "./macos-ffi/skylight.js";
 import { listOnscreenWindows } from "./macos-ffi/window-list.js";
 import { startFocusStealWatch } from "./macos-focus-watch.js";
 import { pointerModifierFlags, withHeldModifiers } from "./macos-input-modifiers.js";
@@ -70,8 +76,10 @@ let keyboardWindowFocuser: (pid: number, windowId: number) => Promise<void> = as
 	if (focusedId !== undefined) {
 		// An untitled focused window is a helper of the target's own interaction (Finder's rename field
 		// editor, a popover); raising the target over it would end that interaction. Only another
-		// document window takes the keys away from the target.
-		const focusedTitle = (await openWindowsForTargeting()).find((window) => window.id === focusedId)?.title;
+		// document window takes the keys away from the target. The WindowServer hides every title from a
+		// process without Screen Recording, so accessibility names the window when the listing does not.
+		const listedTitle = (await openWindowsForTargeting()).find((window) => window.id === focusedId)?.title;
+		const focusedTitle = listedTitle || windowTitlesForPid(pid).get(focusedId);
 		if (!focusedTitle || raiseWindowInApp(pid, windowId)) {
 			return;
 		}
@@ -165,17 +173,27 @@ export type { InputDelivery };
 // target app's event loop and drops characters; ~12ms lets each be consumed.
 const TYPE_CHARACTER_DELAY_MS = 12;
 
-/** How long a target told it is active for a modified gesture stays so without another one. */
-export const MODIFIED_ACTIVATION_IDLE_MILLISECONDS = 2_000;
+/** How long an app behind the person's that background input told it is active stays so without another action. */
+export const BACKGROUND_ACTIVATION_IDLE_MILLISECONDS = 2_000;
 
 export class MacOSInputController {
 	private targetPid: number | undefined;
 	private lastTargetWindow: SkyLightTargetWindow | undefined;
 	private readonly targetWindowsByPid = new Map<number, SkyLightTargetWindow>();
 	private readonly keyboardInputAt = new Map<number, number>();
-	/** Windows whose app was told it is active for a modified gesture, to be told otherwise on close. */
-	private readonly activatedWindows = new Map<number, SkyLightTargetWindow>();
+	/** Apps behind the person's that this controller told they are active, by pid, to be told otherwise once idle. */
+	private readonly activations = new Map<number, { readonly window: SkyLightTargetWindow; readonly psn: Buffer }>();
 	private readonly activationReleaseTimers = new Map<number, NodeJS.Timeout>();
+	/**
+	 * Registered on process exit while any app is held: a process that ends (a server turns termination
+	 * signals into an exit) still tells every app it told it is active otherwise, synchronously on the way out.
+	 */
+	private readonly releaseOnExit = (): void => {
+		for (const pid of [...this.activations.keys()]) {
+			this.releaseActivation(pid);
+		}
+	};
+	private exitHookRegistered = false;
 	private readonly overlay: PointerOverlay;
 	private readonly pointer: VirtualPointer;
 	private readonly isLocked: () => boolean;
@@ -233,59 +251,178 @@ export class MacOSInputController {
 	 * mouse or wheel event, and the keys released afterwards even when the gesture throws. Posting is
 	 * per process under a target, so the person's own keyboard state is never touched.
 	 *
-	 * An app behind the person's swallows a click that is not a command-click (the system treats it as
-	 * the click that activates the window) and does not extend a selection on a command-click either,
-	 * so a modified gesture in background delivery first tells the target app it is active, without
-	 * changing the front process. The app is told otherwise once no modified gesture has reached it for
-	 * {@link MODIFIED_ACTIVATION_IDLE_MILLISECONDS} (or when the controller closes): telling it right
-	 * after each gesture leaves some apps (Finder) deaf to the very next activation, while a chain of
-	 * modified clicks shares one activation.
+	 * An app behind the person's swallows a click (the system spends it on activating the window, so a
+	 * plain click selects nothing) and does not extend a selection on a command-click either, so in
+	 * background delivery a click, double click or drag first has the target app told it is active (see
+	 * activateBehind). Wheel events scroll a background app without that, so a scroll asks for it only
+	 * when it carries modifiers.
 	 */
 	private async holdModifiers<T>(
 		modifiers: ReadonlyArray<KeyModifierName> | undefined,
 		targetWindow: SkyLightTargetWindow | undefined,
+		activation: "pointer" | "wheel",
 		gesture: (flags: number | undefined) => Promise<T>,
 	): Promise<T> {
-		const activateTarget =
-			this.isBackground &&
-			targetWindow !== undefined &&
-			pointerModifierFlags(modifiers) !== 0 &&
-			focusGuardFor(targetWindow) !== null;
-		if (activateTarget && setWindowAppActive(targetWindow, true)) {
-			this.activatedWindows.set(targetWindow.id, targetWindow);
-			focusStealWatcher(targetWindow);
-			await postActivationPrimer(this.postMouse, targetWindow);
-		}
-		if (targetWindow !== undefined && this.activatedWindows.has(targetWindow.id)) {
-			this.cancelActivationRelease(targetWindow.id);
+		// Read first: an unknown modifier name is refused here, before anything is posted.
+		const modified = pointerModifierFlags(modifiers) !== 0;
+		const pid = this.targetPid;
+		let held = false;
+		if (pid !== undefined && targetWindow !== undefined) {
+			held =
+				activation === "pointer" || modified
+					? await this.activateBehind(pid, targetWindow)
+					: this.postponeActivationRelease(pid);
 		}
 		try {
 			return await this.postWithHeldModifiers(modifiers, targetWindow, gesture);
 		} finally {
-			if (targetWindow !== undefined && this.activatedWindows.has(targetWindow.id)) {
-				this.scheduleActivationRelease(targetWindow);
+			if (held && pid !== undefined) {
+				this.scheduleActivationRelease(pid);
 			}
 		}
 	}
 
-	private cancelActivationRelease(windowId: number): void {
-		const timer = this.activationReleaseTimers.get(windowId);
+	/**
+	 * Tell the app owning `window`, which sits behind the person's app, that it is active with `window` as
+	 * its key window: no front-process change, no raise, nothing told to the person's app. An app that
+	 * believes it is active takes the first click of a gesture instead of spending it on activating the
+	 * window, reads modifier flags off a click, and enables its window commands (Save, New Folder). The
+	 * first click after the activation is still spent on it, so a click outside every window absorbs it.
+	 *
+	 * The app stays told until no background action has reached it for
+	 * {@link BACKGROUND_ACTIVATION_IDLE_MILLISECONDS} (or the controller closes): telling it otherwise
+	 * right after each action leaves some apps (Finder) deaf to the very next activation, while a chain of
+	 * actions shares one. An app held for another of its windows is told again, naming this one. True when
+	 * this controller holds the app active afterwards; the caller then schedules the release.
+	 */
+	private async activateBehind(pid: number, window: SkyLightTargetWindow): Promise<boolean> {
+		if (!this.isBackground) {
+			return false;
+		}
+		this.cancelActivationRelease(pid);
+		const held = this.activations.get(pid);
+		if (held?.window.id === window.id) {
+			return true;
+		}
+		const guard = focusGuardFor(window);
+		if (guard === null || !setProcessAppActive(guard.targetPsn, window.id, true)) {
+			// Frontmost already (there is nothing to tell it), or out of reach: an earlier hold stays as it was.
+			return held !== undefined;
+		}
+		this.activations.set(pid, { window, psn: guard.targetPsn });
+		this.syncExitHook();
+		focusStealWatcher(window);
+		await postActivationPrimer(this.mousePostFor(pid), window);
+		return true;
+	}
+
+	/** Keep a held activation from running out while another action reaches the app; false when none is held. */
+	private postponeActivationRelease(pid: number): boolean {
+		if (!this.activations.has(pid)) {
+			return false;
+		}
+		this.cancelActivationRelease(pid);
+		return true;
+	}
+
+	private cancelActivationRelease(pid: number): void {
+		const timer = this.activationReleaseTimers.get(pid);
 		if (timer !== undefined) {
 			clearTimeout(timer);
-			this.activationReleaseTimers.delete(windowId);
+			this.activationReleaseTimers.delete(pid);
 		}
 	}
 
-	private scheduleActivationRelease(window: SkyLightTargetWindow): void {
-		this.cancelActivationRelease(window.id);
+	private scheduleActivationRelease(pid: number): void {
+		this.cancelActivationRelease(pid);
 		const timer = setTimeout(() => {
-			this.activationReleaseTimers.delete(window.id);
-			if (this.activatedWindows.delete(window.id)) {
-				setWindowAppActive(window, false);
-			}
-		}, MODIFIED_ACTIVATION_IDLE_MILLISECONDS);
+			this.activationReleaseTimers.delete(pid);
+			this.releaseActivation(pid);
+		}, BACKGROUND_ACTIVATION_IDLE_MILLISECONDS);
 		timer.unref();
-		this.activationReleaseTimers.set(window.id, timer);
+		this.activationReleaseTimers.set(pid, timer);
+	}
+
+	/**
+	 * Tell a held app it is no longer active, unless the person brought it forward meanwhile: then it
+	 * really is the active app, and telling it otherwise would take that from them. Addressed by process,
+	 * so it still lands after the window it was activated with has closed.
+	 */
+	private releaseActivation(pid: number): void {
+		const held = this.activations.get(pid);
+		if (held === undefined) {
+			return;
+		}
+		this.activations.delete(pid);
+		this.syncExitHook();
+		if (frontProcessSerialNumber()?.equals(held.psn) !== true) {
+			setProcessAppActive(held.psn, held.window.id, false);
+		}
+	}
+
+	/** The exit hook is registered exactly while some app is held. */
+	private syncExitHook(): void {
+		const wanted = this.activations.size > 0;
+		if (wanted && !this.exitHookRegistered) {
+			process.on("exit", this.releaseOnExit);
+		} else if (!wanted && this.exitHookRegistered) {
+			process.off("exit", this.releaseOnExit);
+		}
+		this.exitHookRegistered = wanted;
+	}
+
+	/** Mouse events for `pid`, whichever app the controller is aimed at right now. */
+	private mousePostFor(pid: number): MousePost {
+		return async (kind, position, button, clickState, targetWindow, flags) => {
+			postMouseEvent({ kind, position, button, clickState, targetPid: pid, targetWindow, flags });
+		};
+	}
+
+	/**
+	 * Run a window command (a menu item, a key equivalent) meant for `window` of app `pid`. A window command
+	 * acts on the app's key window, so `window` is first made the app's focused window inside its own app.
+	 * macOS validates window commands against their app being active, so under background delivery an app
+	 * behind the person's is told it is active with `window` as its key window (see activateBehind) before
+	 * `command` runs, when `wantsActivation()` says the command can use that (and always while this
+	 * controller already holds the app); the person's own frontmost app is told nothing. `command` learns
+	 * whether the app is held active; the hold lasts through it and ends once idle afterwards, like a
+	 * pointer gesture's.
+	 */
+	async withWindowCommand<T>(
+		pid: number,
+		window: SkyLightTargetWindow,
+		wantsActivation: () => boolean,
+		command: (held: boolean) => Promise<T>,
+	): Promise<T> {
+		this.beforeInput();
+		await keyboardWindowFocuser(pid, window.id);
+		const activate = this.activations.has(pid) || (this.isBackground && wantsActivation());
+		const held = activate ? await this.activateBehind(pid, window) : false;
+		try {
+			return await command(held);
+		} finally {
+			if (held) {
+				this.scheduleActivationRelease(pid);
+			}
+		}
+	}
+
+	/** Whether this controller holds `pid` told it is active, so the app's own AXFrontmost is not the person's doing. */
+	holdsActivation(pid: number): boolean {
+		return this.activations.has(pid);
+	}
+
+	/** Keys reaching an app this controller holds active keep it so: its idle period restarts after them. */
+	private async keepingActivation<T>(work: () => Promise<T>): Promise<T> {
+		const pid = this.targetPid;
+		const held = pid !== undefined && this.postponeActivationRelease(pid);
+		try {
+			return await work();
+		} finally {
+			if (held && pid !== undefined) {
+				this.scheduleActivationRelease(pid);
+			}
+		}
 	}
 
 	private async postWithHeldModifiers<T>(
@@ -365,7 +502,7 @@ export class MacOSInputController {
 			const targetWindow = await this.targetWindow(position);
 			this.requirePointerWindow(targetWindow);
 			this.lastTargetWindow = targetWindow;
-			await this.holdModifiers(modifiers, targetWindow, async (flags) => {
+			await this.holdModifiers(modifiers, targetWindow, "pointer", async (flags) => {
 				if (this.targetPid === undefined) {
 					await this.move(position);
 					await postClick(this.postMouse, position, button, 1, targetWindow, flags);
@@ -390,7 +527,7 @@ export class MacOSInputController {
 			const targetWindow = await this.targetWindow(position);
 			this.requirePointerWindow(targetWindow);
 			this.lastTargetWindow = targetWindow;
-			await this.holdModifiers(modifiers, targetWindow, async (flags) => {
+			await this.holdModifiers(modifiers, targetWindow, "pointer", async (flags) => {
 				if (this.targetPid === undefined) {
 					await this.move(position);
 					await postDoubleClick(this.postMouse, position, targetWindow, flags);
@@ -409,6 +546,10 @@ export class MacOSInputController {
 	}
 
 	async typeText(text: string): Promise<void> {
+		await this.keepingActivation(() => this.postText(text));
+	}
+
+	private async postText(text: string): Promise<void> {
 		this.beforeInput();
 		const targetWindow = await this.requireSessionWindow("keyboard");
 		const keyboardPid = this.keyboardPid();
@@ -432,6 +573,10 @@ export class MacOSInputController {
 	}
 
 	async pressKey(key: string, options?: KeyOptions): Promise<void> {
+		await this.keepingActivation(() => this.postKey(key, options));
+	}
+
+	private async postKey(key: string, options?: KeyOptions): Promise<void> {
 		this.beforeInput();
 		if (await this.pasteAsTyping(key, options)) {
 			return;
@@ -506,7 +651,7 @@ export class MacOSInputController {
 		const perStep = 4;
 		const steps = Math.max(1, Math.ceil(amount / perStep));
 		const delta = amount / steps;
-		await this.holdModifiers(options.modifiers, targetWindow, async (flags) => {
+		await this.holdModifiers(options.modifiers, targetWindow, "wheel", async (flags) => {
 			for (let i = 0; i < steps; i++) {
 				const d = Math.round(delta);
 				postScrollEvent({
@@ -531,7 +676,7 @@ export class MacOSInputController {
 			const targetWindow = await this.targetWindow(options.from);
 			this.requirePointerWindow(targetWindow);
 			this.lastTargetWindow = targetWindow;
-			await this.holdModifiers(options.modifiers, targetWindow, async (flags) => {
+			await this.holdModifiers(options.modifiers, targetWindow, "pointer", async (flags) => {
 				if (this.targetPid === undefined) {
 					await this.move(options.from);
 					await postDragSequence(this.postMouse, options, targetWindow, flags);
@@ -559,10 +704,9 @@ export class MacOSInputController {
 			clearTimeout(timer);
 		}
 		this.activationReleaseTimers.clear();
-		for (const window of this.activatedWindows.values()) {
-			setWindowAppActive(window, false);
+		for (const pid of [...this.activations.keys()]) {
+			this.releaseActivation(pid);
 		}
-		this.activatedWindows.clear();
 		this.displaySleep.release();
 		this.overlay.close();
 	}

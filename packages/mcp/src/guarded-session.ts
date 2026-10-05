@@ -22,6 +22,7 @@ import type {
 	StopStatusSource,
 	SystemPrompt,
 	TopLevelWindow,
+	WindowProbe,
 } from "@apple-cua/core";
 import type { ResolvedTargetClick } from "./mutation-actions.js";
 import {
@@ -336,6 +337,8 @@ export class GuardedSession {
 	private readonly tokenByPid = new Map<number, string>();
 	private readonly reusableReads = new Map<number, ReusableRead>();
 	private readonly resolvedAppPids = new Map<string, number>();
+	/** The window each app's latest observation named (window_id, a script's bound window), by pid. */
+	private readonly boundWindows = new Map<number, number>();
 	private readonly tails = new Map<number, Promise<void>>();
 	private globalTail: Promise<void> = Promise.resolve();
 	private closed = false;
@@ -343,7 +346,7 @@ export class GuardedSession {
 
 	constructor(
 		private readonly computer: GuardedComputerInterface,
-		private readonly windowProbe?: () => Promise<readonly TopLevelWindow[]>,
+		private readonly windowProbe?: WindowProbe,
 		private readonly appLauncher?: AppOpenLauncher,
 		private readonly systemPromptProbe?: () => readonly SystemPrompt[],
 		private readonly stopSwitch?: StopStatusSource,
@@ -353,9 +356,19 @@ export class GuardedSession {
 		return this.enqueue(undefined, async () => textResult(JSON.stringify(await this.computer.listApps(), null, 2)));
 	}
 
-	listWindows(): Promise<ToolResult> {
+	/**
+	 * Every on-screen top-level window, or only `app`'s. Titles the WindowServer withholds (from a process
+	 * without Screen Recording) are filled in from the apps themselves.
+	 */
+	listWindows(options: { readonly app?: string } = {}): Promise<ToolResult> {
 		return this.enqueue(undefined, async () => {
-			const windows = this.windowProbe === undefined ? [] : await this.windowProbe();
+			const pid = options.app === undefined ? undefined : await this.resolvePid(options.app);
+			const windows =
+				this.windowProbe === undefined
+					? []
+					: (await this.windowProbe({ titlesFor: pid === undefined ? "all" : [pid] })).filter(
+							(window) => pid === undefined || window.ownerPid === pid,
+						);
 			const prompts = this.systemPromptProbe === undefined ? [] : this.systemPromptProbe();
 			return textResult(
 				JSON.stringify(
@@ -378,10 +391,18 @@ export class GuardedSession {
 		});
 	}
 
+	/** `app`'s open windows, titled, for binding a script handle to one of them by its title. */
+	async windowsOf(app: string): Promise<{ readonly pid: number; readonly windows: readonly TopLevelWindow[] }> {
+		this.assertOpen();
+		const pid = await this.resolvePid(app);
+		return { pid, windows: await this.windowsForPid(pid) };
+	}
+
 	async observe(request: ObserveRequest): Promise<ToolResult> {
 		const targetPid = await this.resolvePid(request.app);
 		return this.enqueue(targetPid, async () => {
 			this.clearTokenFor(targetPid);
+			this.bindWindow(targetPid, request.windowId);
 			const state = await this.computer.getAppState(targetPid, {
 				...(request.diffOnly ? STRICT_DIFF_STATE_OPTIONS : STRICT_STATE_OPTIONS),
 				...(request.includeScreenshot === undefined ? {} : { includeScreenshot: request.includeScreenshot }),
@@ -397,9 +418,9 @@ export class GuardedSession {
 			this.assertOpen();
 			const observation = this.computer.getInputObservation(targetPid);
 			const token = this.issueForObservation(observation, state);
+			// A read scoped to a named window is reusable too: the reads after it stay on that window (bindWindow).
 			if (
 				token !== undefined &&
-				request.windowId === undefined &&
 				request.maxElements === undefined &&
 				request.includeMenuBar === undefined &&
 				request.subtreeOf === undefined
@@ -419,6 +440,7 @@ export class GuardedSession {
 		return this.lookupApp(request.app, async (targetPid) =>
 			this.enqueue(targetPid, async () => {
 				this.clearTokenFor(targetPid);
+				this.bindWindow(targetPid, request.windowId);
 				const observed = await this.observeApp(targetPid, {
 					includeScreenshot: request.includeScreenshot === true,
 					...(request.windowId === undefined ? {} : { windowId: request.windowId }),
@@ -463,6 +485,7 @@ export class GuardedSession {
 		return this.lookupApp(request.app, async (targetPid) =>
 			this.enqueue(targetPid, async () => {
 				this.clearTokenFor(targetPid);
+				this.bindWindow(targetPid, request.windowId);
 				const startedAt = Date.now();
 				const deadline = startedAt + (request.timeoutMs ?? 0);
 				const includeScreenshot = request.includeScreenshot === true;
@@ -1118,6 +1141,7 @@ export class GuardedSession {
 				...STRICT_STATE_OPTIONS,
 				includeScreenshot: false,
 				settleMs: 0,
+				...(await this.boundWindowOption(targetPid)),
 			});
 			this.assertOpen();
 			changed = changed || hasAxChange(state);
@@ -1163,7 +1187,7 @@ export class GuardedSession {
 				...STRICT_STATE_OPTIONS,
 				includeScreenshot: false,
 				settleMs: 0,
-				...(windowId === undefined ? {} : { windowId }),
+				...(windowId === undefined ? await this.boundWindowOption(targetPid) : { windowId }),
 			});
 			this.assertOpen();
 			const verification = await this.runChecks(targetPid, state, request);
@@ -1229,7 +1253,7 @@ export class GuardedSession {
 			return [];
 		}
 		try {
-			return (await this.windowProbe()).filter((window) => window.ownerPid === pid);
+			return (await this.windowProbe({ titlesFor: [pid] })).filter((window) => window.ownerPid === pid);
 		} catch {
 			return [];
 		}
@@ -1397,10 +1421,12 @@ export class GuardedSession {
 		// A retained read asks for the whole tree and answers with the same diff-only state the walk would
 		// have produced on its own.
 		const retain = options.retainTree === true && options.fullState !== true;
+		const bound = await this.boundWindowOption(targetPid);
 		const read = await timed("readOutcome.getAppState", () =>
 			this.computer.getAppState(targetPid, {
 				...(options.fullState === true || retain ? STRICT_STATE_OPTIONS : STRICT_DIFF_STATE_OPTIONS),
 				includeScreenshot: options.includeScreenshot === true,
+				...bound,
 			}),
 		);
 		const state: AppState =
@@ -1432,8 +1458,9 @@ export class GuardedSession {
 		readonly changed: boolean;
 	}> {
 		this.assertOpen();
+		const bound = await this.boundWindowOption(targetPid);
 		const state = await timed("readFieldBaseline.getAppState", () =>
-			this.computer.getAppState(targetPid, FIELD_VERIFY_STATE_OPTIONS),
+			this.computer.getAppState(targetPid, { ...FIELD_VERIFY_STATE_OPTIONS, ...bound }),
 		);
 		this.assertOpen();
 		return {
@@ -1461,14 +1488,23 @@ export class GuardedSession {
 		try {
 			const known = new Set(baseline);
 			const probe = this.windowProbe;
-			return (await timed("windowProbe.after", () => probe()))
-				.filter((window) => !known.has(window.id))
-				.map((window) => ({
-					id: window.id,
-					ownerPid: window.ownerPid,
-					ownerName: window.ownerName,
-					title: window.title,
-				}));
+			let opened = (await timed("windowProbe.after", () => probe())).filter((window) => !known.has(window.id));
+			const untitled = [...new Set(opened.filter((window) => window.title === "").map((window) => window.ownerPid))];
+			if (untitled.length > 0) {
+				// Titles the WindowServer withholds come from the apps that opened the windows.
+				const titles = new Map(
+					(await probe({ titlesFor: untitled })).map((window) => [window.id, window.title] as const),
+				);
+				opened = opened.map((window) =>
+					window.title === "" ? { ...window, title: titles.get(window.id) ?? "" } : window,
+				);
+			}
+			return opened.map((window) => ({
+				id: window.id,
+				ownerPid: window.ownerPid,
+				ownerName: window.ownerName,
+				title: window.title,
+			}));
 		} catch {
 			return [];
 		}
@@ -1483,6 +1519,43 @@ export class GuardedSession {
 		this.tokens.set(token, { token, observation, elements });
 		this.tokenByPid.set(observation.pid, token);
 		return token;
+	}
+
+	/**
+	 * Keep this app's later reads (action outcomes, step baselines, waits) on the window an observation
+	 * named, or let them follow the app's focused window again when the observation named none.
+	 */
+	private bindWindow(pid: number, windowId: number | undefined): void {
+		if (windowId === undefined) {
+			this.boundWindows.delete(pid);
+		} else {
+			this.boundWindows.set(pid, windowId);
+		}
+	}
+
+	/**
+	 * The window an internal read of `pid` is scoped to: the one its latest observation named, while that
+	 * window is still open, so an action's outcome and the next step's baseline come from the window acted
+	 * on even when another of the app's windows has focus. A bound window that has closed is let go.
+	 */
+	private async boundWindowOption(pid: number): Promise<{ readonly windowId?: number }> {
+		const windowId = this.boundWindows.get(pid);
+		if (windowId === undefined) {
+			return {};
+		}
+		if (this.windowProbe !== undefined) {
+			let open = true;
+			try {
+				open = (await this.windowProbe()).some((window) => window.id === windowId && window.ownerPid === pid);
+			} catch {
+				// The listing could not be read: keep the window, and let the read report it if it is gone.
+			}
+			if (!open) {
+				this.boundWindows.delete(pid);
+				return {};
+			}
+		}
+		return { windowId };
 	}
 
 	/** One live token per app: a new observation of that app invalidates its previous token only. */

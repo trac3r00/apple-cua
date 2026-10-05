@@ -13,7 +13,7 @@ import type {
 	GuardedComputerInterface,
 	StopStatusSource,
 	SystemPrompt,
-	TopLevelWindow,
+	WindowProbe,
 } from "@apple-cua/core";
 import { IPhoneMirroring } from "@apple-cua/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -75,7 +75,7 @@ class ComputerMcpServer extends McpServer {
 
 export function createMcpServer(
 	computer: GuardedComputerInterface | undefined = undefined,
-	windowProbe?: () => Promise<readonly TopLevelWindow[]>,
+	windowProbe?: WindowProbe,
 	phoneSource?: PhoneToolSource,
 	appLauncher?: AppOpenLauncher,
 	systemPromptProbe?: () => readonly SystemPrompt[],
@@ -239,7 +239,19 @@ export function createMcpServer(
 
 export async function main(): Promise<void> {
 	const server = createMcpServer();
+	exitOnTerminationSignals();
 	await server.connect(new StdioServerTransport());
+}
+
+/**
+ * End the process through process.exit on a termination signal, which runs exit hooks the default signal
+ * handling skips: an app that background input told it is active is told otherwise on the way out.
+ */
+function exitOnTerminationSignals(): void {
+	const exitCodes = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 } as const;
+	for (const [signal, code] of Object.entries(exitCodes)) {
+		process.once(signal, () => process.exit(code));
+	}
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

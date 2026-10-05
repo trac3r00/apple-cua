@@ -466,6 +466,47 @@ export function raiseWindowInApp(pid: number, windowId: number): boolean {
 	}
 }
 
+/**
+ * The title of each of the app's windows, by WindowServer window id, read from the app's own
+ * accessibility windows. The WindowServer hides window titles from a process without Screen Recording
+ * permission, while the app still names its windows. Empty when the app exposes no windows over
+ * accessibility or the id lookup SPI is unavailable.
+ */
+export function windowTitlesForPid(pid: number): ReadonlyMap<number, string> {
+	const titles = new Map<number, string>();
+	if (!isRunning(pid) || AXUIElementGetWindowSpi === null) {
+		return titles;
+	}
+	let root: AXUIElementRef | null = null;
+	let windows: CFTypeRef | null = null;
+	try {
+		root = createApplicationElement(pid);
+		windows = copyOptionalAttributeValue(root, "AXWindows");
+		if (windows === null || !isCFArray(windows)) {
+			return titles;
+		}
+		for (let index = 0; index < cfArrayLength(windows); index++) {
+			const window = cfArrayValueAt(windows, index);
+			if (window === null) {
+				continue;
+			}
+			const id = windowIdOf(window);
+			const title = copyStringAttribute(window, K_AX_TITLE_ATTRIBUTE);
+			if (id !== undefined && title !== null) {
+				titles.set(id, title);
+			}
+		}
+		return titles;
+	} catch {
+		return titles;
+	} finally {
+		cfRelease(windows);
+		if (root !== null) {
+			releaseAXElement(root);
+		}
+	}
+}
+
 export function releaseAccessibilitySnapshot(pid: number): void {
 	replaceElementSnapshot(pid, undefined);
 }

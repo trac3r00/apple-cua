@@ -49,6 +49,9 @@ vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
 setOpenWindowsSourceForTesting(() => undefined);
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/skylight.js", () => ({
+	// Background gestures first ask whether the target sits behind the person's app; here it is frontmost.
+	focusGuardFor: () => null,
+	setProcessAppActive: vi.fn(),
 	beginFocusWithoutRaise: skyLightMock.beginFocusWithoutRaise,
 	frontProcessSerialNumber: skyLightMock.frontProcessSerialNumber,
 	processSerialNumbersMatch: skyLightMock.processSerialNumbersMatch,

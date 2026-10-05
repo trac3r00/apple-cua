@@ -36,6 +36,7 @@ const accessibilityMock = vi.hoisted(() => ({
 	pressElementAtScreenPoint: vi.fn(),
 	setValueByIndex: vi.fn(),
 	typeIntoFocusedAXElement: vi.fn(),
+	windowTitlesForPid: vi.fn<() => ReadonlyMap<number, string>>(() => new Map()),
 }));
 
 const screenshotMock = vi.hoisted(() => ({
@@ -282,6 +283,29 @@ describe("#given an app with several windows #when the observation resolves a ta
 		expect(state.windowId).toBe(42);
 		expect(state.windowTitle).toBe("Downloads");
 		expect(state.windowCandidates?.map((candidate) => candidate.id)).toEqual([99, 42]);
+	});
+
+	it("names every candidate by the title the app reports when the WindowServer withholds titles", async () => {
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS },
+			{ id: 42, owner: { processId: TARGET_PID }, bounds: { x: 0, y: 0, width: 400, height: 300 } },
+		]);
+		accessibilityMock.focusedWindowIdForPid.mockReturnValue(42);
+		accessibilityMock.windowTitlesForPid.mockReturnValueOnce(
+			new Map([
+				[99, "a.txt"],
+				[42, "b.txt"],
+			]),
+		);
+		const computer = new MacOSHostComputer();
+
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+		expect(state.windowCandidates?.map((candidate) => [candidate.id, candidate.title])).toEqual([
+			[99, "a.txt"],
+			[42, "b.txt"],
+		]);
+		expect(state.windowTitle).toBe("b.txt");
 	});
 
 	it("honors an explicitly requested window id over the focused window", async () => {

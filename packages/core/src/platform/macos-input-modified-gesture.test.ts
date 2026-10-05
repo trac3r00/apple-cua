@@ -4,6 +4,7 @@ import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
 import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
 
 const WINDOW = { id: 99, bounds: { x: 10, y: 20, width: 300, height: 200 } };
+const OTHER_WINDOW = { id: 98, bounds: { x: 400, y: 20, width: 300, height: 200 } };
 const COMMAND = 0x00100000;
 const SHIFT = 0x00020000;
 const OPTION = 0x00080000;
@@ -19,19 +20,33 @@ const coreGraphicsMock = vi.hoisted(() => ({
 	warpCursorPosition: vi.fn(),
 }));
 
-const skyLightMock = vi.hoisted(() => ({
-	focusGuardFor: vi.fn(),
-	setWindowAppActive: vi.fn(),
-}));
+const skyLightMock = vi.hoisted(() => {
+	const personPsn = Buffer.alloc(8, 1);
+	const targetPsn = Buffer.alloc(8, 2);
+	const state = { front: personPsn };
+	return {
+		focusGuardFor: vi.fn(),
+		frontProcessSerialNumber: vi.fn(() => state.front),
+		setProcessAppActive: vi.fn<(psn: Buffer, windowId: number, active: boolean) => boolean>(),
+		personPsn,
+		targetPsn,
+		state,
+	};
+});
 
 vi.mock("get-windows", () => ({
-	openWindows: vi.fn(() => Promise.resolve([{ id: 99, owner: { processId: 1234 }, bounds: WINDOW.bounds }])),
+	openWindows: vi.fn(() =>
+		Promise.resolve(
+			[WINDOW, OTHER_WINDOW].map((window) => ({ id: window.id, owner: { processId: 1234 }, bounds: window.bounds })),
+		),
+	),
 }));
 setOpenWindowsSourceForTesting(() => undefined);
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/skylight.js", () => ({
 	focusGuardFor: skyLightMock.focusGuardFor,
-	setWindowAppActive: skyLightMock.setWindowAppActive,
+	frontProcessSerialNumber: skyLightMock.frontProcessSerialNumber,
+	setProcessAppActive: skyLightMock.setProcessAppActive,
 }));
 vi.mock("./macos-ffi/coregraphics.js", () => ({
 	K_CG_EVENT_FLAG_MASK_ALTERNATE: 0x00080000,
@@ -58,36 +73,50 @@ interface KeyCall {
 	readonly flagsChanged?: boolean | undefined;
 }
 
-async function backgroundController() {
+async function backgroundController(delivery: "background" | "attended" = "background") {
 	const { MacOSInputController } = await import("./macos-input.js");
 	return new MacOSInputController(
 		1234,
 		{ set: vi.fn(), highlight: vi.fn(), setMode: vi.fn(), hide: vi.fn(), close: vi.fn() },
 		() => false,
 		{ acquire: vi.fn(), release: vi.fn() },
-		"background",
+		delivery,
 	);
 }
 
-describe("#given a background controller holding modifiers across a pointer gesture", () => {
-	beforeEach(async () => {
-		vi.clearAllMocks();
-		log.events.length = 0;
-		setOnscreenWindowIdsSourceForTesting(() => [99]);
-		const { setFocusStealWatcherForTesting } = await import("./macos-input.js");
-		setFocusStealWatcherForTesting(() => undefined);
-		skyLightMock.focusGuardFor.mockReturnValue({ previousPsn: Buffer.alloc(8, 1), targetPsn: Buffer.alloc(8, 2) });
-		skyLightMock.setWindowAppActive.mockImplementation((_window: unknown, active: boolean) => {
-			log.events.push(`active:${String(active)}`);
-			return true;
-		});
-		coreGraphicsMock.postKeyboardEvent.mockImplementation((call) => {
-			log.events.push(`key:${String(call.keyCode)}:${call.keyDown ? "down" : "up"}:${call.flags.toString(16)}`);
-		});
-		coreGraphicsMock.postMouseEvent.mockImplementation((call) => {
-			log.events.push(`mouse:${call.kind}:${call.position.x},${call.position.y}:${(call.flags ?? 0).toString(16)}`);
-		});
+/** The app behind the person's, its activation recorded as `active:<state>:<window>` among the posted events. */
+async function resetDesktop(): Promise<void> {
+	vi.clearAllMocks();
+	log.events.length = 0;
+	setOnscreenWindowIdsSourceForTesting(() => [99, 98]);
+	const { setFocusStealWatcherForTesting, setKeyboardWindowFocuserForTesting, setKeyboardPidResolverForTesting } =
+		await import("./macos-input.js");
+	setFocusStealWatcherForTesting(() => undefined);
+	setKeyboardPidResolverForTesting((pid) => pid);
+	setKeyboardWindowFocuserForTesting(async (pid, windowId) => {
+		log.events.push(`focus:${pid}:${windowId}`);
 	});
+	skyLightMock.state.front = skyLightMock.personPsn;
+	skyLightMock.focusGuardFor.mockReturnValue({
+		previousPsn: skyLightMock.personPsn,
+		targetPsn: skyLightMock.targetPsn,
+	});
+	skyLightMock.setProcessAppActive.mockImplementation((_psn, windowId, active) => {
+		log.events.push(`active:${String(active)}:${windowId}`);
+		return true;
+	});
+	coreGraphicsMock.postKeyboardEvent.mockImplementation((call) => {
+		log.events.push(`key:${String(call.keyCode)}:${call.keyDown ? "down" : "up"}:${call.flags.toString(16)}`);
+	});
+	coreGraphicsMock.postMouseEvent.mockImplementation((call) => {
+		log.events.push(`mouse:${call.kind}:${call.position.x},${call.position.y}:${(call.flags ?? 0).toString(16)}`);
+	});
+}
+
+const PRIMER = ["mouse:down:-1,-1:0", "mouse:up:-1,-1:0"];
+
+describe("#given a background controller holding modifiers across a pointer gesture", () => {
+	beforeEach(resetDesktop);
 
 	it("#when command-clicking #then the app is activated, primed, the key goes down, the click carries the flag, and the key goes up", async () => {
 		const controller = await backgroundController();
@@ -95,9 +124,8 @@ describe("#given a background controller holding modifiers across a pointer gest
 		await controller.click({ x: 50, y: 70 }, "left", ["cmd"]);
 
 		expect(log.events).toEqual([
-			"active:true",
-			"mouse:down:-1,-1:0",
-			"mouse:up:-1,-1:0",
+			"active:true:99",
+			...PRIMER,
 			"key:55:down:100000",
 			"mouse:down:50,70:100000",
 			"mouse:up:50,70:100000",
@@ -136,16 +164,38 @@ describe("#given a background controller holding modifiers across a pointer gest
 		controller.close();
 	});
 
-	it("#when clicking without modifiers #then no key is posted, no activation happens, and the flags are left alone", async () => {
+	it("#when clicking without modifiers #then the app is still told it is active and primed, so the click is not spent on activating the window", async () => {
 		const controller = await backgroundController();
 
 		await controller.click({ x: 50, y: 70 });
 
 		expect(coreGraphicsMock.postKeyboardEvent).not.toHaveBeenCalled();
-		expect(skyLightMock.setWindowAppActive).not.toHaveBeenCalled();
-		expect(log.events).toEqual(["mouse:down:50,70:0", "mouse:up:50,70:0"]);
-		expect(coreGraphicsMock.postMouseEvent.mock.calls[0]?.[0].flags).toBeUndefined();
+		expect(log.events).toEqual(["active:true:99", ...PRIMER, "mouse:down:50,70:0", "mouse:up:50,70:0"]);
+		expect(coreGraphicsMock.postMouseEvent.mock.calls.at(-1)?.[0].flags).toBeUndefined();
 		controller.close();
+	});
+
+	it("#when double-clicking or dragging without modifiers #then each gesture is primed behind the person's app first", async () => {
+		const clicker = await backgroundController();
+		await clicker.doubleClick({ x: 50, y: 70 });
+
+		expect(log.events).toEqual([
+			"active:true:99",
+			...PRIMER,
+			"mouse:down:50,70:0",
+			"mouse:up:50,70:0",
+			"mouse:down:50,70:0",
+			"mouse:up:50,70:0",
+		]);
+		clicker.close();
+		log.events.length = 0;
+
+		const dragger = await backgroundController();
+		await dragger.drag({ from: { x: 20, y: 30 }, to: { x: 60, y: 30 } });
+
+		expect(log.events.slice(0, 3)).toEqual(["active:true:99", ...PRIMER]);
+		expect(log.events.at(-1)).toBe("mouse:up:60,30:0");
+		dragger.close();
 	});
 
 	it("#when the target app is already frontmost #then it is not told anything about activation", async () => {
@@ -153,14 +203,29 @@ describe("#given a background controller holding modifiers across a pointer gest
 		skyLightMock.focusGuardFor.mockReturnValue(null);
 
 		await controller.click({ x: 50, y: 70 }, "left", ["shift"]);
+		await controller.click({ x: 50, y: 70 });
 
-		expect(skyLightMock.setWindowAppActive).not.toHaveBeenCalled();
+		expect(skyLightMock.setProcessAppActive).not.toHaveBeenCalled();
 		expect(log.events).toEqual([
 			"key:56:down:20000",
 			"mouse:down:50,70:20000",
 			"mouse:up:50,70:20000",
 			"key:56:up:0",
+			"mouse:down:50,70:0",
+			"mouse:up:50,70:0",
 		]);
+		controller.close();
+	});
+
+	it("#when a held app is clicked in another of its windows #then it is told again, naming that window, and primed again", async () => {
+		const controller = await backgroundController();
+
+		await controller.click({ x: 50, y: 70 });
+		await controller.click({ x: 60, y: 70 });
+		await controller.click({ x: 450, y: 70 });
+
+		expect(log.events.filter((event) => event.startsWith("active:"))).toEqual(["active:true:99", "active:true:98"]);
+		expect(log.events.filter((event) => event === PRIMER[0]).length).toBe(2);
 		controller.close();
 	});
 
@@ -205,14 +270,25 @@ describe("#given a background controller holding modifiers across a pointer gest
 		controller.close();
 	});
 
+	it("#when scrolling without modifiers #then the wheel needs no activation and none is made", async () => {
+		const controller = await backgroundController();
+		await controller.rememberTargetWindow(1234);
+
+		await controller.scroll({ direction: "down", amount: 4 });
+
+		expect(skyLightMock.setProcessAppActive).not.toHaveBeenCalled();
+		expect(coreGraphicsMock.postScrollEvent).toHaveBeenCalled();
+		controller.close();
+	});
+
 	it("#when the controller closes #then apps it told were active are told otherwise", async () => {
 		const controller = await backgroundController();
 		await controller.click({ x: 50, y: 70 }, "left", ["command"]);
-		skyLightMock.setWindowAppActive.mockClear();
+		skyLightMock.setProcessAppActive.mockClear();
 
 		controller.close();
 
-		expect(skyLightMock.setWindowAppActive).toHaveBeenCalledWith(WINDOW, false);
+		expect(skyLightMock.setProcessAppActive).toHaveBeenCalledWith(skyLightMock.targetPsn, 99, false);
 	});
 
 	it("#when a modifier name is unknown #then the click is refused before anything is posted", async () => {
@@ -225,53 +301,134 @@ describe("#given a background controller holding modifiers across a pointer gest
 
 		expect(coreGraphicsMock.postMouseEvent).not.toHaveBeenCalled();
 		expect(coreGraphicsMock.postKeyboardEvent).not.toHaveBeenCalled();
+		expect(skyLightMock.setProcessAppActive).not.toHaveBeenCalled();
 		controller.close();
 	});
 });
 
-describe("#given a background command-click that told the target app it is active (idle release)", () => {
-	beforeEach(async () => {
-		vi.clearAllMocks();
+describe("#given a window command (a menu item or key equivalent) for one window of an app behind the person's", () => {
+	beforeEach(resetDesktop);
+
+	it("#when the command wants the app active #then that window is focused first, the app is told it is active for it and primed, and the command runs held", async () => {
+		const controller = await backgroundController();
+
+		const answer = await controller.withWindowCommand(
+			1234,
+			OTHER_WINDOW,
+			() => true,
+			async (held) => {
+				log.events.push(`command:${String(held)}`);
+				return "done";
+			},
+		);
+
+		expect(answer).toBe("done");
+		expect(log.events).toEqual(["focus:1234:98", "active:true:98", ...PRIMER, "command:true"]);
+		expect(controller.holdsActivation(1234)).toBe(true);
+		controller.close();
+	});
+
+	it("#when the command does not want activation #then the window is still focused but the app is told nothing", async () => {
+		const controller = await backgroundController();
+
+		await controller.withWindowCommand(
+			1234,
+			OTHER_WINDOW,
+			() => false,
+			async (held) => {
+				log.events.push(`command:${String(held)}`);
+			},
+		);
+
+		expect(log.events).toEqual(["focus:1234:98", "command:false"]);
+		expect(controller.holdsActivation(1234)).toBe(false);
+		controller.close();
+	});
+
+	it("#when the app is the person's frontmost one #then it is not told anything and the command runs unheld", async () => {
+		const controller = await backgroundController();
+		skyLightMock.focusGuardFor.mockReturnValue(null);
+
+		await controller.withWindowCommand(
+			1234,
+			WINDOW,
+			() => true,
+			async (held) => {
+				log.events.push(`command:${String(held)}`);
+			},
+		);
+
+		expect(log.events).toEqual(["focus:1234:99", "command:false"]);
+		controller.close();
+	});
+
+	it("#when the app is already held for that window #then the command runs held without another activation", async () => {
+		const controller = await backgroundController();
+		await controller.click({ x: 50, y: 70 });
 		log.events.length = 0;
-		vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] });
-		setOnscreenWindowIdsSourceForTesting(() => [99]);
-		const { setFocusStealWatcherForTesting } = await import("./macos-input.js");
-		setFocusStealWatcherForTesting(() => undefined);
-		skyLightMock.focusGuardFor.mockReturnValue({ previousPsn: Buffer.alloc(8, 1), targetPsn: Buffer.alloc(8, 2) });
-		skyLightMock.setWindowAppActive.mockImplementation((_window: unknown, active: boolean) => {
-			log.events.push(`active:${String(active)}`);
-			return true;
+		const wantsActivation = vi.fn(() => false);
+
+		await controller.withWindowCommand(1234, WINDOW, wantsActivation, async (held) => {
+			log.events.push(`command:${String(held)}`);
 		});
+
+		expect(wantsActivation).not.toHaveBeenCalled();
+		expect(log.events).toEqual(["focus:1234:99", "command:true"]);
+		controller.close();
+	});
+
+	it("#when delivery is attended #then the window is focused and the app is never told it is active", async () => {
+		const controller = await backgroundController("attended");
+
+		await controller.withWindowCommand(
+			1234,
+			WINDOW,
+			() => true,
+			async (held) => {
+				log.events.push(`command:${String(held)}`);
+			},
+		);
+
+		expect(log.events).toEqual(["focus:1234:99", "command:false"]);
+		controller.close();
+	});
+});
+
+describe("#given an app behind the person's that background input told it is active (idle release)", () => {
+	beforeEach(async () => {
+		await resetDesktop();
+		vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] });
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
 	});
 
-	const releases = (): number => log.events.filter((event) => event === "active:false").length;
+	const releases = (): number => log.events.filter((event) => event.startsWith("active:false")).length;
 
-	it("#when no further modified gesture arrives #then the app is told it is inactive once the idle period passes", async () => {
-		const { MODIFIED_ACTIVATION_IDLE_MILLISECONDS } = await import("./macos-input.js");
+	it("#when no further action arrives #then the app is told it is inactive once the idle period passes", async () => {
+		const { BACKGROUND_ACTIVATION_IDLE_MILLISECONDS } = await import("./macos-input.js");
 		const controller = await backgroundController();
 
-		await controller.click({ x: 50, y: 70 }, "left", ["cmd"]);
-		vi.advanceTimersByTime(MODIFIED_ACTIVATION_IDLE_MILLISECONDS - 1);
+		await controller.click({ x: 50, y: 70 });
+		vi.advanceTimersByTime(BACKGROUND_ACTIVATION_IDLE_MILLISECONDS - 1);
 		expect(releases()).toBe(0);
 		vi.advanceTimersByTime(1);
 
 		expect(releases()).toBe(1);
+		expect(skyLightMock.setProcessAppActive).toHaveBeenLastCalledWith(skyLightMock.targetPsn, 99, false);
 		controller.close();
 		expect(releases()).toBe(1);
 	});
 
-	it("#when another modified gesture arrives inside the idle period #then the release is postponed", async () => {
-		const { MODIFIED_ACTIVATION_IDLE_MILLISECONDS } = await import("./macos-input.js");
+	it("#when another gesture arrives inside the idle period #then the release is postponed", async () => {
+		const { BACKGROUND_ACTIVATION_IDLE_MILLISECONDS } = await import("./macos-input.js");
 		const controller = await backgroundController();
 
 		await controller.click({ x: 50, y: 70 }, "left", ["cmd"]);
-		vi.advanceTimersByTime(MODIFIED_ACTIVATION_IDLE_MILLISECONDS - 500);
-		await controller.click({ x: 60, y: 70 }, "left", ["shift"]);
-		vi.advanceTimersByTime(MODIFIED_ACTIVATION_IDLE_MILLISECONDS - 500);
+		vi.advanceTimersByTime(BACKGROUND_ACTIVATION_IDLE_MILLISECONDS - 500);
+		await controller.click({ x: 60, y: 70 });
+		vi.advanceTimersByTime(BACKGROUND_ACTIVATION_IDLE_MILLISECONDS - 500);
 		expect(releases()).toBe(0);
 		vi.advanceTimersByTime(500);
 
@@ -279,13 +436,76 @@ describe("#given a background command-click that told the target app it is activ
 		controller.close();
 	});
 
+	it("#when keys reach the held app inside the idle period #then they keep it active too", async () => {
+		const { BACKGROUND_ACTIVATION_IDLE_MILLISECONDS } = await import("./macos-input.js");
+		const controller = await backgroundController();
+
+		await controller.click({ x: 50, y: 70 });
+		vi.advanceTimersByTime(BACKGROUND_ACTIVATION_IDLE_MILLISECONDS - 500);
+		await controller.pressKey("Return");
+		vi.advanceTimersByTime(BACKGROUND_ACTIVATION_IDLE_MILLISECONDS - 500);
+		expect(releases()).toBe(0);
+		vi.advanceTimersByTime(500);
+
+		expect(releases()).toBe(1);
+		controller.close();
+	});
+
+	it("#when a window command ran held #then the app is released once the idle period after it passes", async () => {
+		const { BACKGROUND_ACTIVATION_IDLE_MILLISECONDS } = await import("./macos-input.js");
+		const controller = await backgroundController();
+
+		await controller.withWindowCommand(
+			1234,
+			WINDOW,
+			() => true,
+			async () => undefined,
+		);
+		vi.advanceTimersByTime(BACKGROUND_ACTIVATION_IDLE_MILLISECONDS);
+
+		expect(releases()).toBe(1);
+		expect(controller.holdsActivation(1234)).toBe(false);
+		controller.close();
+	});
+
+	it("#when the person brings the app forward meanwhile #then it is not told it is inactive", async () => {
+		const { BACKGROUND_ACTIVATION_IDLE_MILLISECONDS } = await import("./macos-input.js");
+		const controller = await backgroundController();
+
+		await controller.click({ x: 50, y: 70 });
+		skyLightMock.state.front = skyLightMock.targetPsn;
+		vi.advanceTimersByTime(BACKGROUND_ACTIVATION_IDLE_MILLISECONDS);
+
+		expect(releases()).toBe(0);
+		expect(controller.holdsActivation(1234)).toBe(false);
+		controller.close();
+		expect(releases()).toBe(0);
+	});
+
+	it("#when the process exits while an app is held #then its exit hook tells the app otherwise, and the hook is gone once nothing is held", async () => {
+		const before = process.listeners("exit");
+		const added = () => process.listeners("exit").filter((listener) => !before.includes(listener));
+		const controller = await backgroundController();
+
+		await controller.click({ x: 50, y: 70 });
+		const [hook, ...others] = added();
+		expect(others).toEqual([]);
+		hook?.(0);
+
+		expect(log.events.at(-1)).toBe("active:false:99");
+		expect(controller.holdsActivation(1234)).toBe(false);
+		expect(added()).toEqual([]);
+		controller.close();
+		expect(releases()).toBe(1);
+	});
+
 	it("#when the controller closes before the idle period #then the app is released once and no timer fires later", async () => {
-		const { MODIFIED_ACTIVATION_IDLE_MILLISECONDS } = await import("./macos-input.js");
+		const { BACKGROUND_ACTIVATION_IDLE_MILLISECONDS } = await import("./macos-input.js");
 		const controller = await backgroundController();
 
 		await controller.click({ x: 50, y: 70 }, "left", ["cmd"]);
 		controller.close();
-		vi.advanceTimersByTime(MODIFIED_ACTIVATION_IDLE_MILLISECONDS * 2);
+		vi.advanceTimersByTime(BACKGROUND_ACTIVATION_IDLE_MILLISECONDS * 2);
 
 		expect(releases()).toBe(1);
 	});

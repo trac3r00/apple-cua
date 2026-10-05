@@ -541,3 +541,25 @@ describe("run_script #given several steps #when the script batches them #then on
 		expect(inputEffects(harness.computer.effects)).toEqual([]);
 	});
 });
+
+describe("run_script #given a waitFor whose condition holds #when it stands alone #then the script goes on", () => {
+	it("answers the satisfied wait as confirmed instead of throwing it as refused", async () => {
+		const harness = await start();
+
+		const payload = jsonPayload(
+			await harness.client.callTool({
+				name: "run_script",
+				arguments: {
+					code: `
+						const finder = apple.app("Finder");
+						const waited = await finder.waitFor({ label: "Open" }, { timeoutMs: 500 });
+						return { effect: waited.effect, status: waited.runSteps.steps[0].status };
+					`,
+				},
+			}),
+		);
+
+		expect(payload).toMatchObject({ ok: true, value: { effect: "confirmed", status: "satisfied" } });
+		expect(inputEffects(harness.computer.effects)).toEqual([]);
+	});
+});

@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { AXUIElementRef } from "./macos-ffi/accessibility.js";
 import {
 	type MenuAccessibility,
+	type WindowMenuRunner,
 	chooseMenuAction,
 	findMenuKeyEquivalent,
 	invokeMenu,
+	invokeWindowMenu,
 	planBackgroundKeyEquivalent,
+	waitForKeyEquivalentEnabled,
 } from "./macos-menu.js";
 
 interface MenuNode {
@@ -181,6 +184,173 @@ describe("planBackgroundKeyEquivalent #given a Command chord for an app in the b
 				item: { path: ["Edit", "Undo Typing"], enabled: true },
 			}),
 		).toEqual({ kind: "menu", path: ["Edit", "Undo Typing"] });
+	});
+});
+
+describe("invokeWindowMenu #given a window command for an app behind the person's", () => {
+	/** File > Save (Cmd+S), whose state the test changes the way an app does once told it is active. */
+	function saveMenu(
+		enabled: boolean,
+		title = "Save",
+	): { readonly save: { enabled: boolean; title: string } & MenuNode; readonly menu: MenuNode } {
+		const save = {
+			role: "AXMenuItem",
+			title,
+			enabled,
+			actions: ["AXPress"],
+			children: [],
+			cmdChar: "S",
+			cmdModifiers: 0,
+		};
+		return {
+			save,
+			menu: node("AXMenuBar", undefined, [node("AXMenuBarItem", "File", [node("AXMenu", undefined, [save])])]),
+		};
+	}
+
+	/**
+	 * Stands in for MacOSInputController.withWindowCommand: an app `behind` the person's is told it is active
+	 * when the command wants that; the person's own frontmost app is told nothing.
+	 */
+	function runner(
+		onActivate: () => void = () => undefined,
+		behind = true,
+	): {
+		readonly run: WindowMenuRunner;
+		readonly asked: boolean[];
+	} {
+		const asked: boolean[] = [];
+		return {
+			asked,
+			run: async (wantsActivation, command) => {
+				const wanted = wantsActivation();
+				asked.push(wanted);
+				const activate = wanted && behind;
+				if (activate) {
+					onActivate();
+				}
+				return await command(activate);
+			},
+		};
+	}
+
+	it("#when the item is disabled only because the app is in the background #then the app is told it is active and the item is pressed", async () => {
+		const { save, menu } = saveMenu(false);
+		const fake = fakeAccessibility(menu, false);
+		const { run, asked } = runner(() => {
+			save.enabled = true;
+		});
+
+		const result = await invokeWindowMenu(42, ["File", "Save"], run, fake.accessibility);
+
+		expect(asked).toEqual([true]);
+		expect(result).toEqual({ resolvedPath: ["File", "Save"], action: "AXPress" });
+		expect(fake.performed).toEqual(["Save:AXPress"]);
+	});
+
+	it("#when the app enables the item a little after it is told it is active #then the press waits for it", async () => {
+		const { save, menu } = saveMenu(false);
+		const fake = fakeAccessibility(menu, false);
+		let waits = 0;
+		const accessibility: MenuAccessibility = {
+			...fake.accessibility,
+			delay: async () => {
+				waits += 1;
+				if (waits === 3) {
+					save.enabled = true;
+				}
+			},
+		};
+
+		await invokeWindowMenu(42, ["File", "Save"], runner().run, accessibility);
+
+		expect(waits).toBe(3);
+		expect(fake.performed).toEqual(["Save:AXPress"]);
+	});
+
+	it("#when the item stays disabled even with the app told it is active #then it is refused after a bounded wait and nothing is pressed", async () => {
+		const { menu } = saveMenu(false);
+		const fake = fakeAccessibility(menu, false);
+
+		await expect(invokeWindowMenu(42, ["File", "Save"], runner().run, fake.accessibility)).rejects.toThrow(
+			/"Save"\) is disabled/,
+		);
+
+		expect(fake.performed).toEqual([]);
+		expect(fake.delays.length).toBeGreaterThan(0);
+		expect(fake.delays.reduce((total, milliseconds) => total + milliseconds, 0)).toBeLessThanOrEqual(2_000);
+	});
+
+	it("#when the item reads enabled in the background #then the app is still told it is active first, since that flag is only what it last validated", async () => {
+		const { menu } = saveMenu(true);
+		const fake = fakeAccessibility(menu, false);
+		const { run, asked } = runner();
+
+		await invokeWindowMenu(42, ["File", "Save"], run, fake.accessibility);
+
+		expect(asked).toEqual([true]);
+		expect(fake.performed).toEqual(["Save:AXPress"]);
+		expect(fake.delays).toEqual([]);
+	});
+
+	it("#when the app is the person's frontmost one and the item is disabled #then it is refused at once, with no wait", async () => {
+		const { menu } = saveMenu(false);
+		const fake = fakeAccessibility(menu, true);
+		const { run } = runner(() => undefined, false);
+
+		await expect(invokeWindowMenu(42, ["File", "Save"], run, fake.accessibility)).rejects.toThrow(
+			/"Save"\) is disabled; failed at hop 1/,
+		);
+
+		expect(fake.performed).toEqual([]);
+		expect(fake.delays).toEqual([]);
+	});
+
+	it("#when telling the app it is active retitles the item (Save… becomes Save) #then it is found and pressed under its new title", async () => {
+		const { save, menu } = saveMenu(false, "Save…");
+		const fake = fakeAccessibility(menu, false);
+		const { run } = runner(() => {
+			save.title = "Save";
+			save.enabled = true;
+		});
+
+		const result = await invokeWindowMenu(42, ["File", "Save"], run, fake.accessibility);
+
+		expect(result.resolvedPath).toEqual(["File", "Save"]);
+		expect(fake.performed).toEqual(["Save:AXPress"]);
+	});
+
+	it("#when the app has no such menu #then no activation is asked for and the path is refused", async () => {
+		const { menu } = saveMenu(true);
+		const fake = fakeAccessibility(menu, false);
+		const { run, asked } = runner();
+
+		await expect(invokeWindowMenu(42, ["Window", "Zoom"], run, fake.accessibility)).rejects.toThrow(
+			/"Window"\) was not found/,
+		);
+
+		expect(asked).toEqual([false]);
+	});
+
+	it("#when a chord's item turns enabled and retitled a moment after activation #then the wait finds it by its key", async () => {
+		const { save, menu } = saveMenu(false, "Save…");
+		const fake = fakeAccessibility(menu, false);
+		let waits = 0;
+		const accessibility: MenuAccessibility = {
+			...fake.accessibility,
+			delay: async () => {
+				waits += 1;
+				if (waits === 2) {
+					save.title = "Save";
+					save.enabled = true;
+				}
+			},
+		};
+
+		const item = await waitForKeyEquivalentEnabled(42, "s", ["cmd"], accessibility);
+
+		expect(item).toEqual({ path: ["File", "Save"], enabled: true });
+		expect(waits).toBe(2);
 	});
 });
 

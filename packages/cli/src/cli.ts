@@ -5,7 +5,13 @@ import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { MacOSHostComputer, NOOP_POINTER_OVERLAY, createCursorOverlay, getAppStateForApp } from "@apple-cua/core";
+import {
+	MacOSHostComputer,
+	NOOP_POINTER_OVERLAY,
+	StopSwitch,
+	createCursorOverlay,
+	getAppStateForApp,
+} from "@apple-cua/core";
 import type {
 	ComputerInterface,
 	KeyOptions,
@@ -16,6 +22,7 @@ import type {
 } from "@apple-cua/core";
 import { Command } from "commander";
 import { registerIosCommands } from "./ios.js";
+import { commandPathOf, stopRefusalFor } from "./stop-gate.js";
 
 type PackageJson = {
 	version: string;
@@ -486,7 +493,47 @@ appsCommand
 		},
 	);
 
+program
+	.command("stop")
+	.description(
+		"Stop computer use for every apple-cua agent on this Mac; only `apple-cua resume` lifts it (keyboard chord: Control+Option+Command)",
+	)
+	.option("--reason <text>", "why computer use is being stopped", "stopped by user")
+	.action((options: { reason: string }) => {
+		const status = new StopSwitch().stop(options.reason, "cli");
+		writeOutput(status, `computer use stopped (${status.reason}); resume with \`apple-cua resume\``);
+	});
+
+program
+	.command("resume")
+	.description("Lift the stop so apple-cua agents may use the computer again")
+	.action(() => {
+		const wasStopped = new StopSwitch().resume();
+		writeOutput({ stopped: false, wasStopped }, wasStopped ? "computer use resumed" : "computer use was not stopped");
+	});
+
+program
+	.command("stop-status")
+	.description("Show whether computer use is stopped")
+	.action(() => {
+		const status = new StopSwitch().status();
+		writeOutput(
+			status,
+			status.stopped
+				? `stopped (${status.source} at ${status.stoppedAt}): ${status.reason}`
+				: "computer use is not stopped",
+		);
+	});
+
 registerIosCommands(program, { isJsonOutput });
+
+// Refuse input commands while the stop switch is on, before any command code can send input.
+program.hook("preAction", (_program, actionCommand) => {
+	const refusal = stopRefusalFor(commandPathOf(actionCommand), new StopSwitch());
+	if (refusal !== undefined) {
+		throw new Error(refusal);
+	}
+});
 
 await program.parseAsync().catch(handleError);
 

@@ -136,25 +136,36 @@ export function registerIosCommands(program: Command, options: RegisterIosOption
 		.option("--amount <fraction>", "fraction of the phone window (0..1)", parseFraction, 0.3)
 		.option("--at-x <number>", "x coordinate for the scroll", parseFiniteNumber)
 		.option("--at-y <number>", "y coordinate for the scroll", parseFiniteNumber)
-		.action(async (direction: Direction, commandOptions: { amount: number; atX?: number; atY?: number }) => {
-			if ((commandOptions.atX === undefined) !== (commandOptions.atY === undefined)) {
-				throw new Error("--at-x and --at-y must be provided together");
-			}
-			const at =
-				commandOptions.atX === undefined || commandOptions.atY === undefined
-					? undefined
-					: { x: commandOptions.atX, y: commandOptions.atY };
-			await createMirroring().scroll(direction, {
-				amount: commandOptions.amount,
-				...(at === undefined ? {} : { at }),
-			});
-			writeActionOutput(
-				options,
-				"scroll",
-				{ direction, amount: commandOptions.amount, ...(at === undefined ? {} : { at }) },
-				`Scrolled ${direction}`,
-			);
-		});
+		.option(
+			"--borrow-pointer",
+			"allow the scroll to briefly move the real pointer onto the phone (macOS routes wheel events by pointer location; refused without it)",
+		)
+		.action(
+			async (
+				direction: Direction,
+				commandOptions: { amount: number; atX?: number; atY?: number; borrowPointer?: boolean },
+			) => {
+				if ((commandOptions.atX === undefined) !== (commandOptions.atY === undefined)) {
+					throw new Error("--at-x and --at-y must be provided together");
+				}
+				const at =
+					commandOptions.atX === undefined || commandOptions.atY === undefined
+						? undefined
+						: { x: commandOptions.atX, y: commandOptions.atY };
+				const borrowPointer = commandOptions.borrowPointer === true;
+				await createMirroring().scroll(direction, {
+					amount: commandOptions.amount,
+					...(at === undefined ? {} : { at }),
+					...(borrowPointer ? { borrowPointer } : {}),
+				});
+				writeActionOutput(
+					options,
+					"scroll",
+					{ direction, amount: commandOptions.amount, ...(at === undefined ? {} : { at }) },
+					`Scrolled ${direction}`,
+				);
+			},
+		);
 
 	ios.command("type")
 		.description("Type text into the focused iPhone field (exact paste by default)")

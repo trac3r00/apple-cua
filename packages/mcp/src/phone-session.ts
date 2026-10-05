@@ -1,5 +1,6 @@
 import type { IPhoneMirroring, MirroringObservation, MirroringText } from "@apple-cua/core";
-import { describeMirroringState } from "@apple-cua/core";
+import type { StopStatusSource } from "@apple-cua/core";
+import { describeMirroringState, describeUserStop } from "@apple-cua/core";
 import { type ToolResult, refusalResult, textResult } from "./tool-result.js";
 
 export type PhoneToolSource = Pick<
@@ -26,13 +27,15 @@ export class PhoneGuardSession {
 	>();
 	private readonly ttlMs: number;
 	private readonly now: () => number;
+	private readonly stopSwitch: StopStatusSource | undefined;
 
 	constructor(
 		private readonly source: PhoneToolSource,
-		options: { readonly ttlMs?: number; readonly now?: () => number } = {},
+		options: { readonly ttlMs?: number; readonly now?: () => number; readonly stopSwitch?: StopStatusSource } = {},
 	) {
 		this.ttlMs = options.ttlMs ?? 120_000;
 		this.now = options.now ?? Date.now;
+		this.stopSwitch = options.stopSwitch;
 	}
 
 	async observe(): Promise<ToolResult> {
@@ -79,6 +82,8 @@ export class PhoneGuardSession {
 		validation: PhoneValidation,
 		mutation: (observation: MirroringObservation) => Promise<T>,
 	): Promise<ToolResult> {
+		const stop = this.stopSwitch?.status();
+		if (stop?.stopped === true) return refusalResult("user-stopped", describeUserStop(stop));
 		const entry = token === undefined ? undefined : this.tokens.get(token);
 		if (entry === undefined)
 			return refusalResult("phone-token-missing", "an observation_token is required for iPhone Mirroring input.");

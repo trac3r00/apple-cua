@@ -11,39 +11,105 @@ afterEach(async () => {
 });
 
 describe("post-action observation #given dispatched input #when capture outcome varies #then continuation pauses honestly", () => {
+	it("pauses without a token when AX status is unavailable and explicit observation recovers", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
+		harness.computer.postActionSummary = undefined;
+		const token = await observe(harness);
+
+		const action = await harness.client.callTool({
+			name: "set_value",
+			arguments: { app: "Finder", observation_token: token, element_index: "9", value: "abc" },
+		});
+		const payload = jsonPayload(action);
+		const replay = await harness.client.callTool({
+			name: "set_value",
+			arguments: { app: "Finder", observation_token: token, element_index: "9", value: "replay" },
+		});
+		const recoveredToken = await observe(harness);
+
+		expect(payload).toMatchObject({
+			actionDispatched: true,
+			observationStatus: "unavailable",
+			paused: true,
+			needsExplicitObservation: true,
+		});
+		expect(payload).not.toHaveProperty("observation_token");
+		expect(replay.isError).toBe(true);
+		expect(typeof recoveredToken).toBe("string");
+	});
+
+	it("continues with a fresh token when the AX tree is unchanged, so no extra observation is needed", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
+		harness.computer.postActionSummary = { added: 0, removed: 0, changed: 0 };
+		const token = await observe(harness);
+
+		const action = await harness.client.callTool({
+			name: "set_value",
+			arguments: { app: "Finder", observation_token: token, element_index: "9", value: "abc" },
+		});
+		const payload = jsonPayload(action);
+		const replay = await harness.client.callTool({
+			name: "set_value",
+			arguments: { app: "Finder", observation_token: token, element_index: "9", value: "replay" },
+		});
+		const next = await harness.client.callTool({
+			name: "set_value",
+			arguments: {
+				app: "Finder",
+				observation_token: payload["observation_token"],
+				element_index: "9",
+				value: "next",
+			},
+		});
+
+		expect(payload).toMatchObject({ actionDispatched: true, observationStatus: "unchanged", paused: false });
+		expect(typeof payload["observation_token"]).toBe("string");
+		expect(replay.isError).toBe(true);
+		expect(next.isError).not.toBe(true);
+	});
+
 	it.each([
-		{ summary: { added: 0, removed: 0, changed: 0 }, expected: "unchanged" },
-		{ summary: undefined, expected: "unavailable" },
+		{ delivery: "background" as const, continues: true },
+		{ delivery: "attended" as const, continues: false },
 	])(
-		"pauses without a token when AX status is $expected and explicit observation recovers",
-		async ({ summary, expected }) => {
+		"continues=$continues after acting on a window that is not frontmost under $delivery delivery",
+		async ({ delivery, continues }) => {
 			const harness = await createHarness();
 			closeHarness = harness.close;
-			harness.computer.postActionSummary = summary;
+			harness.computer.delivery = delivery;
+			harness.computer.frontmost = false;
 			const token = await observe(harness);
 
-			const action = await harness.client.callTool({
-				name: "set_value",
-				arguments: { app: "Finder", observation_token: token, element_index: "9", value: "abc" },
-			});
-			const payload = jsonPayload(action);
-			const replay = await harness.client.callTool({
-				name: "set_value",
-				arguments: { app: "Finder", observation_token: token, element_index: "9", value: "replay" },
-			});
-			const recoveredToken = await observe(harness);
+			const payload = jsonPayload(
+				await harness.client.callTool({
+					name: "press_keys",
+					arguments: { app: "Finder", observation_token: token, keys: ["Return"] },
+				}),
+			);
 
-			expect(payload).toMatchObject({
-				actionDispatched: true,
-				observationStatus: expected,
-				paused: true,
-				needsExplicitObservation: true,
-			});
-			expect(payload).not.toHaveProperty("observation_token");
-			expect(replay.isError).toBe(true);
-			expect(typeof recoveredToken).toBe("string");
+			expect(typeof payload["observation_token"] === "string").toBe(continues);
+			expect(payload["paused"]).toBe(!continues);
 		},
 	);
+
+	it("sends elements as tab-separated rows when element_format is table", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
+
+		const payload = jsonPayload(
+			await harness.client.callTool({
+				name: "get_app_state",
+				arguments: { app: "Finder", element_format: "table", include_screenshot: false },
+			}),
+		);
+
+		expect(payload["elements"]).toBeUndefined();
+		expect(payload["element_columns"]).toBe("id\trole\tlabel\tvalue\tframe(x,y,w,h)\tactions\tchildren");
+		expect(payload["element_rows"]).toContain("9\tButton\tOpen\t\t10,20,30,40\tPress\t");
+		expect(typeof payload["observation_token"]).toBe("string");
+	});
 
 	it("pauses when post-action context changes even if the AX tree changed", async () => {
 		const harness = await createHarness();

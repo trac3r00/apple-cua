@@ -1,4 +1,4 @@
-import type { TopLevelWindow } from "@apple-cua/core";
+import type { AppState, AppStateOptions, TopLevelWindow } from "@apple-cua/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, jsonPayload, jsonText, observe } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
@@ -15,6 +15,88 @@ afterEach(async () => {
 });
 
 describe("#given an app state worth checking #when verify_state runs #then it answers with evidence per expectation", () => {
+	it.each([
+		["Private folder", true],
+		["Different folder", false],
+	])("checks requested title %s against AX when the window probe cannot expose titles", async (title, verified) => {
+		class TitledComputer extends FakeGuardedComputer {
+			override async getAppState(targetPid = 1234, options?: AppStateOptions): Promise<AppState> {
+				return { ...(await super.getAppState(targetPid, options)), windowTitle: "Private folder" };
+			}
+		}
+		const harness = await createHarness(new TitledComputer(), async () => [window("")]);
+		closeHarness = harness.close;
+		const token = await observe(harness);
+
+		const payload = jsonPayload(
+			await harness.client.callTool({
+				name: "verify_state",
+				arguments: { app: "Finder", observation_token: token, window_title: title },
+			}),
+		);
+
+		expect(payload["verified"]).toBe(verified);
+	});
+
+	it("satisfies a batch title wait from the observed AX title without Screen Recording metadata", async () => {
+		class TitledComputer extends FakeGuardedComputer {
+			override async getAppState(targetPid = 1234, options?: AppStateOptions): Promise<AppState> {
+				return { ...(await super.getAppState(targetPid, options)), windowTitle: "Private folder" };
+			}
+		}
+		const harness = await createHarness(new TitledComputer(), async () => [window("")]);
+		closeHarness = harness.close;
+		const token = await observe(harness);
+
+		const payload = jsonPayload(
+			await harness.client.callTool({
+				name: "run_steps",
+				arguments: {
+					app: "Finder",
+					observation_token: token,
+					steps: [{ type: "wait_for", window_title: "Private folder", timeout_ms: 1 }],
+				},
+			}),
+		);
+
+		expect(payload["runSteps"]).toMatchObject({
+			completed: 0,
+			stoppedEarly: false,
+			steps: [{ type: "wait_for", status: "satisfied", input_dispatched: false }],
+		});
+	});
+
+	it("reads the token's selected window even when another document becomes the default", async () => {
+		class TwoWindowComputer extends FakeGuardedComputer {
+			override async getAppState(targetPid = 1234, options?: AppStateOptions): Promise<AppState> {
+				this.windowId = options?.windowId ?? 72;
+				this.fieldValues.set(20, this.windowId === 71 ? "target document" : "other document");
+				return { ...(await super.getAppState(targetPid, options)), windowId: this.windowId };
+			}
+		}
+		const harness = await createHarness(new TwoWindowComputer());
+		closeHarness = harness.close;
+		const observed = jsonPayload(
+			await harness.client.callTool({
+				name: "get_app_state",
+				arguments: { app: "Finder", window_id: 71 },
+			}),
+		);
+
+		const payload = jsonPayload(
+			await harness.client.callTool({
+				name: "verify_state",
+				arguments: {
+					app: "Finder",
+					observation_token: observed["observation_token"],
+					checks: [{ element_index: "20", value: "target document" }],
+				},
+			}),
+		);
+
+		expect(payload["verified"]).toBe(true);
+	});
+
 	it("confirms an unchanged field value and re-issues an observation token", async () => {
 		const harness = await createHarness();
 		closeHarness = harness.close;

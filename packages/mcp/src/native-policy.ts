@@ -8,8 +8,13 @@ export function allowedBundleIdsFromEnvironment(value: string | undefined): read
 		.filter((bundleId) => bundleId.length > 0);
 }
 
+/**
+ * Background is the default: apple-cua acts in its target app without taking focus or moving the
+ * person's cursor, so they can keep using the Mac. "attended" opts into routes that may briefly
+ * take the foreground.
+ */
 export function deliveryFromEnvironment(value: string | undefined): InputDelivery {
-	return value?.trim().toLowerCase() === "background" ? "background" : "attended";
+	return value?.trim().toLowerCase() === "attended" ? "attended" : "background";
 }
 
 /** Approved bundle IDs from the host environment; the pre-rename variable name is still honoured. */

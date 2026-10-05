@@ -102,7 +102,7 @@ export function registerPhoneTools(server: McpServer, guard: PhoneGuardSession, 
 	server.registerTool(
 		"ios_scroll",
 		{
-			description: `Scroll content: direction is what you want to see (down reveals content further down), not finger direction. ${TOKEN}`,
+			description: `Scroll content: direction is what you want to see (down reveals content further down), not finger direction. macOS routes wheel events by pointer location, so a scroll has to move the person's real pointer onto the phone and back: under background delivery it is refused unless you pass borrow_pointer: true (use ios_swipe for pages and carousels, which leaves the pointer alone). ${TOKEN}`,
 			inputSchema: iosScrollSchema,
 			annotations: MUTATION_ANNOTATIONS,
 		},
@@ -111,6 +111,7 @@ export function registerPhoneTools(server: McpServer, guard: PhoneGuardSession, 
 				source.scroll(input.direction, {
 					...(input.amount === undefined ? {} : { amount: input.amount }),
 					...(input.at === undefined ? {} : { at: input.at }),
+					...(input.borrow_pointer === undefined ? {} : { borrowPointer: input.borrow_pointer }),
 				}),
 			),
 	);
@@ -129,7 +130,7 @@ export function registerPhoneTools(server: McpServer, guard: PhoneGuardSession, 
 	server.registerTool(
 		"ios_press_keys",
 		{
-			description: `Press a key combination in the phone. ${TOKEN}`,
+			description: `Press a key combination in the phone. The keys briefly make the phone window the key window so they reach it (it is not raised); focus is returned to the previous app right after. ${TOKEN}`,
 			inputSchema: iosPressKeysSchema,
 			annotations: MUTATION_ANNOTATIONS,
 		},

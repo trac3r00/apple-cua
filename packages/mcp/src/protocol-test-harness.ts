@@ -11,25 +11,44 @@ import type {
 	InvokeMenuResult,
 	KeyOptions,
 	Point,
+	PointerOptions,
+	PreflightOptions,
 	PreflightResult,
+	Rect,
 	ScreenshotOptions,
 	ScreenshotResult,
 	ScrollOptions,
 	SelectTextOptions,
+	SystemPrompt,
+	WindowTextRead,
 } from "@apple-cua/core";
+
+/** The scroll area and first row of the scrollable list the fake can model (see `scrollList`). */
+const SCROLL_AREA_ID = 200;
+const FIRST_ROW_ID = 201;
+const ROW_HEIGHT = 20;
+const AREA_FRAME = { x: 0, y: 100, width: 300, height: 100 };
 
 export type Effect =
 	| { readonly kind: "performAction"; readonly pid: number; readonly id: number; readonly action: string }
 	| { readonly kind: "setValue"; readonly pid: number; readonly id: number; readonly value: string }
 	| { readonly kind: "selectText"; readonly pid: number; readonly id: number }
-	| { readonly kind: "click"; readonly point: Point }
+	| { readonly kind: "click"; readonly point: Point; readonly modifiers?: PointerOptions["modifiers"] }
 	| { readonly kind: "drag"; readonly options: DragOptions }
+	| { readonly kind: "scroll"; readonly options: ScrollOptions }
 	| { readonly kind: "move"; readonly point: Point }
+	| { readonly kind: "scrollIntoView"; readonly pid: number; readonly id: number }
 	| { readonly kind: "type"; readonly text: string }
 	| { readonly kind: "key"; readonly key: string }
 	| { readonly kind: "invokeMenu"; readonly pid: number; readonly path: readonly string[] }
 	| { readonly kind: "clipboardWrite"; readonly input: ClipboardWriteInput }
 	| { readonly kind: "close" };
+
+function clickEffect(point: Point, options: PointerOptions | undefined): Effect {
+	return options?.modifiers === undefined
+		? { kind: "click", point }
+		: { kind: "click", point, modifiers: options.modifiers };
+}
 
 function diffElements(
 	before: readonly AXTreeElement[],
@@ -46,6 +65,37 @@ function diffElements(
 			: [];
 	});
 	return { added, removed, changed };
+}
+
+/** The subtree of one element with ids restarting at 0, and which original id each new id stands for. */
+function rebaseSubtree(
+	elements: readonly AXTreeElement[],
+	rootId: number,
+): { elements: AXTreeElement[]; ids: ReadonlyMap<number, number> } {
+	const byId = new Map(elements.map((element) => [element.id, element] as const));
+	const order: AXTreeElement[] = [];
+	const visit = (id: number): void => {
+		const element = byId.get(id);
+		if (element !== undefined) {
+			order.push(element);
+			for (const child of element.children) {
+				visit(child);
+			}
+		}
+	};
+	visit(rootId);
+	const renumbered = new Map(order.map((element, index) => [element.id, index] as const));
+	return {
+		elements: order.map((element) => ({
+			...element,
+			id: renumbered.get(element.id) ?? element.id,
+			children: element.children.flatMap((child) => {
+				const id = renumbered.get(child);
+				return id === undefined ? [] : [id];
+			}),
+		})),
+		ids: new Map(order.map((element, index) => [index, element.id] as const)),
+	};
 }
 
 export class Deferred<T> {
@@ -79,6 +129,7 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	readonly stateOptions: (AppStateOptions | undefined)[] = [];
 	readonly preflightExpected: InputObservation[] = [];
 	preflightResult: PreflightResult = { ok: true };
+	readonly preflightOptions: (PreflightOptions | undefined)[] = [];
 	preflightGate: Deferred<PreflightResult> | undefined;
 	preflightEntered: Deferred<void> | undefined;
 	stateGate: Deferred<void> | undefined;
@@ -100,9 +151,36 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	onStateCall: ((call: number) => void) | undefined;
 	/** Delivery mode the fake computer reports, mirroring the native driver's default. */
 	delivery: "attended" | "background" = "attended";
+	frontmost = true;
+	/** When set, every accessibility action throws it, modelling a control that rejects AXPress. */
+	performActionError: Error | undefined;
+	readonly elementFrames = new Map<number, Rect>();
 	windowId = 71;
 	windowIdAfterAction: number | undefined;
 	windowBounds = { x: 300, y: 150, width: 1000, height: 800 };
+	/** macOS dialogs the fake reports on screen, as the native driver does with systemPrompts. */
+	systemPrompts: readonly SystemPrompt[] = [];
+	/** When true, the fake behaves like a server without Screen Recording: no image, and why. */
+	screenCaptureDenied = false;
+	/**
+	 * A scrollable list: page-scroll actions on its scroll area (id 200) move the rows in view, `visibleRows` at a
+	 * time. A virtualized list walks only the rows in view; otherwise every row is in the tree, clipped by the area.
+	 */
+	scrollList:
+		| { readonly rows: readonly string[]; readonly visibleRows: number; readonly virtualized: boolean }
+		| undefined;
+	/** Index of the first row in view. */
+	scrollOffset = 0;
+	/** Rows are drawn and readable from pixels but absent from the accessibility tree. */
+	axHidesRows = false;
+	/** Rows advertise AXScrollToVisible, which scrollElementIntoView then performs. */
+	scrollIntoViewAdvertised = false;
+	/** Called after each page-scroll action with the pages scrolled so far. */
+	onScrollPage: ((pagesScrolled: number) => void) | undefined;
+	/** Where the drawn agent cursor was asked to glide, in order. */
+	readonly pointerHints: Point[] = [];
+	private pagesScrolled = 0;
+	private subtreeIds: ReadonlyMap<number, number> | undefined;
 	private generation = 0;
 	private stateCalls = 0;
 	private readonly observations = new Map<number, InputObservation>();
@@ -126,10 +204,22 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 		const app = targetPid === 5678 ? "Other" : "Finder";
 		const bundleId = targetPid === 5678 ? "com.example.other" : "com.apple.finder";
 		const captureTree = options?.includeAccessibilityTree !== false;
-		const elements = captureTree ? this.currentElements() : [];
+		const probe = options?.probe === true;
+		let elements = captureTree ? this.currentElements() : [];
+		if (captureTree && options?.subtreeOf !== undefined) {
+			const rebased = rebaseSubtree(
+				elements,
+				// Like the real driver, the id names an element of the previous snapshot: after a subtree read, its own ids.
+				this.subtreeIds?.get(options.subtreeOf) ?? options.subtreeOf,
+			);
+			elements = rebased.elements;
+			this.subtreeIds = rebased.ids;
+		} else if (captureTree) {
+			this.subtreeIds = undefined;
+		}
 		const previous = this.snapshotByPid.get(targetPid);
-		const axChanges = previous === undefined || !captureTree ? undefined : diffElements(previous, elements);
-		if (captureTree) {
+		const axChanges = previous === undefined || !captureTree || probe ? undefined : diffElements(previous, elements);
+		if (captureTree && !probe) {
 			this.snapshotByPid.set(targetPid, elements);
 		}
 		const treeOmitted = options?.diffOnly === true && captureTree && this.sawSnapshot.has(targetPid);
@@ -138,11 +228,14 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 			app,
 			bundleId,
 			pid: targetPid,
-			frontmost: true,
+			frontmost: this.frontmost,
 			axAvailable: true,
 			elements: treeOmitted ? [] : elements,
 			...(captureTree ? {} : { treeSkipped: true }),
-			screenshotBase64: options?.includeScreenshot === false ? "" : Buffer.from("png-bytes").toString("base64"),
+			screenshotBase64:
+				options?.includeScreenshot === false || this.screenCaptureDenied
+					? ""
+					: Buffer.from("png-bytes").toString("base64"),
 			screenshotWidth: 500,
 			screenshotHeight: 400,
 			screenshotMimeType: "image/png",
@@ -150,6 +243,10 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 			windowBounds: { ...this.windowBounds },
 			...(treeOmitted ? { treeOmitted: true } : {}),
 			...(this.elementsTruncated ? { elementsTruncated: true } : {}),
+			...(this.screenCaptureDenied && options?.includeScreenshot !== false
+				? { screenshotUnavailable: "screen-recording-permission" as const }
+				: {}),
+			...(this.systemPrompts.length > 0 ? { systemPrompts: this.systemPrompts } : {}),
 			...(this.actionDispatched && this.postActionSummary !== undefined
 				? {
 						axChangeSummary: this.postActionSummary,
@@ -157,7 +254,7 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 					}
 				: {}),
 		};
-		if (captureTree) {
+		if (captureTree && !probe) {
 			this.generation += 1;
 			this.observations.set(targetPid, {
 				generation: this.generation,
@@ -178,8 +275,9 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 		return this.observations.get(targetPid);
 	}
 
-	async preflightInput(expected: InputObservation): Promise<PreflightResult> {
+	async preflightInput(expected: InputObservation, options?: PreflightOptions): Promise<PreflightResult> {
 		this.preflightExpected.push(expected);
+		this.preflightOptions.push(options);
 		const entered = this.preflightEntered;
 		this.preflightEntered = undefined;
 		entered?.resolve(undefined);
@@ -195,8 +293,58 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 		];
 	}
 
-	async performAction(pid: number, id: number, action: string): Promise<void> {
+	async performAction(pid: number, observedId: number, action: string): Promise<void> {
+		if (this.performActionError !== undefined) {
+			throw this.performActionError;
+		}
+		const id = this.subtreeIds?.get(observedId) ?? observedId;
 		this.dispatch({ kind: "performAction", pid, id, action });
+		const list = this.scrollList;
+		if (list !== undefined && id === SCROLL_AREA_ID && action.endsWith("ByPage")) {
+			const last = Math.max(0, list.rows.length - list.visibleRows);
+			this.scrollOffset =
+				action === "AXScrollUpByPage"
+					? Math.max(0, this.scrollOffset - list.visibleRows)
+					: Math.min(last, this.scrollOffset + list.visibleRows);
+			this.pagesScrolled += 1;
+			this.onScrollPage?.(this.pagesScrolled);
+		}
+	}
+	async elementFrame(_pid: number, observedId: number): Promise<Rect | undefined> {
+		const id = this.subtreeIds?.get(observedId) ?? observedId;
+		return id >= FIRST_ROW_ID ? this.globalRowFrame(id) : this.elementFrames.get(id);
+	}
+	async refreshElementFrame(_pid: number, observedId: number): Promise<Rect | undefined> {
+		const id = this.subtreeIds?.get(observedId) ?? observedId;
+		return id >= FIRST_ROW_ID ? this.globalRowFrame(id) : undefined;
+	}
+	async scrollElementIntoView(pid: number, observedId: number): Promise<Rect | undefined> {
+		const id = this.subtreeIds?.get(observedId) ?? observedId;
+		const list = this.scrollList;
+		if (list === undefined || !this.scrollIntoViewAdvertised || id < FIRST_ROW_ID) {
+			return undefined;
+		}
+		this.dispatch({ kind: "scrollIntoView", pid, id });
+		this.scrollOffset = Math.min(Math.max(0, list.rows.length - list.visibleRows), id - FIRST_ROW_ID);
+		return this.globalRowFrame(id);
+	}
+	async recognizeWindowText(): Promise<WindowTextRead> {
+		if (this.screenCaptureDenied) {
+			return { unavailable: "screen-recording-permission" };
+		}
+		const list = this.scrollList;
+		const entries = (list?.rows ?? [])
+			.map((text, index) => ({ text, index }))
+			.filter(({ index }) => index >= this.scrollOffset && index < this.scrollOffset + (list?.visibleRows ?? 0))
+			.map(({ text, index }) => ({
+				text,
+				confidence: 0.9,
+				frame: this.globalRowFrame(FIRST_ROW_ID + index),
+			}));
+		return { entries };
+	}
+	showPointerAt(position: Point): void {
+		this.pointerHints.push(position);
 	}
 	async setValue(pid: number, id: number, value: string): Promise<void> {
 		this.dispatch({ kind: "setValue", pid, id, value });
@@ -213,8 +361,8 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	async typeIntoFocused(_pid: number, _text: string): Promise<boolean> {
 		return false;
 	}
-	async click(point: Point): Promise<void> {
-		this.dispatch({ kind: "click", point });
+	async click(point: Point, options?: PointerOptions): Promise<void> {
+		this.dispatch(clickEffect(point, options));
 	}
 	async drag(options: DragOptions): Promise<void> {
 		this.dispatch({ kind: "drag", options });
@@ -246,16 +394,18 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	async move(position: Point): Promise<void> {
 		this.dispatch({ kind: "move", point: position });
 	}
-	async rightClick(point: Point): Promise<void> {
-		this.dispatch({ kind: "click", point });
+	async rightClick(point: Point, options?: PointerOptions): Promise<void> {
+		this.dispatch(clickEffect(point, options));
 	}
-	async middleClick(point: Point): Promise<void> {
-		this.dispatch({ kind: "click", point });
+	async middleClick(point: Point, options?: PointerOptions): Promise<void> {
+		this.dispatch(clickEffect(point, options));
 	}
-	async doubleClick(point: Point): Promise<void> {
-		this.dispatch({ kind: "click", point });
+	async doubleClick(point: Point, options?: PointerOptions): Promise<void> {
+		this.dispatch(clickEffect(point, options));
 	}
-	async scroll(_options: ScrollOptions): Promise<void> {}
+	async scroll(options: ScrollOptions): Promise<void> {
+		this.dispatch({ kind: "scroll", options });
+	}
 	async getCursorPosition(): Promise<Point> {
 		return { x: 0, y: 0 };
 	}
@@ -310,7 +460,54 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 				children: [],
 			});
 		}
-		return elements.filter((element) => !this.hiddenElementIds.has(element.id));
+		return [...elements, ...this.scrollListElements()].filter((element) => !this.hiddenElementIds.has(element.id));
+	}
+
+	private rowFrame(index: number): Rect {
+		return { x: 10, y: AREA_FRAME.y + (index - this.scrollOffset) * ROW_HEIGHT, width: 200, height: ROW_HEIGHT };
+	}
+
+	/** The row's frame on screen: the window screenshot (500x400) maps onto the window bounds at 2x. */
+	private globalRowFrame(id: number): Rect {
+		const frame = this.rowFrame(id - FIRST_ROW_ID);
+		return {
+			x: this.windowBounds.x + frame.x * 2,
+			y: this.windowBounds.y + frame.y * 2,
+			width: frame.width * 2,
+			height: frame.height * 2,
+		};
+	}
+
+	private scrollListElements(): AXTreeElement[] {
+		const list = this.scrollList;
+		if (list === undefined) {
+			return [];
+		}
+		const inView = (index: number): boolean =>
+			index >= this.scrollOffset && index < this.scrollOffset + list.visibleRows;
+		const rows = list.rows
+			.map((label, index) => ({ label, index }))
+			.filter(({ index }) => !this.axHidesRows && (!list.virtualized || inView(index)));
+		return [
+			{
+				id: SCROLL_AREA_ID,
+				role: "AXScrollArea",
+				label: null,
+				value: null,
+				frame: { ...AREA_FRAME },
+				actions: [],
+				children: rows.map(({ index }) => FIRST_ROW_ID + index),
+			},
+			...rows.map(({ label, index }) => ({
+				id: FIRST_ROW_ID + index,
+				role: "AXStaticText",
+				label,
+				value: null,
+				frame: this.rowFrame(index),
+				actions: this.scrollIntoViewAdvertised ? ["AXScrollToVisible"] : [],
+				children: [],
+			})),
+		];
 	}
 
 	private dispatch(effect: Effect): void {

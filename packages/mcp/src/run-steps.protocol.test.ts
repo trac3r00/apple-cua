@@ -2,6 +2,7 @@ import type { TopLevelWindow } from "@apple-cua/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
+import { MAX_RUN_STEPS } from "./tool-schemas.js";
 
 function window(title: string): TopLevelWindow {
 	return { id: 4, ownerPid: 1234, ownerName: "Finder", title, bounds: { x: 0, y: 0, width: 800, height: 600 } };
@@ -320,7 +321,7 @@ describe("run_steps #given invalid input #when the call arrives #then it is refu
 			arguments: {
 				app: "Finder",
 				observation_token: token,
-				steps: Array.from({ length: 11 }, () => ({ type: "type_text", text: "x" })),
+				steps: Array.from({ length: MAX_RUN_STEPS + 1 }, () => ({ type: "type_text", text: "x" })),
 			},
 		});
 

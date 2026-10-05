@@ -232,7 +232,7 @@ describe("native preflight #given recorded metadata #when policy revokes input #
 			actionDispatched: false,
 			effect: "refused",
 			reason: "app-not-approved",
-			escalation: { target: "session", reason: "permission_required" },
+			escalation: { target: "human", reason: "needs_user" },
 			paused: true,
 		});
 		expect(harness.computer.preflightExpected).toEqual([before]);

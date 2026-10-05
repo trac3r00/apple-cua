@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { allowedBundleIdsFromEnvironment } from "./native-policy.js";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import type { FakeGuardedComputer } from "./protocol-test-harness.js";
-import { TOOL_NAMES } from "./server.js";
+import { toolNamesFor } from "./server.js";
 
 const MUTATION_NAMES = [
 	"click",
@@ -32,14 +32,16 @@ afterEach(async () => {
 
 describe("MCP metadata #given a connected client #when initialized #then the context-first contract is advertised", () => {
 	it("publishes instructions, every tool, required mutation tokens, and conservative annotations", async () => {
-		const harness = await createHarness();
+		const harness = await createHarness(undefined, undefined, undefined, {
+			serverOptions: { toolset: "full", iphone: false },
+		});
 		closeHarness = harness.close;
 
 		const result = await harness.client.listTools();
 		const tools = new Map(result.tools.map((tool) => [tool.name, tool]));
 
 		expect(harness.client.getInstructions()).toEqual(expect.any(String));
-		expect([...tools.keys()].sort()).toEqual([...TOOL_NAMES].sort());
+		expect([...tools.keys()].sort()).toEqual([...toolNamesFor("full", false)].sort());
 		expect(tools.get("list_apps")?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
 		expect(tools.get("get_app_state")?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
 		for (const name of MUTATION_NAMES) {

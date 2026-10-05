@@ -1,9 +1,15 @@
-import type { AppOpenLauncher, TopLevelWindow } from "@apple-cua/core";
+import type { AppOpenLauncher, StopStatusSource, SystemPrompt, TopLevelWindow } from "@apple-cua/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import type {
+	ClientCapabilities,
+	ElicitRequest,
+	ElicitResult,
+	JSONRPCMessage,
+} from "@modelcontextprotocol/sdk/types.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
-import { createMcpServer } from "./server.js";
+import { type McpServerOptions, createMcpServer } from "./server.js";
 
 class InMemoryTransport implements Transport {
 	peer: InMemoryTransport | undefined;
@@ -30,9 +36,31 @@ export async function createHarness(
 	computer = new FakeGuardedComputer(),
 	windowProbe?: () => Promise<readonly TopLevelWindow[]>,
 	appLauncher?: AppOpenLauncher,
+	clientOptions?: {
+		readonly capabilities?: ClientCapabilities;
+		readonly onElicit?: (request: ElicitRequest) => ElicitResult | Promise<ElicitResult>;
+		readonly systemPromptProbe?: () => readonly SystemPrompt[];
+		readonly stopSwitch?: StopStatusSource;
+		/** Toolset profile and iPhone opt-in; omitted fields come from the environment. */
+		readonly serverOptions?: McpServerOptions;
+	},
 ) {
-	const server = createMcpServer(computer, windowProbe, undefined, appLauncher);
-	const client = new Client({ name: "context-first-test", version: "0.1.0" });
+	const server = createMcpServer(
+		computer,
+		windowProbe,
+		undefined,
+		appLauncher,
+		clientOptions?.systemPromptProbe,
+		clientOptions?.stopSwitch,
+		clientOptions?.serverOptions,
+	);
+	const client = new Client(
+		{ name: "context-first-test", version: "0.1.0" },
+		clientOptions?.capabilities === undefined ? {} : { capabilities: clientOptions.capabilities },
+	);
+	if (clientOptions?.onElicit !== undefined) {
+		client.setRequestHandler(ElicitRequestSchema, clientOptions.onElicit);
+	}
 	const clientTransport = new InMemoryTransport();
 	const serverTransport = new InMemoryTransport();
 	clientTransport.peer = serverTransport;

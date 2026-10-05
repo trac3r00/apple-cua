@@ -31,7 +31,13 @@ describe("#given only the pre-rename delivery variable #when the process environ
 		expect(deliveryFromProcessEnvironment()).toBe("background");
 	});
 
-	it("defaults to attended delivery when neither name is set", () => {
+	it("defaults to background delivery when neither name is set", () => {
+		expect(deliveryFromProcessEnvironment()).toBe("background");
+	});
+
+	it("selects attended delivery only when asked for", () => {
+		vi.stubEnv("APPLE_CUA_DELIVERY", "attended");
+
 		expect(deliveryFromProcessEnvironment()).toBe("attended");
 	});
 });

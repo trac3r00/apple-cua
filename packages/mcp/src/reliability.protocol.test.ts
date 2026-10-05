@@ -152,7 +152,7 @@ describe("#given a refused preflight #when a mutation is attempted #then the ans
 			arguments: { app: "Finder", observation_token: token, element_index: "20", value: "x" },
 		});
 
-		expect(jsonPayload(result)["escalation"]).toEqual({ target: "session", reason: "permission_required" });
+		expect(jsonPayload(result)["escalation"]).toEqual({ target: "human", reason: "needs_user" });
 	});
 
 	it("refuses the same way for a multi-field write", async () => {

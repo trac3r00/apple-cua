@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
+	AX_PRESS_ACTION,
 	describeQuery,
+	describeUserStop,
 	matchElements,
 	openApplication,
 	parseElementIndex,
@@ -17,13 +19,24 @@ import type {
 	InputObservation,
 	Point,
 	Rect,
+	StopStatusSource,
+	SystemPrompt,
 	TopLevelWindow,
 } from "@apple-cua/core";
 import type { ResolvedTargetClick } from "./mutation-actions.js";
 import {
+	type FindEvidence,
+	type ScrollFindChain,
+	type ScrollFindResult,
+	type StepFind,
+	findByScrolling,
+} from "./scroll-find.js";
+import {
 	type ActionDispatch,
+	type ElementFormat,
 	type RunStepReport,
 	type RunStepsReport,
+	SYSTEM_PROMPT_NOTE,
 	type SetFieldStepReport,
 	type SetFieldsReport,
 	type StepDispatch,
@@ -35,6 +48,8 @@ import {
 	compactElement,
 	compactElementMatch,
 	describeElement,
+	describeSystemPrompt,
+	lockRefusalResult,
 	observedActionResult,
 	observedRunStepsResult,
 	observedSetFieldsResult,
@@ -55,6 +70,20 @@ const DEFAULT_FIND_RESULTS = 5;
 const MAX_NEAR_MISSES = 5;
 const MAX_ALTERNATIVES = 3;
 
+const TIMING_ENABLED = process.env["APPLE_CUA_TIMING"] === "1";
+
+async function timed<T>(label: string, run: () => Promise<T>): Promise<T> {
+	if (!TIMING_ENABLED) {
+		return await run();
+	}
+	const startedAt = performance.now();
+	try {
+		return await run();
+	} finally {
+		process.stderr.write(`[timing] ${label} ${(performance.now() - startedAt).toFixed(1)}\n`);
+	}
+}
+
 function delayMilliseconds(milliseconds: number): Promise<void> {
 	return new Promise((resolve) => {
 		setTimeout(resolve, milliseconds);
@@ -63,7 +92,9 @@ function delayMilliseconds(milliseconds: number): Promise<void> {
 
 const STRICT_STATE_OPTIONS = { requireWindow: true } as const;
 const STRICT_DIFF_STATE_OPTIONS = { diffOnly: true, requireWindow: true } as const;
-const FIELD_VERIFY_STATE_OPTIONS = { requireWindow: true, settleMs: 80 } as const;
+// A baseline read only needs element facts; capturing the window image here cost a screen grab
+// per element step for pixels nothing looked at.
+const FIELD_VERIFY_STATE_OPTIONS = { requireWindow: true, settleMs: 80, includeScreenshot: false } as const;
 
 export interface MutationOptions {
 	/** Return the whole accessibility tree in the post-action observation instead of only the diff. */
@@ -74,6 +105,17 @@ export interface MutationOptions {
 	 * next step.
 	 */
 	readonly includeScreenshot?: boolean;
+	/**
+	 * The action maps observed screenshot coordinates onto the screen, so the window must not have
+	 * moved or resized since the observation. Element, keyboard and menu actions leave this unset.
+	 */
+	readonly screenPoints?: boolean;
+	/**
+	 * Read the whole tree after the action and keep it, so the next action on this app (a script's next
+	 * step) can resolve its target against it instead of walking the UI again. The answer is still the
+	 * diff-only state a plain read would have produced.
+	 */
+	readonly retainTree?: boolean;
 }
 
 export interface ObservationOptions {
@@ -102,6 +144,7 @@ export interface ObservationOptions {
 	 * from `windowCandidates` when an app has several windows.
 	 */
 	readonly windowId?: number;
+	readonly elementFormat?: ElementFormat;
 }
 
 export interface ObserveRequest extends ObservationOptions {
@@ -168,8 +211,44 @@ export interface OpenAppRequest {
  * Step-type knowledge the session needs to run a batch: which observed element a step
  * targets (if any), how to validate it against the token observation, and how to dispatch it.
  */
+export interface StepTarget {
+	readonly query: ElementQuery;
+	/** Which match to use, best first. */
+	readonly index: number;
+	/** Look past the edge of the window for it: scroll the area a page at a time, and read the pixels too. */
+	readonly find?: StepFind;
+}
+
+export interface StepWait {
+	readonly query?: ElementQuery;
+	/** Wait for the query to stop matching instead of to start matching. */
+	readonly gone: boolean;
+	readonly windowTitle?: string;
+	readonly timeoutMs: number;
+}
+
+/** Lets the caller watch a batch progress and stop it between steps. */
+export type RunPace = "verified" | "fast";
+
+export interface RunControl {
+	/**
+	 * `verified` (default) reads the UI before every step that names an element. `fast` resolves the targets
+	 * known up front against one read and runs only cheap guards between steps, for a person-like chain.
+	 */
+	readonly pace?: RunPace;
+	readonly signal?: AbortSignal;
+	readonly onProgress?: (completed: number, total: number, message: string) => void;
+}
+
 export interface RunStepDriver {
 	readonly elementIndex: (step: RunStep) => number | undefined;
+	/** The described element a step acts on, resolved against a fresh read right before it runs. */
+	readonly target: (step: RunStep) => StepTarget | undefined;
+	readonly wait: (step: RunStep) => StepWait | undefined;
+	/** The same step naming the element its target resolved to. */
+	readonly resolve: (step: RunStep, elementIndex: number) => RunStep;
+	/** The same step aimed at a screen point (global logical points) where text was read from the window's pixels. */
+	readonly resolveAtPoint: (step: RunStep, observation: InputObservation, point: Point) => RunStep;
 	readonly validate: (step: RunStep, observation: InputObservation) => void;
 	readonly dispatch: (step: RunStep, targetPid: number, observation: InputObservation) => Promise<StepDispatch>;
 }
@@ -182,6 +261,40 @@ type ObservedElementIdentity = ReadonlyMap<
 	{ readonly role: string; readonly label: string | null; readonly y: number }
 >;
 
+type TargetLookup<T> = { readonly found: T } | { readonly missing: string };
+type ElementFinder<T> = (elements: ReadonlyMap<number, AXTreeElement>) => TargetLookup<T>;
+
+/** What a run_steps chain resolves its element targets against, and whether to keep that read between steps. */
+type ChainTree = ScrollFindChain;
+
+function findQueryTarget(target: StepTarget): ElementFinder<ReturnType<typeof matchElements>[number]> {
+	return (elements) => {
+		const match = matchElements([...elements.values()], target.query)[target.index];
+		return match === undefined
+			? {
+					missing: `no element in the current window matches ${describeQuery(target.query)}${target.index > 0 ? ` at position ${target.index}` : ""}`,
+				}
+			: { found: match };
+	};
+}
+
+function findObservedElement(
+	elementIndex: number,
+	observedIdentity: ReturnType<ObservedElementIdentity["get"]>,
+): ElementFinder<AXTreeElement> {
+	return (elements) => {
+		const element = elements.get(elementIndex);
+		if (element === undefined) {
+			return { missing: `element ${elementIndex} is not present in the latest observation` };
+		}
+		return observedIdentity !== undefined && !sameElementIdentity(observedIdentity, element)
+			? {
+					missing: `element ${elementIndex} is now ${element.role} "${element.label ?? ""}", not the observed control; re-observe`,
+				}
+			: { found: element };
+	};
+}
+
 /** A refusal to dispatch input: nothing was sent, and the caller must be told why. */
 class InputRefusal extends Error {
 	constructor(
@@ -190,6 +303,26 @@ class InputRefusal extends Error {
 	) {
 		super(detail ?? `input refused: ${reason}`);
 	}
+}
+
+/**
+ * How long the tree read after an action may stand in for the next action's pre-dispatch read. The
+ * outcome read already waited for the UI to settle, so only a script's own glue code runs in between;
+ * anything slower falls back to a fresh read.
+ */
+const READ_REUSE_MILLISECONDS = 300;
+
+/** Steps that act on screen points, so a moved or resized window must stop a fast-paced chain. */
+const POINTER_STEP_TYPES: ReadonlySet<string> = new Set(["click", "drag", "scroll"]);
+
+const FAST_PACE_NOTE =
+	"pace: fast - the steps ran back to back without reading the UI between them (the stop switch and the window were still checked before each step); intermediate states were not individually read, only the final outcome was.";
+
+/** A settled, complete tree read that is still the app's latest observation. */
+interface ReusableRead {
+	readonly observation: InputObservation;
+	readonly elements: ReadonlyMap<number, AXTreeElement>;
+	readonly at: number;
 }
 
 interface LiveToken {
@@ -201,6 +334,8 @@ interface LiveToken {
 export class GuardedSession {
 	private readonly tokens = new Map<string, LiveToken>();
 	private readonly tokenByPid = new Map<number, string>();
+	private readonly reusableReads = new Map<number, ReusableRead>();
+	private readonly resolvedAppPids = new Map<string, number>();
 	private readonly tails = new Map<number, Promise<void>>();
 	private globalTail: Promise<void> = Promise.resolve();
 	private closed = false;
@@ -210,6 +345,8 @@ export class GuardedSession {
 		private readonly computer: GuardedComputerInterface,
 		private readonly windowProbe?: () => Promise<readonly TopLevelWindow[]>,
 		private readonly appLauncher?: AppOpenLauncher,
+		private readonly systemPromptProbe?: () => readonly SystemPrompt[],
+		private readonly stopSwitch?: StopStatusSource,
 	) {}
 
 	listApps(): Promise<ToolResult> {
@@ -219,6 +356,7 @@ export class GuardedSession {
 	listWindows(): Promise<ToolResult> {
 		return this.enqueue(undefined, async () => {
 			const windows = this.windowProbe === undefined ? [] : await this.windowProbe();
+			const prompts = this.systemPromptProbe === undefined ? [] : this.systemPromptProbe();
 			return textResult(
 				JSON.stringify(
 					{
@@ -229,6 +367,9 @@ export class GuardedSession {
 							title: window.title,
 							bounds: window.bounds,
 						})),
+						...(prompts.length > 0
+							? { system_prompts: prompts.map(describeSystemPrompt), system_prompt_note: SYSTEM_PROMPT_NOTE }
+							: {}),
 					},
 					null,
 					2,
@@ -238,7 +379,7 @@ export class GuardedSession {
 	}
 
 	async observe(request: ObserveRequest): Promise<ToolResult> {
-		const targetPid = await resolveAppPid(this.computer, request.app);
+		const targetPid = await this.resolvePid(request.app);
 		return this.enqueue(targetPid, async () => {
 			this.clearTokenFor(targetPid);
 			const state = await this.computer.getAppState(targetPid, {
@@ -256,7 +397,16 @@ export class GuardedSession {
 			this.assertOpen();
 			const observation = this.computer.getInputObservation(targetPid);
 			const token = this.issueForObservation(observation, state);
-			return stateResult(state, token);
+			if (
+				token !== undefined &&
+				request.windowId === undefined &&
+				request.maxElements === undefined &&
+				request.includeMenuBar === undefined &&
+				request.subtreeOf === undefined
+			) {
+				this.rememberRead(targetPid, observation, state);
+			}
+			return stateResult(state, token, request.elementFormat);
 		});
 	}
 
@@ -374,6 +524,10 @@ export class GuardedSession {
 						"the accessibility walk produced no observation to act on; retry",
 					);
 				}
+				const stopped = this.userStopped();
+				if (stopped !== undefined) {
+					return refusalResult(stopped.reason, stopped.message);
+				}
 				const preflight = await this.computer.preflightInput(observation);
 				if (!preflight.ok) {
 					this.clearTokenFor(targetPid);
@@ -469,7 +623,7 @@ export class GuardedSession {
 	private async lookupApp(app: string, run: (targetPid: number) => Promise<ToolResult>): Promise<ToolResult> {
 		let targetPid: number;
 		try {
-			targetPid = await resolveAppPid(this.computer, app);
+			targetPid = await this.resolvePid(app);
 		} catch (error: unknown) {
 			return appNotRunningResult(app, error instanceof Error ? error.message : String(error));
 		}
@@ -511,7 +665,7 @@ export class GuardedSession {
 		return this.enqueue(this.laneForRequestedToken(token), async () => {
 			let expected: Awaited<ReturnType<typeof this.beginMutation>>;
 			try {
-				expected = await this.beginMutation(token, app, validate);
+				expected = await this.beginMutation(token, app, validate, options.screenPoints === true);
 			} catch (error: unknown) {
 				const refused = this.refusalFrom(error);
 				if (refused !== undefined) {
@@ -547,7 +701,7 @@ export class GuardedSession {
 		return this.enqueue(this.laneForRequestedToken(token), async () => {
 			let expected: Awaited<ReturnType<typeof this.beginMutation>>;
 			try {
-				expected = await this.beginMutation(token, app, () => undefined);
+				expected = await this.beginMutation(token, app, () => undefined, false);
 			} catch (error: unknown) {
 				const refused = this.refusalFrom(error);
 				if (refused !== undefined) {
@@ -564,8 +718,16 @@ export class GuardedSession {
 			let baseline = await this.readFieldBaseline(expected.pid);
 			let uiChanged = false;
 			let stoppedEarly = false;
+			let refused: string | undefined;
 
 			for (const { update, index } of targets) {
+				const stopped = this.userStopped();
+				if (stopped !== undefined) {
+					steps.push(skippedStep(index, update.value, stopped.message));
+					stoppedEarly = true;
+					refused = stopped.reason;
+					break;
+				}
 				const element = baseline.elements.get(index);
 				if (element === undefined) {
 					steps.push(skippedStep(index, update.value, "element index is not present in the latest observation"));
@@ -617,7 +779,10 @@ export class GuardedSession {
 				}
 			}
 
-			const report = summarize(steps, updates.length, stoppedEarly, uiChanged);
+			const report = {
+				...summarize(steps, updates.length, stoppedEarly, uiChanged),
+				...(refused === undefined ? {} : { refused }),
+			};
 			try {
 				const outcome = await this.readOutcome(expected.pid, expected.observation, options);
 				return observedSetFieldsResult(outcome.state, report, outcome.contextUnchanged, outcome.nextToken);
@@ -635,15 +800,25 @@ export class GuardedSession {
 		expect: VerifyRequest | undefined,
 		driver: RunStepDriver,
 		options: MutationOptions = {},
+		control: RunControl = {},
 	): Promise<ToolResult> {
 		return this.enqueue(this.laneForRequestedToken(token), async () => {
 			let expected: Awaited<ReturnType<typeof this.beginMutation>>;
 			try {
-				expected = await this.beginMutation(token, app, (observation) => {
-					for (const step of steps) {
-						driver.validate(step, observation);
-					}
-				});
+				expected = await this.beginMutation(
+					token,
+					app,
+					(observation) => {
+						for (const step of steps) {
+							driver.validate(step, observation);
+						}
+					},
+					steps.some(
+						(step) =>
+							step.type === "drag" ||
+							(step.type === "click" && step.element_index === undefined && step.target === undefined),
+					),
+				);
 			} catch (error: unknown) {
 				const refused = this.refusalFrom(error);
 				if (refused !== undefined) {
@@ -653,42 +828,182 @@ export class GuardedSession {
 			}
 			const beforeAction = await this.captureWindowBaseline();
 			const reports: RunStepReport[] = [];
-			let uiChanged = false;
 			let stoppedEarly = false;
+			let refused: string | undefined;
+			// The settled read behind the token can answer the first pre-dispatch read, but only until this
+			// batch waits or dispatches: from then on the UI is what the batch itself made of it.
+			let canReuseRead = true;
+			let treeReads = 0;
+			const readBaseline = async (): ReturnType<GuardedSession["readFieldBaseline"]> => {
+				const reusable = canReuseRead ? this.takeReusableRead(expected.observation) : undefined;
+				canReuseRead = false;
+				if (reusable !== undefined) {
+					return { elements: reusable, changed: false };
+				}
+				treeReads += 1;
+				return await this.readFieldBaseline(expected.pid);
+			};
+			// Fast pace keeps the chain's one read until a wait or a miss makes it stale, and runs the cheap
+			// guard that stands in for a read between steps once something has run.
+			const fast = control.pace === "fast";
+			const chain: ChainTree = {
+				keep: fast,
+				elements: undefined,
+				changed: false,
+				framesStale: false,
+				idsRebased: false,
+				read: readBaseline,
+			};
+			let guardNeeded = false;
 
 			for (const [position, step] of steps.entries()) {
-				const elementIndex = driver.elementIndex(step);
-				if (elementIndex !== undefined) {
-					const baseline = await this.readFieldBaseline(expected.pid);
-					uiChanged = uiChanged || baseline.changed;
-					const element = baseline.elements.get(elementIndex);
-					if (element === undefined) {
-						reports.push(
-							skippedRunStep(
-								position,
-								step.type,
-								`element ${elementIndex} is not present in the latest observation`,
-							),
-						);
+				const stopped = this.userStopped();
+				if (stopped !== undefined) {
+					for (const [remaining, skipped] of steps.entries()) {
+						if (remaining >= position) {
+							reports.push(skippedRunStep(remaining, skipped.type, stopped.message));
+						}
+					}
+					stoppedEarly = true;
+					refused = stopped.reason;
+					break;
+				}
+				if (control.signal?.aborted === true) {
+					for (const [remaining, skipped] of steps.entries()) {
+						if (remaining >= position) {
+							reports.push(
+								skippedRunStep(remaining, skipped.type, "cancelled by the client before this step ran"),
+							);
+						}
+					}
+					stoppedEarly = true;
+					break;
+				}
+
+				const wait = driver.wait(step);
+				if (wait !== undefined) {
+					canReuseRead = false;
+					chain.elements = undefined;
+					guardNeeded = true;
+					const waited = await this.waitForStep(expected.pid, wait, control.signal);
+					chain.changed = chain.changed || waited.changed;
+					if (!waited.satisfied) {
+						reports.push({
+							step: position,
+							type: step.type,
+							input_dispatched: false,
+							status: "failed",
+							reason: waited.reason,
+						});
 						stoppedEarly = true;
 						break;
 					}
-					const observedIdentity = expected.elements?.get(elementIndex);
-					if (observedIdentity !== undefined && !sameElementIdentity(observedIdentity, element)) {
-						reports.push(
-							skippedRunStep(
-								position,
-								step.type,
-								`element ${elementIndex} is now ${element.role} "${element.label ?? ""}", not the observed control; re-observe`,
-							),
-						);
+					reports.push({
+						step: position,
+						type: step.type,
+						input_dispatched: false,
+						status: "satisfied",
+						detail: { waited_ms: waited.waitedMs },
+					});
+					control.onProgress?.(position + 1, steps.length, `${step.type} satisfied`);
+					continue;
+				}
+
+				let runnable = step;
+				let resolvedElement:
+					| { readonly id: number; readonly role: string; readonly label: string | null }
+					| undefined;
+				let foundEvidence: FindEvidence | undefined;
+				const target = driver.target(step);
+				if (target?.find !== undefined) {
+					const searched = await this.searchByScrolling(chain, expected, step, target, target.find, control);
+					if ("missing" in searched) {
+						reports.push({ ...skippedRunStep(position, step.type, searched.missing), found: searched.evidence });
+						stoppedEarly = true;
+						if (searched.refused !== undefined) {
+							refused = searched.refused;
+						}
+						break;
+					}
+					foundEvidence = searched.evidence;
+					if (searched.found.kind === "element") {
+						const element = searched.found.element;
+						resolvedElement = { id: element.id, role: element.role, label: element.label };
+						// A control that does not advertise AXPress (a Finder row's name field) takes no accessibility
+						// press, so its click goes to the centre the search just measured, through the pointer route.
+						const pointerClick = step.type === "click" && !element.actions.includes(AX_PRESS_ACTION);
+						runnable = pointerClick
+							? driver.resolveAtPoint(step, expected.observation, searched.found.centre)
+							: driver.resolve(step, element.id);
+					} else {
+						try {
+							runnable = driver.resolveAtPoint(step, expected.observation, searched.found.point);
+						} catch (error: unknown) {
+							reports.push({
+								...skippedRunStep(position, step.type, error instanceof Error ? error.message : String(error)),
+								found: searched.evidence,
+							});
+							stoppedEarly = true;
+							break;
+						}
+					}
+				} else if (target !== undefined) {
+					const located = await this.resolveStepTarget(chain, findQueryTarget(target));
+					if ("missing" in located) {
+						reports.push(skippedRunStep(position, step.type, located.missing));
+						stoppedEarly = true;
+						break;
+					}
+					const match = located.found;
+					resolvedElement = { id: match.element.id, role: match.element.role, label: match.element.label };
+					runnable = driver.resolve(step, match.element.id);
+				}
+
+				const elementIndex = target === undefined ? driver.elementIndex(step) : undefined;
+				if (elementIndex !== undefined && chain.idsRebased && chain.elements !== undefined) {
+					reports.push(
+						skippedRunStep(
+							position,
+							step.type,
+							"element ids were renumbered by an earlier scroll-find in this chain; name this step's element with target",
+						),
+					);
+					stoppedEarly = true;
+					break;
+				}
+				if (elementIndex !== undefined) {
+					const located = await this.resolveStepTarget(
+						chain,
+						findObservedElement(elementIndex, expected.elements?.get(elementIndex)),
+					);
+					if ("missing" in located) {
+						reports.push(skippedRunStep(position, step.type, located.missing));
 						stoppedEarly = true;
 						break;
 					}
 				}
 
+				if (fast && guardNeeded) {
+					const blocked = await this.chainGuard(expected.pid, expected.observation, step);
+					if (blocked !== undefined) {
+						const reason = `the window guard refused this step (${blocked}); nothing further was dispatched`;
+						for (const [remaining, skipped] of steps.entries()) {
+							if (remaining >= position) {
+								reports.push(skippedRunStep(remaining, skipped.type, reason));
+							}
+						}
+						stoppedEarly = true;
+						refused = blocked;
+						break;
+					}
+				}
+
+				canReuseRead = false;
+				guardNeeded = true;
 				try {
-					const dispatch = await driver.dispatch(step, expected.pid, expected.observation);
+					const dispatch = await timed("dispatch", () =>
+						driver.dispatch(runnable, expected.pid, expected.observation),
+					);
 					reports.push({
 						step: position,
 						type: step.type,
@@ -696,8 +1011,12 @@ export class GuardedSession {
 						status: "dispatched",
 						route: dispatch.route,
 						delivery: dispatch.delivery,
+						...(dispatch.fallback === undefined ? {} : { fallback: dispatch.fallback }),
+						...(resolvedElement === undefined ? {} : { resolved_element: resolvedElement }),
+						...(foundEvidence === undefined ? {} : { found: foundEvidence }),
 						...(dispatch.detail === undefined ? {} : { detail: dispatch.detail }),
 					});
+					control.onProgress?.(position + 1, steps.length, `${step.type} dispatched`);
 				} catch (error: unknown) {
 					reports.push({
 						step: position,
@@ -711,7 +1030,17 @@ export class GuardedSession {
 				}
 			}
 
-			const report = summarizeRunSteps(reports, steps.length, stoppedEarly, uiChanged);
+			const report = {
+				...summarizeRunSteps(reports, steps.length, stoppedEarly, chain.changed),
+				...(refused === undefined ? {} : { refused }),
+				...(fast
+					? {
+							pace: "fast",
+							pace_note: FAST_PACE_NOTE,
+							tree_reads: treeReads,
+						}
+					: {}),
+			};
 			try {
 				if (expect?.timeoutMs !== undefined) {
 					await this.pollVerification(expected.pid, expect);
@@ -756,11 +1085,11 @@ export class GuardedSession {
 	verify(token: string, app: string, request: VerifyRequest): Promise<ToolResult> {
 		return this.enqueue(this.laneForRequestedToken(token), async () => {
 			const active = this.consume(token);
-			const targetPid = await resolveAppPid(this.computer, app);
+			const targetPid = await this.resolvePidForToken(app, active.observation.pid);
 			if (targetPid !== active.observation.pid) {
 				throw new Error("requested app does not match the token observation");
 			}
-			const { state, verification } = await this.pollVerification(targetPid, request);
+			const { state, verification } = await this.pollVerification(targetPid, request, active.observation.windowId);
 			const observation = this.computer.getInputObservation(targetPid);
 			const nextToken =
 				observation !== undefined && observationMatchesState(observation, state)
@@ -770,9 +1099,62 @@ export class GuardedSession {
 		});
 	}
 
+	private async waitForStep(
+		targetPid: number,
+		wait: StepWait,
+		signal: AbortSignal | undefined,
+	): Promise<{
+		readonly satisfied: boolean;
+		readonly changed: boolean;
+		readonly waitedMs: number;
+		readonly reason: string;
+	}> {
+		const startedAt = Date.now();
+		const deadline = startedAt + wait.timeoutMs;
+		let changed = false;
+		for (;;) {
+			this.assertOpen();
+			const state = await this.computer.getAppState(targetPid, {
+				...STRICT_STATE_OPTIONS,
+				includeScreenshot: false,
+				settleMs: 0,
+			});
+			this.assertOpen();
+			changed = changed || hasAxChange(state);
+			const unmet: string[] = [];
+			if (wait.query !== undefined) {
+				const present = matchElements(state.elements, wait.query).length > 0;
+				if (present === wait.gone) {
+					unmet.push(`${describeQuery(wait.query)} is ${wait.gone ? "still shown" : "not shown"}`);
+				}
+			}
+			if (wait.windowTitle !== undefined) {
+				const titles = (await this.windowsForPid(targetPid)).map((window) => window.title);
+				if (state.windowTitle !== undefined && !titles.includes(state.windowTitle)) {
+					titles.push(state.windowTitle);
+				}
+				if (!titles.includes(wait.windowTitle)) {
+					unmet.push(`no window titled ${JSON.stringify(wait.windowTitle)} is open`);
+				}
+			}
+			const waitedMs = Date.now() - startedAt;
+			if (unmet.length === 0) {
+				return { satisfied: true, changed, waitedMs, reason: "" };
+			}
+			if (signal?.aborted === true) {
+				return { satisfied: false, changed, waitedMs, reason: "cancelled by the client while waiting" };
+			}
+			if (Date.now() >= deadline) {
+				return { satisfied: false, changed, waitedMs, reason: `after ${waitedMs} ms: ${unmet.join("; ")}` };
+			}
+			await delayMilliseconds(VERIFY_POLL_INTERVAL_MILLISECONDS);
+		}
+	}
+
 	private async pollVerification(
 		targetPid: number,
 		request: VerifyRequest,
+		windowId?: number,
 	): Promise<{ readonly state: AppState; readonly verification: Verification }> {
 		const deadline = Date.now() + (request.timeoutMs ?? 0);
 		for (;;) {
@@ -781,6 +1163,7 @@ export class GuardedSession {
 				...STRICT_STATE_OPTIONS,
 				includeScreenshot: false,
 				settleMs: 0,
+				...(windowId === undefined ? {} : { windowId }),
 			});
 			this.assertOpen();
 			const verification = await this.runChecks(targetPid, state, request);
@@ -829,6 +1212,9 @@ export class GuardedSession {
 		}
 		if (request.windowTitle !== undefined) {
 			const titles = (await this.windowsForPid(pid)).map((window) => window.title);
+			if (state.windowTitle !== undefined && !titles.includes(state.windowTitle)) {
+				titles.push(state.windowTitle);
+			}
 			checks.push({
 				check: `a window titled ${JSON.stringify(request.windowTitle)} is open`,
 				verified: titles.includes(request.windowTitle),
@@ -853,18 +1239,23 @@ export class GuardedSession {
 		token: string,
 		app: string,
 		validate: Validation,
+		screenPoints: boolean,
 	): Promise<{
 		readonly pid: number;
 		readonly observation: InputObservation;
 		readonly elements: ObservedElementIdentity | undefined;
 	}> {
+		const stopped = this.userStopped();
+		if (stopped !== undefined) {
+			throw stopped;
+		}
 		let active: ReturnType<GuardedSession["consume"]>;
 		try {
 			active = this.consume(token);
 		} catch (error: unknown) {
 			throw new InputRefusal("stale-observation-token", error instanceof Error ? error.message : undefined);
 		}
-		const targetPid = await resolveAppPid(this.computer, app);
+		const targetPid = await this.resolvePidForToken(app, active.observation.pid);
 		if (targetPid !== active.observation.pid) {
 			throw new InputRefusal("token-observation-mismatch", "requested app does not match the token observation");
 		}
@@ -873,12 +1264,120 @@ export class GuardedSession {
 		} catch (error: unknown) {
 			throw new InputRefusal("element-not-observed", error instanceof Error ? error.message : undefined);
 		}
-		const preflight = await this.computer.preflightInput(active.observation);
+		const preflight = await timed("preflightInput", () =>
+			this.computer.preflightInput(active.observation, { requireSameBounds: screenPoints }),
+		);
 		if (!preflight.ok) {
+			this.resolvedAppPids.delete(appKey(app));
 			throw new InputRefusal(preflight.reason);
 		}
 		this.assertOpen();
 		return { pid: targetPid, observation: active.observation, elements: active.elements };
+	}
+
+	/**
+	 * THE seam where a run_steps chain turns what a step names (a described target or an element id) into
+	 * an element. Verified pace reads the UI first, every time. Fast pace tries the chain's one read first
+	 * and reads again, for this step only, when the element is not in it (UI an earlier step created);
+	 * the fresh read then becomes the chain's tree, because ids belong to the snapshot they came from.
+	 * Anything that finds elements the plain read cannot (scrolling a list until the row exists, text
+	 * recognition when no accessibility element matches) extends this function, not the chain loop.
+	 */
+	private async resolveStepTarget<T>(chain: ChainTree, find: ElementFinder<T>): Promise<TargetLookup<T>> {
+		// Frames a scroll in this chain moved cannot be trusted to aim an action, so they force a fresh read.
+		if (chain.elements !== undefined && !chain.framesStale) {
+			const attempt = find(chain.elements);
+			if ("found" in attempt) {
+				return attempt;
+			}
+		}
+		const baseline = await chain.read();
+		chain.changed = chain.changed || baseline.changed;
+		chain.framesStale = false;
+		chain.idsRebased = false;
+		chain.elements = chain.keep ? baseline.elements : undefined;
+		return find(baseline.elements);
+	}
+
+	/**
+	 * A step that names its target with `find`: look at what is shown (accessibility, then the window's pixels),
+	 * scroll the area a page and look again, and stop at the first sighting. The stop switch, the cancel signal and
+	 * the window guards are checked before every look, so a long search can be stopped between pages.
+	 */
+	private async searchByScrolling(
+		chain: ChainTree,
+		expected: { readonly pid: number; readonly observation: InputObservation },
+		step: RunStep,
+		target: StepTarget,
+		find: StepFind,
+		control: RunControl,
+	): Promise<ScrollFindResult> {
+		return await findByScrolling(
+			{
+				computer: this.computer,
+				pid: expected.pid,
+				observation: expected.observation,
+				interrupted: async (scrolled) => {
+					this.assertOpen();
+					const stopped = this.userStopped();
+					if (stopped !== undefined) {
+						return { message: stopped.message, refused: stopped.reason };
+					}
+					if (control.signal?.aborted === true) {
+						return { message: "cancelled by the client while looking for the target" };
+					}
+					if (!scrolled) {
+						return undefined;
+					}
+					const blocked = await this.chainGuard(expected.pid, expected.observation, step);
+					return blocked === undefined
+						? undefined
+						: {
+								message: `the window guard refused the search (${blocked}); nothing further was dispatched`,
+								refused: blocked,
+							};
+				},
+			},
+			chain,
+			target.query,
+			target.index,
+			find,
+		);
+	}
+
+	/**
+	 * The cheap check that stands in for a tree read between fast-paced steps: the window the chain was
+	 * observed on is still the same window (and, for steps that aim at screen points, the same bounds),
+	 * the app is still approved and running, and the observation was not replaced. A reason means refuse.
+	 */
+	private async chainGuard(pid: number, observed: InputObservation, step: RunStep): Promise<string | undefined> {
+		const pointer = POINTER_STEP_TYPES.has(step.type);
+		const current = this.computer.getInputObservation(pid);
+		if (current === undefined) {
+			return "observation-replaced";
+		}
+		if (current !== observed) {
+			if (
+				current.pid !== observed.pid ||
+				current.bundleId !== observed.bundleId ||
+				current.windowId !== observed.windowId
+			) {
+				return "window-changed";
+			}
+			if (pointer && !sameInputContext(observed, current)) {
+				return "window-bounds-changed";
+			}
+		}
+		const result = await timed("chainGuard", () =>
+			this.computer.preflightInput(current, { requireSameBounds: pointer }),
+		);
+		return result.ok ? undefined : result.reason;
+	}
+
+	/** The refusal to raise while the user's stop switch is on, or nothing while computer use is allowed. */
+	private userStopped(): InputRefusal | undefined {
+		const status = this.stopSwitch?.status();
+		return status?.stopped === true ? new InputRefusal("user-stopped", describeUserStop(status)) : undefined;
 	}
 
 	private refusalFrom(error: unknown): ToolResult | undefined {
@@ -895,18 +1394,36 @@ export class GuardedSession {
 		readonly nextToken: string | undefined;
 	}> {
 		this.assertOpen();
-		const state = await this.computer.getAppState(targetPid, {
-			...(options.fullState === true ? STRICT_STATE_OPTIONS : STRICT_DIFF_STATE_OPTIONS),
-			includeScreenshot: options.includeScreenshot === true,
-		});
+		// A retained read asks for the whole tree and answers with the same diff-only state the walk would
+		// have produced on its own.
+		const retain = options.retainTree === true && options.fullState !== true;
+		const read = await timed("readOutcome.getAppState", () =>
+			this.computer.getAppState(targetPid, {
+				...(options.fullState === true || retain ? STRICT_STATE_OPTIONS : STRICT_DIFF_STATE_OPTIONS),
+				includeScreenshot: options.includeScreenshot === true,
+			}),
+		);
+		const state: AppState =
+			retain && read.axChangeSummary !== undefined && read.treeSkipped !== true
+				? { ...read, elements: [], treeOmitted: true }
+				: read;
 		this.assertOpen();
 		const current = this.computer.getInputObservation(targetPid);
+		// Background delivery acts on a window that is deliberately not frontmost, so requiring focus
+		// here withheld the next token after every background action and cost a full re-observation.
+		// A post-action read that produced a comparable tree is itself a fresh observation, so it earns
+		// a token whether or not the tree changed; only an unavailable tree still pauses.
+		const focusSatisfied = state.frontmost || this.computer.delivery === "background";
 		const contextUnchanged =
 			current !== undefined &&
-			state.frontmost &&
+			focusSatisfied &&
 			observationMatchesState(current, state) &&
 			sameInputContext(expected, current);
-		const nextToken = contextUnchanged && hasAxChange(state) ? this.issue(current, undefined) : undefined;
+		const nextToken =
+			contextUnchanged && state.axChangeSummary !== undefined ? this.issue(current, undefined) : undefined;
+		if (nextToken !== undefined) {
+			this.rememberRead(targetPid, current, read);
+		}
 		return { state, contextUnchanged, nextToken };
 	}
 
@@ -915,7 +1432,9 @@ export class GuardedSession {
 		readonly changed: boolean;
 	}> {
 		this.assertOpen();
-		const state = await this.computer.getAppState(targetPid, FIELD_VERIFY_STATE_OPTIONS);
+		const state = await timed("readFieldBaseline.getAppState", () =>
+			this.computer.getAppState(targetPid, FIELD_VERIFY_STATE_OPTIONS),
+		);
 		this.assertOpen();
 		return {
 			elements: new Map(state.elements.map((element) => [element.id, element] as const)),
@@ -927,8 +1446,9 @@ export class GuardedSession {
 		if (this.windowProbe === undefined) {
 			return undefined;
 		}
+		const probe = this.windowProbe;
 		try {
-			return (await this.windowProbe()).map((window) => window.id);
+			return (await timed("windowProbe.before", () => probe())).map((window) => window.id);
 		} catch {
 			return undefined;
 		}
@@ -940,7 +1460,8 @@ export class GuardedSession {
 		}
 		try {
 			const known = new Set(baseline);
-			return (await this.windowProbe())
+			const probe = this.windowProbe;
+			return (await timed("windowProbe.after", () => probe()))
 				.filter((window) => !known.has(window.id))
 				.map((window) => ({
 					id: window.id,
@@ -966,11 +1487,66 @@ export class GuardedSession {
 
 	/** One live token per app: a new observation of that app invalidates its previous token only. */
 	private clearTokenFor(pid: number): void {
+		this.reusableReads.delete(pid);
 		const token = this.tokenByPid.get(pid);
 		if (token !== undefined) {
 			this.tokens.delete(token);
 			this.tokenByPid.delete(pid);
 		}
+	}
+
+	/** Resolve an app name to a pid, remembering the answer for later requests naming the same app. */
+	private async resolvePid(app: string): Promise<number> {
+		const pid = await timed("resolveAppPid", () => resolveAppPid(this.computer, app));
+		this.resolvedAppPids.set(appKey(app), pid);
+		return pid;
+	}
+
+	/**
+	 * The pid a token-carrying request names. When this session already resolved the same app name to the
+	 * token's pid, enumerating every running app again (the dominant cost of a small action) adds nothing:
+	 * preflight still proves that exact process is running, is the observed bundle and is approved.
+	 */
+	private async resolvePidForToken(app: string, tokenPid: number): Promise<number> {
+		return this.resolvedAppPids.get(appKey(app)) === tokenPid ? tokenPid : await this.resolvePid(app);
+	}
+
+	/** Keep the complete tree of a settled read so the next action can resolve its target against it. */
+	private rememberRead(pid: number, observation: InputObservation | undefined, state: AppState): void {
+		if (
+			observation === undefined ||
+			state.treeSkipped === true ||
+			state.treeOmitted === true ||
+			state.elementsTruncated === true ||
+			!observationMatchesState(observation, state)
+		) {
+			this.reusableReads.delete(pid);
+			return;
+		}
+		this.reusableReads.set(pid, {
+			observation,
+			elements: new Map(state.elements.map((element) => [element.id, element] as const)),
+			at: Date.now(),
+		});
+	}
+
+	/**
+	 * The tree of the read that produced `expected`, once. It stands in for a fresh read only while that
+	 * read is still the app's latest observation (nothing observed or acted since) and younger than
+	 * {@link READ_REUSE_MILLISECONDS}.
+	 */
+	private takeReusableRead(expected: InputObservation): ReadonlyMap<number, AXTreeElement> | undefined {
+		const entry = this.reusableReads.get(expected.pid);
+		this.reusableReads.delete(expected.pid);
+		if (
+			entry === undefined ||
+			entry.observation !== expected ||
+			Date.now() - entry.at > READ_REUSE_MILLISECONDS ||
+			this.computer.getInputObservation(expected.pid) !== expected
+		) {
+			return undefined;
+		}
+		return entry.elements;
 	}
 
 	private laneForRequestedToken(token: string): number | undefined {
@@ -995,12 +1571,15 @@ export class GuardedSession {
 		}
 	}
 
-	private enqueue<T>(lane: number | undefined, operation: () => Promise<T>): Promise<T> {
+	private enqueue(lane: number | undefined, operation: () => Promise<ToolResult>): Promise<ToolResult> {
 		const previous = lane === undefined ? this.globalTail : (this.tails.get(lane) ?? Promise.resolve());
-		const result = previous.then(async () => {
-			this.assertOpen();
-			return await operation();
-		});
+		// A locked Mac is not a tool failure: it answers as a refusal that asks for the person.
+		const result = previous
+			.then(async () => {
+				this.assertOpen();
+				return await operation();
+			})
+			.catch((error: unknown) => lockRefusalResult(error) ?? Promise.reject(error));
 		const settled = result.then(
 			() => undefined,
 			() => undefined,
@@ -1049,6 +1628,10 @@ function parseFieldIndex(elementIndex: string): number {
 		throw new Error(`Invalid element index: ${elementIndex}`);
 	}
 	return index;
+}
+
+function appKey(app: string): string {
+	return app.trim().toLowerCase();
 }
 
 function observedElementIdentity(state: AppState): ObservedElementIdentity | undefined {

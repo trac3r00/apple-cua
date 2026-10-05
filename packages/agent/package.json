@@ -1,0 +1,37 @@
+{
+	"name": "@apple-cua/agent",
+	"version": "0.1.0",
+	"type": "module",
+	"description": "Decision-layer agent: an indexed action space over apple-cua observations and one fan-out decision per step",
+	"keywords": ["computer-use", "agent", "decision", "systemone", "jev", "macos", "ios", "accessibility"],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/bob01933/bob-cua.git",
+		"directory": "packages/agent"
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"scripts": {
+		"build": "tsgo",
+		"typecheck": "tsgo --noEmit",
+		"test": "vitest --run"
+	},
+	"dependencies": {
+		"@apple-cua/core": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^20.0.0",
+		"typescript": "^5.7.0",
+		"vitest": "^2.1.0"
+	},
+	"engines": {
+		"node": ">=20.0.0"
+	}
+}

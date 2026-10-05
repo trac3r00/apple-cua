@@ -1,5 +1,6 @@
 import type { KoffiFunc } from "koffi";
 
+import { resolveAxMessagingTimeoutSeconds } from "./ax-timeout.js";
 import { cfRelease, toCFString } from "./corefoundation.js";
 import { koffi } from "./koffi.js";
 
@@ -12,6 +13,8 @@ type KoffiCType = ReturnType<typeof koffi.proto>;
 type KoffiRegistered = ReturnType<typeof koffi.register>;
 
 const AX_SUCCESS = 0;
+/** The app did not answer inside the messaging timeout: stop asking it anything else. */
+const AX_ERROR_CANNOT_COMPLETE = -25204;
 const CALLBACK_PROTO = "void MacosCuaAxObserverCallback(void *observer, void *element, void *notification, void *ctx)";
 
 /**
@@ -56,6 +59,7 @@ interface AxObserverBindings {
 	>;
 	readonly getRunLoopSource: KoffiFunc<(observer: AXObserverRef) => CFRunLoopSourceRef | null>;
 	readonly createApplicationElement: KoffiFunc<(pid: number) => AXUIElementRef | null>;
+	readonly setMessagingTimeout: KoffiFunc<(element: AXUIElementRef, seconds: number) => number>;
 	readonly runLoopGetCurrent: KoffiFunc<() => CFRunLoopRef | null>;
 	readonly addSource: KoffiFunc<(runLoop: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFStringRef) => void>;
 	readonly removeSource: KoffiFunc<(runLoop: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFStringRef) => void>;
@@ -106,6 +110,9 @@ function getBindings(): AxObserverBindings | null {
 			createApplicationElement: applicationServices.func("AXUIElementCreateApplication", "void *", [
 				"int32_t",
 			]) as AxObserverBindings["createApplicationElement"],
+			setMessagingTimeout: applicationServices.func(
+				"int32_t AXUIElementSetMessagingTimeout(void *element, float seconds)",
+			) as AxObserverBindings["setMessagingTimeout"],
 			runLoopGetCurrent: coreFoundation.func(
 				"CFRunLoopGetCurrent",
 				"void *",
@@ -193,11 +200,23 @@ export function createAxEventWaiter(pid: number): AxEventWaiter | null {
 	}
 
 	let registered = 0;
+	const timeoutSeconds = resolveAxMessagingTimeoutSeconds();
+	if (timeoutSeconds > 0) {
+		bindings.setMessagingTimeout(element, timeoutSeconds);
+	}
 	for (const name of SETTLE_NOTIFICATIONS) {
 		const notification = toCFString(name);
 		try {
-			if (bindings.addNotification(observer, element, notification, null) === AX_SUCCESS) {
+			const result = bindings.addNotification(observer, element, notification, null);
+			if (result === AX_SUCCESS) {
 				registered += 1;
+				continue;
+			}
+			// An app that cannot answer is not going to answer the next fourteen either. Without
+			// this the settle spent one messaging timeout per notification, measured at 22.6 s
+			// against a stopped app before the whole observation failed.
+			if (result === AX_ERROR_CANNOT_COMPLETE) {
+				break;
 			}
 		} finally {
 			cfRelease(notification);

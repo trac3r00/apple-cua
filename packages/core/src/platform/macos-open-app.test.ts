@@ -105,5 +105,7 @@ describe("#given a bundle id and an app name #when the open arguments are built 
 		expect(openArguments("com.apple.Safari")).toEqual(["-b", "com.apple.Safari"]);
 		expect(openArguments("Finder")).toEqual(["-a", "Finder"]);
 		expect(openArguments("Visual Studio Code")).toEqual(["-a", "Visual Studio Code"]);
+		expect(openArguments("Finder", true)).toEqual(["-g", "-a", "Finder"]);
+		expect(openArguments("com.apple.Safari", true)).toEqual(["-g", "-b", "com.apple.Safari"]);
 	});
 });

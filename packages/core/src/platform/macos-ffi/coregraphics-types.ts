@@ -19,6 +19,8 @@ export type MouseEventOptions = {
 	readonly clickState: number | undefined;
 	readonly targetPid: number | undefined;
 	readonly targetWindow?: SkyLightTargetWindow | undefined;
+	/** CGEventFlags mask stamped on the event (held modifiers); left alone when undefined. */
+	readonly flags?: number | undefined;
 };
 
 export type KeyboardEventOptions = {
@@ -28,6 +30,8 @@ export type KeyboardEventOptions = {
 	readonly text: string | undefined;
 	readonly targetPid: number | undefined;
 	readonly targetWindow?: SkyLightTargetWindow | undefined;
+	/** Post a flagsChanged event (a modifier key going down or up) instead of a key down/up. */
+	readonly flagsChanged?: boolean | undefined;
 };
 
 export type ScrollEventOptions = {
@@ -35,11 +39,16 @@ export type ScrollEventOptions = {
 	readonly deltaY: number;
 	readonly targetPid: number | undefined;
 	readonly targetWindow?: SkyLightTargetWindow | undefined;
+	/** CGEventFlags mask stamped on the event (held modifiers); left alone when undefined. */
+	readonly flags?: number | undefined;
+	/** Screen point the wheel event is delivered at; the real cursor position when undefined. */
+	readonly position?: CGPoint | undefined;
 };
 
 export const K_CG_EVENT_SOURCE_STATE_HID_SYSTEM_STATE = 1;
 export const K_CG_HID_EVENT_TAP = 0;
 export const K_CG_SCROLL_EVENT_UNIT_LINE = 1;
+export const K_CG_EVENT_FLAGS_CHANGED = 12;
 export const K_CG_SCROLL_EVENT_UNIT_PIXEL = 0;
 export const K_CG_MOUSE_EVENT_CLICK_STATE = 1;
 export const K_CG_MOUSE_EVENT_BUTTON_NUMBER = 3;

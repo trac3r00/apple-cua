@@ -60,6 +60,7 @@ const koffiMock = vi.hoisted(() => {
 			},
 		),
 		_AXUIElementGetWindow: vi.fn(() => -25205),
+		AXUIElementSetMessagingTimeout: vi.fn(() => 0),
 	};
 
 	function libraryFor(path: string) {

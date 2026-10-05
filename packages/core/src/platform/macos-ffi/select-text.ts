@@ -6,11 +6,12 @@ import {
 	K_AX_SELECTED_TEXT_RANGE_ATTRIBUTE,
 	K_AX_VALUE_ATTRIBUTE,
 	copyAttributeValue,
+	focusedTextEntryElement,
 	refetchElement,
 	releaseAXElement,
 	setAttributeValue,
 } from "./accessibility.js";
-import { type CFTypeRef, cfRelease, fromCFString, isCFString } from "./corefoundation.js";
+import { type CFTypeRef, cfRelease, fromCFString, isCFString, toCFString } from "./corefoundation.js";
 import { koffi } from "./koffi.js";
 
 const applicationServices = koffi.load("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices");
@@ -34,6 +35,69 @@ export function selectTextByIndex(pid: number, elementIndex: number, options: Se
 			setAttributeValue(element, K_AX_SELECTED_TEXT_RANGE_ATTRIBUTE, axValue);
 		} finally {
 			cfRelease(axValue);
+		}
+	} finally {
+		releaseAXElement(element);
+	}
+}
+
+/**
+ * Select the whole text of the app's focused text field through accessibility. This is the Select
+ * All an app in the background accepts: its Edit > Select All stays disabled until it is active.
+ * False when no native text field has focus.
+ */
+export function selectAllInFocusedTextElement(pid: number): boolean {
+	const element = focusedTextEntryElement(pid);
+	if (element === null) {
+		return false;
+	}
+	try {
+		const axValue = createCFRangeValue({ location: 0, length: readElementText(element).length });
+		try {
+			setAttributeValue(element, K_AX_SELECTED_TEXT_RANGE_ATTRIBUTE, axValue);
+		} finally {
+			cfRelease(axValue);
+		}
+		return true;
+	} finally {
+		releaseAXElement(element);
+	}
+}
+
+/** Replace the focused native text field's selection with `text` (empty deletes it); false when no such field has focus. */
+export function replaceSelectionInFocusedTextElement(pid: number, text: string): boolean {
+	const element = focusedTextEntryElement(pid);
+	if (element === null) {
+		return false;
+	}
+	try {
+		const value = toCFString(text);
+		try {
+			setAttributeValue(element, "AXSelectedText", value);
+		} finally {
+			cfRelease(value);
+		}
+		return true;
+	} finally {
+		releaseAXElement(element);
+	}
+}
+
+/** The selected text of the app's focused text field, or undefined when no native text field has focus. */
+export function selectedTextOfFocusedElement(pid: number): string | undefined {
+	const element = focusedTextEntryElement(pid);
+	if (element === null) {
+		return undefined;
+	}
+	try {
+		const value = copyAttributeValue(element, "AXSelectedText");
+		if (value === null) {
+			return "";
+		}
+		try {
+			return isCFString(value) ? fromCFString(value) : "";
+		} finally {
+			cfRelease(value);
 		}
 	} finally {
 		releaseAXElement(element);

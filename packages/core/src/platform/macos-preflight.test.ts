@@ -52,6 +52,7 @@ const screenshotMock = vi.hoisted(() => ({
 	getMainDisplayId: vi.fn(() => 1),
 	getMainDisplayLogicalSize: vi.fn(),
 	getMainDisplayNativePixelSize: vi.fn(),
+	screenCaptureAllowed: vi.fn(() => true),
 }));
 
 vi.mock("node:child_process", () => ({ execFile: childProcessMock.execFile }));
@@ -59,6 +60,7 @@ vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
 // The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
 setOpenWindowsSourceForTesting(() => undefined);
 vi.mock("./macos-ffi/accessibility.js", () => accessibilityMock);
+vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/screenshot.js", () => screenshotMock);
 
 import type { InputObservation } from "../computer/guarded-interface.js";
@@ -417,6 +419,27 @@ describe("MacOSHostComputer preflightInput", () => {
 		]);
 
 		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason: "window-bounds-changed" });
+	});
+
+	it("#given input that does not map screen points #when the same window moved #then it is still allowed", async () => {
+		const computer = approvedComputer({ delivery: "background" });
+		const expected = await observe(computer);
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, owner: { processId: TARGET_PID }, bounds: { ...WINDOW_BOUNDS, width: 801 } },
+		]);
+
+		expect(await computer.preflightInput(expected, { requireSameBounds: false })).toEqual({ ok: true });
+	});
+
+	it("#given input that does not map screen points #when a different window replaced it #then it is refused", async () => {
+		const computer = approvedComputer({ delivery: "background" });
+		const expected = await observe(computer);
+		windowMock.openWindows.mockResolvedValue([{ id: 100, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
+
+		expect(await computer.preflightInput(expected, { requireSameBounds: false })).toEqual({
+			ok: false,
+			reason: "window-changed",
+		});
 	});
 
 	it.each([

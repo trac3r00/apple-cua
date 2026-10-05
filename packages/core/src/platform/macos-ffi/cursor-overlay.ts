@@ -6,7 +6,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Point, Rect } from "../../types/index.js";
 
-export type PointerMode = "pointer" | "scroll" | "thinking";
+/** "click" is an event rather than a lasting mode: the overlay ripples where the dot lands. */
+export type PointerMode = "pointer" | "scroll" | "thinking" | "click";
 
 export interface PointerOverlay {
 	set(point: Point): void;
@@ -50,9 +51,13 @@ const overlaySocketPath = join(tmpdir(), "apple-cua-cursor.sock");
 // a few seconds each) so the cursor glides continuously instead of fading out and
 // back in between commands; still self-cleans when the session truly ends.
 const overlayIdleSeconds = "15";
+// The daemon exits after that idle time, so a later command can find nobody listening again and
+// must start a fresh one. Spawns are spaced by this much so the first command's retries (150 ms
+// apart) never start duplicates while one daemon is still binding its socket.
+const DAEMON_RESPAWN_GUARD_MILLISECONDS = 1_000;
 
 export function createCursorOverlay(
-	transportFactory: OverlayTransportFactory = defaultSocketTransport,
+	transportFactory: OverlayTransportFactory = () => defaultSocketTransport(),
 ): PointerOverlay {
 	let transport: OverlayTransport | undefined;
 	let resolved = false;
@@ -106,15 +111,16 @@ function overlayBinaryPath(): string | undefined {
 }
 
 // Default transport: send each command over a short-lived connection to the shared
-// overlay daemon, spawning the daemon (detached) the first time no one is listening.
-function defaultSocketTransport(): OverlayTransport {
-	let daemonEnsured = false;
+// overlay daemon, spawning the daemon (detached) whenever no one is listening.
+export function defaultSocketTransport(now: () => number = Date.now): OverlayTransport {
+	let lastSpawnAt = Number.NEGATIVE_INFINITY;
 
 	function ensureDaemon(): void {
-		if (daemonEnsured) {
+		const time = now();
+		if (time - lastSpawnAt < DAEMON_RESPAWN_GUARD_MILLISECONDS) {
 			return;
 		}
-		daemonEnsured = true;
+		lastSpawnAt = time;
 		const binaryPath = overlayBinaryPath();
 		if (binaryPath === undefined) {
 			return;

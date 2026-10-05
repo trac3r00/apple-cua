@@ -32,6 +32,19 @@ const coreGraphics = koffi.load("/System/Library/Frameworks/CoreGraphics.framewo
 const imageIO = koffi.load("/System/Library/Frameworks/ImageIO.framework/ImageIO");
 const coreFoundation = koffi.load("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation");
 
+const CGPreflightScreenCaptureAccess = coreGraphics.func("CGPreflightScreenCaptureAccess", "bool", []) as KoffiFunc<
+	() => boolean
+>;
+
+/**
+ * Whether this process may capture the screen. Unlike a capture attempt, the preflight never raises
+ * macOS's permission prompt, so a server without Screen Recording can decline pixels quietly instead
+ * of putting a system dialog over the person's work in the middle of a task.
+ */
+export function screenCaptureAllowed(): boolean {
+	return CGPreflightScreenCaptureAccess();
+}
+
 const PNG_UNIFORM_TYPE = "public.png";
 const JPEG_UNIFORM_TYPE = "public.jpeg";
 const MAX_PIXEL_SIZE_KEY = "kCGImageDestinationImageMaxPixelSize";
@@ -371,15 +384,34 @@ export function captureDisplayRegionImage(
 	}
 }
 
+const CG_DISPLAY_MODE_REF = koffi.pointer("CGDisplayModeRefForScreenshot", koffi.opaque());
+const CGDisplayCopyDisplayMode = coreGraphics.func("CGDisplayCopyDisplayMode", CG_DISPLAY_MODE_REF, [
+	"uint32_t",
+]) as KoffiFunc<(display: number) => CFTypeRef | null>;
+const CGDisplayModeGetPixelWidth = coreGraphics.func("CGDisplayModeGetPixelWidth", "size_t", [
+	CG_DISPLAY_MODE_REF,
+]) as KoffiFunc<(mode: CFTypeRef) => number | bigint>;
+const CGDisplayModeGetPixelHeight = coreGraphics.func("CGDisplayModeGetPixelHeight", "size_t", [
+	CG_DISPLAY_MODE_REF,
+]) as KoffiFunc<(mode: CFTypeRef) => number | bigint>;
+const CGDisplayModeRelease = coreGraphics.func("CGDisplayModeRelease", "void", [CG_DISPLAY_MODE_REF]) as KoffiFunc<
+	(mode: CFTypeRef) => void
+>;
+
+/**
+ * The main display's backing pixel size, read from its display mode. Capturing the display to
+ * measure it would need Screen Recording (raising macOS's permission prompt where it is missing)
+ * and cost a full-screen image on every observation.
+ */
 export function getMainDisplayNativePixelSize(): { width: number; height: number } {
-	const sourceImage = CGDisplayCreateImage(CGMainDisplayID());
-	if (sourceImage === null) {
-		throw new Error("CGDisplayCreateImage returned null (Screen Recording permission may be missing)");
+	const mode = CGDisplayCopyDisplayMode(CGMainDisplayID());
+	if (mode === null) {
+		throw new Error("CGDisplayCopyDisplayMode returned null for the main display");
 	}
 	try {
-		return { width: CGImageGetWidth(sourceImage), height: CGImageGetHeight(sourceImage) };
+		return { width: Number(CGDisplayModeGetPixelWidth(mode)), height: Number(CGDisplayModeGetPixelHeight(mode)) };
 	} finally {
-		cfRelease(sourceImage);
+		CGDisplayModeRelease(mode);
 	}
 }
 

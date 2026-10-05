@@ -5,6 +5,8 @@ import { findMatchingApp } from "../computer/actions.js";
 /** Launches or activates an application by name or bundle id. */
 export interface AppOpenLauncher {
 	launch(target: string): Promise<void>;
+	/** True when launching leaves the app in the background instead of bringing it forward. */
+	readonly background?: boolean;
 }
 
 export interface AppLister {
@@ -32,15 +34,20 @@ const DEFAULT_TIMEOUT_MILLISECONDS = 10_000;
 const DEFAULT_POLL_INTERVAL_MILLISECONDS = 200;
 const BUNDLE_ID_SHAPE = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
 
-/** A bundle id goes to open -b, an app name to open -a. */
-export function openArguments(target: string): readonly string[] {
-	return BUNDLE_ID_SHAPE.test(target) ? ["-b", target] : ["-a", target];
+/**
+ * A bundle id goes to open -b, an app name to open -a. In the background, -g launches the app
+ * without bringing it forward, so opening it does not take focus from the person at the Mac.
+ */
+export function openArguments(target: string, background = false): readonly string[] {
+	return [...(background ? ["-g"] : []), ...(BUNDLE_ID_SHAPE.test(target) ? ["-b", target] : ["-a", target])];
 }
 
-export function spawnOpenLauncher(): AppOpenLauncher {
+export function spawnOpenLauncher(options: { readonly background?: boolean } = {}): AppOpenLauncher {
+	const background = options.background === true;
 	return {
+		background,
 		async launch(target: string): Promise<void> {
-			const args = [...openArguments(target)];
+			const args = [...openArguments(target, background)];
 			await new Promise<void>((resolve, reject) => {
 				const child = spawn("open", args, { stdio: ["ignore", "ignore", "pipe"] });
 				let stderr = "";
@@ -83,7 +90,13 @@ export async function openApplication(
 	const running = findMatchingApp(await lister.listApps(), name);
 	await launcher.launch(running?.bundleId ?? name);
 	if (running !== undefined) {
-		return { name: running.name, bundleId: running.bundleId, pid: running.pid, launched: false, activated: true };
+		return {
+			name: running.name,
+			bundleId: running.bundleId,
+			pid: running.pid,
+			launched: false,
+			activated: launcher.background !== true,
+		};
 	}
 	const deadline = Date.now() + timeoutMs;
 	for (;;) {

@@ -4,11 +4,12 @@ import { classifyContentKind } from "../accessibility/content-kind.js";
 import { diffAxTreeChanges, diffAxTreesByKey } from "../accessibility/diff.js";
 import { normalizeAxTree } from "../accessibility/normalize.js";
 import type { AXTreeElement, AppInfo, AppState, DisplayInfo } from "../accessibility/types.js";
-import type { WindowInventoryEntry } from "../accessibility/types.js";
+import type { OcrTextEntry, WindowInventoryEntry } from "../accessibility/types.js";
 import { resolveAppInstructions } from "../app-instructions/index.js";
 import { resolveDisplayMetadata } from "../computer/display-metadata.js";
-import type { InputObservation, PreflightResult } from "../computer/guarded-interface.js";
-import type { ComputerInterface, ScreenshotResult } from "../computer/interface.js";
+import type { InputObservation, PreflightOptions, PreflightResult } from "../computer/guarded-interface.js";
+import type { ComputerInterface, ScreenshotResult, WindowTextRead } from "../computer/interface.js";
+import { assertScreenUnlocked } from "../computer/lock-guard.js";
 import { type ScreenshotViewport, resolveWindowScreenshotSize, screenRectToScreenshot } from "../computer/viewport.js";
 import type { AppApprovalStore } from "../permission/app-approval.js";
 import { blockedUrl, browserUrlScript, isBrowserBundle } from "../permission/url-blocklist.js";
@@ -17,6 +18,7 @@ import type {
 	DragOptions,
 	KeyOptions,
 	Point,
+	PointerOptions,
 	Rect,
 	ScreenshotOptions,
 	ScrollOptions,
@@ -26,19 +28,28 @@ import { type RunningAppInfo, collectAppUsage, getRunningMacOSApps } from "./app
 import { execFileStdout, execFileStdoutBuffer } from "./exec-util.js";
 import { HostComputer, type HostComputerOptions } from "./host.js";
 import { parseImageDimensions, sniffImageMimeType } from "./image-format.js";
+import { type KeyboardFenceClock, awaitAccessibilityWriteSettled, awaitKeyboardFence } from "./keyboard-fence.js";
 import {
 	currentObservationKey,
+	elementFrameByIndex,
 	extractAccessibilityTree,
+	focusedElementFrame,
 	focusedWindowIdForPid,
+	focusedWindowIsModal,
 	performActionByIndex,
 	pressElementAtScreenPoint,
+	rebaselineObservedElement,
 	releaseAccessibilitySnapshot,
+	relocatedElementFrame,
+	scrollToVisibleByIndex,
 	setValueByIndex,
 	typeIntoFocusedAXElement,
 } from "./macos-ffi/accessibility.js";
 import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
 import { createAxEventWaiter, waitForAxQuiet } from "./macos-ffi/ax-observer.js";
-import { type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
+import { NOOP_POINTER_OVERLAY, type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
+import { isScreenLocked } from "./macos-ffi/lock-screen.js";
+import { readClipboard, writeClipboard } from "./macos-ffi/pasteboard.js";
 import { createDisplaySleepAssertion } from "./macos-ffi/power.js";
 import {
 	captureDisplayImage,
@@ -47,16 +58,35 @@ import {
 	getMainDisplayId,
 	getMainDisplayLogicalSize,
 	getMainDisplayNativePixelSize,
+	screenCaptureAllowed,
 } from "./macos-ffi/screenshot.js";
-import { selectTextByIndex } from "./macos-ffi/select-text.js";
+import {
+	replaceSelectionInFocusedTextElement,
+	selectAllInFocusedTextElement,
+	selectTextByIndex,
+	selectedTextOfFocusedElement,
+} from "./macos-ffi/select-text.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
+import { recognizeTextInImage } from "./macos-ffi/vision.js";
 import { MacOSInputController } from "./macos-input.js";
 import type { InputDelivery } from "./macos-input.js";
-import { currentOnscreenWindowIds } from "./macos-input.js";
+import { currentOnscreenWindowIds, guardAgainstFocusSteal } from "./macos-input.js";
+import {
+	type BackgroundKeyPlan,
+	type InvokeMenuResult,
+	applicationIsFrontmost,
+	commandChordMask,
+	findMenuKeyEquivalent,
+	invokeMenu,
+	normalizeMenuPath,
+	planBackgroundKeyEquivalent,
+	pressMenuItem,
+} from "./macos-menu.js";
 import { openWindowsForTargeting } from "./macos-open-windows.js";
 import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
 import { resolveTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
+import { currentSystemPrompts } from "./system-prompts.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -65,10 +95,19 @@ const SYSTEM_PROFILER_TIMEOUT_MILLISECONDS = 10_000;
 const SCREENSHOT_TIMEOUT_MILLISECONDS = 10_000;
 const SCREENSHOT_MAX_BUFFER_BYTES = 100 * 1024 * 1024;
 const DEFAULT_APP_STATE_SETTLE_MILLISECONDS = 300;
+const WINDOW_APPEAR_WAIT_MILLISECONDS = 3_000;
+const WINDOW_APPEAR_POLL_MILLISECONDS = 150;
+const KEYBOARD_FENCE_CLOCK: KeyboardFenceClock = {
+	now: () => performance.now(),
+	sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+};
 /** Interval between accessibility-tree polls while waiting for the UI to settle. */
 const UI_SETTLE_POLL_MILLISECONDS = 40;
 /** How long accessibility must stay silent before the event-driven settle call returns. */
 const AX_SETTLE_QUIET_MILLISECONDS = 60;
+/** How often, and how many times, a scrolled-into-view element's frame is re-read until it holds still. */
+const SCROLL_SETTLE_POLL_MILLISECONDS = 25;
+const SCROLL_SETTLE_MAX_POLLS = 12;
 /** Element budget for settle polls: enough to see the visible tree change, far cheaper to walk. */
 const SETTLE_SIGNATURE_MAX_ELEMENTS = 250;
 
@@ -84,6 +123,8 @@ export interface MacOSHostComputerOptions extends HostComputerOptions {
 	 * need foreground delivery are refused instead of quietly taking over.
 	 */
 	delivery?: InputDelivery;
+	/** Reports whether the Mac is locked. Defaults to the console session's lock flag. */
+	isLocked?: () => boolean;
 }
 
 export class MacOSHostComputer extends HostComputer {
@@ -109,17 +150,19 @@ export class MacOSHostComputer extends HostComputer {
 	private readonly highlightedApps = new Set<number>();
 	private readonly inputObservations = new Map<number, InputObservation>();
 	private observationGeneration = 0;
+	private readonly isLocked: () => boolean;
 
 	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
 		this.appApproval = options.appApproval;
 		this.delivery = options.delivery ?? "attended";
 		this.urlBlocklist = options.urlBlocklist ?? [];
-		this.overlay = options.overlay ?? createCursorOverlay();
+		this.overlay = options.overlay ?? (agentCursorEnabled() ? createCursorOverlay() : NOOP_POINTER_OVERLAY);
+		this.isLocked = options.isLocked ?? isScreenLocked;
 		this.input = new MacOSInputController(
 			options.defaultTargetPid,
 			this.overlay,
-			undefined,
+			this.isLocked,
 			createDisplaySleepAssertion(),
 			this.delivery,
 		);
@@ -139,6 +182,11 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	private async captureScreenshot(options?: ScreenshotOptions, windowId?: number): Promise<ScreenshotResult> {
+		if (!screenCaptureAllowed()) {
+			throw new Error(
+				"Screen Recording permission is not granted to the process running apple-cua, so no image was captured (capturing would raise macOS's permission prompt). Grant it in System Settings > Privacy & Security > Screen Recording to the app that launches this server, then restart the server.",
+			);
+		}
 		const size = options?.targetSize ?? (await this.getScreenSize());
 		if (options?.region !== undefined) {
 			if (windowId !== undefined) {
@@ -179,20 +227,20 @@ export class MacOSHostComputer extends HostComputer {
 		await this.input.move(position);
 	}
 
-	async click(position: Point): Promise<void> {
-		await this.input.click(position);
+	async click(position: Point, options?: PointerOptions): Promise<void> {
+		await this.input.click(position, "left", options?.modifiers);
 	}
 
-	async rightClick(position: Point): Promise<void> {
-		await this.input.click(position, "right");
+	async rightClick(position: Point, options?: PointerOptions): Promise<void> {
+		await this.input.click(position, "right", options?.modifiers);
 	}
 
-	async middleClick(position: Point): Promise<void> {
-		await this.input.click(position, "middle");
+	async middleClick(position: Point, options?: PointerOptions): Promise<void> {
+		await this.input.click(position, "middle", options?.modifiers);
 	}
 
-	async doubleClick(position: Point): Promise<void> {
-		await this.input.doubleClick(position);
+	async doubleClick(position: Point, options?: PointerOptions): Promise<void> {
+		await this.input.doubleClick(position, options?.modifiers);
 	}
 
 	async type(text: string): Promise<void> {
@@ -200,7 +248,118 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async key(key: string, options?: KeyOptions): Promise<void> {
+		const pid = this.input.currentTargetPid;
+		const modifiers = options?.modifiers ?? [];
+		if (this.delivery === "background" && pid !== undefined && commandChordMask(modifiers) !== undefined) {
+			await this.input.prepareKeyboardTarget();
+			// Select All in a native text field is done on the field itself, which has taken effect when
+			// this returns: text typed next always replaces the selection instead of racing a posted key.
+			if (commandChordMask(modifiers) === 0 && key.toLowerCase() === "a" && this.selectAllInTextField(pid)) {
+				return;
+			}
+			const plan = planBackgroundKeyEquivalent({
+				frontmost: applicationIsFrontmost(pid),
+				key,
+				modifiers,
+				item: findMenuKeyEquivalent(pid, key, modifiers),
+			});
+			if (await this.runBackgroundKeyPlan(pid, plan)) {
+				return;
+			}
+		}
 		await this.input.pressKey(key, options);
+	}
+
+	/**
+	 * Invoke a menu path. Edit > Select All, Copy, Cut and Paste are done on the focused native text
+	 * field through accessibility: AppKit validates those items only while their menu is shown, so
+	 * their AXEnabled flag says "disabled" even when the command would run, and pressing the item in a
+	 * background app does nothing. Every other path is pressed as a menu item.
+	 */
+	async invokeMenu(targetPid: number, path: readonly string[]): Promise<InvokeMenuResult> {
+		const normalized = normalizeMenuPath(path);
+		const command = normalized.length === 2 && normalized[0] === "Edit" ? normalized[1] : undefined;
+		if (command !== undefined) {
+			const done = await this.editCommandOnTextField(targetPid, command);
+			if (done) {
+				return { resolvedPath: normalized, action: "accessibility" };
+			}
+		}
+		return await invokeMenu(targetPid, normalized);
+	}
+
+	/** True when the Edit command ran on the focused native text field; false hands it to the menu. */
+	private async editCommandOnTextField(pid: number, command: string): Promise<boolean> {
+		switch (command) {
+			case "Select All":
+				return this.selectAllInTextField(pid);
+			case "Copy":
+			case "Cut": {
+				const text = selectedTextOfFocusedElement(pid);
+				if (text === undefined || text.length === 0) {
+					return false;
+				}
+				writeClipboard({ type: "text", text });
+				if (command === "Cut") {
+					if (!replaceSelectionInFocusedTextElement(pid, "")) {
+						return false;
+					}
+					await this.settleAccessibilityWrite(pid);
+				}
+				return true;
+			}
+			case "Paste": {
+				const text = readClipboard().text;
+				return text !== undefined && text.length > 0 && (await this.typeIntoFocused(pid, text));
+			}
+			default:
+				return false;
+		}
+	}
+
+	/**
+	 * Select All on the focused native text field, except in a sheet or dialog: a Save panel's name
+	 * field lives in another process, and there Cmd+A deliberately selects the name without its
+	 * extension, which only the real key does.
+	 */
+	private selectAllInTextField(pid: number): boolean {
+		return !focusedWindowIsModal(pid) && selectAllInFocusedTextElement(pid);
+	}
+
+	/** Carries out a Command chord for a background app; false hands the chord back to real key events. */
+	private async runBackgroundKeyPlan(pid: number, plan: BackgroundKeyPlan): Promise<boolean> {
+		switch (plan.kind) {
+			case "keys":
+				return false;
+			case "menu":
+				pressMenuItem(pid, plan.path);
+				return true;
+			case "select-all":
+				if (this.selectAllInTextField(pid)) {
+					return true;
+				}
+				throw new Error(
+					"Select All would do nothing: the app is in the background, where Edit > Select All is disabled, and no native text field has focus to select through accessibility. Observe the app and use select_text or set_value on the field instead.",
+				);
+			case "copy-selection": {
+				const text = selectedTextOfFocusedElement(pid);
+				if (text === undefined || text.length === 0) {
+					throw new Error(
+						"Copy would do nothing: the app is in the background, where Edit > Copy is disabled, and no text is selected in a focused native text field to copy through accessibility.",
+					);
+				}
+				writeClipboard({ type: "text", text });
+				return true;
+			}
+			case "paste-text": {
+				const text = readClipboard().text;
+				// A native field takes the clipboard text at its selection; anything else (a web page) goes
+				// back to the key path, which types the clipboard there for a background app.
+				return text !== undefined && text.length > 0 && (await this.typeIntoFocused(pid, text));
+			}
+			case "refuse":
+				throw new Error(plan.message);
+		}
 	}
 
 	async scroll(options: ScrollOptions): Promise<void> {
@@ -284,19 +443,29 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	private async captureAppState(targetPid?: number, options?: AppStateOptions): Promise<AppState> {
+		// A locked Mac shows only the lock screen and hides every app window from accessibility, so an
+		// observation would return a useless image and a whole-app tree. Stop with the ask instead.
+		assertScreenUnlocked(this.isLocked());
 		const settleMs = options?.settleMs ?? DEFAULT_APP_STATE_SETTLE_MILLISECONDS;
 		const apps = await getRunningMacOSApps();
 		const app = resolveTargetApp(apps, targetPid);
 		this.assertAppApproved(app);
 		await this.assertBrowserUrlAllowed(app, options?.requireWindow === true);
-		const windows = await openWindowsForTargeting();
-		const windowInventory = await this.describeWindowsForPid(app.pid, windows);
-		const targetWindow = await this.resolveObservationWindow(app.pid, options?.windowId, windows);
+		let windows = await openWindowsForTargeting();
+		let targetWindow = await this.resolveObservationWindow(app.pid, options?.windowId, windows);
+		// A window that was just opened (open_app, a new document, a reopened app) can take a moment to
+		// reach the window server. Wait a bounded time for it instead of failing the first observation.
+		const windowDeadline = Date.now() + WINDOW_APPEAR_WAIT_MILLISECONDS;
+		while (options?.requireWindow === true && targetWindow === undefined && Date.now() < windowDeadline) {
+			await new Promise((resolve) => setTimeout(resolve, WINDOW_APPEAR_POLL_MILLISECONDS));
+			windows = await openWindowsForTargeting();
+			targetWindow = await this.resolveObservationWindow(app.pid, options?.windowId, windows);
+		}
 		if (options?.requireWindow === true && targetWindow === undefined) {
 			throw new Error(`No visible target window available for pid ${app.pid}`);
 		}
-		const targetWindowTitle = windowInventory.find((entry) => entry.id === targetWindow?.id)?.title;
-		const windowCandidates = windowInventory.length > 1 ? windowInventory : undefined;
+		const windowInventory = await this.describeWindowsForPid(app.pid, windows);
+		const inventoryTitle = windowInventory.find((entry) => entry.id === targetWindow?.id)?.title;
 		this.observedAxPids.add(app.pid);
 		const walkOptions = {
 			...(options?.maxElements === undefined ? {} : { maxElements: options.maxElements }),
@@ -314,13 +483,32 @@ export class MacOSHostComputer extends HostComputer {
 		const size =
 			options?.screenshotSize ??
 			(targetWindow !== undefined ? resolveWindowScreenshotSize(targetWindow.bounds) : await this.getScreenSize());
+		// Without Screen Recording a capture would raise macOS's permission prompt mid-task; observe the
+		// elements anyway and say why the image is missing.
+		const screenshotRefused = options?.includeScreenshot !== false && !screenCaptureAllowed();
 		const screenshot =
-			options?.includeScreenshot === false
+			options?.includeScreenshot === false || screenshotRefused
 				? { data: Buffer.alloc(0), mimeType: "image/png" as const, width: size.width, height: size.height }
 				: await this.captureScreenshot({ targetSize: size, format: "jpeg" }, targetWindow?.id);
 		const tree = captureTree ? extractAccessibilityTree(app.pid, walkOptions) : undefined;
+		// WindowServer can hide titles without Screen Recording while the matched AX window still
+		// exposes them. Use that observed title, not an unrelated window from an app-wide fallback.
+		const targetWindowTitle = tree?.windowTitle ?? inventoryTitle;
+		const windowCandidates =
+			windowInventory.length > 1
+				? windowInventory.map((window) =>
+						window.id === targetWindow?.id && targetWindowTitle !== undefined
+							? { ...window, title: targetWindowTitle }
+							: window,
+					)
+				: undefined;
+		const ocrText =
+			tree?.windowContentUnavailable === true && targetWindow !== undefined
+				? await this.readWindowText(screenshot, size, targetWindow)
+				: undefined;
 		const display = resolveDisplayInfo();
 		const appInstructions = resolveAppInstructions(app.name, app.bundleId);
+		const systemPrompts = currentSystemPrompts();
 
 		let elements = tree?.elements ?? [];
 		let windowBounds: ScreenshotViewport["windowBounds"] | undefined;
@@ -345,7 +533,7 @@ export class MacOSHostComputer extends HostComputer {
 		const comparable = tree !== undefined && previousTree !== undefined && previousTree.walkKey === tree.walkKey;
 		const axChangeSummary = comparable ? diffAxTreesByKey(previousTree.elements, elements) : undefined;
 		const axChanges = comparable ? diffAxTreeChanges(previousTree.elements, elements) : undefined;
-		if (tree !== undefined) {
+		if (tree !== undefined && options?.probe !== true) {
 			this.lastAxTreeByPid.set(app.pid, { elements, truncated: tree.truncated, walkKey: tree.walkKey });
 		}
 		const contentKind =
@@ -379,10 +567,14 @@ export class MacOSHostComputer extends HostComputer {
 			...(targetWindow !== undefined ? { windowId: targetWindow.id } : {}),
 			...(targetWindowTitle !== undefined ? { windowTitle: targetWindowTitle } : {}),
 			...(windowCandidates !== undefined ? { windowCandidates } : {}),
+			...(tree?.windowContentUnavailable === true ? { windowContentUnavailable: true } : {}),
+			...(ocrText !== undefined ? { ocrText } : {}),
+			...(screenshotRefused ? { screenshotUnavailable: "screen-recording-permission" as const } : {}),
+			...(systemPrompts.length > 0 ? { systemPrompts } : {}),
 		};
 		if (targetWindow === undefined) {
 			this.inputObservations.delete(app.pid);
-		} else if (tree !== undefined) {
+		} else if (tree !== undefined && options?.probe !== true) {
 			this.observationGeneration += 1;
 			this.inputObservations.set(app.pid, {
 				generation: this.observationGeneration,
@@ -398,7 +590,43 @@ export class MacOSHostComputer extends HostComputer {
 				observedElementIds: new Set(elements.map((element) => element.id)),
 			});
 		}
+		// The agent reads this observation next, so the overlay dot pulses until the next action.
+		if (options?.probe !== true) {
+			this.input.showThinking();
+		}
 		return state;
+	}
+
+	/**
+	 * Read the window from pixels when accessibility cannot reach its content, so an observation
+	 * still says what is on screen instead of listing only the menu bar. Recognition failing is not
+	 * an observation failure: the state then simply carries no text, as it would for a blank window.
+	 */
+	private async readWindowText(
+		screenshot: { readonly data: Buffer; readonly width: number; readonly height: number },
+		size: { readonly width: number; readonly height: number },
+		window: SkyLightTargetWindow,
+	): Promise<readonly OcrTextEntry[] | undefined> {
+		try {
+			const image =
+				screenshot.data.byteLength > 0
+					? screenshot
+					: await this.captureScreenshot({ targetSize: size, format: "jpeg" }, window.id);
+			const scaleX = window.bounds.width / image.width;
+			const scaleY = window.bounds.height / image.height;
+			return recognizeTextInImage(image.data).map((observation) => ({
+				text: observation.text,
+				confidence: observation.confidence,
+				frame: {
+					x: Math.round(window.bounds.x + observation.box.x * scaleX),
+					y: Math.round(window.bounds.y + observation.box.y * scaleY),
+					width: Math.round(observation.box.width * scaleX),
+					height: Math.round(observation.box.height * scaleY),
+				},
+			}));
+		} catch {
+			return undefined;
+		}
 	}
 
 	private async assertBrowserUrlAllowed(app: RunningAppInfo, requireUrl: boolean): Promise<void> {
@@ -526,23 +754,129 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async setValue(targetPid: number, elementIndex: number, value: string): Promise<void> {
+		this.showElement(targetPid, elementIndex, false);
 		setValueByIndex(targetPid, elementIndex, value);
+		await this.settleAccessibilityWrite(targetPid);
 	}
 
 	async selectText(targetPid: number, elementIndex: number, options: SelectTextOptions): Promise<void> {
+		this.showElement(targetPid, elementIndex, false);
 		selectTextByIndex(targetPid, elementIndex, options);
 	}
 
 	async performAction(targetPid: number, elementIndex: number, action: string): Promise<void> {
+		this.showElement(targetPid, elementIndex, true);
+		// Pressing or focusing an element can make its app activate itself (Safari does for a web
+		// field); background delivery hands the front back to the person's app when that happens.
+		const observation = this.inputObservations.get(targetPid);
+		if (this.delivery === "background" && observation !== undefined) {
+			guardAgainstFocusSteal({ id: observation.windowId, bounds: observation.windowBounds });
+		}
 		performActionByIndex(targetPid, elementIndex, action);
 	}
 
 	async pressAtPosition(targetPid: number, position: Point): Promise<boolean> {
+		this.input.showPointer(position, true);
 		return pressElementAtScreenPoint(targetPid, position.x, position.y);
 	}
 
+	/**
+	 * Accessibility routes act without any pointer, so the overlay dot is moved to the element's
+	 * centre first to keep every action visible. The frame lookup is display only: when it fails the
+	 * action still runs and reports its own error, so a lookup failure is not surfaced here.
+	 */
+	private showElement(targetPid: number, elementIndex: number, press: boolean): void {
+		let frame: Rect | undefined;
+		try {
+			frame = elementFrameByIndex(targetPid, elementIndex);
+		} catch {
+			return;
+		}
+		if (frame !== undefined && frame.width > 0 && frame.height > 0) {
+			this.input.showPointer({ x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 }, press);
+		}
+	}
+
+	async elementFrame(targetPid: number, elementIndex: number): Promise<Rect | undefined> {
+		return elementFrameByIndex(targetPid, elementIndex);
+	}
+
+	async scrollElementIntoView(targetPid: number, elementIndex: number): Promise<Rect | undefined> {
+		if (!scrollToVisibleByIndex(targetPid, elementIndex)) {
+			return undefined;
+		}
+		return await this.refreshElementFrame(targetPid, elementIndex);
+	}
+
+	async refreshElementFrame(targetPid: number, elementIndex: number): Promise<Rect | undefined> {
+		// Some apps animate a scroll: wait for the frame to hold still before trusting it.
+		let frame = relocatedElementFrame(targetPid, elementIndex);
+		for (let poll = 0; poll < SCROLL_SETTLE_MAX_POLLS; poll += 1) {
+			await new Promise((resolve) => setTimeout(resolve, SCROLL_SETTLE_POLL_MILLISECONDS));
+			const next = relocatedElementFrame(targetPid, elementIndex);
+			const held = frame !== undefined && next !== undefined && sameRect(frame, next);
+			frame = next;
+			if (held) {
+				break;
+			}
+		}
+		rebaselineObservedElement(targetPid, elementIndex);
+		return frame;
+	}
+
+	async recognizeWindowText(targetPid: number): Promise<WindowTextRead> {
+		if (!screenCaptureAllowed()) {
+			return { unavailable: "screen-recording-permission" };
+		}
+		const window = await this.resolveObservationWindow(targetPid, this.inputObservations.get(targetPid)?.windowId);
+		if (window === undefined) {
+			return { unavailable: "no-window" };
+		}
+		const size = resolveWindowScreenshotSize(window.bounds);
+		const entries = await this.readWindowText(
+			{ data: Buffer.alloc(0), width: size.width, height: size.height },
+			size,
+			window,
+		);
+		return entries === undefined ? { unavailable: "recognition-failed" } : { entries };
+	}
+
+	showPointerAt(position: Point, press: boolean): void {
+		this.input.showPointer(position, press);
+	}
+
 	async typeIntoFocused(targetPid: number, text: string): Promise<boolean> {
-		return typeIntoFocusedAXElement(targetPid, text);
+		// Keys posted just before (Cmd+A) still wait in the app's event queue, while this write lands at
+		// once: without the fence the text lands at the old caret instead of replacing the selection.
+		await awaitKeyboardFence(
+			this.input.lastKeyboardInputAt(targetPid),
+			() => createAxEventWaiter(targetPid),
+			KEYBOARD_FENCE_CLOCK,
+		);
+		// In a sheet or dialog (a Save panel, whose UI is hosted by another process), the element
+		// accessibility calls focused can differ from where keys really go (its Go to Folder field), so
+		// real key events are the route that types where the user would.
+		if (focusedWindowIsModal(targetPid)) {
+			return false;
+		}
+		const focused = focusedElementFrame(targetPid);
+		if (focused !== undefined && focused.width > 0 && focused.height > 0) {
+			this.input.showPointer({ x: focused.x + focused.width / 2, y: focused.y + focused.height / 2 }, false);
+		}
+		if (!typeIntoFocusedAXElement(targetPid, text)) {
+			return false;
+		}
+		await this.settleAccessibilityWrite(targetPid);
+		return true;
+	}
+
+	/**
+	 * A text write over accessibility returns before the app has taken it in (TextEdit marks the
+	 * document edited ~100 ms later); a key posted meanwhile acts on the old state. Wait for the app's
+	 * own change notifications, bounded, so the next action sees the write.
+	 */
+	private async settleAccessibilityWrite(targetPid: number): Promise<void> {
+		await awaitAccessibilityWriteSettled(() => createAxEventWaiter(targetPid), KEYBOARD_FENCE_CLOCK);
 	}
 
 	getInputObservation(targetPid: number): InputObservation | undefined {
@@ -554,7 +888,7 @@ export class MacOSHostComputer extends HostComputer {
 		releaseAccessibilitySnapshot(targetPid);
 	}
 
-	async preflightInput(expected: InputObservation): Promise<PreflightResult> {
+	async preflightInput(expected: InputObservation, options?: PreflightOptions): Promise<PreflightResult> {
 		const stored = this.inputObservations.get(expected.pid);
 		if (stored === undefined || !sameObservation(stored, expected)) {
 			return { ok: false, reason: "observation-replaced" };
@@ -616,7 +950,7 @@ export class MacOSHostComputer extends HostComputer {
 		if (targetWindow.id !== expected.windowId) {
 			return { ok: false, reason: "window-changed" };
 		}
-		if (!sameRect(targetWindow.bounds, expected.windowBounds)) {
+		if (options?.requireSameBounds !== false && !sameRect(targetWindow.bounds, expected.windowBounds)) {
 			return { ok: false, reason: "window-bounds-changed" };
 		}
 		return { ok: true };
@@ -686,6 +1020,12 @@ function sameObservation(left: InputObservation, right: InputObservation): boole
 		sameRect(left.screenshotViewport.bounds, right.screenshotViewport.bounds) &&
 		sameNumberSet(left.observedElementIds, right.observedElementIds)
 	);
+}
+
+/** The drawn agent cursor is on unless APPLE_CUA_CURSOR turns it off (off, 0, false, no). */
+export function agentCursorEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
+	const value = environment["APPLE_CUA_CURSOR"]?.trim().toLowerCase();
+	return !(value === "off" || value === "0" || value === "false" || value === "no");
 }
 
 function sameRect(left: Rect, right: Rect): boolean {

@@ -87,6 +87,7 @@ const koffiMock = vi.hoisted(() => {
 		AXIsProcessTrusted: vi.fn(() => true),
 		AXUIElementCreateApplication: vi.fn(() => applicationElement),
 		AXUIElementCreateSystemWide: vi.fn(),
+		AXUIElementSetMessagingTimeout: vi.fn(() => 0),
 		AXUIElementCopyElementAtPosition: vi.fn(),
 		AXUIElementGetPid: vi.fn(),
 		AXUIElementGetTypeID: vi.fn(() => 4),
@@ -221,6 +222,23 @@ afterEach(async () => {
 });
 
 describe("#given a window-scoped accessibility walk", () => {
+	it("#when the requested window matches #then its observed title is returned with the tree", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+
+		const scoped = extractAccessibilityTree(process.pid, { windowId: 42 });
+
+		expect(scoped).toHaveProperty("windowTitle", "Fixture");
+	});
+
+	it("#when the requested window is absent #then another window's title is not attributed to it", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+		koffiMock.applicationElement.children = [koffiMock.windowElement, koffiMock.menuBarElement];
+
+		const fallback = extractAccessibilityTree(process.pid, { windowId: 999 });
+
+		expect(fallback).not.toHaveProperty("windowTitle");
+	});
+
 	it("#when the window id matches #then the walk covers that window without the app element or the menu bar", async () => {
 		const { extractAccessibilityTree } = await import("./accessibility.js");
 		koffiMock.applicationElement.children = [koffiMock.windowElement, koffiMock.menuBarElement];
@@ -233,11 +251,20 @@ describe("#given a window-scoped accessibility walk", () => {
 		expect(scoped.elements.some((element) => element.role === "AXMenuBar")).toBe(false);
 	});
 
-	it("#when the window id does not match #then the walk falls back to the whole application tree", async () => {
+	it("#when the window id does not match #then the walk falls back to the app's windows without the menu bar", async () => {
 		const { extractAccessibilityTree } = await import("./accessibility.js");
 		koffiMock.applicationElement.children = [koffiMock.windowElement, koffiMock.menuBarElement];
 
-		const unscoped = extractAccessibilityTree(process.pid, { windowId: 999 });
+		const fallback = extractAccessibilityTree(process.pid, { windowId: 999 });
+
+		expect(fallback.elements.map((element) => element.role)).toEqual(["AXWindow", "AXTextField", "AXButton"]);
+	});
+
+	it("#when the window id does not match and the menu bar is requested #then the whole application tree is walked", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+		koffiMock.applicationElement.children = [koffiMock.windowElement, koffiMock.menuBarElement];
+
+		const unscoped = extractAccessibilityTree(process.pid, { windowId: 999, includeMenuBar: true });
 
 		expect(unscoped.elements.map((element) => element.role)).toEqual([
 			"AXApplication",
@@ -247,6 +274,27 @@ describe("#given a window-scoped accessibility walk", () => {
 			"AXMenuBar",
 		]);
 	});
+
+	it.each([
+		["matches", 42],
+		["does not match", 999],
+	])(
+		"#when the window id %s #then every top-level child is released exactly as often as it was retained",
+		async (_case, windowId) => {
+			const { extractAccessibilityTree, releaseAccessibilitySnapshot } = await import("./accessibility.js");
+			koffiMock.applicationElement.children = [koffiMock.windowElement, koffiMock.menuBarElement];
+			const { CFRetain, CFRelease } = koffiMock.coreFoundationFunctions;
+			const balance = (element: unknown): number =>
+				CFRetain.mock.calls.filter(([reference]) => reference === element).length -
+				CFRelease.mock.calls.filter(([reference]) => reference === element).length;
+
+			extractAccessibilityTree(process.pid, { windowId });
+			releaseAccessibilitySnapshot(process.pid);
+
+			expect(balance(koffiMock.windowElement)).toBe(0);
+			expect(balance(koffiMock.menuBarElement)).toBe(0);
+		},
+	);
 
 	it("#when the menu bar is requested #then the scoped walk keeps it", async () => {
 		const { extractAccessibilityTree } = await import("./accessibility.js");

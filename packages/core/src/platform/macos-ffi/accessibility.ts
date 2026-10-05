@@ -1,11 +1,13 @@
 import type { KoffiFunc } from "koffi";
 import type { AXTreeElement } from "../../accessibility/types.js";
+import { AX_ERROR_CANNOT_COMPLETE, resolveAxMessagingTimeoutSeconds } from "./ax-timeout.js";
 import {
 	type CFArrayRef,
 	type CFStringRef,
 	type CFTypeRef,
 	cfArrayLength,
 	cfArrayValueAt,
+	cfBooleanTrue,
 	cfGetTypeId,
 	cfRelease,
 	cfRetain,
@@ -17,11 +19,17 @@ import {
 	isCFNull,
 	isCFNumber,
 	isCFString,
+	toCFNumber,
 	toCFString,
 	withCFArray,
 	withCFString,
 } from "./corefoundation.js";
 import { koffi } from "./koffi.js";
+
+export {
+	DEFAULT_AX_MESSAGING_TIMEOUT_SECONDS,
+	resolveAxMessagingTimeoutSeconds,
+} from "./ax-timeout.js";
 
 export type AXUIElementRef = CFTypeRef;
 export type AXValueRef = CFTypeRef;
@@ -213,9 +221,57 @@ const AXUIElementGetWindowSpi = (() => {
 	}
 })();
 
+/**
+ * Bounds how long one accessibility message may wait for its app to answer. Without it a busy app
+ * — one that is loading a page or sitting on a modal sheet — leaves the AX call blocked with no
+ * reply, which is the wedge that made every later observation of that app time out as well.
+ * Optional: when the symbol is unavailable the system default applies.
+ */
+const AXUIElementSetMessagingTimeout = (() => {
+	try {
+		return applicationServices.func(
+			"int32_t AXUIElementSetMessagingTimeout(void *element, float seconds)",
+		) as KoffiFunc<(element: AXUIElementRef, seconds: number) => number>;
+	} catch {
+		return null;
+	}
+})();
+
+function applyMessagingTimeout(element: AXUIElementRef): void {
+	if (AXUIElementSetMessagingTimeout === null) {
+		return;
+	}
+	const seconds = resolveAxMessagingTimeoutSeconds();
+	if (seconds <= 0) {
+		return;
+	}
+	AXUIElementSetMessagingTimeout(element, seconds);
+}
+
+/**
+ * An app that cannot answer its own role is not an app without an accessibility tree: it is an app
+ * that did not reply. Every per-attribute read in the walk is best-effort and swallows its error, so
+ * without this probe that condition arrives as an empty tree after grinding through hundreds of
+ * timed-out messages, indistinguishable from an app that genuinely publishes nothing. One message
+ * up front turns it into a fast, named failure.
+ */
+function assertAppAnswersAccessibility(root: AXUIElementRef, pid: number): void {
+	const error = withCFString(K_AX_ROLE_ATTRIBUTE, (attributeReference) => {
+		const outValue: Array<CFTypeRef | null> = [null];
+		return AXUIElementCopyAttributeValue(root, attributeReference, outValue);
+	});
+	if (error === AX_ERROR_CANNOT_COMPLETE) {
+		throw new Error(
+			`the app (pid ${pid}) did not answer within the accessibility messaging timeout of ${resolveAxMessagingTimeoutSeconds()}s; it may be busy loading, or showing a sheet only a person can clear`,
+		);
+	}
+}
+
 export interface AccessibilityTreeResult {
 	readonly elements: AXTreeElement[];
 	readonly axAvailable: boolean;
+	/** Title of the exactly matched AX window, never borrowed from an unmatched app-wide walk. */
+	readonly windowTitle?: string;
 	/** True when the walk stopped at the element budget, so the tree is a partial view. */
 	readonly truncated: boolean;
 	/**
@@ -224,6 +280,12 @@ export interface AccessibilityTreeResult {
 	 * keys.
 	 */
 	readonly walkKey: string;
+	/**
+	 * True when the app answered with application elements where its windows should be. That is
+	 * what a session without the physical console (fast user switching, Screen Sharing) gets: the
+	 * window content is not reachable over accessibility at all, only the menu bar is.
+	 */
+	readonly windowContentUnavailable?: boolean;
 }
 
 export function createApplicationElement(pid: number): AXUIElementRef {
@@ -231,6 +293,7 @@ export function createApplicationElement(pid: number): AXUIElementRef {
 	if (element === null) {
 		throw new Error(`AXUIElementCreateApplication returned null for pid ${pid}`);
 	}
+	applyMessagingTimeout(element);
 	return element;
 }
 
@@ -264,6 +327,139 @@ export function focusedWindowIdForPid(pid: number): number | undefined {
 		if (focused !== null) {
 			cfRelease(focused);
 		}
+		if (root !== null) {
+			releaseAXElement(root);
+		}
+	}
+}
+
+const MODAL_WINDOW_SUBROLES: ReadonlySet<string> = new Set(["AXDialog", "AXSystemDialog"]);
+
+/**
+ * True when the app's focused window is a sheet or dialog (a Save panel, an alert). Keys belong to
+ * that modal UI, so it must not be raised over; the caller's document window is its owner anyway.
+ */
+export function focusedWindowIsModal(pid: number): boolean {
+	if (!isRunning(pid)) {
+		return false;
+	}
+	let root: AXUIElementRef | null = null;
+	let focused: CFTypeRef | null = null;
+	try {
+		root = createApplicationElement(pid);
+		focused = copyOptionalAttributeValue(root, K_AX_FOCUSED_WINDOW_ATTRIBUTE);
+		if (focused === null) {
+			return false;
+		}
+		const window = focused as AXUIElementRef;
+		if (copyStringAttribute(window, K_AX_ROLE_ATTRIBUTE) === "AXSheet") {
+			return true;
+		}
+		const subrole = copyStringAttribute(window, "AXSubrole");
+		return subrole !== null && MODAL_WINDOW_SUBROLES.has(subrole);
+	} catch {
+		return false;
+	} finally {
+		cfRelease(focused);
+		if (root !== null) {
+			releaseAXElement(root);
+		}
+	}
+}
+
+const FILE_PANEL_SHEET_LABELS: ReadonlySet<string> = new Set(["save", "open"]);
+const MAX_FILE_PANEL_ANCESTORS = 8;
+
+function isFilePanelSheet(element: AXUIElementRef): boolean {
+	if (copyStringAttribute(element, K_AX_ROLE_ATTRIBUTE) !== "AXSheet") {
+		return false;
+	}
+	const label =
+		copyStringAttribute(element, K_AX_DESCRIPTION_ATTRIBUTE) ?? copyStringAttribute(element, K_AX_TITLE_ATTRIBUTE);
+	return label !== null && FILE_PANEL_SHEET_LABELS.has(label);
+}
+
+/** True when the app's focused window is showing AppKit's Save or Open panel (sheet "save"/"open"). */
+export function focusedWindowShowsFilePanel(pid: number): boolean {
+	if (!isRunning(pid)) {
+		return false;
+	}
+	let root: AXUIElementRef | null = null;
+	let focused: CFTypeRef | null = null;
+	let children: CFTypeRef | null = null;
+	try {
+		root = createApplicationElement(pid);
+		focused = copyOptionalAttributeValue(root, K_AX_FOCUSED_WINDOW_ATTRIBUTE);
+		if (focused === null) {
+			return false;
+		}
+		// The panel's own sheets (Go to Folder) become the focused window while they are open, so a
+		// file panel among the focused window's ancestors counts as well as one among its children.
+		let ancestor: CFTypeRef | null = cfRetain(focused);
+		try {
+			for (let depth = 0; ancestor !== null && depth < MAX_FILE_PANEL_ANCESTORS; depth++) {
+				if (isFilePanelSheet(ancestor as AXUIElementRef)) {
+					return true;
+				}
+				const parent = copyOptionalAttributeValue(ancestor as AXUIElementRef, "AXParent");
+				cfRelease(ancestor);
+				ancestor = parent;
+			}
+		} finally {
+			cfRelease(ancestor);
+		}
+		children = copyOptionalAttributeValue(focused as AXUIElementRef, "AXChildren");
+		if (children === null || !isCFArray(children)) {
+			return false;
+		}
+		for (let index = 0; index < cfArrayLength(children); index++) {
+			const child = cfArrayValueAt(children, index);
+			if (child !== null && isFilePanelSheet(child as AXUIElementRef)) {
+				return true;
+			}
+		}
+		return false;
+	} catch {
+		return false;
+	} finally {
+		cfRelease(children);
+		cfRelease(focused);
+		if (root !== null) {
+			releaseAXElement(root);
+		}
+	}
+}
+
+/**
+ * Make `windowId` the app's focused window so keyboard input posted to the process lands there:
+ * AppKit hands key events to the key window whatever window the event names. AXRaise orders the
+ * window front inside its own app without activating the app, so the user's frontmost app keeps
+ * focus. Returns false when the window is not reachable over accessibility.
+ */
+export function raiseWindowInApp(pid: number, windowId: number): boolean {
+	if (!isRunning(pid) || AXUIElementGetWindowSpi === null) {
+		return false;
+	}
+	let root: AXUIElementRef | null = null;
+	let windows: CFTypeRef | null = null;
+	try {
+		root = createApplicationElement(pid);
+		windows = copyOptionalAttributeValue(root, "AXWindows");
+		if (windows === null || !isCFArray(windows)) {
+			return false;
+		}
+		for (let index = 0; index < cfArrayLength(windows); index++) {
+			const window = cfArrayValueAt(windows, index);
+			if (window !== null && windowIdOf(window) === windowId) {
+				performAction(window, "AXRaise");
+				return true;
+			}
+		}
+		return false;
+	} catch {
+		return false;
+	} finally {
+		cfRelease(windows);
 		if (root !== null) {
 			releaseAXElement(root);
 		}
@@ -315,6 +511,112 @@ export function elementFrame(element: AXUIElementRef): AXElementFrame | undefine
 		return undefined;
 	}
 	return { x: position.x, y: position.y, width: size.width, height: size.height };
+}
+
+/** Screen frame of the app's focused element, or undefined when it has none or cannot answer. */
+export function focusedElementFrame(pid: number): AXElementFrame | undefined {
+	if (!AXIsProcessTrusted() || !isRunning(pid)) {
+		return undefined;
+	}
+	const app = createApplicationElement(pid);
+	try {
+		const focused = copyOptionalAttributeValue(app, K_AX_FOCUSED_UI_ELEMENT_ATTRIBUTE);
+		if (focused === null) {
+			return undefined;
+		}
+		try {
+			return elementFrame(focused);
+		} finally {
+			releaseAXElement(focused);
+		}
+	} finally {
+		releaseAXElement(app);
+	}
+}
+
+/** Screen frame of an observed element, re-resolved through the same identity check actions use. */
+export function elementFrameByIndex(pid: number, elementIndex: number): AXElementFrame | undefined {
+	const element = refetchElement(pid, elementIndex);
+	try {
+		return elementFrame(element);
+	} finally {
+		releaseAXElement(element);
+	}
+}
+
+export const AX_SCROLL_TO_VISIBLE_ACTION = "AXScrollToVisible";
+
+/**
+ * An observed element that is expected to have MOVED since the observation (it is about to be
+ * scrolled into view, or an earlier scroll already moved it). The role and label must still read as the
+ * observed control, so a recycled row is refused; the y position is not compared, because moving is
+ * what scrolling does.
+ */
+function retainedRelocatableElement(pid: number, elementIndex: number): AXUIElementRef {
+	if (!AXIsProcessTrusted()) {
+		throw new Error("accessibility permission denied");
+	}
+	if (!isRunning(pid)) {
+		throw new Error(`invalid process or element index: ${pid}:${elementIndex}`);
+	}
+	const observed = elementSnapshots.get(pid)?.identity[elementIndex];
+	const element = retainedElementForIndex(pid, elementIndex);
+	if (observed === undefined || element === undefined) {
+		throw new Error(`element ${elementIndex} not found in snapshot`);
+	}
+	const facts = copyElementFacts(element, { useMultipleAttributes: true, skippedApplications: 0 });
+	if (facts.role !== observed.role || facts.label !== observed.label) {
+		releaseAXElement(element);
+		throw new Error(
+			`element ${elementIndex} is now ${facts.role} "${facts.label ?? ""}", not the observed control; observe the app again before acting`,
+		);
+	}
+	return element;
+}
+
+/**
+ * Ask an observed element to scroll itself into view (AXScrollToVisible), which moves its enclosing
+ * scroll area without any pointer or keyboard. False when the element does not advertise the action.
+ */
+export function scrollToVisibleByIndex(pid: number, elementIndex: number): boolean {
+	const element = retainedRelocatableElement(pid, elementIndex);
+	try {
+		if (!copyActionNames(element).includes(AX_SCROLL_TO_VISIBLE_ACTION)) {
+			return false;
+		}
+		performAction(element, AX_SCROLL_TO_VISIBLE_ACTION);
+		return true;
+	} finally {
+		releaseAXElement(element);
+	}
+}
+
+/** The live frame of an observed element that may have moved since it was observed. */
+export function relocatedElementFrame(pid: number, elementIndex: number): AXElementFrame | undefined {
+	const element = retainedRelocatableElement(pid, elementIndex);
+	try {
+		return elementFrame(element);
+	} finally {
+		releaseAXElement(element);
+	}
+}
+
+/**
+ * Accept the element's current position as its observed position, so actions on its id pass the
+ * moved-control check after a deliberate scroll. Only this one id is re-baselined.
+ */
+export function rebaselineObservedElement(pid: number, elementIndex: number): void {
+	const snapshot = elementSnapshots.get(pid);
+	const frame = relocatedElementFrame(pid, elementIndex);
+	if (snapshot === undefined || frame === undefined) {
+		return;
+	}
+	elementSnapshots.set(pid, {
+		...snapshot,
+		identity: snapshot.identity.map((shape, index) =>
+			index === elementIndex ? { ...shape, y: Math.round(frame.y) } : shape,
+		),
+	});
 }
 
 export function copyAttributeValue(element: AXUIElementRef, attribute: string): CFTypeRef | null {
@@ -370,6 +672,7 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 	const walkRoots: AXUIElementRef[] = [];
 	const snapshotElements: AXUIElementRef[] = [];
 	try {
+		assertAppAnswersAccessibility(root, pid);
 		const scope =
 			options.subtreeOf === undefined
 				? resolveWalkScope(root, options)
@@ -393,7 +696,9 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 		// walk starts at the matched window because the application element is not part of
 		// a window observation.
 		const walkInputs = scope.scoped ? scope.roots : [root];
-		walkElements(walkInputs, maxDepth, maxElements, elements, snapshotElements);
+		const skippedApplications = walkElements(walkInputs, maxDepth, maxElements, elements, snapshotElements);
+		const contentUnavailable =
+			scope.degenerate > 0 || skippedApplications > 0 ? { windowContentUnavailable: true } : {};
 		if (elements.length === 0) {
 			if (!keepIndexSpace) {
 				replaceElementSnapshot(pid, undefined);
@@ -403,6 +708,7 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 				axAvailable: false,
 				truncated: false,
 				walkKey: unavailableWalkKey(maxDepth, maxElements),
+				...contentUnavailable,
 			};
 		}
 		if (!keepIndexSpace) {
@@ -423,6 +729,13 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 			axAvailable: true,
 			truncated: elements.length >= maxElements,
 			walkKey: walkKeyFor(scope.descriptor, maxDepth, maxElements),
+			...(scope.descriptor.windowId !== undefined &&
+			scope.descriptor.subtreeOf === undefined &&
+			elements[0]?.role === "AXWindow" &&
+			elements[0].label !== null
+				? { windowTitle: elements[0].label }
+				: {}),
+			...contentUnavailable,
 		};
 	} catch (error) {
 		for (const element of snapshotElements) {
@@ -447,6 +760,8 @@ interface ResolvedWalkScope {
 	readonly scoped: boolean;
 	/** Number of direct children the application element exposes, before any scoping. */
 	readonly appChildren: number;
+	/** Children that were application elements standing in for windows; see windowContentUnavailable. */
+	readonly degenerate: number;
 }
 
 /**
@@ -461,29 +776,55 @@ function resolveWalkScope(root: AXUIElementRef, options: AccessibilityTreeOption
 	const includeMenuBar = options.includeMenuBar === true;
 	const windowId = options.windowId;
 	if (windowId === undefined || AXUIElementGetWindowSpi === null) {
-		return { roots: children, descriptor: UNMATCHED_WINDOW_SCOPE, scoped: false, appChildren };
+		return { roots: children, descriptor: UNMATCHED_WINDOW_SCOPE, scoped: false, appChildren, degenerate: 0 };
 	}
 
 	const windows: AXUIElementRef[] = [];
 	const attached: AXUIElementRef[] = [];
+	const otherWindows: AXUIElementRef[] = [];
+	const menus: AXUIElementRef[] = [];
+	const degenerate: AXUIElementRef[] = [];
 	for (const child of children) {
-		const matched = windowIdOf(child) === windowId;
-		if (matched) {
+		if (windowIdOf(child) === windowId) {
 			windows.push(child);
 			continue;
 		}
-		if (isAppLevelChrome(child, includeMenuBar)) {
-			releaseAXElement(child);
-			continue;
+		const role = copyStringAttribute(child, K_AX_ROLE_ATTRIBUTE) ?? "";
+		if (role === "AXApplication") {
+			degenerate.push(child);
+		} else if (!includeMenuBar && MENU_ROLES.has(role)) {
+			menus.push(child);
+		} else if (WINDOW_ROLES.has(role)) {
+			otherWindows.push(child);
+		} else {
+			attached.push(child);
 		}
-		attached.push(child);
 	}
 
+	// Every child handed back as a root is released by the caller, so a child may be released here
+	// only when it is left out of the roots. Releasing one and still returning it made the walk read
+	// freed elements and release them twice, which crashed the process whenever the window was not
+	// among the AX children (a locked screen, another Space, a window replaced mid-navigation).
 	if (windows.length === 0) {
-		for (const child of attached) {
+		if (menus.length === 0 && degenerate.length === 0) {
+			return { roots: children, descriptor: UNMATCHED_WINDOW_SCOPE, scoped: false, appChildren, degenerate: 0 };
+		}
+		// The window was not found: walk the app's windows and panels, but not its menu bar, which is
+		// hundreds of elements of app chrome the caller did not ask for, nor application elements
+		// standing in for windows, which only lead back to the menu bar.
+		for (const child of [...menus, ...degenerate]) {
 			releaseAXElement(child);
 		}
-		return { roots: children, descriptor: UNMATCHED_WINDOW_SCOPE, scoped: false, appChildren };
+		return {
+			roots: [...otherWindows, ...attached],
+			descriptor: UNMATCHED_WINDOW_SCOPE,
+			scoped: true,
+			appChildren,
+			degenerate: degenerate.length,
+		};
+	}
+	for (const child of [...otherWindows, ...menus, ...degenerate]) {
+		releaseAXElement(child);
 	}
 
 	return {
@@ -491,6 +832,7 @@ function resolveWalkScope(root: AXUIElementRef, options: AccessibilityTreeOption
 		descriptor: { windowId, includeMenuBar, scoped: true, subtreeOf: undefined },
 		scoped: true,
 		appChildren,
+		degenerate: degenerate.length,
 	};
 }
 
@@ -514,6 +856,7 @@ function resolveSubtreeWalkScope(pid: number, subtreeOf: number, options: Access
 		},
 		scoped: true,
 		appChildren: 1,
+		degenerate: 0,
 	};
 }
 
@@ -531,16 +874,8 @@ function windowIdOf(element: AXUIElementRef): number | undefined {
 	return AXUIElementGetWindowSpi(element, out) === AX_SUCCESS ? out[0] : undefined;
 }
 
-function isAppLevelChrome(element: AXUIElementRef, includeMenuBar: boolean): boolean {
-	const role = copyStringAttribute(element, K_AX_ROLE_ATTRIBUTE) ?? "";
-	if (role === "AXWindow" || role === "AXSheet" || role === "AXDialog") {
-		return true;
-	}
-	if (includeMenuBar) {
-		return false;
-	}
-	return role === "AXMenuBar" || role === "AXMenu" || role === "AXMenuBarItem" || role === "AXMenuItem";
-}
+const WINDOW_ROLES: ReadonlySet<string> = new Set(["AXWindow", "AXSheet", "AXDialog"]);
+const MENU_ROLES: ReadonlySet<string> = new Set(["AXMenuBar", "AXMenu", "AXMenuBarItem", "AXMenuItem"]);
 
 function walkElements(
 	roots: readonly AXUIElementRef[],
@@ -548,26 +883,266 @@ function walkElements(
 	maxElements: number,
 	elements: AXTreeElement[],
 	snapshotElements: AXUIElementRef[],
-): void {
-	const state: WalkState = { useMultipleAttributes: true };
+): number {
+	const state: WalkState = { useMultipleAttributes: true, skippedApplications: 0 };
 	for (const root of roots) {
 		if (elements.length >= maxElements) {
-			return;
+			break;
 		}
 		appendAXElement(root, 0, maxDepth, maxElements, elements, snapshotElements, state);
 	}
+	return state.skippedApplications;
 }
 
 interface WalkState {
 	useMultipleAttributes: boolean;
+	/** Nested application elements left out of the walk; see windowContentUnavailable. */
+	skippedApplications: number;
 }
+
+/** An application element below the root is the app answering for a window it cannot expose. */
+function isNestedApplication(element: AXUIElementRef): boolean {
+	return copyStringAttribute(element, K_AX_ROLE_ATTRIBUTE) === "AXApplication";
+}
+
+const TEXT_ENTRY_ROLES: ReadonlySet<string> = new Set(["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"]);
 
 export function performActionByIndex(pid: number, elementIndex: number, action: string): void {
 	const element = refetchElement(pid, elementIndex);
 	try {
+		// A text view or a list lists no page-scroll action itself (AXError -25205), and the scroll area
+		// around it refuses the action while its app is in the background; moving the scroll area's
+		// scroll bar by one visible page works in both cases without bringing the app forward.
+		// A list can advertise the page action yet refuse it (AXError -25205) or accept it and do nothing while
+		// its app is in the background (Finder's list view does both), so the scroll bar is moved first; the
+		// action itself is the fallback for scroll areas without a settable bar.
+		if (action in SCROLL_PAGE_DIRECTIONS && scrollOnePageWithScrollBar(element, action)) {
+			return;
+		}
 		performAction(element, action);
+		// Pressing a text field in web content does not move keyboard focus to it, so typing that
+		// follows would land wherever focus was (Safari's address bar). A click focuses the field, so
+		// focus it explicitly; a field that refuses focus keeps the press alone.
+		webFieldFocusedByPress.delete(pid);
+		if (
+			action === K_AX_PRESS_ACTION &&
+			TEXT_ENTRY_ROLES.has(copyStringAttribute(element, K_AX_ROLE_ATTRIBUTE) ?? "")
+		) {
+			try {
+				setAttributeValue(element, "AXFocused", cfBooleanTrue());
+				if (isInsideWebArea(element)) {
+					webFieldFocusedByPress.add(pid);
+				}
+			} catch {
+				/* Not focusable over accessibility; the press already happened. */
+			}
+		}
 	} finally {
 		releaseAXElement(element);
+	}
+}
+
+/**
+ * Apps whose web text field this driver last focused by pressing it. Safari answers no focused
+ * element at all while it is in the background, so that press is the evidence left to go on.
+ */
+const webFieldFocusedByPress = new Set<number>();
+
+/** True when the app's focused element is inside a web page. */
+export function focusedElementInWebArea(pid: number): boolean {
+	if (!isRunning(pid)) {
+		return false;
+	}
+	const app = createApplicationElement(pid);
+	try {
+		const focused = copyOptionalAttributeValue(app, K_AX_FOCUSED_UI_ELEMENT_ATTRIBUTE);
+		if (focused === null) {
+			return webFieldFocusedByPress.has(pid);
+		}
+		try {
+			return isInsideWebArea(focused);
+		} finally {
+			releaseAXElement(focused);
+		}
+	} catch {
+		return false;
+	} finally {
+		releaseAXElement(app);
+	}
+}
+
+const SCROLL_PAGE_DIRECTIONS: Readonly<Record<string, { readonly vertical: boolean; readonly sign: 1 | -1 }>> = {
+	AXScrollDownByPage: { vertical: true, sign: 1 },
+	AXScrollUpByPage: { vertical: true, sign: -1 },
+	AXScrollRightByPage: { vertical: false, sign: 1 },
+	AXScrollLeftByPage: { vertical: false, sign: -1 },
+};
+const MAX_SCROLL_AREA_ANCESTORS = 8;
+const SCROLL_SETTLE_POLLS = 20;
+const SCROLL_SETTLE_POLL_MILLISECONDS = 10;
+const SLEEP_CELL = new Int32Array(new SharedArrayBuffer(4));
+
+/** Where a scroll area is scrolled to along one axis: its visible extent, how far it can scroll, and 0..1 progress. */
+interface ScrollMetrics {
+	readonly visible: number;
+	readonly scrollable: number;
+	readonly position: number;
+}
+
+/**
+ * Read the scroll position from geometry: how far the content has moved relative to the scroll area. Finder's
+ * list scroll bar keeps reporting the value it was last given, so reading the bar (and adding a page to it) made
+ * every page after the first repeat the first; the content frame always says where the content really is.
+ */
+function scrollMetrics(scrollArea: AXUIElementRef, vertical: boolean): ScrollMetrics | null {
+	const area = elementFrame(scrollArea);
+	const content = largestContentFrame(scrollArea);
+	if (area === undefined || content === null) {
+		return null;
+	}
+	const visible = vertical ? area.height : area.width;
+	const scrollable = (vertical ? content.height : content.width) - visible;
+	const offset = vertical ? area.y - content.y : area.x - content.x;
+	return { visible, scrollable, position: scrollable > 0 ? Math.min(1, Math.max(0, offset / scrollable)) : 0 };
+}
+
+/** The scroll bar is set asynchronously; wait, bounded, until the content has moved to where it was told to. */
+function awaitScrollPosition(scrollArea: AXUIElementRef, vertical: boolean, wanted: number): void {
+	for (let attempt = 0; attempt < SCROLL_SETTLE_POLLS; attempt += 1) {
+		const metrics = scrollMetrics(scrollArea, vertical);
+		if (metrics === null || metrics.scrollable <= 0 || Math.abs(metrics.position - wanted) * metrics.scrollable < 1) {
+			return;
+		}
+		Atomics.wait(SLEEP_CELL, 0, 0, SCROLL_SETTLE_POLL_MILLISECONDS);
+	}
+}
+
+/**
+ * Scroll by one visible page by moving the enclosing scroll area's scroll bar (AXValue 0..1). The scroll bar spans
+ * the content minus the visible part, so one page is visible / (content - visible). False when there is no scroll
+ * area or scroll bar to move.
+ */
+function scrollOnePageWithScrollBar(element: AXUIElementRef, action: string): boolean {
+	const direction = SCROLL_PAGE_DIRECTIONS[action];
+	if (direction === undefined) {
+		return false;
+	}
+	const scrollArea = selfOrAncestorWithRole(element, "AXScrollArea");
+	if (scrollArea === null) {
+		return false;
+	}
+	try {
+		const bar = copyOptionalAttributeValue(
+			scrollArea,
+			direction.vertical ? "AXVerticalScrollBar" : "AXHorizontalScrollBar",
+		) as AXUIElementRef | null;
+		if (bar === null) {
+			return false;
+		}
+		try {
+			const metrics = scrollMetrics(scrollArea, direction.vertical);
+			if (metrics === null) {
+				return false;
+			}
+			if (metrics.scrollable <= 0) {
+				return true;
+			}
+			const next = Math.min(
+				1,
+				Math.max(0, metrics.position + (direction.sign * metrics.visible) / metrics.scrollable),
+			);
+			const value = toCFNumber(next);
+			try {
+				setAttributeValue(bar, K_AX_VALUE_ATTRIBUTE, value);
+			} finally {
+				cfRelease(value);
+			}
+			awaitScrollPosition(scrollArea, direction.vertical, next);
+			return true;
+		} finally {
+			releaseAXElement(bar);
+		}
+	} finally {
+		releaseAXElement(scrollArea);
+	}
+}
+
+function selfOrAncestorWithRole(element: AXUIElementRef, role: string): AXUIElementRef | null {
+	let current: AXUIElementRef | null = cfRetain(element) as AXUIElementRef;
+	for (let depth = 0; current !== null && depth <= MAX_SCROLL_AREA_ANCESTORS; depth++) {
+		if (copyStringAttribute(current, K_AX_ROLE_ATTRIBUTE) === role) {
+			return current;
+		}
+		const parent = copyOptionalAttributeValue(current, "AXParent") as AXUIElementRef | null;
+		releaseAXElement(current);
+		current = parent;
+	}
+	if (current !== null) {
+		releaseAXElement(current);
+	}
+	return null;
+}
+
+/** The frame of the scrolled content: the largest child of the scroll area that is not a scroll bar. */
+function largestContentFrame(scrollArea: AXUIElementRef): AXElementFrame | null {
+	let largest: AXElementFrame | null = null;
+	for (const child of copyElementChildren(scrollArea)) {
+		try {
+			if (copyStringAttribute(child, K_AX_ROLE_ATTRIBUTE) === "AXScrollBar") {
+				continue;
+			}
+			const frame = elementFrame(child);
+			if (frame !== undefined && (largest === null || frame.width * frame.height > largest.width * largest.height)) {
+				largest = frame;
+			}
+		} finally {
+			releaseAXElement(child);
+		}
+	}
+	return largest;
+}
+
+const MAX_WEB_AREA_ANCESTORS = 40;
+
+/** True when the element sits inside a web page, whose input handlers only see real key events. */
+function isInsideWebArea(element: AXUIElementRef): boolean {
+	let current: CFTypeRef | null = cfRetain(element);
+	try {
+		for (let depth = 0; current !== null && depth < MAX_WEB_AREA_ANCESTORS; depth++) {
+			if (copyStringAttribute(current as AXUIElementRef, K_AX_ROLE_ATTRIBUTE) === "AXWebArea") {
+				return true;
+			}
+			const parent = copyOptionalAttributeValue(current as AXUIElementRef, "AXParent");
+			cfRelease(current);
+			current = parent;
+		}
+		return false;
+	} finally {
+		cfRelease(current);
+	}
+}
+
+/**
+ * The app's focused element when it is a native text-entry field (not web content, whose fields
+ * only react to real key events), retained for the caller to release; null otherwise.
+ */
+export function focusedTextEntryElement(pid: number): AXUIElementRef | null {
+	if (!AXIsProcessTrusted() || !isRunning(pid)) {
+		return null;
+	}
+	const app = createApplicationElement(pid);
+	try {
+		const focused = copyOptionalAttributeValue(app, K_AX_FOCUSED_UI_ELEMENT_ATTRIBUTE);
+		if (focused === null) {
+			return null;
+		}
+		if (TEXT_ENTRY_ROLES.has(copyStringAttribute(focused, K_AX_ROLE_ATTRIBUTE) ?? "") && !isInsideWebArea(focused)) {
+			return focused;
+		}
+		releaseAXElement(focused);
+		return null;
+	} finally {
+		releaseAXElement(app);
 	}
 }
 
@@ -582,6 +1157,16 @@ export function typeIntoFocusedAXElement(targetPid: number, text: string): boole
 			return false;
 		}
 		try {
+			// A web page's field accepts the accessibility write but its input and change events never
+			// fire, so the page never sees the text; real key events are the route that reaches it.
+			// Only a text field takes typed text as a value; a list or outline (Finder's file list)
+			// accepts the write and does nothing, where real keys would select an item by name.
+			if (
+				!TEXT_ENTRY_ROLES.has(copyStringAttribute(focused, K_AX_ROLE_ATTRIBUTE) ?? "") ||
+				isInsideWebArea(focused)
+			) {
+				return false;
+			}
 			if (trySetSelectedText(focused, text)) {
 				return true;
 			}
@@ -625,6 +1210,7 @@ export function pressElementAtScreenPoint(targetPid: number, x: number, y: numbe
 	if (systemwide === null) {
 		return false;
 	}
+	applyMessagingTimeout(systemwide);
 	try {
 		const out: Array<AXUIElementRef | null> = [null];
 		const error = AXUIElementCopyElementAtPosition(systemwide, x, y, out);
@@ -762,9 +1348,16 @@ function appendAXElement(
 		return undefined;
 	}
 
+	const facts = copyElementFacts(element, state);
+	if (depth > 0 && facts.role === "AXApplication") {
+		state.skippedApplications += 1;
+		for (const child of facts.children) {
+			releaseAXElement(child);
+		}
+		return undefined;
+	}
 	const id = elements.length;
 	snapshotElements.push(cfRetain(element));
-	const facts = copyElementFacts(element, state);
 	elements.push({
 		id,
 		role: facts.role,
@@ -956,7 +1549,7 @@ function assertStillObservedControl(
 	if (observed === undefined) {
 		return;
 	}
-	const facts = copyElementFacts(element, { useMultipleAttributes: true });
+	const facts = copyElementFacts(element, { useMultipleAttributes: true, skippedApplications: 0 });
 	if (facts.role === observed.role && facts.label === observed.label && Math.round(facts.frame.y) === observed.y) {
 		return;
 	}
@@ -988,6 +1581,10 @@ function findAXElement(
 	const children = copyElementChildren(element);
 	try {
 		for (const child of children) {
+			// Mirrors the walk, which leaves nested application elements out, so ids stay aligned.
+			if (isNestedApplication(child)) {
+				continue;
+			}
 			const matched = findAXElement(child, targetIndex, depth + 1, maxDepth, maxElements, cursor);
 			if (matched !== null) {
 				return matched;
@@ -1164,6 +1761,10 @@ function isRunning(pid: number): boolean {
 
 function assertAXSuccess(operation: string, error: number): void {
 	if (error !== AX_SUCCESS) {
-		throw new Error(`${operation} failed with AXError ${error}`);
+		const hint =
+			error === AX_ERROR_CANNOT_COMPLETE
+				? " - the app did not answer within the accessibility messaging timeout; it may be busy loading, or showing a sheet only a person can clear"
+				: "";
+		throw new Error(`${operation} failed with AXError ${error}${hint}`);
 	}
 }

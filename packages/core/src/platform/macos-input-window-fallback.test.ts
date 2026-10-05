@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
+import { setKeyboardWindowFocuserForTesting, setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
 import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
 
 interface TestWindow {
@@ -55,6 +55,8 @@ describe("#given target windows without owner metadata", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		setOnscreenWindowIdsSourceForTesting(() => [55, 77, 88]);
+		// Window routing is under test here; making the routed window key has its own tests.
+		setKeyboardWindowFocuserForTesting(async () => undefined);
 		windowMock.openWindows.mockResolvedValue([]);
 		fallbackMock.selectSystemEventsTargetWindow.mockResolvedValue(undefined);
 	});

@@ -44,14 +44,20 @@ const screenshotMock = vi.hoisted(() => ({
 	captureWindowImage: vi.fn(),
 	getMainDisplayLogicalSize: vi.fn(),
 	getMainDisplayNativePixelSize: vi.fn(),
+	screenCaptureAllowed: vi.fn(() => true),
 }));
 vi.mock("./macos-ffi/screenshot.js", () => screenshotMock);
 vi.mock("./macos-ffi/accessibility.js", () => accessibilityMock);
+vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 
 import { AppApprovalStore } from "../permission/app-approval.js";
 import { setRunningApplicationLookupForTesting } from "./app-list.js";
 import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
 import { MacOSHostComputer } from "./macos.js";
+import { setSystemPromptWindowSourceForTesting } from "./system-prompts.js";
+
+// The live window server would leak this Mac's real dialogs into the fixtures; pin an empty screen.
+setSystemPromptWindowSourceForTesting(() => []);
 
 /** Forces the AppleScript application-list fallback so the execFile fixtures stay authoritative. */
 const unavailableNativeLookup = {
@@ -129,6 +135,21 @@ beforeEach(() => {
 });
 
 describe("#given one observation #when the driver resolves its target window and its inventory #then it enumerates the window list once", () => {
+	it("uses the matched accessibility title when WindowServer does not expose one", async () => {
+		accessibilityMock.extractAccessibilityTree.mockReturnValue({
+			axAvailable: true,
+			truncated: false,
+			walkKey: "scoped-window-99",
+			windowTitle: "Private folder",
+			elements: [],
+		});
+		const computer = new MacOSHostComputer();
+
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0, includeScreenshot: false });
+
+		expect(state.windowTitle).toBe("Private folder");
+	});
+
 	it("calls the window enumeration once per observation instead of once per consumer", async () => {
 		windowMock.openWindows.mockClear();
 		windowMock.openWindows.mockResolvedValue([
@@ -140,6 +161,92 @@ describe("#given one observation #when the driver resolves its target window and
 
 		expect(state.windowId).toBe(99);
 		expect(windowMock.openWindows.mock.calls.length).toBe(1);
+	});
+});
+
+describe("#given APPLE_CUA_CURSOR #when the host decides whether to draw the agent cursor #then only an explicit off disables it", () => {
+	it.each([
+		[undefined, true],
+		["on", true],
+		["off", false],
+		["0", false],
+		["FALSE", false],
+		["no", false],
+	])("APPLE_CUA_CURSOR=%s -> %s", async (value, enabled) => {
+		const { agentCursorEnabled } = await import("./macos.js");
+		expect(agentCursorEnabled(value === undefined ? {} : { APPLE_CUA_CURSOR: value })).toBe(enabled);
+	});
+});
+
+describe("#given a locked Mac #when get_app_state is asked for #then it stops with the unlock request before reading anything", () => {
+	it("refuses without enumerating windows", async () => {
+		windowMock.openWindows.mockClear();
+		const computer = new MacOSHostComputer({ isLocked: () => true });
+
+		await expect(computer.getAppState(TARGET_PID, { settleMs: 0 })).rejects.toThrow(/Mac is locked/);
+		expect(windowMock.openWindows).not.toHaveBeenCalled();
+	});
+});
+
+describe("#given a window that appears just after the first look #when a window is required #then the observation waits for it", () => {
+	it("observes the window once the window server lists it", async () => {
+		windowMock.openWindows.mockReset();
+		windowMock.openWindows
+			.mockResolvedValueOnce([])
+			.mockResolvedValue([{ id: 99, title: "Documents", owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
+		const computer = new MacOSHostComputer();
+
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0, requireWindow: true });
+
+		expect(state.windowId).toBe(99);
+	});
+});
+
+describe("#given no Screen Recording permission #when get_app_state is asked for an image #then it observes without capturing", () => {
+	it("returns the elements and the reason, and never starts a capture that would raise the permission prompt", async () => {
+		screenshotMock.screenCaptureAllowed.mockReturnValue(false);
+		const capturesBefore = screenshotMock.captureWindowImage.mock.calls.length;
+		const subprocessesBefore = childProcessMock.execFile.mock.calls.length;
+		try {
+			const computer = new MacOSHostComputer();
+
+			const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+			expect(state.screenshotUnavailable).toBe("screen-recording-permission");
+			expect(state.screenshotBase64).toBe("");
+			expect(state.elements.map((element) => element.id)).toEqual([5]);
+			// Neither the in-process capture nor the screencapture fallback ran; only the app lookup did.
+			expect(screenshotMock.captureWindowImage.mock.calls.length).toBe(capturesBefore);
+			expect(childProcessMock.execFile.mock.calls.length - subprocessesBefore).toBe(1);
+		} finally {
+			screenshotMock.screenCaptureAllowed.mockReturnValue(true);
+		}
+	});
+});
+
+describe("#given a macOS permission prompt over the screen #when get_app_state observes an app #then the observation names it", () => {
+	it("reports the prompt that the app's own tree cannot show", async () => {
+		setSystemPromptWindowSourceForTesting(() => [
+			{
+				id: 17196,
+				ownerPid: 1752,
+				layer: 0,
+				ownerName: "universalAccessAuthWarn",
+				title: "Screen Recording",
+				bounds: { x: 700, y: 300, width: 520, height: 220 },
+			},
+		]);
+		try {
+			const computer = new MacOSHostComputer();
+
+			const state = await computer.getAppState(TARGET_PID, { settleMs: 0, includeScreenshot: false });
+
+			expect(state.systemPrompts?.map((prompt) => [prompt.owner, prompt.kind])).toEqual([
+				["universalAccessAuthWarn", "permission"],
+			]);
+		} finally {
+			setSystemPromptWindowSourceForTesting(() => []);
+		}
 	});
 });
 

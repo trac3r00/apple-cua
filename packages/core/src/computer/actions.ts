@@ -1,7 +1,10 @@
 import type { AppInfo, AppState } from "../accessibility/types.js";
 import { resolveElementCoordinate } from "../platform/macos-accessibility.js";
-import type { AppStateOptions, ScrollOptions } from "../types/index.js";
+import type { AppStateOptions, KeyModifierName, ScrollOptions } from "../types/index.js";
 import type { ComputerInterface } from "./interface.js";
+import { type KeyModifier, MODIFIER_ALIASES, normalizeModifiers } from "./modifiers.js";
+
+export { normalizeModifiers };
 
 export type ComputerUseMouseButton = "left" | "right" | "middle";
 
@@ -39,20 +42,6 @@ export async function scrollElement(
 		await computer.performAction(targetPid, elementIndex, action);
 	}
 }
-
-type KeyModifier = "command" | "option" | "control" | "shift";
-
-const MODIFIER_ALIASES = new Map<string, KeyModifier>([
-	["cmd", "command"],
-	["command", "command"],
-	["meta", "command"],
-	["super", "command"],
-	["alt", "option"],
-	["option", "option"],
-	["ctrl", "control"],
-	["control", "control"],
-	["shift", "shift"],
-]);
 
 /**
  * The app a name, bundle id, or partial app name refers to: an exact name or bundle-id match
@@ -132,10 +121,17 @@ export function parseElementIndex(elementIndex: string | number): number {
 }
 
 export function parseKeyChord(key: string): { readonly key: string; readonly modifiers: KeyModifier[] } {
-	const parts = key
+	// "+" is both the separator and a key. A chord that ends in "+" ("+", "cmd++") names the plus key,
+	// which on the keyboard is shift with "=".
+	const trimmed = key.trim();
+	const plusKey = trimmed.endsWith("+");
+	const parts = (plusKey ? trimmed.slice(0, -1) : trimmed)
 		.split("+")
 		.map((part) => part.trim())
 		.filter(Boolean);
+	if (plusKey) {
+		parts.push("shift", "=");
+	}
 	const finalKey = parts.at(-1);
 	if (finalKey === undefined) {
 		throw new Error("key must be non-empty");
@@ -165,22 +161,25 @@ export async function clickPoint(
 	point: { readonly x: number; readonly y: number },
 	button: ComputerUseMouseButton,
 	clickCount: number,
+	modifiers?: ReadonlyArray<KeyModifierName>,
 ): Promise<void> {
 	const count = Math.max(1, Math.trunc(clickCount));
+	// Passed only when asked for, so a plain click keeps its exact call shape.
+	const options = modifiers === undefined || modifiers.length === 0 ? undefined : { modifiers };
 	if (button === "left" && count === 2) {
-		await computer.doubleClick(point);
+		await (options === undefined ? computer.doubleClick(point) : computer.doubleClick(point, options));
 		return;
 	}
 	for (let index = 0; index < count; index += 1) {
 		switch (button) {
 			case "left":
-				await computer.click(point);
+				await (options === undefined ? computer.click(point) : computer.click(point, options));
 				break;
 			case "right":
-				await computer.rightClick(point);
+				await (options === undefined ? computer.rightClick(point) : computer.rightClick(point, options));
 				break;
 			case "middle":
-				await computer.middleClick(point);
+				await (options === undefined ? computer.middleClick(point) : computer.middleClick(point, options));
 				break;
 		}
 	}

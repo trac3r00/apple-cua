@@ -1,4 +1,4 @@
-import type { AppInfo, AppState } from "../accessibility/types.js";
+import type { AppInfo, AppState, OcrTextEntry } from "../accessibility/types.js";
 import type {
 	AppStateOptions,
 	ComputerCapabilities,
@@ -6,6 +6,8 @@ import type {
 	InputDelivery,
 	KeyOptions,
 	Point,
+	PointerOptions,
+	Rect,
 	ScreenshotOptions,
 	ScrollOptions,
 	SelectTextOptions,
@@ -19,6 +21,11 @@ export interface ScreenshotResult {
 	height: number;
 }
 
+/** Text read from the pixels of an app window, or why the pixels could not be read. */
+export type WindowTextRead =
+	| { readonly entries: readonly OcrTextEntry[] }
+	| { readonly unavailable: "screen-recording-permission" | "no-window" | "recognition-failed" };
+
 export interface ComputerInterface {
 	readonly capabilities: ComputerCapabilities;
 	/**
@@ -31,10 +38,10 @@ export interface ComputerInterface {
 	screenshot(options?: ScreenshotOptions): Promise<ScreenshotResult>;
 	setTarget(pid?: number): void;
 	move(position: Point): Promise<void>;
-	click(position: Point): Promise<void>;
-	rightClick(position: Point): Promise<void>;
-	middleClick(position: Point): Promise<void>;
-	doubleClick(position: Point): Promise<void>;
+	click(position: Point, options?: PointerOptions): Promise<void>;
+	rightClick(position: Point, options?: PointerOptions): Promise<void>;
+	middleClick(position: Point, options?: PointerOptions): Promise<void>;
+	doubleClick(position: Point, options?: PointerOptions): Promise<void>;
 	type(text: string): Promise<void>;
 	key(key: string, options?: KeyOptions): Promise<void>;
 	scroll(options: ScrollOptions): Promise<void>;
@@ -59,6 +66,31 @@ export interface ComputerInterface {
 	selectText(targetPid: number, elementIndex: number, options: SelectTextOptions): Promise<void>;
 	performAction(targetPid: number, elementIndex: number, action: string): Promise<void>;
 	pressAtPosition(targetPid: number, position: Point): Promise<boolean>;
+	/**
+	 * Screen frame (global logical points) of an element from the current observation, or
+	 * undefined when it reports none. Lets an action fall back from an accessibility press the
+	 * control does not support to a click at the control's centre instead of failing.
+	 */
+	elementFrame?(targetPid: number, elementIndex: number): Promise<Rect | undefined>;
+	/**
+	 * Scroll an observed element into view through accessibility (AXScrollToVisible), with no pointer
+	 * and no keyboard. Resolves to the element's settled on-screen frame (global logical points) and
+	 * accepts its new position as its observed one; undefined when the element does not advertise the action.
+	 */
+	scrollElementIntoView?(targetPid: number, elementIndex: number): Promise<Rect | undefined>;
+	/**
+	 * The settled on-screen frame (global logical points) of an observed element that may have moved since it
+	 * was observed, because its scroll area scrolled. Accepts the new position as its observed one, so actions
+	 * on its id keep working. Reads just that element: no tree walk.
+	 */
+	refreshElementFrame?(targetPid: number, elementIndex: number): Promise<Rect | undefined>;
+	/**
+	 * Read the text of the observed window from a capture of it, frames in global logical points. Never
+	 * triggers the Screen Recording prompt: without the permission it answers `unavailable`.
+	 */
+	recognizeWindowText?(targetPid: number): Promise<WindowTextRead>;
+	/** Show the drawn agent cursor at a point (it glides there); never moves the real pointer. */
+	showPointerAt?(position: Point, press: boolean): void;
 	typeIntoFocused(targetPid: number, text: string): Promise<boolean>;
 	close(): Promise<void>;
 }

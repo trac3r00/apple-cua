@@ -1,0 +1,127 @@
+import type { StopStatusSource, StopSwitch } from "./stop-switch.js";
+
+/** CGEventFlags modifier masks (the same values as the K_CG_EVENT_FLAG_MASK_* constants). */
+const FLAG_SHIFT = 0x00020000;
+const FLAG_CONTROL = 0x00040000;
+const FLAG_ALTERNATE = 0x00080000;
+const FLAG_COMMAND = 0x00100000;
+
+export const STOP_CHORD_MASK = FLAG_CONTROL | FLAG_ALTERNATE | FLAG_COMMAND;
+export const STOP_CHORD_LABEL = "keyboard chord Control+Option+Command";
+export const STOP_CHORD_POLL_MS = 50;
+/** Consecutive samples the chord must be held for (3 x 50 ms = ~150 ms). */
+export const STOP_CHORD_REQUIRED_SAMPLES = 3;
+
+/** Starts a repeating callback and returns the function that cancels it. */
+export type StopChordTimer = (callback: () => void, milliseconds: number) => () => void;
+
+export interface StopChordDetectorOptions {
+	/** Reads the current modifier flags of the physical keyboard (CGEventFlags bitmask). */
+	readonly readFlags: () => number;
+	/** Called once per press, after the chord has been held for the required samples. */
+	readonly onChord: () => void;
+	readonly onError?: (error: unknown) => void;
+	readonly intervalMs?: number;
+	readonly requiredSamples?: number;
+	readonly timer?: StopChordTimer;
+}
+
+/** The real timer is unref'd so the detector never keeps the process alive. */
+const SYSTEM_TIMER: StopChordTimer = (callback, milliseconds) => {
+	const handle = setInterval(callback, milliseconds);
+	handle.unref();
+	return () => clearInterval(handle);
+};
+
+/**
+ * Detects Control+Option+Command held together (Shift not held, so common shortcuts that add
+ * Shift never trigger it). The flags are read from the HID system state, which reflects the
+ * physical keyboard: apple-cua's own per-pid background events do not move it. Limitation:
+ * foreground (attended) delivery posts events through the HID tap, so a batch that itself
+ * presses all three modifiers for >= 150 ms could trip the chord; no apple-cua action holds
+ * that combination.
+ */
+export class StopChordDetector {
+	private readonly readFlags: () => number;
+	private readonly onChord: () => void;
+	private readonly onError: (error: unknown) => void;
+	private readonly intervalMs: number;
+	private readonly requiredSamples: number;
+	private readonly timer: StopChordTimer;
+	private cancel: (() => void) | undefined;
+	private heldSamples = 0;
+	private armed = true;
+	private reportedError = false;
+
+	constructor(options: StopChordDetectorOptions) {
+		this.readFlags = options.readFlags;
+		this.onChord = options.onChord;
+		this.onError = options.onError ?? defaultOnError;
+		this.intervalMs = options.intervalMs ?? STOP_CHORD_POLL_MS;
+		this.requiredSamples = options.requiredSamples ?? STOP_CHORD_REQUIRED_SAMPLES;
+		this.timer = options.timer ?? SYSTEM_TIMER;
+	}
+
+	start(): void {
+		if (this.cancel === undefined) {
+			this.cancel = this.timer(() => this.sample(), this.intervalMs);
+		}
+	}
+
+	stop(): void {
+		this.cancel?.();
+		this.cancel = undefined;
+	}
+
+	/** Take one reading; the timer calls this, and tests drive it directly. */
+	sample(): void {
+		let flags: number;
+		try {
+			flags = this.readFlags();
+		} catch (error: unknown) {
+			if (!this.reportedError) {
+				this.reportedError = true;
+				this.onError(error);
+			}
+			return;
+		}
+		const held = (flags & STOP_CHORD_MASK) === STOP_CHORD_MASK && (flags & FLAG_SHIFT) === 0;
+		if (!held) {
+			this.heldSamples = 0;
+			this.armed = true;
+			return;
+		}
+		this.heldSamples += 1;
+		if (this.armed && this.heldSamples >= this.requiredSamples) {
+			this.armed = false;
+			this.onChord();
+		}
+	}
+}
+
+function defaultOnError(error: unknown): void {
+	const details = error instanceof Error ? error.message : String(error);
+	process.stderr.write(`apple-cua stop chord detector could not read the keyboard state: ${details}\n`);
+}
+
+/**
+ * Wire a detector to a stop switch and start it. A chord while already stopped keeps the first
+ * stop's time and reason.
+ */
+export function startStopChordDetector(
+	stopSwitch: Pick<StopSwitch, "stop"> & StopStatusSource,
+	readFlags: () => number,
+	options: Pick<StopChordDetectorOptions, "intervalMs" | "requiredSamples" | "timer" | "onError"> = {},
+): StopChordDetector {
+	const detector = new StopChordDetector({
+		...options,
+		readFlags,
+		onChord: () => {
+			if (!stopSwitch.status().stopped) {
+				stopSwitch.stop(STOP_CHORD_LABEL, "chord");
+			}
+		},
+	});
+	detector.start();
+	return detector;
+}

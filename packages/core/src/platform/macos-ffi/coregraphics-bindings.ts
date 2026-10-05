@@ -59,6 +59,10 @@ const CGEventSetFlags = coreGraphics.func("CGEventSetFlags", "void", [CG_EVENT_R
 	(event: CGEventRef, flags: number) => void
 >;
 
+const CGEventSetType = coreGraphics.func("CGEventSetType", "void", [CG_EVENT_REF, "uint32_t"]) as KoffiFunc<
+	(event: CGEventRef, eventType: number) => void
+>;
+
 const CGEventSetIntegerValueField = coreGraphics.func("CGEventSetIntegerValueField", "void", [
 	CG_EVENT_REF,
 	"uint32_t",
@@ -162,6 +166,10 @@ export function setUnicodeString(event: CGEventRef, text: string): void {
 
 export function setFlags(event: CGEventRef, flags: number): void {
 	CGEventSetFlags(event, flags);
+}
+
+export function setEventType(event: CGEventRef, eventType: number): void {
+	CGEventSetType(event, eventType);
 }
 
 export function setIntegerValueField(event: CGEventRef, field: number, value: number): void {

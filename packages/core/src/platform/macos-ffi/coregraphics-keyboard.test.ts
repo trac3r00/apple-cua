@@ -30,6 +30,7 @@ const koffiMock = vi.hoisted(() => {
 		CGEventCreateScrollWheelEvent: vi.fn(),
 		CGEventKeyboardSetUnicodeString: vi.fn(),
 		CGEventSetFlags: vi.fn(),
+		CGEventSetType: vi.fn(),
 		CGEventSetIntegerValueField: vi.fn(),
 		CGEventSetTimestamp: vi.fn(),
 		CGEventSetLocation: vi.fn(),

@@ -34,6 +34,7 @@ const koffiMock = vi.hoisted(() => {
 		CGEventCreateScrollWheelEvent: vi.fn(() => ({ type: "scroll" })),
 		CGEventKeyboardSetUnicodeString: vi.fn(),
 		CGEventSetFlags: vi.fn(),
+		CGEventSetType: vi.fn(),
 		CGEventSetIntegerValueField: vi.fn(),
 		CGEventSetTimestamp: vi.fn(),
 		CGEventSetLocation: vi.fn(),
@@ -227,6 +228,113 @@ describe("#given CoreGraphics koffi bindings", () => {
 
 			expect(koffiMock.coreGraphicsFunctions.CGEventPostToPid).not.toHaveBeenCalled();
 			expect(skyLightMock.postSkyLightEventToPid).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("#when posting a targeted mouse event with held modifiers", () => {
+		it("#then the flags are in the NSEvent behind it and on the CGEvent", async () => {
+			const { createNSEventBackedMouseEvent } = await import("./appkit.js");
+			const { K_CG_EVENT_FLAG_MASK_COMMAND, postMouseEvent } = await import("./coregraphics.js");
+
+			postMouseEvent({
+				kind: "down",
+				position: { x: 100, y: 200 },
+				button: "left",
+				clickState: 1,
+				targetPid: 4321,
+				targetWindow: { id: 99, bounds: { x: 80, y: 170, width: 400, height: 300 } },
+				flags: K_CG_EVENT_FLAG_MASK_COMMAND,
+			});
+
+			expect(createNSEventBackedMouseEvent).toHaveBeenCalledWith(
+				1,
+				{ x: 100, y: 200 },
+				K_CG_EVENT_FLAG_MASK_COMMAND,
+				99,
+				1,
+			);
+			expect(koffiMock.coreGraphicsFunctions.CGEventSetFlags).toHaveBeenCalledWith(
+				koffiMock.mouseEvent,
+				K_CG_EVENT_FLAG_MASK_COMMAND,
+			);
+		});
+
+		it("#then an event without modifiers leaves the flags alone", async () => {
+			const { createNSEventBackedMouseEvent } = await import("./appkit.js");
+			const { postMouseEvent } = await import("./coregraphics.js");
+
+			postMouseEvent({
+				kind: "down",
+				position: { x: 100, y: 200 },
+				button: "left",
+				clickState: 1,
+				targetPid: 4321,
+				targetWindow: { id: 99, bounds: { x: 80, y: 170, width: 400, height: 300 } },
+			});
+
+			expect(createNSEventBackedMouseEvent).toHaveBeenCalledWith(1, { x: 100, y: 200 }, 0, 99, 1);
+			expect(koffiMock.coreGraphicsFunctions.CGEventSetFlags).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("#when posting a modifier key change", () => {
+		it("#then it is a flagsChanged event carrying the new modifier state", async () => {
+			const { K_CG_EVENT_FLAG_MASK_SHIFT, postKeyboardEvent } = await import("./coregraphics.js");
+
+			postKeyboardEvent({
+				keyCode: 56,
+				keyDown: true,
+				flags: K_CG_EVENT_FLAG_MASK_SHIFT,
+				text: undefined,
+				targetPid: 4321,
+				targetWindow: { id: 99, bounds: { x: 80, y: 170, width: 400, height: 300 } },
+				flagsChanged: true,
+			});
+
+			expect(koffiMock.coreGraphicsFunctions.CGEventSetType).toHaveBeenCalledWith(koffiMock.keyboardEvent, 12);
+			expect(koffiMock.coreGraphicsFunctions.CGEventSetFlags).toHaveBeenCalledWith(
+				koffiMock.keyboardEvent,
+				K_CG_EVENT_FLAG_MASK_SHIFT,
+			);
+		});
+
+		it("#then an ordinary key event keeps its key type", async () => {
+			const { postKeyboardEvent } = await import("./coregraphics.js");
+
+			postKeyboardEvent({
+				keyCode: 0,
+				keyDown: true,
+				flags: 0,
+				text: undefined,
+				targetPid: 4321,
+				targetWindow: { id: 99, bounds: { x: 80, y: 170, width: 400, height: 300 } },
+			});
+
+			expect(koffiMock.coreGraphicsFunctions.CGEventSetType).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("#when posting a scroll event with held modifiers at a point", () => {
+		it("#then the wheel event carries the flags and is located at that point", async () => {
+			const { K_CG_EVENT_FLAG_MASK_ALTERNATE, postScrollEvent } = await import("./coregraphics.js");
+
+			postScrollEvent({
+				deltaX: 0,
+				deltaY: -4,
+				targetPid: undefined,
+				flags: K_CG_EVENT_FLAG_MASK_ALTERNATE,
+				position: { x: 300, y: 400 },
+			});
+
+			const scrollEvent = koffiMock.coreGraphicsFunctions.CGEventCreateScrollWheelEvent.mock.results[0]?.value;
+			expect(koffiMock.coreGraphicsFunctions.CGEventSetFlags).toHaveBeenCalledWith(
+				scrollEvent,
+				K_CG_EVENT_FLAG_MASK_ALTERNATE,
+			);
+			expect(koffiMock.coreGraphicsFunctions.CGEventSetLocation).toHaveBeenCalledWith(scrollEvent, {
+				x: 300,
+				y: 400,
+			});
 		});
 	});
 

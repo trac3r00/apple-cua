@@ -114,6 +114,17 @@ const CFReleaseNative = coreFoundation.func("CFRelease", "void", ["void *"]) as 
 	(reference: CFTypeRef) => void
 >;
 
+let booleanTrue: CFBooleanRef | undefined;
+
+/** The kCFBooleanTrue constant, read from CoreFoundation's exported variable on first use. */
+export function cfBooleanTrue(): CFBooleanRef {
+	booleanTrue ??= koffi.decode(coreFoundation.symbol("kCFBooleanTrue", "void *"), "void *");
+	if (booleanTrue === undefined || booleanTrue === null) {
+		throw new Error("kCFBooleanTrue is unavailable");
+	}
+	return booleanTrue;
+}
+
 export function cfGetTypeId(reference: CFTypeRef): number {
 	return CFGetTypeID(reference);
 }
@@ -151,6 +162,33 @@ export function fromCFString(reference: CFStringRef): string {
 
 	const endIndex = buffer.indexOf(0);
 	return buffer.subarray(0, endIndex === -1 ? buffer.byteLength : endIndex).toString("utf8");
+}
+
+let cfNumberCreateBinding:
+	| KoffiFunc<(allocator: null, numberType: number, valuePtr: Buffer) => CFNumberRef | null>
+	| undefined;
+
+/** Bound on first use, like CFDictionaryGetValue, so loading this module binds only what every caller needs. */
+function getCFNumberCreate(): KoffiFunc<(allocator: null, numberType: number, valuePtr: Buffer) => CFNumberRef | null> {
+	if (cfNumberCreateBinding === undefined) {
+		cfNumberCreateBinding = coreFoundation.func("CFNumberCreate", CF_TYPE_REF, [
+			"void *",
+			"int",
+			"void *",
+		]) as KoffiFunc<(allocator: null, numberType: number, valuePtr: Buffer) => CFNumberRef | null>;
+	}
+	return cfNumberCreateBinding;
+}
+
+/** A CFNumber holding a double; the caller releases it. */
+export function toCFNumber(value: number): CFNumberRef {
+	const buffer = Buffer.alloc(8);
+	buffer.writeDoubleLE(value, 0);
+	const reference = getCFNumberCreate()(null, CF_NUMBER_DOUBLE_TYPE, buffer);
+	if (reference === null) {
+		throw new Error("CFNumberCreate failed");
+	}
+	return reference;
 }
 
 export function fromCFNumber(reference: CFNumberRef): number {

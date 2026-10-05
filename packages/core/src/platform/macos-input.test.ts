@@ -345,6 +345,30 @@ describe("#given MacOSInputController target routing", () => {
 		expect(overlay.close).toHaveBeenCalledOnce();
 	});
 
+	it("#when clicking under background delivery #then the drawn cursor still shows the click and ripples", async () => {
+		// given
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
+		]);
+		const overlay = { set: vi.fn(), highlight: vi.fn(), setMode: vi.fn(), hide: vi.fn(), close: vi.fn() };
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(
+			1234,
+			overlay,
+			() => false,
+			{ acquire: vi.fn(), release: vi.fn() },
+			"background",
+		);
+
+		// when
+		await controller.click({ x: 50, y: 70 });
+
+		// then
+		expect(overlay.set).toHaveBeenCalledWith({ x: 50, y: 70 });
+		expect(overlay.setMode).toHaveBeenLastCalledWith("click");
+		controller.close();
+	});
+
 	it("#when an action runs #then it holds a display-sleep assertion and releases it on close", async () => {
 		// given
 		windowMock.openWindows.mockResolvedValue([

@@ -14,6 +14,7 @@ export {
 	clickPoint,
 	findMatchingApp,
 	getAppStateForApp,
+	normalizeModifiers,
 	observeAction,
 	parseElementIndex,
 	parseKeyChord,
@@ -35,14 +36,22 @@ export {
 export type {
 	GuardedComputerInterface,
 	InputObservation,
+	PreflightOptions,
 	PreflightResult,
 } from "./computer/guarded-interface.js";
-export type { ComputerInterface, ScreenshotResult } from "./computer/interface.js";
+export type { ComputerInterface, ScreenshotResult, WindowTextRead } from "./computer/interface.js";
 export {
 	type TopLevelWindow,
 	listTopLevelWindows,
 } from "./platform/macos-top-level-windows.js";
 export { type ListedWindow, listWindows } from "./platform/macos-ffi/window-list.js";
+export {
+	type SystemPrompt,
+	type SystemPromptKind,
+	classifySystemPrompts,
+	currentSystemPrompts,
+	setSystemPromptWindowSourceForTesting,
+} from "./platform/system-prompts.js";
 export {
 	MAX_SCREENSHOT_LONG_EDGE,
 	type ScreenshotViewport,
@@ -52,6 +61,7 @@ export {
 } from "./computer/viewport.js";
 export { type AppApprovalDecision, AppApprovalStore } from "./permission/app-approval.js";
 export { type LockScreenMonitorCallbacks, LockScreenMonitor } from "./platform/lock-screen-monitor.js";
+export { type HostCapabilities, probeHostCapabilities } from "./platform/host-capabilities.js";
 export {
 	type PassiveMemoryConfig,
 	type PassiveMemoryContext,
@@ -90,6 +100,24 @@ export {
 	recognizeTextInImage,
 } from "./platform/macos-ffi/vision.js";
 export { renamedEnvironmentVariable } from "./platform/renamed-environment.js";
+export {
+	type StopSource,
+	type StopStatus,
+	type StopStatusSource,
+	STATE_DIR_ENV,
+	StopSwitch,
+	describeUserStop,
+	resolveStateDir,
+} from "./platform/stop-switch.js";
+export {
+	type StopChordDetectorOptions,
+	type StopChordTimer,
+	STOP_CHORD_LABEL,
+	STOP_CHORD_MASK,
+	StopChordDetector,
+	startStopChordDetector,
+} from "./platform/stop-chord.js";
+export { readHidModifierFlags } from "./platform/macos-ffi/event-flags.js";
 export {
 	type IOSDelivery,
 	type IOSInputTarget,
@@ -153,12 +181,18 @@ export {
 	createCursorOverlay,
 } from "./platform/macos-ffi/cursor-overlay.js";
 export { VMComputer, type VMComputerOptions } from "./platform/vm.js";
+export {
+	DEFAULT_AX_MESSAGING_TIMEOUT_SECONDS,
+	resolveAxMessagingTimeoutSeconds,
+} from "./platform/macos-ffi/accessibility.js";
 export type {
 	ComputerCapabilities,
 	DragOptions,
 	AppStateOptions,
+	KeyModifierName,
 	KeyOptions,
 	Point,
+	PointerOptions,
 	Rect,
 	ScreenshotOptions,
 	ScrollOptions,

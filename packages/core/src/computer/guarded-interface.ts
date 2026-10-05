@@ -30,7 +30,17 @@ export type PreflightResult =
 				| "observation-replaced";
 	  };
 
+export interface PreflightOptions {
+	/**
+	 * Refuse when the window moved or resized since the observation. Only input that maps observed
+	 * screenshot coordinates onto the screen depends on the bounds; element, keyboard and menu input
+	 * does not, and would otherwise be refused while a window is still animating into place.
+	 * Defaults to true.
+	 */
+	readonly requireSameBounds?: boolean;
+}
+
 export interface GuardedComputerInterface extends ComputerInterface {
 	getInputObservation(targetPid: number): InputObservation | undefined;
-	preflightInput(expected: InputObservation): Promise<PreflightResult>;
+	preflightInput(expected: InputObservation, options?: PreflightOptions): Promise<PreflightResult>;
 }

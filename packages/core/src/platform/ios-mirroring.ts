@@ -4,6 +4,7 @@ import type { Point } from "../types/index.js";
 import {
 	type IOSInputTarget,
 	type SwipeKind,
+	assertScrollMayBorrowPointer,
 	longPressMirroring,
 	pressMirroringCombo,
 	scrollMirroring,
@@ -822,12 +823,15 @@ export class IPhoneMirroring {
 
 	/**
 	 * Scroll the phone's content. `direction` is what you want to SEE — "down" reveals content
-	 * further down the list — and `amount` is a fraction of the window.
+	 * further down the list — and `amount` is a fraction of the window. Scrolling moves the person's
+	 * real pointer (macOS routes wheel events by pointer location), so under background delivery it is
+	 * refused, before anything moves, unless `borrowPointer` is true.
 	 */
 	async scroll(
 		direction: "up" | "down" | "left" | "right",
-		options: { readonly amount?: number; readonly at?: Point } = {},
+		options: { readonly amount?: number; readonly at?: Point; readonly borrowPointer?: boolean } = {},
 	): Promise<void> {
+		assertScrollMayBorrowPointer(this.delivery, options.borrowPointer);
 		const { target, window } = await this.target();
 		const amount = options.amount ?? 0.3;
 		const at = options.at ?? { x: window.x + window.width / 2, y: window.y + window.height / 2 };
@@ -836,6 +840,7 @@ export class IPhoneMirroring {
 		try {
 			await scrollMirroring(target, {
 				at,
+				borrowPointer: options.borrowPointer === true,
 				deltaY: direction === "down" ? window.height * amount : direction === "up" ? -window.height * amount : 0,
 				deltaX: direction === "right" ? window.width * amount : direction === "left" ? -window.width * amount : 0,
 			});

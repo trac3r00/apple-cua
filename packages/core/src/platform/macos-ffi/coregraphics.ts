@@ -7,6 +7,7 @@ import {
 	createScrollEvent,
 	getLocation,
 	postToHidEventTap,
+	setEventType,
 	setFlags,
 	setIntegerValueField,
 	setLocation,
@@ -17,6 +18,7 @@ import {
 import {
 	type CGEventRef,
 	type CGPoint,
+	K_CG_EVENT_FLAGS_CHANGED,
 	K_CG_MOUSE_EVENT_BUTTON_NUMBER,
 	K_CG_MOUSE_EVENT_CLICK_STATE,
 	K_CG_MOUSE_EVENT_SUBTYPE,
@@ -66,11 +68,14 @@ export {
 export { currentUptimeNanoseconds } from "./coregraphics-bindings.js";
 
 export function postMouseEvent(options: MouseEventOptions): void {
-	const event = makeMouseEvent(options.kind, options.position, options.button, options.targetWindow);
+	const event = makeMouseEvent(options.kind, options.position, options.button, options.targetWindow, options.flags);
 	try {
 		setIntegerValueField(event, K_CG_MOUSE_EVENT_BUTTON_NUMBER, mouseButtonNumber(options.button));
 		if (options.clickState !== undefined) {
 			setIntegerValueField(event, K_CG_MOUSE_EVENT_CLICK_STATE, options.clickState);
+		}
+		if (options.flags !== undefined) {
+			setFlags(event, options.flags);
 		}
 		if (options.targetPid === undefined) {
 			postMouse(event, undefined, options.targetWindow);
@@ -86,6 +91,10 @@ export function postMouseEvent(options: MouseEventOptions): void {
 export function postKeyboardEvent(options: KeyboardEventOptions): void {
 	const event = createKeyboardEvent(options.keyCode, options.keyDown);
 	try {
+		if (options.flagsChanged === true) {
+			// A modifier key going down or up is a flagsChanged event whose flags already show the new state.
+			setEventType(event, K_CG_EVENT_FLAGS_CHANGED);
+		}
 		setFlags(event, options.flags);
 		if (options.text !== undefined) {
 			setUnicodeString(event, options.text);
@@ -112,6 +121,12 @@ export function postUnicodeText(
 export function postScrollEvent(options: ScrollEventOptions): void {
 	const event = createScrollEvent(options.deltaX, options.deltaY);
 	try {
+		if (options.flags !== undefined) {
+			setFlags(event, options.flags);
+		}
+		if (options.position !== undefined) {
+			stampScrollLocation(event, options.position, options.targetPid, options.targetWindow);
+		}
 		postScroll(event, options.targetPid, options.targetWindow);
 	} finally {
 		cfRelease(event);
@@ -136,14 +151,18 @@ function makeMouseEvent(
 	position: CGPoint,
 	button: MouseButton,
 	targetWindow: SkyLightTargetWindow | undefined,
+	flags: number | undefined,
 ): CGEventRef {
+	// The app reads modifiers from the NSEvent backing a targeted event, not from the CGEvent flags
+	// set afterwards, so held modifiers have to be part of the NSEvent itself. NSEventModifierFlags
+	// use the same bits as CGEventFlags for command, option, control and shift.
 	const event =
 		targetWindow === undefined
 			? createMouseEvent(mouseEventType(kind, button), position, mouseButtonNumber(button))
 			: createNSEventBackedMouseEvent(
 					mouseEventType(kind, button),
 					position,
-					0,
+					flags ?? 0,
 					targetWindow.id,
 					kind === "move" ? 0 : 1,
 				);
@@ -205,6 +224,25 @@ function postScroll(
 	}
 	postSkyLightEventToPid(targetPid, event);
 	postCoreGraphicsEventToWindowOwner(targetWindow, event);
+}
+
+/** Aim a wheel event at a point instead of wherever the real cursor happens to be. */
+function stampScrollLocation(
+	event: CGEventRef,
+	position: CGPoint,
+	targetPid: number | undefined,
+	targetWindow: SkyLightTargetWindow | undefined,
+): void {
+	setLocation(event, position);
+	if (targetPid === undefined || targetWindow === undefined) {
+		return;
+	}
+	setIntegerValueField(event, K_CG_MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER, targetWindow.id);
+	setIntegerValueField(event, K_CG_MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER_THAT_CAN_HANDLE_THIS_EVENT, targetWindow.id);
+	setSkyLightWindowLocation(event, {
+		x: position.x - targetWindow.bounds.x,
+		y: position.y - targetWindow.bounds.y,
+	});
 }
 
 function stampTargetedMouseEvent(

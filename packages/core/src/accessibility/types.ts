@@ -1,3 +1,4 @@
+import type { SystemPrompt } from "../platform/system-prompts.js";
 export interface AXTreeElement {
 	id: number;
 	role: string;
@@ -110,6 +111,31 @@ export interface AppState {
 	 * so a caller can pick explicitly instead of relying on the driver's default choice.
 	 */
 	windowCandidates?: readonly WindowInventoryEntry[];
+	/**
+	 * The app answered accessibility with application elements where its windows should be, which
+	 * is what a session without the physical console gets: window content cannot be read or acted
+	 * on over accessibility, only the menu bar can. {@link ocrText} is the window read from pixels.
+	 */
+	windowContentUnavailable?: boolean;
+	/** Text recognized in the window image with its screen frame, present when window content is unavailable. */
+	ocrText?: readonly OcrTextEntry[];
+	/**
+	 * Why an observation that asked for an image carries none: this process lacks the Screen Recording
+	 * permission, and capturing anyway would raise macOS's permission prompt over the person's work.
+	 */
+	screenshotUnavailable?: "screen-recording-permission";
+	/**
+	 * Dialogs macOS itself has on screen (a permission request, a password sheet, a system alert).
+	 * They belong to no app being driven, can block input or capture, and only the person can answer.
+	 */
+	systemPrompts?: readonly SystemPrompt[];
+}
+
+export interface OcrTextEntry {
+	readonly text: string;
+	readonly confidence: number;
+	/** Screen frame in global logical points, the same space as element frames and click points. */
+	readonly frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
 }
 
 export interface SkyshotResult {

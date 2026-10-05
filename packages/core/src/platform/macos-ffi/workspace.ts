@@ -106,7 +106,26 @@ export function activateApplication(pid: number): boolean {
 	});
 }
 
+const coreFoundation = koffi.load("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation");
+const CFRunLoopRunInMode = coreFoundation.func(
+	"int32_t CFRunLoopRunInMode(void *mode, double seconds, bool once)",
+) as KoffiFunc<(mode: object, seconds: number, returnAfterSourceHandled: boolean) => number>;
+
+/**
+ * NSWorkspace keeps its running-application list current from notifications delivered on this
+ * thread's run loop, which a Node process never turns. Without this the list froze at the first
+ * read: an app that quit and relaunched was still reported under its dead pid. Turning the loop
+ * once, without waiting, lets the pending updates land before the list is read.
+ */
+function deliverWorkspaceUpdates(): void {
+	// An autoreleased NSString is a CFString (toll-free bridged); run loop modes compare by value.
+	withAutoreleasePool(() => {
+		CFRunLoopRunInMode(nsString("kCFRunLoopDefaultMode"), 0, false);
+	});
+}
+
 export function getRunningApplications(): WorkspaceRunningApplication[] {
+	deliverWorkspaceUpdates();
 	return withAutoreleasePool(() => {
 		const applications = msgPointer(sharedWorkspace(), runningApplicationsSelector);
 		return applications === null ? [] : readApplicationArray(applications);
@@ -116,6 +135,7 @@ export function getRunningApplications(): WorkspaceRunningApplication[] {
 export function findRunningApplication(
 	identifier: RunningApplicationIdentifier,
 ): WorkspaceRunningApplication | undefined {
+	deliverWorkspaceUpdates();
 	return withAutoreleasePool(() => {
 		if (typeof identifier === "number") {
 			if (!Number.isSafeInteger(identifier) || identifier <= 0) {

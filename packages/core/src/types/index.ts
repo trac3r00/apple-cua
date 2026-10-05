@@ -62,6 +62,12 @@ export interface AppStateOptions {
 	 * explored one branch at a time instead of being truncated or dumped whole.
 	 */
 	subtreeOf?: number;
+	/**
+	 * A read that only answers a question while an action is in flight (a scroll-until-found check): it
+	 * still renumbers the accessibility ids it returns, but it does not become the app's input observation
+	 * or the baseline later diffs compare against, and it leaves the overlay cursor alone.
+	 */
+	probe?: boolean;
 }
 
 /**
@@ -71,14 +77,24 @@ export interface AppStateOptions {
  */
 export type InputDelivery = "attended" | "background";
 
+/** A modifier key a person can hold; the short names are aliases for the long ones. */
+export type KeyModifierName = "command" | "option" | "control" | "shift" | "cmd" | "alt" | "opt" | "ctrl";
+
 export interface KeyOptions {
-	readonly modifiers?: ReadonlyArray<"command" | "option" | "control" | "shift" | "cmd" | "alt" | "ctrl">;
+	readonly modifiers?: ReadonlyArray<KeyModifierName>;
 	readonly holdMilliseconds?: number;
 }
 
-export interface ScrollOptions {
+/** Modifier keys held for the whole of a click, drag or scroll, like a person holding Command while clicking. */
+export interface PointerOptions {
+	readonly modifiers?: ReadonlyArray<KeyModifierName>;
+}
+
+export interface ScrollOptions extends PointerOptions {
 	direction: "up" | "down" | "left" | "right";
 	amount: number;
+	/** Screen point the wheel event is delivered at; without it the event carries the real cursor position. */
+	position?: Point;
 }
 
 export interface SelectTextOptions {
@@ -88,7 +104,7 @@ export interface SelectTextOptions {
 	suffix?: string;
 }
 
-export interface DragOptions {
+export interface DragOptions extends PointerOptions {
 	from: Point;
 	to: Point;
 	duration?: number;

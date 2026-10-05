@@ -64,4 +64,150 @@ describe("#given MacOSInputController keyboard input", () => {
 		controller.close();
 		vi.useRealTimers();
 	});
+
+	it("#given two windows of one app #when typing into the observed one #then that window is made the app's focused window first", async () => {
+		// given
+		const { MacOSInputController, setKeyboardWindowFocuserForTesting, setOnscreenWindowIdsSourceForTesting } =
+			await import("./macos-input.js");
+		const focused: Array<readonly [number, number]> = [];
+		setKeyboardWindowFocuserForTesting(async (pid, windowId) => {
+			focused.push([pid, windowId]);
+		});
+		setOnscreenWindowIdsSourceForTesting(() => [11, 12]);
+		const window = (id: number) => ({
+			id,
+			bounds: { x: 0, y: 0, width: 400, height: 300 },
+			owner: { processId: 42 },
+		});
+		const controller = new MacOSInputController(42);
+		await controller.rememberTargetWindow(42, 12, [window(11), window(12)]);
+
+		// when
+		await controller.pressKey("a", { modifiers: ["cmd"] });
+		await controller.typeText("x");
+
+		// then
+		expect(focused).toEqual([
+			[42, 12],
+			[42, 12],
+		]);
+		expect(coreGraphicsMock.postUnicodeText).toHaveBeenCalledWith("x", 42, expect.objectContaining({ id: 12 }));
+		controller.close();
+	});
+
+	it("#given a background web field #when pressing cmd+v #then the clipboard text is typed, and elsewhere cmd+v stays a key press", async () => {
+		// given
+		const {
+			MacOSInputController,
+			setBackgroundPasteForTesting,
+			setFocusStealWatcherForTesting,
+			setKeyboardWindowFocuserForTesting,
+			setOnscreenWindowIdsSourceForTesting,
+		} = await import("./macos-input.js");
+		let webField = true;
+		setBackgroundPasteForTesting(
+			() => webField,
+			() => "pasted",
+		);
+		setFocusStealWatcherForTesting(() => undefined);
+		setKeyboardWindowFocuserForTesting(async () => undefined);
+		setOnscreenWindowIdsSourceForTesting(() => [12]);
+		const window = { id: 12, bounds: { x: 0, y: 0, width: 400, height: 300 }, owner: { processId: 42 } };
+		const noSleep = { acquire: () => undefined, release: () => undefined };
+		const controller = new MacOSInputController(42, undefined, () => false, noSleep, "background");
+		await controller.rememberTargetWindow(42, 12, [window]);
+
+		// when
+		await controller.pressKey("v", { modifiers: ["cmd"] });
+		webField = false;
+		await controller.pressKey("v", { modifiers: ["cmd"] });
+
+		// then
+		expect(coreGraphicsMock.postUnicodeText.mock.calls.map((call) => call[0]).join("")).toBe("pasted");
+		expect(coreGraphicsMock.postKeyboardEvent).toHaveBeenCalledTimes(2);
+		setBackgroundPasteForTesting(
+			() => false,
+			() => undefined,
+		);
+		controller.close();
+	});
+
+	it("#given an open Save panel #when typing and pressing keys #then events go to the panel's service process", async () => {
+		// given
+		const {
+			MacOSInputController,
+			setKeyboardPidResolverForTesting,
+			setKeyboardWindowFocuserForTesting,
+			setOnscreenWindowIdsSourceForTesting,
+		} = await import("./macos-input.js");
+		setKeyboardWindowFocuserForTesting(async () => undefined);
+		setKeyboardPidResolverForTesting((pid) => (pid === 42 ? 4242 : pid));
+		setOnscreenWindowIdsSourceForTesting(() => [12]);
+		const window = { id: 12, bounds: { x: 0, y: 0, width: 400, height: 300 }, owner: { processId: 42 } };
+		const controller = new MacOSInputController(42);
+		await controller.rememberTargetWindow(42, 12, [window]);
+
+		// when
+		await controller.typeText("a");
+		await controller.pressKey("Return");
+
+		// then
+		expect(coreGraphicsMock.postUnicodeText).toHaveBeenCalledWith("a", 4242, expect.objectContaining({ id: 12 }));
+		expect(coreGraphicsMock.postKeyboardEvent).toHaveBeenCalledWith(expect.objectContaining({ targetPid: 4242 }));
+		setKeyboardPidResolverForTesting((pid) => pid);
+		controller.close();
+	});
+
+	it("#given background delivery #when pressing a key #then the focus-steal watcher sees the target window, and attended delivery skips it", async () => {
+		// given
+		const {
+			MacOSInputController,
+			setFocusStealWatcherForTesting,
+			setKeyboardWindowFocuserForTesting,
+			setOnscreenWindowIdsSourceForTesting,
+		} = await import("./macos-input.js");
+		const watched: number[] = [];
+		setFocusStealWatcherForTesting((window) => {
+			watched.push(window.id);
+		});
+		setKeyboardWindowFocuserForTesting(async () => undefined);
+		setOnscreenWindowIdsSourceForTesting(() => [12]);
+		const window = { id: 12, bounds: { x: 0, y: 0, width: 400, height: 300 }, owner: { processId: 42 } };
+		const noSleep = { acquire: () => undefined, release: () => undefined };
+		const background = new MacOSInputController(42, undefined, () => false, noSleep, "background");
+		const attended = new MacOSInputController(42, undefined, () => false, noSleep, "attended");
+		await background.rememberTargetWindow(42, 12, [window]);
+		await attended.rememberTargetWindow(42, 12, [window]);
+
+		// when
+		await background.pressKey("g", { modifiers: ["shift", "cmd"] });
+		await attended.pressKey("g", { modifiers: ["shift", "cmd"] });
+
+		// then
+		expect(watched).toEqual([12]);
+		background.close();
+		attended.close();
+	});
+
+	it("#when a key is posted to a target app #then the controller remembers when, so typing can wait for it", async () => {
+		// given
+		const { MacOSInputController, setKeyboardWindowFocuserForTesting, setOnscreenWindowIdsSourceForTesting } =
+			await import("./macos-input.js");
+		setKeyboardWindowFocuserForTesting(async () => {});
+		setOnscreenWindowIdsSourceForTesting(() => [21]);
+		const controller = new MacOSInputController(77);
+		await controller.rememberTargetWindow(77, 21, [
+			{ id: 21, bounds: { x: 0, y: 0, width: 400, height: 300 }, owner: { processId: 77 } },
+		]);
+		expect(controller.lastKeyboardInputAt(77)).toBeUndefined();
+
+		// when
+		const before = performance.now();
+		await controller.pressKey("a", { modifiers: ["cmd"] });
+
+		// then
+		expect(controller.lastKeyboardInputAt(77)).toBeGreaterThanOrEqual(before);
+		expect(controller.lastKeyboardInputAt(78)).toBeUndefined();
+		controller.close();
+	});
 });

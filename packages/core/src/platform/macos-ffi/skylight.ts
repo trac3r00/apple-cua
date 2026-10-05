@@ -188,6 +188,25 @@ export function activateWindowWithoutRaise(window: SkyLightTargetWindow): boolea
 	return defocused && focused;
 }
 
+/**
+ * Tell a window's own app that it is (or no longer is) the active app, without changing the front
+ * process, raising anything, or telling the person's app anything. An app that believes it is active
+ * stops swallowing the first click of a gesture and reads modifier flags off the click like it does
+ * for a person; the frontmost app stays whoever the person is using.
+ */
+export function setWindowAppActive(window: SkyLightTargetWindow, active: boolean): boolean {
+	const targetPsn = processSerialNumberForWindow(window.id);
+	if (targetPsn === null) {
+		return false;
+	}
+	const record = Buffer.alloc(0xf8);
+	record[0x04] = 0xf8;
+	record[0x08] = 0x0d;
+	record.writeUInt32LE(window.id, 0x3c);
+	record[0x8a] = active ? 0x01 : 0x02;
+	return SLPSPostEventRecordTo(targetPsn, record) === 0;
+}
+
 export function beginFocusWithoutRaise(window: SkyLightTargetWindow): FocusRestoreToken | null {
 	const previousPsn = frontProcessSerialNumber();
 	if (previousPsn === null) {
@@ -214,6 +233,20 @@ export function beginFocusWithoutRaise(window: SkyLightTargetWindow): FocusResto
 export function frontProcessSerialNumber(): Buffer | null {
 	const frontProcess = Buffer.alloc(8);
 	return _SLPSGetFrontProcess(frontProcess) === 0 ? frontProcess : null;
+}
+
+/**
+ * Who is frontmost before background input reaches `window`, so a target app that activates itself
+ * in response (Finder's Go to Folder panel does) can be sent back behind the person's app. Null
+ * when the target already is frontmost or either process cannot be resolved.
+ */
+export function focusGuardFor(window: SkyLightTargetWindow): FocusRestoreToken | null {
+	const previousPsn = frontProcessSerialNumber();
+	const targetPsn = processSerialNumberForWindow(window.id);
+	if (previousPsn === null || targetPsn === null || previousPsn.equals(targetPsn)) {
+		return null;
+	}
+	return { previousPsn, targetPsn };
 }
 
 export function processSerialNumbersMatch(left: Buffer, right: Buffer): boolean {

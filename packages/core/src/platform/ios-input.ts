@@ -65,6 +65,11 @@ export interface IOSScrollOptions {
 	readonly deltaY: number;
 	readonly deltaX?: number;
 	readonly steps?: number;
+	/**
+	 * Allow the scroll to take the person's real pointer for the length of the gesture. Required under
+	 * background delivery, where it is otherwise refused; attended delivery always borrows it.
+	 */
+	readonly borrowPointer?: boolean;
 }
 
 /** iPhone Mirroring forwards raw HID keycodes; a CGEvent flag mask never reaches the phone. */
@@ -222,6 +227,18 @@ function deliveryFor(target: IOSInputTarget): IOSDelivery {
 	return target.delivery ?? "background";
 }
 
+/**
+ * macOS routes a wheel event by pointer location, so a phone scroll has to move the real pointer.
+ * That contradicts background delivery's promise not to touch it; refuse unless the caller opts in.
+ */
+export function assertScrollMayBorrowPointer(delivery: IOSDelivery, borrowPointer: boolean | undefined): void {
+	if (delivery === "background" && borrowPointer !== true) {
+		throw new Error(
+			"scrolling the phone would borrow the person's pointer: macOS sends wheel events to the window under the real cursor, so the cursor must move onto the phone and back. Background delivery refuses that by default. Pass borrow_pointer: true to allow a brief pointer borrow, or use a swipe (ios_swipe) for pages and carousels, which leaves the pointer alone.",
+		);
+	}
+}
+
 function skyLightWindow(target: IOSInputTarget): SkyLightTargetWindow {
 	return { id: target.windowId, bounds: target.bounds };
 }
@@ -308,11 +325,13 @@ export async function swipeMirroring(target: IOSInputTarget, options: SwipeOptio
  *
  * macOS routes a scroll to the window under the real pointer — not to the active app, and not
  * to the event's own location — so this borrows the pointer for the length of the gesture and
- * puts it straight back. Verified on macOS 26: a vertical touch-drag is dropped, and the wheel
+ * puts it straight back. Under background delivery that borrow must be opted into with
+ * `borrowPointer`; without it nothing is moved and the call throws. Verified on macOS 26: a vertical touch-drag is dropped, and the wheel
  * is the gesture that moves a list. The caller must have proven the phone window owns the
  * point (see requireMirroringWindowAt); otherwise the scroll lands in whatever is in front.
  */
 export async function scrollMirroring(target: IOSInputTarget, options: IOSScrollOptions): Promise<void> {
+	assertScrollMayBorrowPointer(deliveryFor(target), options.borrowPointer);
 	const steps = options.steps ?? SCROLL_DEFAULT_STEPS;
 	const deltaY = options.deltaY;
 	const deltaX = options.deltaX ?? 0;

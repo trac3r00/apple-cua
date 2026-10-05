@@ -56,7 +56,9 @@ const ffiMock = vi.hoisted(() => {
 		return null;
 	};
 	const send = vi.fn(sendImplementation);
+	const runLoop = vi.fn(() => 0);
 	const func = vi.fn((name: string) => {
+		if (name.includes("CFRunLoopRunInMode")) return runLoop;
 		if (name === "objc_getClass") return (className: string) => classes.get(className) ?? null;
 		if (name === "sel_registerName") return (selector: string) => selector;
 		if (name === "objc_msgSend") return send;
@@ -64,8 +66,9 @@ const ffiMock = vi.hoisted(() => {
 	});
 	return {
 		module: {
-			load: vi.fn((path: string) => (path.includes("libobjc") ? { func } : {})),
+			load: vi.fn((path: string) => (path.includes("libobjc") || path.includes("CoreFoundation") ? { func } : {})),
 		},
+		runLoop,
 		pool,
 		send,
 		sendImplementation,
@@ -107,6 +110,14 @@ describe("#given mocked NSWorkspace applications #when enumerating #then foregro
 			},
 		]);
 		expect(ffiMock.send).toHaveBeenCalledWith(ffiMock.pool, "release");
+	});
+
+	it("turns the run loop without waiting before reading, so relaunched apps are not reported stale", () => {
+		ffiMock.runLoop.mockClear();
+
+		getRunningApplications();
+
+		expect(ffiMock.runLoop).toHaveBeenCalledWith(expect.anything(), 0, false);
 	});
 });
 

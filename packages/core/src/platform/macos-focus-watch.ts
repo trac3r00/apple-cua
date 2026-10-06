@@ -5,6 +5,11 @@ import {
 	processSerialNumbersMatch,
 	restoreFrontProcessNoWindows,
 } from "./macos-ffi/skylight.js";
+import {
+	type PhysicalInputProbe,
+	createDeliberateSwitchDetector,
+	hidPhysicalInputProbe,
+} from "./macos-physical-intent.js";
 
 /**
  * While the target holds the front the person's keystrokes land in it, so the watcher polls on a
@@ -14,14 +19,27 @@ import {
 const FOCUS_POLL_INTERVAL_MILLISECONDS = 10;
 const FOCUS_POLL_WINDOW_MILLISECONDS = 300;
 const FOCUS_LATE_CHECK_MILLISECONDS = 800;
+/** A Command-Tab can start after the poll window ends, so the keyboard is sampled until the late check. */
+const FOCUS_COMMAND_SAMPLE_INTERVAL_MILLISECONDS = 50;
+
+export interface FocusWatchOptions {
+	/** Physical keyboard and mouse state; the HID system state unless a test supplies one. */
+	readonly physicalInput?: PhysicalInputProbe;
+	readonly nowMilliseconds?: () => number;
+}
 
 /**
  * Send the person's app back as soon as the target takes the front. It never fights the person:
- * once the front is neither the target nor the app it started from (they switched apps), it stops
- * for good. This runs on this thread's timers; use {@link startFocusStealWatch} to keep it off a
- * busy event loop.
+ * once the front is neither the target nor the app it started from (they switched apps), or the
+ * target took the front right after the person's own mouse press or Command key (they switched to
+ * it), it stops for good. This runs on this thread's timers; use {@link startFocusStealWatch} to
+ * keep it off a busy event loop.
  */
-export function watchForFocusSteal(guard: FocusRestoreToken): void {
+export function watchForFocusSteal(guard: FocusRestoreToken, options: FocusWatchOptions = {}): void {
+	const detector = createDeliberateSwitchDetector(
+		options.physicalInput ?? hidPhysicalInputProbe,
+		options.nowMilliseconds ?? Date.now,
+	);
 	const timers: NodeJS.Timeout[] = [];
 	const stop = (): void => {
 		for (const timer of timers) {
@@ -35,16 +53,28 @@ export function watchForFocusSteal(guard: FocusRestoreToken): void {
 			return;
 		}
 		if (processSerialNumbersMatch(front, guard.targetPsn)) {
-			restoreFrontProcessNoWindows(guard);
+			if (detector.deliberate()) {
+				stop();
+			} else {
+				restoreFrontProcessNoWindows(guard);
+			}
 		} else if (!processSerialNumbersMatch(front, guard.previousPsn)) {
 			stop();
 		}
 	};
-	const poller = setInterval(check, FOCUS_POLL_INTERVAL_MILLISECONDS);
+	const poller = setInterval(() => {
+		detector.sample();
+		check();
+	}, FOCUS_POLL_INTERVAL_MILLISECONDS);
+	const commandSampler = setInterval(detector.sample, FOCUS_COMMAND_SAMPLE_INTERVAL_MILLISECONDS);
 	timers.push(
 		poller,
+		commandSampler,
 		setTimeout(() => clearInterval(poller), FOCUS_POLL_WINDOW_MILLISECONDS),
-		setTimeout(check, FOCUS_LATE_CHECK_MILLISECONDS),
+		setTimeout(() => {
+			clearInterval(commandSampler);
+			check();
+		}, FOCUS_LATE_CHECK_MILLISECONDS),
 	);
 	for (const timer of timers) {
 		timer.unref();

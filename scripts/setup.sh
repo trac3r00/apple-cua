@@ -1,36 +1,60 @@
 #!/usr/bin/env bash
-# One-command setup for apple-cua on any Mac with Apple Silicon or Intel and macOS 14 (Sonoma) or later.
+# One-command setup for apple-cua on a Mac with Apple Silicon or Intel and macOS 15 (Sequoia) or later.
 #
-#   ./scripts/setup.sh [--rebuild-native] [--rebuild-helper] [--register omo|claude|codex|json]...
-#                      [--allow <bundle ids>] [--delivery background|attended] [--toolset lean|full] [--yes]
+#   ./scripts/setup.sh [--add-to-path] [--register omo|claude|codex|json]... [--allow <apps>]
+#                      [--delivery background|attended] [--toolset lean|full] [--rebuild-native] [--rebuild-helper]
+#                      [--yes] [--no-doctor]
 #
 # Safe to re-run: every step checks before it acts, and a run after a failure picks up where the last one stopped.
-# Outside this checkout it installs nothing, except the official Node.js LTS into ~/.apple-cua/node (checked against
-# nodejs.org's SHASUMS256.txt) when this Mac has no Node.js 20+ or no self-contained node to bundle into the helper.
-# It edits MCP client configs only for the clients named with --register, backing each file up first.
+# Outside this checkout it writes only:
+#   - the `apple-cua` command, into $APPLE_CUA_BIN_DIR (default ~/.local/bin);
+#   - the official Node.js LTS, into $APPLE_CUA_HOME/node (default ~/.apple-cua/node, checked against nodejs.org's
+#     SHASUMS256.txt), when this Mac has no Node.js 20+ or no self-contained node to bundle into the helper;
+#   - with --add-to-path, one line in your shell startup file, backed up first;
+#   - through `apple-cua config`, $APPLE_CUA_HOME/config.json and the configs of the MCP clients you register with
+#     (backed up and merged; a client you never registered is not touched).
 #
-# The signed helper app ("apple-cua MCP") is built only when it is missing or fails its smoke run, or with
-# --rebuild-helper: every build is a new code identity, and macOS then asks for Screen Recording and Accessibility
-# again. Granting those two permissions is the one step left to do by hand; the closing doctor run says whether it is.
+# The signed helper app ("apple-cua MCP") is built only when it is missing, fails its smoke run, was built from
+# another launcher or Info.plist than this checkout has, or with --rebuild-helper: every build is a new code
+# identity, and macOS then asks for Screen Recording and Accessibility again. Granting those two permissions is the
+# one step left to do by hand; the closing doctor run says whether it is.
+#
+# APPLE_CUA_MACOS_VERSION pretends this Mac runs another macOS version; it exists to test the version check.
 set -Eeuo pipefail
 
-readonly MIN_MACOS="14.0"
+readonly MIN_MACOS="15.0"
+readonly MIN_MACOS_NAME="Sequoia"
 readonly MIN_NODE_MAJOR=20
-readonly TOTAL_STEPS=10
+readonly TOTAL_STEPS=11
+readonly LAUNCHER_MARKER="# apple-cua-launcher checkout="
+readonly PATH_LINE_MARKER="# added by apple-cua"
+
+absolute() {
+	case "$1" in
+		/*) printf '%s\n' "$1" ;;
+		*) printf '%s\n' "$PWD/$1" ;;
+	esac
+}
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-readonly repo
-readonly managed_node_dir="$HOME/.apple-cua/node"
+apple_cua_home="$(absolute "${APPLE_CUA_HOME:-$HOME/.apple-cua}")"
+bin_dir="$(absolute "${APPLE_CUA_BIN_DIR:-$HOME/.local/bin}")"
+readonly repo apple_cua_home bin_dir
+export APPLE_CUA_HOME="$apple_cua_home" APPLE_CUA_BIN_DIR="$bin_dir"
+readonly managed_node_dir="$apple_cua_home/node"
+readonly launcher="$bin_dir/apple-cua"
 readonly native_dir="$repo/packages/core/native"
 readonly helper_app="$repo/packages/mcp/dist/apple-cua-mcp.app"
 readonly helper_launcher="$helper_app/Contents/MacOS/apple-cua-mcp"
 readonly helper_node="$helper_app/Contents/Resources/node"
-readonly server_js="$repo/packages/mcp/dist/server.js"
+readonly helper_stamp="$helper_app/Contents/Resources/helper-inputs.sha256"
 readonly cli_js="$repo/packages/cli/dist/cli.js"
 
 rebuild_native=0
 rebuild_helper=0
 assume_yes=0
+add_path=0
+run_doctor=1
 registers=()
 allow=""
 allow_given=0
@@ -39,25 +63,30 @@ toolset=""
 temp_dirs=()
 current_step=0
 current_title="starting"
-used_managed_node=0
 
 usage() {
 	cat <<'EOF'
 usage: ./scripts/setup.sh [options]
 
-Installs, builds and checks apple-cua in this checkout. Safe to re-run.
+Installs, builds and checks apple-cua in this checkout, and puts the apple-cua command in ~/.local/bin
+(APPLE_CUA_BIN_DIR). Safe to re-run.
 
-  --rebuild-native        rebuild packages/core/native (default: use the committed universal binaries,
-                          rebuilt only when their sources changed or a slice for this Mac is missing)
-  --rebuild-helper        rebuild the signed helper app even if it works; macOS then asks for Screen
-                          Recording and Accessibility again, because the rebuild is a new code identity
-  --register <client>     register the MCP server with omo, claude, codex or json (prints a block);
-                          repeatable or comma-separated; config files are backed up and merged
-  --allow <bundle ids>    comma-separated apps the server may observe and drive, e.g. com.apple.TextEdit
+  --add-to-path           append the line that puts ~/.local/bin on PATH to your shell startup file (backed up first)
+  --register <client>     register the MCP server with omo, claude, codex or json (prints a block); repeatable or
+                          comma-separated; shortcut for: apple-cua config --register <client>
+  --allow <apps>          the apps the server may observe and drive, by name or bundle id (e.g. TextEdit); replaces
+                          the saved list
   --delivery <mode>       background (default) or attended
   --toolset <profile>     full (default) or lean
-  -y, --yes               do not ask; download Node.js when needed and keep an existing allow list
+  --rebuild-native        rebuild packages/core/native (default: use the committed universal binaries, rebuilt only
+                          when their sources changed or a slice for this Mac is missing)
+  --rebuild-helper        rebuild the signed helper app even if it works; macOS then asks for Screen Recording and
+                          Accessibility again, because the rebuild is a new code identity
+  -y, --yes               do not ask; download Node.js when needed
+  --no-doctor             skip the closing doctor run
   -h, --help              show this help
+
+Afterwards: apple-cua config (apps and MCP clients), apple-cua doctor [--fix], apple-cua update, apple-cua uninstall.
 EOF
 }
 
@@ -81,8 +110,10 @@ add_registers() {
 
 while (($# > 0)); do
 	case "$1" in
+		--add-to-path) add_path=1 ;;
 		--rebuild-native) rebuild_native=1 ;;
 		--rebuild-helper) rebuild_helper=1 ;;
+		--no-doctor) run_doctor=0 ;;
 		--register)
 			(($# >= 2)) || usage_error "--register needs a client"
 			add_registers "$2"
@@ -90,7 +121,7 @@ while (($# > 0)); do
 			;;
 		--register=*) add_registers "${1#*=}" ;;
 		--allow)
-			(($# >= 2)) || usage_error "--allow needs a comma-separated list of bundle ids"
+			(($# >= 2)) || usage_error "--allow needs a comma-separated list of apps"
 			allow="$2"
 			allow_given=1
 			shift
@@ -162,15 +193,25 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Ask a yes/no question. With --yes, or without a terminal to ask on, the default answer is taken.
+# Ask a yes/no question. Under `curl ... | bash` stdin is the download, so the question goes to the terminal itself
+# (/dev/tty), the way Homebrew's and rustup's installers ask. With --yes, or with no terminal at all (CI), the default
+# answer is taken.
 confirm() {
-	local question=$1 default=${2:-y} answer prompt="[Y/n]"
+	local question=$1 default=${2:-y} answer="" prompt="[Y/n]"
 	[[ "$default" == y ]] || prompt="[y/N]"
-	if ((assume_yes)) || [[ ! -t 0 ]]; then
+	if ((assume_yes)); then
 		[[ "$default" == y ]]
 		return
 	fi
-	read -r -p "          $question $prompt " answer || answer=""
+	if [[ -t 0 ]]; then
+		read -r -p "          $question $prompt " answer || answer=""
+	elif (: </dev/tty) 2>/dev/null; then
+		printf '          %s %s ' "$question" "$prompt" >/dev/tty
+		read -r answer </dev/tty || answer=""
+	else
+		[[ "$default" == y ]]
+		return
+	fi
 	answer="${answer:-$default}"
 	[[ "$answer" == [Yy]* ]]
 }
@@ -200,7 +241,7 @@ node_is_usable() {
 }
 
 # Only a self-contained node can be copied into the helper bundle: Homebrew's links libnode.dylib and Cellar paths
-# that do not exist there. Same rule as scripts/build-tcc-helper.sh.
+# (/opt/homebrew on Apple Silicon, /usr/local on Intel) that do not exist there. Same rule as build-tcc-helper.sh.
 node_is_self_contained() {
 	local dependencies
 	dependencies="$(otool -L "$1" 2>/dev/null)" || return 1
@@ -222,7 +263,7 @@ bundle_refusal() {
 	fi
 }
 
-# The official Node.js LTS for this Mac's architecture in ~/.apple-cua/node, downloaded once and verified against
+# The official Node.js LTS for this Mac's architecture in $APPLE_CUA_HOME/node, downloaded once and verified against
 # SHASUMS256.txt. Its bin/node is self-contained, so it can also be bundled into the helper.
 ensure_managed_node() {
 	if [[ -x "$managed_node_dir/bin/node" ]] && node_is_usable "$managed_node_dir/bin/node"; then
@@ -328,21 +369,95 @@ helper_smoke() {
 }
 
 helper_identity() {
-	/usr/bin/codesign -dvvv "$helper_app" 2>&1 | sed -n 's/^CDHash=/CDHash /p'
+	local details
+	details="$(/usr/bin/codesign -dvvv "$helper_app" 2>&1 || true)"
+	printf '%s, CDHash %s' "$(sed -n 's/^Identifier=//p' <<<"$details")" "$(sed -n 's/^CDHash=//p' <<<"$details")"
 }
 
 run_pnpm() {
 	(cd "$repo" && "${pnpm_command[@]}" "$@")
 }
 
+# --- The apple-cua command ----------------------------------------------------------------------------------------
+
+# A launcher that runs this checkout's CLI with the node setup used, and with the APPLE_CUA_HOME and
+# APPLE_CUA_BIN_DIR of this setup unless the caller sets them. Its second line names the checkout, which is how
+# `apple-cua uninstall` and later setups recognise it.
+write_launcher() {
+	local q_home q_bin q_node q_cli q_setup
+	q_home="$(printf '%q' "$apple_cua_home")"
+	q_bin="$(printf '%q' "$bin_dir")"
+	q_node="$(printf '%q' "$1")"
+	q_cli="$(printf '%q' "$cli_js")"
+	q_setup="$(printf '%q' "$repo/scripts/setup.sh")"
+	cat <<LAUNCHER
+#!/bin/bash
+$LAUNCHER_MARKER$repo
+# The apple-cua command, written by the setup of that checkout; \`apple-cua uninstall\` removes it.
+if [[ -z "\${APPLE_CUA_HOME:-}" ]]; then export APPLE_CUA_HOME=$q_home; fi
+if [[ -z "\${APPLE_CUA_BIN_DIR:-}" ]]; then export APPLE_CUA_BIN_DIR=$q_bin; fi
+node=$q_node
+if [[ ! -x "\$node" ]]; then node="\$(command -v node || true)"; fi
+if [[ -z "\$node" ]]; then
+	setup=$q_setup
+	echo "apple-cua: found no node to run with; re-run \$setup" >&2
+	exit 1
+fi
+exec "\$node" $q_cli "\$@"
+LAUNCHER
+}
+
+shell_rc_file() {
+	case "$(basename "${SHELL:-/bin/zsh}")" in
+		zsh) printf '%s\n' "${ZDOTDIR:-$HOME}/.zshrc" ;;
+		bash) printf '%s\n' "$HOME/.bash_profile" ;;
+		fish) printf '%s\n' "$HOME/.config/fish/config.fish" ;;
+		*) printf '%s\n' "$HOME/.profile" ;;
+	esac
+}
+
+# The line that puts bin_dir on PATH, in the syntax of the startup file it goes into. $HOME and $PATH are written
+# literally, for the shell to expand when it starts.
+# shellcheck disable=SC2016
+path_line() {
+	local dir=$bin_dir
+	if [[ "$dir" == "$HOME"/* ]]; then dir='$HOME'"${dir#"$HOME"}"; fi
+	if [[ "$1" == *.fish ]]; then
+		printf 'set -gx PATH "%s" $PATH %s\n' "$dir" "$PATH_LINE_MARKER"
+	else
+		printf 'export PATH="%s:$PATH" %s\n' "$dir" "$PATH_LINE_MARKER"
+	fi
+}
+
+add_to_path() {
+	local rc line backup=""
+	rc="$(shell_rc_file)"
+	line="$(path_line "$rc")"
+	if [[ -f "$rc" ]] && grep -qF "$PATH_LINE_MARKER" "$rc"; then
+		ok "$rc already puts $bin_dir on PATH"
+		return 0
+	fi
+	mkdir -p "$(dirname "$rc")"
+	if [[ -f "$rc" ]]; then
+		backup="$rc.bak-$(date +%Y%m%d-%H%M%S)"
+		[[ ! -e "$backup" ]] || backup="$backup-$$"
+		cp -p "$rc" "$backup"
+		if [[ -s "$rc" && -n "$(tail -c 1 "$rc")" ]]; then printf '\n' >>"$rc"; fi
+	fi
+	printf '%s\n' "$line" >>"$rc"
+	ok "added $bin_dir to PATH in $rc${backup:+ (backup: $backup)}"
+	info "new terminals find apple-cua; in this one run: ${line% "$PATH_LINE_MARKER"}"
+}
+
 # --- 1. macOS ----------------------------------------------------------------------------------------------------
 
 step "macOS version and architecture"
 [[ "$(uname -s)" == Darwin ]] || fail "apple-cua runs on macOS only, and this is $(uname -s)"
-macos_version="$(sw_vers -productVersion)"
+macos_version="${APPLE_CUA_MACOS_VERSION:-$(sw_vers -productVersion)}"
 version_at_least "$macos_version" "$MIN_MACOS" ||
-	fail "apple-cua needs macOS $MIN_MACOS (Sonoma) or later, and this Mac runs macOS $macos_version" \
+	fail "apple-cua supports macOS $MIN_MACOS ($MIN_MACOS_NAME) and later, and this Mac runs macOS $macos_version" \
 		"update macOS in System Settings > General > Software Update, then re-run ./scripts/setup.sh"
+# hw.optional.arm64 names the CPU even for a process under Rosetta, where uname -m says x86_64.
 if [[ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" == 1 ]]; then
 	host_arch=arm64
 	node_platform_arch=arm64
@@ -353,7 +468,7 @@ else
 	machine=Intel
 fi
 if [[ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" == 1 ]]; then
-	warn "this shell runs under Rosetta; setup still targets this Mac's native $host_arch"
+	warn "this shell runs under Rosetta; setup still builds for this Mac's native $host_arch"
 fi
 ok "macOS $macos_version on $machine ($host_arch)"
 
@@ -386,8 +501,11 @@ else
 	fi
 	ensure_managed_node
 	export PATH="$managed_node_dir/bin:$PATH"
-	used_managed_node=1
-	ok "$managed_node_dir/bin/node ($(node --version))"
+	build_node="$managed_node_dir/bin/node"
+	ok "$build_node ($(node --version))"
+fi
+if [[ "$("$build_node" -p process.arch 2>/dev/null || true)" != "$node_platform_arch" ]]; then
+	warn "$build_node is an Intel (x64) build running under Rosetta; install the native $node_platform_arch Node.js from https://nodejs.org for full speed"
 fi
 
 # --- 4. pnpm -----------------------------------------------------------------------------------------------------
@@ -461,6 +579,8 @@ elif [[ ! -d "$helper_app" ]]; then
 	helper_reason="it does not exist yet"
 elif ! helper_problem="$(helper_smoke)"; then
 	helper_reason="its smoke run failed: $helper_problem"
+elif [[ -f "$helper_stamp" && "$(<"$helper_stamp")" != "$(bash "$repo/scripts/build-tcc-helper.sh" --inputs-digest)" ]]; then
+	helper_reason="this checkout has another launcher or Info.plist than the one it was built from"
 fi
 if [[ -z "$helper_reason" ]]; then
 	ok "kept $helper_app ($(helper_identity)), so its permission grants still apply"
@@ -472,7 +592,7 @@ else
 		info "building it because $helper_reason"
 	fi
 	select_helper_node
-	APPLE_CUA_NODE="$helper_node_source" "$repo/scripts/build-tcc-helper.sh" | sed 's/^/          /'
+	APPLE_CUA_NODE="$helper_node_source" "$repo/scripts/build-tcc-helper.sh" 2>&1 | sed 's/^/          /'
 	if ! helper_problem="$(helper_smoke)"; then
 		fail "the freshly built helper failed its smoke run: $helper_problem" \
 			"re-run with --rebuild-helper; if it fails again, set APPLE_CUA_NODE to a node from https://nodejs.org"
@@ -480,34 +600,68 @@ else
 	ok "built $helper_app ($(helper_identity)) bundling Node $("$helper_node" --version)"
 fi
 
-# --- 9. MCP client registration ----------------------------------------------------------------------------------
+# --- 9. The apple-cua command ------------------------------------------------------------------------------------
 
-step "MCP client registration"
-if ((${#registers[@]} == 0)); then
-	ok "skipped: no --register given (no client configuration was read or changed)"
-	if ((allow_given)) || [[ -n "$delivery$toolset" ]]; then
-		warn "--allow, --delivery and --toolset only apply together with --register"
-	fi
+step "the apple-cua command"
+cua="node $cli_js"
+if [[ (-e "$launcher" || -L "$launcher") && "$(sed -n 2p "$launcher" 2>/dev/null || true)" != "$LAUNCHER_MARKER"* ]]; then
+	warn "$launcher exists and was not written by apple-cua setup, so it was left as it is"
+	info "remove it and re-run setup to get the apple-cua command; until then run: $cua <command>"
 else
-	if ((!allow_given && !assume_yes)) && [[ -t 0 ]]; then
-		read -r -p "          Apps the server may observe and drive (comma-separated bundle ids, Enter keeps the current list): " answer || answer=""
-		if [[ -n "$answer" ]]; then
-			allow="$answer"
-			allow_given=1
-		fi
+	previous="$(sed -n "2s/^$LAUNCHER_MARKER//p" "$launcher" 2>/dev/null || true)"
+	mkdir -p "$bin_dir"
+	write_launcher "$build_node" >"$launcher.tmp-$$"
+	chmod 755 "$launcher.tmp-$$"
+	mv -f "$launcher.tmp-$$" "$launcher"
+	if [[ -n "$previous" && "$previous" != "$repo" ]]; then
+		ok "$launcher now runs this checkout (it ran $previous before)"
+	else
+		ok "$launcher runs this checkout"
 	fi
-	register_arguments=("${registers[@]}")
-	if ((allow_given)); then register_arguments+=(--allow "$allow"); fi
-	if [[ -n "$delivery" ]]; then register_arguments+=(--delivery "$delivery"); fi
-	if [[ -n "$toolset" ]]; then register_arguments+=(--toolset "$toolset"); fi
-	node "$repo/scripts/register-mcp.mjs" "${register_arguments[@]}" ||
-		fail "registration did not complete" "read the messages above; a config that failed was left untouched"
-	ok "registered with: ${registers[*]}"
+	cua="$launcher"
+	case ":$PATH:" in
+		*":$bin_dir:"*)
+			ok "$bin_dir is on PATH"
+			cua="apple-cua"
+			;;
+		*)
+			if ((add_path)); then
+				add_to_path
+				cua="apple-cua"
+			else
+				warn "$bin_dir is not on PATH, so a new terminal does not find apple-cua yet"
+				info "add it with: $repo/scripts/setup.sh --add-to-path   (appends this line to $(shell_rc_file), backed up first)"
+				info "  $(path_line "$(shell_rc_file)")"
+			fi
+			;;
+	esac
 fi
 
-# --- 10. Doctor --------------------------------------------------------------------------------------------------
+# --- 10. MCP client registration ---------------------------------------------------------------------------------
+
+step "MCP client registration"
+config_arguments=()
+for client in ${registers[@]+"${registers[@]}"}; do
+	config_arguments+=(--register "$client")
+done
+if ((allow_given)); then config_arguments+=(--disallow all --allow "$allow"); fi
+if [[ -n "$delivery" ]]; then config_arguments+=(--delivery "$delivery"); fi
+if [[ -n "$toolset" ]]; then config_arguments+=(--toolset "$toolset"); fi
+if ((${#config_arguments[@]} == 0)); then config_arguments=(--apply); fi
+if ! node "$cli_js" config "${config_arguments[@]}" 2>&1 | sed 's/^/          /'; then
+	fail "the MCP client registration did not complete" \
+		"read the messages above, then run: $cua config; a config file that could not be read was left untouched"
+fi
+ok "apple-cua config ${config_arguments[*]}"
+
+# --- 11. Doctor --------------------------------------------------------------------------------------------------
 
 step "doctor"
+if ((!run_doctor)); then
+	ok "skipped: --no-doctor was given"
+	printf '\napple-cua is set up in %s.\n' "$repo"
+	exit 0
+fi
 doctor_verdict=ready
 if ! node "$cli_js" doctor; then
 	# The doctor exits 1 whenever it is not ready; its JSON says whether only the manual permission grants are left.
@@ -521,17 +675,11 @@ if ! node "$cli_js" doctor; then
 	fi
 fi
 
-printf '\nMCP server for any client:\n'
-printf '  command  %s\n' "$helper_launcher"
-printf '  args     %s\n' "$server_js"
-printf '  env      APPLE_CUA_ALLOWED_BUNDLE_IDS=<bundle ids it may drive>  (no app is approved without it)\n'
-printf 'Register it later with: ./scripts/setup.sh --register <omo|claude|codex|json> --allow com.apple.TextEdit\n'
-printf 'Re-check any time with: node %s doctor\n' "$cli_js"
-if ((used_managed_node)); then
-	# shellcheck disable=SC2016 # $PATH is printed literally, for the user to paste into a shell profile
-	printf 'Node.js for the CLI is in %s; add it to PATH with: export PATH="%s/bin:$PATH"\n' \
-		"$managed_node_dir" "$managed_node_dir"
-fi
+printf '\nNext:\n'
+printf '  %-28s %s\n' "$cua config" "choose the apps agents may use and the MCP clients to register with" \
+	"$cua doctor --fix" "check the installation and repair what is safe to repair" \
+	"$cua update" "update this checkout and everything setup built" \
+	"$cua uninstall" "remove apple-cua again"
 
 case "$doctor_verdict" in
 	ready) printf '\napple-cua is set up and ready.\n' ;;
@@ -541,6 +689,6 @@ case "$doctor_verdict" in
 		;;
 	*)
 		fail "the doctor found problems beyond permissions" \
-			"follow the numbered steps the doctor printed above, then re-run ./scripts/setup.sh"
+			"follow the numbered steps the doctor printed above (apple-cua doctor --fix repairs most), then re-run ./scripts/setup.sh"
 		;;
 esac

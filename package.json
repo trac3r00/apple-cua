@@ -4,11 +4,19 @@
 	"private": true,
 	"type": "module",
 	"description": "Native macOS computer-use control with cua-style platform abstractions",
-	"keywords": ["computer-use", "macos", "automation", "mcp", "accessibility", "coregraphics", "agent"],
+	"keywords": [
+		"computer-use",
+		"macos",
+		"automation",
+		"mcp",
+		"accessibility",
+		"coregraphics",
+		"agent"
+	],
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/bob01933/bob-cua.git"
+		"url": "https://github.com/trac3r00/apple-cua.git"
 	},
 	"scripts": {
 		"build": "pnpm -r build",
@@ -18,7 +26,9 @@
 		"lint:fix": "biome check . --write",
 		"test": "vitest --run",
 		"test:watch": "vitest",
-		"check": "biome check . && pnpm -r typecheck && pnpm typecheck:tests && vitest --run"
+		"check": "biome check . && pnpm -r typecheck && pnpm typecheck:tests && vitest --run",
+		"setup": "./scripts/setup.sh",
+		"doctor": "node packages/cli/dist/cli.js doctor"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",
@@ -30,8 +40,5 @@
 	"engines": {
 		"node": ">=20.0.0"
 	},
-	"packageManager": "pnpm@10.30.2",
-	"pnpm": {
-		"onlyBuiltDependencies": ["@biomejs/biome", "esbuild", "get-windows", "koffi", "node-mac-permissions"]
-	}
+	"packageManager": "pnpm@10.30.2"
 }

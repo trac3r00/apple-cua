@@ -4,15 +4,7 @@
 	"private": true,
 	"type": "module",
 	"description": "Native macOS computer-use control with cua-style platform abstractions",
-	"keywords": [
-		"computer-use",
-		"macos",
-		"automation",
-		"mcp",
-		"accessibility",
-		"coregraphics",
-		"agent"
-	],
+	"keywords": ["computer-use", "macos", "automation", "mcp", "accessibility", "coregraphics", "agent"],
 	"license": "MIT",
 	"repository": {
 		"type": "git",

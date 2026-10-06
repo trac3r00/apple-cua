@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type FixDependencies, type FixOptions, planRepairs, runDoctorFix } from "./doctor-fix.js";
-import { type DoctorFacts, PRIVACY_PANES, evaluateDoctor } from "./doctor.js";
+import { type DoctorFacts, HELPER_DISPLAY_NAME, PRIVACY_PANES, evaluateDoctor } from "./doctor.js";
 
 function readyFacts(): DoctorFacts {
 	return {
@@ -25,6 +25,7 @@ function readyFacts(): DoctorFacts {
 				processArch: "arm64",
 				processNode: "v22.23.2",
 				nativeCapture: { available: true, error: "" },
+				automation: {},
 			},
 		},
 		stop: { stopped: false },
@@ -54,6 +55,7 @@ function brokenFacts(): DoctorFacts {
 				processArch: "arm64",
 				processNode: "v22.23.2",
 				nativeCapture: { available: true, error: "" },
+				automation: {},
 			},
 		},
 		stop: { stopped: true, stoppedAt: "2026-10-06T00:00:00.000Z", reason: "lifecycle test", source: "cli" },
@@ -92,6 +94,10 @@ function fakeMac(answers: readonly boolean[] = []) {
 		openUrl: (url) => {
 			calls.push(`open ${url}`);
 			return true;
+		},
+		grantPermissions: async () => {
+			calls.push("grant permissions");
+			return { missing: [] };
 		},
 		ask: async (question) => {
 			calls.push(`ask ${question}`);
@@ -165,6 +171,8 @@ describe("#given a person at the terminal #when --fix needs consent #then it ask
 		expect(mac.calls).not.toContain("rebuild helper");
 		expect(mac.calls).toContain("resume");
 		expect(outcome.fixed).toContain("lift the stop switch");
+		expect(mac.calls.at(-1)).toBe("grant permissions");
+		expect(outcome.fixed).toContain(`grant the missing permissions to "${HELPER_DISPLAY_NAME}"`);
 	});
 });
 

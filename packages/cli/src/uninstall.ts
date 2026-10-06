@@ -27,7 +27,7 @@ import { loadSettings } from "./settings.js";
 export const LAUNCHER_MARKER = "# apple-cua-launcher checkout=";
 /** Ends the one line `setup.sh --add-to-path` appends to a shell startup file. */
 export const PATH_LINE_MARKER = "# added by apple-cua";
-const TCC_SERVICES = ["Accessibility", "ScreenCapture"] as const;
+const TCC_SERVICES = ["Accessibility", "ScreenCapture", "AppleEvents"] as const;
 const HELPER_EXECUTABLE = "/Contents/MacOS/apple-cua-mcp";
 const LSREGISTER =
 	"/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
@@ -67,6 +67,8 @@ export interface UninstallFacts {
 	readonly stateEntries: readonly string[];
 	/** apple-cua's own directories, removed at the end when nothing else is left in them. */
 	readonly stateDirectories: readonly string[];
+	/** The stop switch file, which every installation on this Mac shares (~/.apple-cua/stop.json). */
+	readonly stopPath: string;
 }
 
 export interface UninstallPlan {
@@ -75,7 +77,7 @@ export interface UninstallPlan {
 	readonly leaveRegistrations: readonly { readonly client: ClientName; readonly reason: string }[];
 	readonly pastedJson: boolean;
 	readonly stopProcesses: readonly ProcessRow[];
-	/** The bundle id whose Accessibility and Screen Recording entries are reset. */
+	/** The bundle id whose Accessibility, Screen Recording and Automation entries are reset. */
 	readonly resetPermissions: string | undefined;
 	readonly keepPermissions: string | undefined;
 	readonly removeHelper: string | undefined;
@@ -114,6 +116,7 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 	const unregister: ClientName[] = [];
 	const leaveRegistrations: { client: ClientName; reason: string }[] = [];
 	let sharedWith: string | undefined;
+	let anotherInstallationStays = facts.otherInstallerCheckout !== undefined;
 	for (const item of facts.clientEntries) {
 		if (item.entry === undefined) {
 			continue;
@@ -128,6 +131,7 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 			});
 		} else {
 			leaveRegistrations.push({ client: item.client, reason: `it runs ${command}, another installation` });
+			anotherInstallationStays = true;
 			if (facts.helperBundleId !== undefined && item.otherHelperBundleId === facts.helperBundleId) {
 				sharedWith ??= command;
 			}
@@ -138,7 +142,7 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 	let keepPermissions: string | undefined;
 	if (facts.helperBundleId === undefined) {
 		keepPermissions = installed
-			? 'no helper app is left to name, so no permission is reset; if "apple-cua MCP" is still listed in System Settings > Privacy & Security, remove it there'
+			? 'no helper app is left to name, so no permission is reset; if "apple-cua-mcp" is still listed in System Settings > Privacy & Security, remove it there'
 			: undefined;
 	} else if (sharedWith !== undefined) {
 		keepPermissions = `the permissions of ${facts.helperBundleId}: ${sharedWith} uses the same bundle id`;
@@ -169,6 +173,11 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 				return lines.length === 0 ? [] : [{ path: rc.path, lines }];
 			});
 
+	if (facts.launchers.some((launcher) => launcher.checkout !== undefined && launcher.checkout !== layout.checkout)) {
+		anotherInstallationStays = true;
+	}
+	// The stop switch belongs to every installation on this Mac: it stays while another one does.
+	const shared = anotherInstallationStays ? [facts.stopPath, dirname(facts.stopPath)] : [];
 	const keepState =
 		facts.otherInstallerCheckout === undefined
 			? undefined
@@ -185,8 +194,8 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 		removeLaunchers,
 		leaveLaunchers,
 		removePathLines,
-		removeState: keepState === undefined ? [...facts.stateEntries] : [],
-		removeIfEmpty: keepState === undefined ? [...facts.stateDirectories] : [],
+		removeState: keepState === undefined ? facts.stateEntries.filter((path) => !shared.includes(path)) : [],
+		removeIfEmpty: keepState === undefined ? facts.stateDirectories.filter((path) => !shared.includes(path)) : [],
 		keepState,
 		removeCheckout: installerCheckout || options.purge,
 		checkoutReason: installerCheckout
@@ -210,7 +219,7 @@ export function formatPlan(plan: UninstallPlan): string {
 		row("stop", `pid ${item.pid}: ${item.command}`);
 	}
 	if (plan.resetPermissions !== undefined) {
-		row("reset", `the Accessibility and Screen Recording permissions of ${plan.resetPermissions}`);
+		row("reset", `the Accessibility, Screen Recording and Automation permissions of ${plan.resetPermissions}`);
 	}
 	if (plan.removeHelper !== undefined) {
 		row("remove", `helper app ${show(plan.removeHelper)}`);
@@ -326,12 +335,12 @@ export async function executeUninstall(plan: UninstallPlan, deps: UninstallDepen
 			} else if (result.status === "unknown-app") {
 				done(
 					"skipped",
-					`${service}: tccutil cannot find ${bundleId} (LaunchServices skips apps in temporary folders); if "apple-cua MCP" is still listed in System Settings > Privacy & Security, remove it there`,
+					`${service}: tccutil cannot find ${bundleId} (LaunchServices skips apps in temporary folders); if "apple-cua-mcp" is still listed in System Settings > Privacy & Security, remove it there`,
 				);
 			} else {
 				const message = `tccutil reset ${service} ${bundleId}: ${result.output}`;
 				failures.push(message);
-				done("FAILED", `${message} (remove "apple-cua MCP" in System Settings > Privacy & Security by hand)`);
+				done("FAILED", `${message} (remove "apple-cua-mcp" in System Settings > Privacy & Security by hand)`);
 			}
 		}
 		if (plan.removeHelper !== undefined) {
@@ -509,6 +518,7 @@ export function gatherUninstallFacts(layout: Layout, env: Environment): Uninstal
 			(path) => existsSync(path),
 		),
 		stateDirectories: [...new Set([layout.appleCuaHome, dirname(stopFile)])],
+		stopPath: stopFile,
 	};
 }
 

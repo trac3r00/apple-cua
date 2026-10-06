@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync, readFileSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { StopSwitch } from "@apple-cua/core";
-import type { StopStatus } from "@apple-cua/core";
+import type { AutomationStatus, StopStatus } from "@apple-cua/core";
 import { type ClientInspection, inspectClient } from "./clients.js";
 import { type Environment, type Layout, displayPath, homeDirectory, resolveLayout } from "./layout.js";
 import { desiredRegistration, loadSettings } from "./settings.js";
@@ -13,15 +13,39 @@ export const MINIMUM_MACOS = "15.0";
 export const MINIMUM_MACOS_NAME = "Sequoia";
 export const MINIMUM_NODE_MAJOR = 20;
 /** How the signed helper app appears in System Settings, and so the name the user grants permissions to. */
-export const HELPER_DISPLAY_NAME = "apple-cua MCP";
+export const HELPER_DISPLAY_NAME = "apple-cua-mcp";
 /** The System Settings panes `apple-cua doctor --fix` opens for a missing grant. */
 export const PRIVACY_PANES = {
 	accessibility: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
 	screenRecording: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+	automation: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
 } as const;
+/** The command that walks a person through every permission grant. */
+export const GRANT_COMMAND = "apple-cua permissions grant";
+const AUTOMATION_STATUSES: readonly AutomationStatus[] = [
+	"granted",
+	"denied",
+	"not-determined",
+	"not-running",
+	"unknown",
+];
+const APP_NAMES: Readonly<Record<string, string>> = {
+	"com.apple.systemevents": "System Events",
+	"com.apple.finder": "Finder",
+	"com.apple.safari": "Safari",
+	"com.google.chrome": "Google Chrome",
+	"com.microsoft.edgemac": "Microsoft Edge",
+	"company.thebrowser.browser": "Arc",
+};
+
+/** How System Settings > Privacy & Security > Automation names an app the helper controls. */
+export function automationAppName(bundleId: string): string {
+	return APP_NAMES[bundleId.toLowerCase()] ?? bundleId;
+}
 /** Written into the helper by scripts/build-tcc-helper.sh: the digest of the inputs it was built from. */
 export const HELPER_INPUTS_STAMP = "Contents/Resources/helper-inputs.sha256";
 const SELF_CHECK_TIMEOUT_MS = 30_000;
+const PERMISSION_REQUEST_TIMEOUT_MS = 5 * 60_000;
 const NATIVE_INPUTS_FILE = "build-inputs.sha256";
 
 export type MachArchitecture = "arm64" | "x86_64";
@@ -69,6 +93,8 @@ export interface SelfCheckReport {
 	readonly processArch: MachArchitecture | undefined;
 	readonly processNode: string | undefined;
 	readonly nativeCapture: { readonly available: boolean; readonly error: string } | undefined;
+	/** Automation permission per app the server sends Apple Events to; empty from a server that predates the check. */
+	readonly automation: Readonly<Record<string, AutomationStatus>>;
 }
 
 export type SelfCheckResult =
@@ -370,8 +396,36 @@ function helperChecks(facts: DoctorFacts): DoctorCheck[] {
 	return checks;
 }
 
-function permissionFix(grant: string, pane: string, helperApp: string): string {
-	return `Grant ${grant} to "${HELPER_DISPLAY_NAME}" in System Settings > Privacy & Security > ${pane} (apple-cua doctor --fix opens it). It is listed there once the server has asked; otherwise add it with + from ${helperApp}. Restart your MCP client afterwards.`;
+function permissionFix(grant: string, pane: string): string {
+	return `Grant ${grant} to "${HELPER_DISPLAY_NAME}": run ${GRANT_COMMAND}, which shows macOS's dialog, opens System Settings > Privacy & Security > ${pane} and waits until it is on. Restart your MCP client afterwards.`;
+}
+
+function automationChecks(automation: SelfCheckReport["automation"]): DoctorCheck[] {
+	return Object.entries(automation).map(([bundleId, status]) => {
+		const id = `permission:automation:${bundleId}`;
+		const app = automationAppName(bundleId);
+		switch (status) {
+			case "granted":
+				return check(id, "ok", `Automation: "${HELPER_DISPLAY_NAME}" may control ${app}`);
+			case "not-determined":
+				return check(
+					id,
+					"warn",
+					`Automation of ${app} not answered yet, so macOS would ask in the middle of an agent's task`,
+					`Answer it now: run ${GRANT_COMMAND} and choose Allow when macOS asks about ${app}.`,
+				);
+			case "denied":
+				return check(
+					id,
+					"warn",
+					`Automation of ${app} refused, so apple-cua falls back to slower or less exact ways`,
+					`Switch on ${app} under "${HELPER_DISPLAY_NAME}" in System Settings > Privacy & Security > Automation (${GRANT_COMMAND} opens it).`,
+				);
+			case "not-running":
+			case "unknown":
+				return check(id, "ok", `Automation of ${app}: not checked (${app} is not running)`);
+		}
+	});
 }
 
 function selfCheckChecks(facts: DoctorFacts): DoctorCheck[] {
@@ -391,7 +445,6 @@ function selfCheckChecks(facts: DoctorFacts): DoctorCheck[] {
 		];
 	}
 	const { report } = result;
-	const helperApp = showOf(facts)(facts.helper.app);
 	const checks: DoctorCheck[] = [
 		check(
 			"self-check",
@@ -416,7 +469,7 @@ function selfCheckChecks(facts: DoctorFacts): DoctorCheck[] {
 					"permission:accessibility",
 					"fail",
 					`Accessibility not granted to "${HELPER_DISPLAY_NAME}" (needed to observe apps and send input)`,
-					permissionFix("Accessibility", "Accessibility", helperApp),
+					permissionFix("Accessibility", "Accessibility"),
 					true,
 				),
 		report.permissions.screenRecording
@@ -425,9 +478,10 @@ function selfCheckChecks(facts: DoctorFacts): DoctorCheck[] {
 					"permission:screen-recording",
 					"fail",
 					`Screen Recording not granted to "${HELPER_DISPLAY_NAME}" (needed for screenshots)`,
-					permissionFix("Screen Recording", "Screen & System Audio Recording", helperApp),
+					permissionFix("Screen Recording", "Screen & System Audio Recording"),
 					true,
 				),
+		...automationChecks(report.automation),
 	);
 	if (report.nativeCapture !== undefined) {
 		checks.push(
@@ -644,6 +698,7 @@ export function parseSelfCheckOutput(stdout: string): SelfCheckReport | undefine
 	const session = record["session"] as Record<string, unknown> | undefined;
 	const processInfo = record["process"] as Record<string, unknown> | undefined;
 	const nativeCapture = record["nativeCapture"] as Record<string, unknown> | undefined;
+	const automation = record["automation"];
 	return {
 		permissions: { accessibility: permissions["accessibility"], screenRecording: permissions["screenRecording"] },
 		sessionMode: typeof session?.["mode"] === "string" ? session["mode"] : undefined,
@@ -656,6 +711,15 @@ export function parseSelfCheckOutput(stdout: string): SelfCheckReport | undefine
 						error: typeof nativeCapture["error"] === "string" ? nativeCapture["error"] : "",
 					}
 				: undefined,
+		automation:
+			typeof automation === "object" && automation !== null
+				? Object.fromEntries(
+						Object.entries(automation).flatMap(([bundleId, status]) => {
+							const known = AUTOMATION_STATUSES.find((candidate) => candidate === status);
+							return known === undefined ? [] : [[bundleId, known]];
+						}),
+					)
+				: {},
 	};
 }
 
@@ -719,6 +783,39 @@ function readConfigFacts(layout: Layout, env: Environment): ConfigFacts {
 	}
 }
 
+/** Runs server.js --doctor through the helper, so the answers describe the helper's permissions. */
+export function runSelfCheck(layout: Pick<Layout, "helperExecutable" | "server">): SelfCheckResult {
+	const run = spawnSync(layout.helperExecutable, [layout.server, "--doctor"], {
+		encoding: "utf8",
+		timeout: SELF_CHECK_TIMEOUT_MS,
+	});
+	const report = run.status === 0 ? parseSelfCheckOutput(run.stdout) : undefined;
+	return report === undefined
+		? { ok: false, error: run.status === 0 ? "its --doctor output was not a capability report" : processFailure(run) }
+		: { ok: true, report };
+}
+
+/**
+ * Runs server.js --request-permissions through the helper, which shows macOS's dialogs under the helper's name. An
+ * Automation dialog blocks until it is answered, hence the long timeout. Undefined when the helper gave no answer.
+ */
+export function requestHelperPermissions(
+	layout: Pick<Layout, "helperExecutable" | "server">,
+	kinds: readonly string[],
+): Record<string, unknown> | undefined {
+	const run = spawnSync(layout.helperExecutable, [layout.server, "--request-permissions", kinds.join(",")], {
+		encoding: "utf8",
+		timeout: PERMISSION_REQUEST_TIMEOUT_MS,
+	});
+	const line = run.status === 0 ? run.stdout.trim().split("\n").pop() : undefined;
+	try {
+		const parsed: unknown = line === undefined ? undefined : JSON.parse(line);
+		return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Reads the Mac without changing it and without raising a permission prompt. Permissions are read inside the
  * signed helper (server.js --doctor through its launcher), because macOS keys them to the helper's identity, not
@@ -751,21 +848,7 @@ export function gatherDoctorFacts(layout: Layout = resolveLayout(), env: Environ
 	}
 
 	const serverPresent = existsSync(layout.server);
-	let selfCheck: SelfCheckResult | undefined;
-	if (present && serverPresent) {
-		const run = spawnSync(launcher, [layout.server, "--doctor"], {
-			encoding: "utf8",
-			timeout: SELF_CHECK_TIMEOUT_MS,
-		});
-		const report = run.status === 0 ? parseSelfCheckOutput(run.stdout) : undefined;
-		selfCheck =
-			report === undefined
-				? {
-						ok: false,
-						error: run.status === 0 ? "its --doctor output was not a capability report" : processFailure(run),
-					}
-				: { ok: true, report };
-	}
+	const selfCheck = present && serverPresent ? runSelfCheck(layout) : undefined;
 
 	const home = homeDirectory(env);
 	return {

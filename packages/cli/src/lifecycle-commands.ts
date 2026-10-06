@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
+import { closeSync, existsSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { ReadStream, WriteStream } from "node:tty";
-import { StopSwitch } from "@apple-cua/core";
+import { StopSwitch, isBrowserBundle } from "@apple-cua/core";
+import type { AutomationStatus } from "@apple-cua/core";
 import type { Command } from "commander";
 import {
 	CLIENT_NAMES,
@@ -21,8 +22,20 @@ import {
 	unregisterClient,
 } from "./clients.js";
 import { runDoctorFix } from "./doctor-fix.js";
-import { evaluateDoctor, formatDoctorReport, gatherDoctorFacts } from "./doctor.js";
+import {
+	evaluateDoctor,
+	formatDoctorReport,
+	gatherDoctorFacts,
+	requestHelperPermissions,
+	runSelfCheck,
+} from "./doctor.js";
 import { type Layout, displayPath, readInstallMarker, resolveLayout } from "./layout.js";
+import {
+	type GrantDependencies,
+	type GrantOutcome,
+	type PermissionRequestAnswer,
+	grantPermissions,
+} from "./permission-guide.js";
 import {
 	type Delivery,
 	type Settings,
@@ -136,6 +149,25 @@ function confirm(question: string): Promise<boolean> {
 	return withPrompt(async (ask) => /^y(?:es)?$/i.test((await ask(`${question}? [y/N] `)).trim()));
 }
 
+function onPath(command: string): boolean {
+	return spawnSync("/bin/sh", ["-c", `command -v ${command}`], { stdio: "ignore" }).status === 0;
+}
+
+/** The MCP clients this Mac has: their CLI is on PATH or their configuration folder exists. */
+function installedClients(layout: Layout): ClientName[] {
+	const found: ClientName[] = [];
+	if (existsSync(join(layout.home, ".omo")) || onPath("omo")) {
+		found.push("omo");
+	}
+	if (existsSync(join(layout.home, ".claude.json")) || onPath("claude")) {
+		found.push("claude");
+	}
+	if (existsSync(join(layout.home, ".codex")) || onPath("codex")) {
+		found.push("codex");
+	}
+	return found;
+}
+
 function clientContext(layout: Layout): ClientContext {
 	return { home: layout.home, env: process.env, now: new Date() };
 }
@@ -235,10 +267,19 @@ async function askChoice<T extends string>(
 	}
 }
 
-async function askClients(ask: Ask, say: Say, question: string): Promise<ClientName[]> {
+async function askClients(
+	ask: Ask,
+	say: Say,
+	question: string,
+	onEnter: readonly ClientName[] = [],
+): Promise<ClientName[]> {
 	for (;;) {
 		try {
-			return parseClients(await ask(question));
+			const answer = (await ask(question)).trim();
+			if (answer === "") {
+				return [...onEnter];
+			}
+			return answer.toLowerCase() === "none" ? [] : parseClients(answer);
 		} catch (error) {
 			say(`  ${errorMessage(error)}`);
 		}
@@ -246,7 +287,12 @@ async function askClients(ask: Ask, say: Say, question: string): Promise<ClientN
 }
 
 /** The friendly mode of `apple-cua config`: one question per setting, Enter keeps the current value. */
-export async function askForChanges(settings: Settings, ask: Ask, say: Say): Promise<SettingsChange> {
+export async function askForChanges(
+	settings: Settings,
+	ask: Ask,
+	say: Say,
+	installed: readonly ClientName[] = [],
+): Promise<SettingsChange> {
 	say(`Apps agents may observe and drive: ${settings.allowedApps.join(", ") || "none yet"}`);
 	const allow = (await ask("  Add apps (names like TextEdit, or bundle ids; comma-separated; Enter skips): ")).trim();
 	const disallow =
@@ -258,7 +304,15 @@ export async function askForChanges(settings: Settings, ask: Ask, say: Say): Pro
 	const iphoneChoice = settings.iphone ? "on" : "off";
 	const iphone = (await askChoice(ask, say, "iPhone Mirroring tools", ["on", "off"] as const, iphoneChoice)) === "on";
 	say(`MCP clients: ${CLIENT_NAMES.join(", ")}; registered with: ${settings.clients.join(", ") || "none yet"}`);
-	const register = await askClients(ask, say, "  Register with (comma-separated; Enter skips): ");
+	const suggested = settings.clients.length === 0 ? installed : [];
+	const register = await askClients(
+		ask,
+		say,
+		suggested.length === 0
+			? "  Register with (comma-separated; Enter skips): "
+			: `  Register with (comma-separated; Enter registers with the installed ${suggested.join(", ")}; "none" skips): `,
+		suggested,
+	);
 	const unregister =
 		settings.clients.length === 0
 			? []
@@ -350,7 +404,7 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 			tell(
 				`Settings live in ${show(layout.configPath)} and apply to every MCP client apple-cua is registered with. Enter keeps a value.\n`,
 			);
-			return askForChanges(current, ask, tell);
+			return askForChanges(current, ask, tell, installedClients(layout));
 		});
 	}
 	if (change === undefined && !loaded.saved && !adopted) {
@@ -430,6 +484,134 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 	return failures.length === 0 ? 0 : 1;
 }
 
+// --- permissions ---------------------------------------------------------------------------------------------------
+
+const GRANT_WAIT_MS = 10 * 60_000;
+const GRANT_POLL_MS = 1_500;
+
+/** Re-checks until `granted` holds, the person presses Enter, or ten minutes pass. */
+async function waitUntilGranted(granted: () => boolean): Promise<boolean> {
+	const terminal = openTerminal();
+	let skipped = false;
+	const skip = () => {
+		skipped = true;
+	};
+	terminal?.input.on("data", skip);
+	// A stream paused by an earlier wait stays paused when a listener is added, so Enter would never arrive.
+	terminal?.input.resume();
+	try {
+		for (const deadline = Date.now() + GRANT_WAIT_MS; Date.now() < deadline && !skipped; ) {
+			if (granted()) {
+				return true;
+			}
+			await sleep(GRANT_POLL_MS);
+		}
+		return granted();
+	} finally {
+		terminal?.input.off("data", skip);
+		terminal?.input.pause();
+		terminal?.close();
+	}
+}
+
+const AUTOMATION_STATUSES: readonly AutomationStatus[] = [
+	"granted",
+	"denied",
+	"not-determined",
+	"not-running",
+	"unknown",
+];
+
+function automationAnswer(value: unknown): Record<string, AutomationStatus> | undefined {
+	if (typeof value !== "object" || value === null) {
+		return undefined;
+	}
+	return Object.fromEntries(
+		Object.entries(value).flatMap(([bundleId, status]) => {
+			const known = AUTOMATION_STATUSES.find((candidate) => candidate === status);
+			return known === undefined ? [] : [[bundleId, known]];
+		}),
+	);
+}
+
+function grantDependencies(layout: Layout, say: Say, open: boolean): GrantDependencies {
+	return {
+		read: () => {
+			const result = runSelfCheck(layout);
+			return result.ok ? { ...result.report.permissions, automation: result.report.automation } : undefined;
+		},
+		request: (kinds): PermissionRequestAnswer | undefined => {
+			const answer = requestHelperPermissions(layout, kinds);
+			if (answer === undefined) {
+				return undefined;
+			}
+			const accessibility = answer["accessibility"];
+			const screenRecording = answer["screenRecording"];
+			const automation = automationAnswer(answer["automation"]);
+			return {
+				...(typeof accessibility === "boolean" ? { accessibility } : {}),
+				...(typeof screenRecording === "boolean" ? { screenRecording } : {}),
+				...(automation === undefined ? {} : { automation }),
+			};
+		},
+		openUrl: async (url) => open && (await openPrivacyPane(url)),
+		waitFor: waitUntilGranted,
+		print: say,
+	};
+}
+
+const SETTINGS_QUIT_WAIT_MS = 5_000;
+const OPEN_ATTEMPTS = 4;
+
+/**
+ * Opens a System Settings pane. A running System Settings keeps showing the app list it read when it opened, so an
+ * entry macOS added a moment ago would not be there to switch on: it is quit first, and the pane opens fresh.
+ */
+async function openPrivacyPane(url: string): Promise<boolean> {
+	const running = () => spawnSync("/usr/bin/pgrep", ["-x", "System Settings"], { stdio: "ignore" }).status === 0;
+	if (running()) {
+		spawnSync("/usr/bin/osascript", ["-e", 'quit app "System Settings"'], { stdio: "ignore" });
+		for (const deadline = Date.now() + SETTINGS_QUIT_WAIT_MS; running() && Date.now() < deadline; ) {
+			await sleep(200);
+		}
+	}
+	// Right after a quit, LaunchServices can still refuse to start System Settings for a moment.
+	for (let attempt = 0; attempt < OPEN_ATTEMPTS; attempt += 1) {
+		if (spawnSync("/usr/bin/open", [url], { stdio: "ignore" }).status === 0) {
+			return true;
+		}
+		await sleep(500);
+	}
+	return false;
+}
+
+/** The approved apps the server reads a page address from with Apple Events (browsers). */
+function approvedBrowsers(layout: Layout): string[] {
+	try {
+		return loadSettings(layout.configPath).settings.allowedApps.filter((bundleId) => isBrowserBundle(bundleId));
+	} catch {
+		return [];
+	}
+}
+
+function runGrant(layout: Layout, say: Say, open: boolean): Promise<GrantOutcome> {
+	return grantPermissions(
+		{ interactive: isInteractive(), openPanes: open, extraAutomationTargets: approvedBrowsers(layout) },
+		grantDependencies(layout, say, open),
+	);
+}
+
+async function runPermissionsGrantCommand(options: { readonly open: boolean }, json: boolean): Promise<number> {
+	const layout = resolveLayout();
+	const outcome = await runGrant(layout, json ? quiet : print, options.open);
+	if (json) {
+		print(JSON.stringify(outcome));
+	} else if (outcome.missing.length === 0) {
+		print(`\nAll set: "apple-cua-mcp" holds every permission it needs.`);
+	}
+	return outcome.missing.length === 0 ? 0 : 1;
+}
+
 // --- doctor --------------------------------------------------------------------------------------------------------
 
 function reapplyRegistrations(layout: Layout, say: Say): boolean {
@@ -483,6 +665,7 @@ async function runDoctorCommand(options: DoctorCommandOptions, json: boolean): P
 				new StopSwitch().resume();
 			},
 			openUrl: (url) => spawnSync("/usr/bin/open", [url], { stdio: "ignore" }).status === 0,
+			grantPermissions: () => runGrant(layout, say, options.open),
 			ask: confirm,
 			print: say,
 		},
@@ -611,10 +794,23 @@ export function registerLifecycleCommands(program: Command, options: LifecycleCo
 			process.exitCode = await runConfig(commandOptions, options.isJsonOutput());
 		});
 
+	const permissions =
+		program.commands.find((command) => command.name() === "permissions") ??
+		program.command("permissions").description("Manage macOS permissions");
+	permissions
+		.command("grant")
+		.description(
+			'Walk through granting "apple-cua-mcp" Accessibility, Screen Recording and Automation: shows macOS\'s dialogs, opens System Settings and waits until each is on; exits 0 when everything is granted',
+		)
+		.option("--no-open", "print how to open System Settings instead of opening it")
+		.action(async (commandOptions: { readonly open: boolean }) => {
+			process.exitCode = await runPermissionsGrantCommand(commandOptions, options.isJsonOutput());
+		});
+
 	program
 		.command("doctor")
 		.description(
-			'Check this Mac, the native binaries, the signed helper, the permissions of "apple-cua MCP" and the MCP client registrations without raising a permission prompt; exits 0 when ready, 1 otherwise',
+			'Check this Mac, the native binaries, the signed helper, the permissions of "apple-cua-mcp" and the MCP client registrations without raising a permission prompt; exits 0 when ready, 1 otherwise',
 		)
 		.option("--fix", "repair what is safe to repair, ask before what is not, and report what is left")
 		.option(

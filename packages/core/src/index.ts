@@ -74,6 +74,14 @@ export { type LockScreenMonitorCallbacks, LockScreenMonitor } from "./platform/l
 export { type HostCapabilities, probeHostCapabilities } from "./platform/host-capabilities.js";
 export { getSckitLoadError, isSckitAvailable } from "./platform/macos-ffi/sckit.js";
 export {
+	type AutomationStatus,
+	automationPermission,
+	automationStatusFromCode,
+	requestAccessibility,
+	requestScreenRecording,
+} from "./platform/macos-ffi/permission-prompts.js";
+export { isBrowserBundle } from "./permission/url-blocklist.js";
+export {
 	type PassiveMemoryConfig,
 	type PassiveMemoryContext,
 	shouldRecord,

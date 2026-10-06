@@ -59,6 +59,7 @@ function readyFacts(): DoctorFacts {
 				processArch: "arm64",
 				processNode: "v22.23.2",
 				nativeCapture: { available: true, error: "" },
+				automation: {},
 			},
 		},
 		stop: { stopped: false },
@@ -168,6 +169,7 @@ describe("#given a fresh helper identity without grants #when the doctor evaluat
 					processArch: "arm64",
 					processNode: "v24.11.0",
 					nativeCapture: { available: true, error: "" },
+					automation: {},
 				},
 			},
 		});
@@ -302,6 +304,7 @@ describe("#given conditions that leave the install working #when the doctor eval
 					processArch: "arm64",
 					processNode: "v22.23.2",
 					nativeCapture: { available: false, error: "libsckit.dylib not found" },
+					automation: {},
 				},
 			},
 		});
@@ -320,6 +323,7 @@ describe("#given server.js --doctor output #when it is parsed #then only a capab
 			session: { mode: "console" },
 			process: { node: "v24.11.0", arch: "x64" },
 			nativeCapture: { available: true, error: "" },
+			automation: {},
 		});
 
 		expect(parseSelfCheckOutput(`warning: something\n${line}\n`)).toEqual({
@@ -328,6 +332,7 @@ describe("#given server.js --doctor output #when it is parsed #then only a capab
 			processArch: "x86_64",
 			processNode: "v24.11.0",
 			nativeCapture: { available: true, error: "" },
+			automation: {},
 		});
 	});
 

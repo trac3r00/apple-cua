@@ -49,6 +49,7 @@ function facts(overrides: Partial<UninstallFacts> = {}): UninstallFacts {
 		rcFiles: [],
 		stateEntries: [],
 		stateDirectories: [],
+		stopPath: "/home/.apple-cua/stop.json",
 		...overrides,
 	};
 }
@@ -124,6 +125,29 @@ describe("#given registrations of several installations #when uninstall is plann
 		expect(plan.leaveRegistrations[0]?.reason).toMatch(/which is gone/);
 		expect(plan.resetPermissions).toBeUndefined();
 		expect(plan.keepPermissions).toMatch(/remove it there/);
+	});
+});
+
+describe("#given the shared stop switch #when uninstall is planned #then it stays while another installation does", () => {
+	it("keeps the stop file and its folder for another installation's registration, and removes them when none is left", () => {
+		const state = {
+			stateEntries: [layout.configPath, "/home/.apple-cua/stop.json"],
+			stateDirectories: [layout.appleCuaHome, "/home/.apple-cua"],
+		};
+		const other = {
+			client: "omo" as const,
+			entry: entry("/other/apple-cua-mcp"),
+			runsThisCheckout: false,
+			alive: true,
+		};
+
+		const shared = planUninstall(facts({ ...state, clientEntries: [other] }), { purge: false });
+		const alone = planUninstall(facts(state), { purge: false });
+
+		expect(shared.removeState).toEqual([layout.configPath]);
+		expect(shared.removeIfEmpty).toEqual([layout.appleCuaHome]);
+		expect(alone.removeState).toEqual(state.stateEntries);
+		expect(alone.removeIfEmpty).toEqual(state.stateDirectories);
 	});
 });
 
@@ -251,6 +275,7 @@ describe("#given an installation in a temporary home #when uninstall runs #then 
 			`register ${layout.helperApp}`,
 			`reset Accessibility ${BUNDLE_ID}`,
 			`reset ScreenCapture ${BUNDLE_ID}`,
+			`reset AppleEvents ${BUNDLE_ID}`,
 			`unregister ${layout.helperApp}`,
 		]);
 		expect(readFileSync(omo, "utf8")).toBe(omoBefore);

@@ -24,9 +24,11 @@ macOS and the Xcode Command Line Tools (`xcode-select --install` when they are a
 20+ from PATH or downloads the official LTS into `~/.apple-cua/node` (verified against
 `SHASUMS256.txt`), installs with the pnpm version `package.json` pins, builds every package, keeps
 the committed universal (arm64 + x86_64) native binaries unless their sources changed, builds the
-signed helper app "apple-cua MCP" only when it is missing, broken or built from another launcher,
+signed helper app "apple-cua-mcp" only when it is missing, broken or built from another launcher,
 installs the `apple-cua` command, re-applies your MCP client registrations, and ends with
-`apple-cua doctor`. Flags: `--add-to-path`, `--rebuild-native`, `--rebuild-helper`, `--yes`,
+`apple-cua doctor`. In a terminal (without `--yes`) it also offers to put the command on PATH, asks on
+a first run which apps to approve and which MCP clients to register with, and walks through the
+helper's permission dialogs (`apple-cua permissions grant`). Flags: `--add-to-path`, `--rebuild-native`, `--rebuild-helper`, `--yes`,
 `--no-doctor`, and `--register`, `--allow`, `--delivery`, `--toolset` as shortcuts for
 `apple-cua config`.
 
@@ -72,10 +74,12 @@ The process macOS identifies needs:
 - **Accessibility** for AX queries/actions and native input.
 - **Automation / Apple Events** where System Events or browser scripting is used.
 
-Through the helper that process is **apple-cua MCP**: grant it Accessibility and Screen & System
-Audio Recording in **System Settings → Privacy & Security** once, then restart the MCP client;
-`apple-cua doctor --fix` opens the pane. It is listed there after the server first asks, and can also
-be added with + from `packages/mcp/dist/apple-cua-mcp.app` in the checkout. Setup and
+Through the helper that process is **apple-cua-mcp**, the name macOS shows in its dialogs and in
+**System Settings → Privacy & Security**. `apple-cua permissions grant` (run by setup, and by
+`apple-cua doctor --fix` in a terminal) shows each dialog, opens the pane with the entry listed and
+waits until it is on; Automation of System Events, Finder and approved running browsers is asked up
+front so no dialog interrupts a task. Restart the MCP client afterwards. Older helpers appear as
+**node** in those lists; that entry is no longer used. Setup and
 `apple-cua update` keep the helper, and so the grants, unless its launcher or Info.plist changed;
 `apple-cua doctor --fix --rebuild-helper` creates a new code identity that macOS asks about again.
 The CLI, and a server started with plain `node`, use the identity of the terminal, app or launcher

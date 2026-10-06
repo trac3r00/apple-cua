@@ -2,6 +2,8 @@ import {
 	type DoctorCheck,
 	type DoctorFacts,
 	type DoctorReport,
+	GRANT_COMMAND,
+	HELPER_DISPLAY_NAME,
 	PRIVACY_PANES,
 	evaluateDoctor,
 	formatDoctorReport,
@@ -43,7 +45,7 @@ export function planRepairs(report: DoctorReport): Repair[] {
 		repairs.push({
 			id: "permissions",
 			kind: "guide",
-			title: "open System Settings where the missing permission is granted",
+			title: `grant the missing permissions to "${HELPER_DISPLAY_NAME}"`,
 		});
 	}
 	return repairs;
@@ -65,6 +67,8 @@ export interface FixDependencies {
 	readonly reapplyRegistrations: () => boolean;
 	readonly resume: () => void;
 	readonly openUrl: (url: string) => boolean;
+	/** Walks a person through macOS's permission dialogs (apple-cua permissions grant); called only when interactive. */
+	readonly grantPermissions: () => Promise<{ readonly missing: readonly string[] }>;
 	/** Asks a yes/no question; called only when interactive. Defaults to no. */
 	readonly ask: (question: string) => Promise<boolean>;
 	readonly print: (text: string) => void;
@@ -77,10 +81,17 @@ export interface FixOutcome {
 	readonly report: DoctorReport;
 }
 
-const PANE_NAMES: Readonly<Record<string, { readonly url: string; readonly pane: string }>> = {
-	"permission:accessibility": { url: PRIVACY_PANES.accessibility, pane: "Accessibility" },
-	"permission:screen-recording": { url: PRIVACY_PANES.screenRecording, pane: "Screen & System Audio Recording" },
-};
+function paneFor(checkId: string): { readonly url: string; readonly pane: string } | undefined {
+	if (checkId === "permission:accessibility") {
+		return { url: PRIVACY_PANES.accessibility, pane: "Accessibility" };
+	}
+	if (checkId === "permission:screen-recording") {
+		return { url: PRIVACY_PANES.screenRecording, pane: "Screen & System Audio Recording" };
+	}
+	return checkId.startsWith("permission:automation:")
+		? { url: PRIVACY_PANES.automation, pane: "Automation" }
+		: undefined;
+}
 
 /**
  * Repairs what is safe to repair, asks before what is not, and reports what is left. Every effect goes through
@@ -141,10 +152,20 @@ export async function runDoctorFix(options: FixOptions, deps: FixDependencies): 
 				break;
 			}
 			case "permissions": {
-				const missing = notOk(before, (id) => id.startsWith("permission:")).flatMap((item) => {
-					const pane = PANE_NAMES[item.id];
+				if (options.interactive) {
+					const outcome = await deps.grantPermissions();
+					if (outcome.missing.length === 0) {
+						fixed.push(repair.title);
+					} else {
+						skipped.push(`grant ${outcome.missing.join(", ")} (${GRANT_COMMAND})`);
+					}
+					break;
+				}
+				const panes = notOk(before, (id) => id.startsWith("permission:")).flatMap((item) => {
+					const pane = paneFor(item.id);
 					return pane === undefined ? [] : [pane];
 				});
+				const missing = panes.filter((pane, index) => panes.findIndex((other) => other.url === pane.url) === index);
 				// One pane at a time: opening a second one only replaces the first in System Settings.
 				let opened = false;
 				for (const pane of missing) {
@@ -155,7 +176,7 @@ export async function runDoctorFix(options: FixOptions, deps: FixDependencies): 
 						deps.print(`  ${opened ? "then " : ""}open ${pane.pane} with: open "${pane.url}"`);
 					}
 				}
-				skipped.push(`grant ${missing.map((pane) => pane.pane).join(" and ")} to "apple-cua MCP" (only you can)`);
+				skipped.push(`grant ${missing.map((pane) => pane.pane).join(" and ")} to "apple-cua-mcp" (only you can)`);
 				break;
 			}
 		}

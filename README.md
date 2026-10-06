@@ -50,17 +50,21 @@ stopped. It
    nodejs.org's `SHASUMS256.txt`;
 3. runs the pnpm version `package.json` pins, `pnpm install --frozen-lockfile`, and builds every package;
 4. uses the committed universal (arm64 + x86_64) native binaries, rebuilding them only when their sources changed;
-5. builds the signed helper app **apple-cua MCP** only when it is missing, broken, or built from another launcher than
+5. builds the signed helper app **apple-cua-mcp** only when it is missing, broken, or built from another launcher than
    the checkout has, bundling a self-contained `node` for this Mac's CPU (Homebrew's links `libnode.dylib` and cannot
    be bundled, so setup downloads the official build instead);
-6. installs the `apple-cua` command, writes your saved settings into every MCP client you registered, and finishes
-   with `apple-cua doctor`.
+6. installs the `apple-cua` command and, in a terminal, offers to put it on `PATH`;
+7. on a first run in a terminal, asks which apps agents may use and which MCP clients to register with (Enter
+   registers with the ones installed on this Mac); otherwise writes your saved settings into every registered client;
+8. walks you through macOS's permission dialogs for **apple-cua-mcp** (see below), and finishes with
+   `apple-cua doctor`. With `--yes`, or without a terminal, it asks nothing and the doctor lists what is left.
 
 From then on one command covers the whole lifecycle:
 
 | Command | What it does |
 |---|---|
 | `apple-cua config` | Choose the apps agents may use and the MCP clients to register with; asks in a terminal, takes flags in scripts |
+| `apple-cua permissions grant` | Walk through Accessibility, Screen Recording and Automation for **apple-cua-mcp**: shows macOS's dialog, opens System Settings and waits until each switch is on |
 | `apple-cua doctor [--fix]` | Check everything without raising a permission prompt; `--fix` repairs what is safe and asks before the rest |
 | `apple-cua update` | Fast-forward the checkout, rerun setup, re-apply the registrations, run the doctor |
 | `apple-cua uninstall` | Remove the registrations (backed up), the helper and its permissions, the command and its PATH line, `~/.apple-cua`, and the checkout the installer made |
@@ -87,13 +91,21 @@ apple-cua config --show                                # the settings, and where
 | `--delivery background\|attended`, `--toolset full\|lean`, `--iphone`, `--no-iphone` | `APPLE_CUA_DELIVERY`, `APPLE_CUA_TOOLSET` and `APPLE_CUA_IPHONE` in every registration. |
 | `--apply` | Write the saved settings into every registered client again; setup and `apple-cua update` do this. |
 
-### The one manual step
+### Permissions
 
-Only a person can grant macOS privacy permissions. Grant **Accessibility** and **Screen & System Audio Recording** to
-**apple-cua MCP** in System Settings → Privacy & Security, once, then restart your MCP client; `apple-cua doctor --fix`
-opens the pane. The app is listed there after the server first asks, or add
-`~/.apple-cua/app/packages/mcp/dist/apple-cua-mcp.app` with **+**. Setup and updates keep the helper unless its
-launcher changed, so the grants keep working.
+Only a person can grant macOS privacy permissions, so setup (and `apple-cua permissions grant` any time later) guides
+you through each one for the helper app, listed as **apple-cua-mcp**:
+
+| Permission | Why | What you do |
+|---|---|---|
+| Accessibility | read app windows, send clicks and keys | choose **Open System Settings** in macOS's dialog and switch on **apple-cua-mcp** |
+| Screen & System Audio Recording | screenshots | the same, in the Screen & System Audio Recording list |
+| Automation of System Events and Finder (and of approved browsers that are running) | window lookup, desktop size, a page's address | choose **Allow** when macOS asks |
+
+The walk-through opens the right pane (reopening System Settings so the new entry is listed), waits until the switch
+is on, and lets you skip a step with Enter. Restart your MCP client afterwards. Setup and updates keep the helper
+unless its launcher changed, so the grants keep working. Helpers built before the apple-cua-mcp name was used appear
+as **node** in these lists; that entry is no longer used and can be removed with the minus button.
 
 ### Check and repair
 
@@ -111,20 +123,23 @@ apple-cua doctor
   ok    MCP server built (/Users/you/.apple-cua/app/packages/mcp/dist/server.js)
   ok    helper app /Users/you/.apple-cua/app/packages/mcp/dist/apple-cua-mcp.app (signature valid, bundled Node v22.23.2)
   ok    server.js answered through the helper (Node v22.23.2, arm64)
-  ok    Accessibility granted to "apple-cua MCP"
-  FAIL  Screen Recording not granted to "apple-cua MCP" (needed for screenshots)
+  ok    Accessibility granted to "apple-cua-mcp"
+  FAIL  Screen Recording not granted to "apple-cua-mcp" (needed for screenshots)
+  ok    Automation: "apple-cua-mcp" may control System Events
+  warn  Automation of Finder not answered yet, so macOS would ask in the middle of an agent's task
   ok    ScreenCaptureKit capture loads in the helper
   ok    omo: registered in ~/.omo/agent/mcp.json
   ok    stop switch: not stopped (Control+Option+Command or `apple-cua stop` stops every agent)
 
-Installed. One manual step remains, granting permissions to "apple-cua MCP":
-  1. Grant Screen Recording to "apple-cua MCP" in System Settings > Privacy & Security > Screen & System Audio Recording (apple-cua doctor --fix opens it). ...
+Installed. One manual step remains, granting permissions to "apple-cua-mcp":
+  1. Grant Screen Recording to "apple-cua-mcp": run apple-cua permissions grant, which shows macOS's dialog, opens System Settings > Privacy & Security > Screen & System Audio Recording and waits until it is on. ...
 ```
 
 `apple-cua doctor --fix` rebuilds missing or outdated native binaries and re-registers clients whose entry went stale.
 It asks before rebuilding a broken helper, because a rebuild is a new code identity that needs both permissions again
-(`--rebuild-helper` consents up front), and before lifting a stop. It opens System Settings at a missing permission
-(`--no-open` prints the command instead) and ends with what it fixed and what is left.
+(`--rebuild-helper` consents up front), and before lifting a stop. In a terminal it runs the permission walk-through
+for anything missing; without one it prints where each permission is granted (`--no-open` never opens System
+Settings). It ends with what it fixed and what is left.
 
 ### Update and uninstall
 
@@ -273,8 +288,8 @@ grok mcp add apple-cua -s user \
   /absolute/path/to/apple-cua/packages/mcp/dist/server.js
 ```
 
-The first run prompts for Screen Recording and Accessibility for "apple-cua MCP"; grant both in
-System Settings and restart the server. The helper bundles a self-contained `node` built for this Mac's CPU
+Grant the helper its permissions with `apple-cua permissions grant` (or when the server first asks, macOS names it
+"apple-cua-mcp"), then restart the server. The helper bundles a self-contained `node` built for this Mac's CPU
 (Homebrew's build links `libnode.dylib` and cannot be copied into a bundle), resolved in this order: `APPLE_CUA_NODE`,
 then the first standalone node on `PATH`, then `~/.local/bin/node`, `/usr/local/bin/node` and `~/.apple-cua/node` —
 and the build fails loudly when none of them fits. `setup.sh` passes `APPLE_CUA_NODE` itself and downloads the
@@ -595,15 +610,17 @@ library cannot load (for example a binary without this Mac's slice), screenshots
 macOS keys screen capture and input synthesis to the identity of the process that asks:
 
 1. **The MCP server through the signed helper** (what setup builds and `apple-cua config --register` configures): grant
-   **Screen Recording** and **Accessibility** to **apple-cua MCP** in System Settings → Privacy & Security. One grant
+   **Screen Recording** and **Accessibility** to **apple-cua-mcp** in System Settings → Privacy & Security. One grant
    serves every MCP client and survives setup and `apple-cua update`; only a helper rebuild asks again.
 2. **The CLI, or `node packages/mcp/dist/server.js` run directly**: grant both to the terminal or IDE that launches
    it. Permission is per binary: switching from iTerm2 to Ghostty means granting again.
-3. **Apple Events / Automation**: allow the launcher if you use `--target-bundle-id` or permission helpers that query
-   System Events.
+3. **Apple Events / Automation**: the helper asks once per app it controls (System Events, Finder, approved browsers);
+   `apple-cua permissions grant` asks up front so the dialog never interrupts an agent's task. For the CLI, allow the
+   terminal if you use `--target-bundle-id` or permission helpers that query System Events.
 
 Restart the client or terminal after a grant (some apps cache the permission state at launch).
-`apple-cua doctor` reports what is missing without raising a prompt, and `apple-cua doctor --fix` opens the pane.
+`apple-cua doctor` reports what is missing without raising a prompt, and `apple-cua permissions grant` walks through
+granting it.
 
 Full walkthrough: [`skills/apple-cua/references/installation.md`](./skills/apple-cua/references/installation.md).
 

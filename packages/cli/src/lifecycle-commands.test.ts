@@ -39,6 +39,18 @@ describe("#given a person at the terminal #when apple-cua config asks #then Ente
 		expect(session.questions.some((question) => question.startsWith("  Remove apps"))).toBe(false);
 	});
 
+	it("on a first run, registers with the installed clients on Enter and with none on 'none'", async () => {
+		const enter = scripted(["", "", "", "", ""]);
+		const none = scripted(["", "", "", "", "none"]);
+
+		const accepted = await askForChanges(DEFAULT_SETTINGS, enter.ask, enter.say, ["omo", "claude"]);
+		const declined = await askForChanges(DEFAULT_SETTINGS, none.ask, none.say, ["omo", "claude"]);
+
+		expect(accepted.register).toEqual(["omo", "claude"]);
+		expect(enter.questions.at(-1)).toContain("Enter registers with the installed omo, claude");
+		expect(declined.register).toEqual([]);
+	});
+
 	it("offers removal and unregistering once there is something to remove", async () => {
 		const settings = { ...DEFAULT_SETTINGS, allowedApps: ["com.apple.TextEdit"], clients: ["omo"] as const };
 		const session = scripted(["", "all", "attended", "", "", "", "omo"]);

@@ -33,7 +33,13 @@ import { PhoneGuardSession, type PhoneToolSource } from "./phone-session.js";
 import { registerPhoneTools } from "./phone-tools.js";
 import { registerPowerTools } from "./power-tools.js";
 import { registerScriptTools } from "./script-tools.js";
-import { SELF_CHECK_FLAG, selfCheckReport } from "./self-check.js";
+import {
+	PERMISSION_REQUEST_FLAG,
+	SELF_CHECK_FLAG,
+	parsePermissionRequests,
+	requestPermissions,
+	selfCheckReport,
+} from "./self-check.js";
 import { SERVER_INFO } from "./server-info.js";
 import { toolNamesFor } from "./tool-names.js";
 import {
@@ -274,8 +280,12 @@ function isEntryPoint(): boolean {
 }
 
 if (isEntryPoint()) {
+	const requestIndex = process.argv.indexOf(PERMISSION_REQUEST_FLAG);
 	if (process.argv.includes(SELF_CHECK_FLAG)) {
 		process.stdout.write(`${JSON.stringify(selfCheckReport())}\n`, () => process.exit(0));
+	} else if (requestIndex !== -1) {
+		const report = requestPermissions(parsePermissionRequests(process.argv[requestIndex + 1] ?? ""));
+		process.stdout.write(`${JSON.stringify(report)}\n`, () => process.exit(0));
 	} else {
 		main().catch((error: unknown) => {
 			const details = error instanceof Error ? (error.stack ?? error.message) : String(error);

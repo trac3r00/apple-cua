@@ -14,10 +14,15 @@
 #   - through `apple-cua config`, $APPLE_CUA_HOME/config.json and the configs of the MCP clients you register with
 #     (backed up and merged; a client you never registered is not touched).
 #
-# The signed helper app ("apple-cua MCP") is built only when it is missing, fails its smoke run, was built from
+# The signed helper app ("apple-cua-mcp") is built only when it is missing, fails its smoke run, was built from
 # another launcher or Info.plist than this checkout has, or with --rebuild-helper: every build is a new code
-# identity, and macOS then asks for Screen Recording and Accessibility again. Granting those two permissions is the
-# one step left to do by hand; the closing doctor run says whether it is.
+# identity, and macOS then asks for Screen Recording and Accessibility again.
+#
+# In a terminal (and without --yes) setup asks what only a person can answer: whether to put apple-cua on PATH, on a
+# first run which apps agents may use and which MCP clients to register with, and then it walks through macOS's
+# permission dialogs for "apple-cua-mcp" (Accessibility, Screen Recording, Automation), opening System Settings and
+# waiting until each switch is on. Without a terminal it skips the questions and the closing doctor run lists what
+# is left.
 #
 # APPLE_CUA_MACOS_VERSION pretends this Mac runs another macOS version; it exists to test the version check.
 set -Eeuo pipefail
@@ -25,7 +30,7 @@ set -Eeuo pipefail
 readonly MIN_MACOS="15.0"
 readonly MIN_MACOS_NAME="Sequoia"
 readonly MIN_NODE_MAJOR=20
-readonly TOTAL_STEPS=11
+readonly TOTAL_STEPS=12
 readonly LAUNCHER_MARKER="# apple-cua-launcher checkout="
 readonly PATH_LINE_MARKER="# added by apple-cua"
 
@@ -49,6 +54,7 @@ readonly helper_launcher="$helper_app/Contents/MacOS/apple-cua-mcp"
 readonly helper_node="$helper_app/Contents/Resources/node"
 readonly helper_stamp="$helper_app/Contents/Resources/helper-inputs.sha256"
 readonly cli_js="$repo/packages/cli/dist/cli.js"
+readonly lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 rebuild_native=0
 rebuild_helper=0
@@ -82,11 +88,13 @@ Installs, builds and checks apple-cua in this checkout, and puts the apple-cua c
                           when their sources changed or a slice for this Mac is missing)
   --rebuild-helper        rebuild the signed helper app even if it works; macOS then asks for Screen Recording and
                           Accessibility again, because the rebuild is a new code identity
-  -y, --yes               do not ask; download Node.js when needed
+  -y, --yes               do not ask: download Node.js when needed, skip the first-run questions and the
+                          permission walk-through (apple-cua config and apple-cua permissions grant do them later)
   --no-doctor             skip the closing doctor run
   -h, --help              show this help
 
-Afterwards: apple-cua config (apps and MCP clients), apple-cua doctor [--fix], apple-cua update, apple-cua uninstall.
+Afterwards: apple-cua config (apps and MCP clients), apple-cua permissions grant, apple-cua doctor [--fix],
+apple-cua update, apple-cua uninstall.
 EOF
 }
 
@@ -214,6 +222,12 @@ confirm() {
 	fi
 	answer="${answer:-$default}"
 	[[ "$answer" == [Yy]* ]]
+}
+
+# Whether a person can be asked: not with --yes, and only when there is a terminal (stdin, or /dev/tty under
+# `curl ... | bash`).
+can_ask() {
+	((!assume_yes)) && { [[ -t 0 ]] || (: </dev/tty) 2>/dev/null; }
 }
 
 version_at_least() {
@@ -571,7 +585,7 @@ ok "built core, mcp, cli, pi-extension and agent"
 
 # --- 8. Signed helper app ----------------------------------------------------------------------------------------
 
-step "signed helper app (\"apple-cua MCP\")"
+step "signed helper app (\"apple-cua-mcp\")"
 helper_reason=""
 if ((rebuild_helper)); then
 	helper_reason="--rebuild-helper was given"
@@ -583,11 +597,15 @@ elif [[ -f "$helper_stamp" && "$(<"$helper_stamp")" != "$(bash "$repo/scripts/bu
 	helper_reason="this checkout has another launcher or Info.plist than the one it was built from"
 fi
 if [[ -z "$helper_reason" ]]; then
+	# Idempotent: System Settings lists the helper, and tccutil finds it, only once LaunchServices knows it.
+	"$lsregister" -f "$helper_app" || warn "LaunchServices did not register $helper_app, so System Settings may not list it"
 	ok "kept $helper_app ($(helper_identity)), so its permission grants still apply"
 else
 	if [[ -d "$helper_app" ]]; then
 		warn "rebuilding the helper because $helper_reason"
 		warn "the rebuild is a new code identity: macOS will ask again for Screen Recording and Accessibility"
+		info "helpers built before the apple-cua-mcp name was used are listed as \"node\" in Privacy & Security;"
+		info "that entry is no longer used and can be removed there with the minus button"
 	else
 		info "building it because $helper_reason"
 	fi
@@ -625,7 +643,8 @@ else
 			cua="apple-cua"
 			;;
 		*)
-			if ((add_path)); then
+			if ((add_path)) ||
+				{ can_ask && confirm "$bin_dir is not on PATH. Add it in $(shell_rc_file) (backed up first)?" y; }; then
 				add_to_path
 				cua="apple-cua"
 			else
@@ -647,14 +666,37 @@ done
 if ((allow_given)); then config_arguments+=(--disallow all --allow "$allow"); fi
 if [[ -n "$delivery" ]]; then config_arguments+=(--delivery "$delivery"); fi
 if [[ -n "$toolset" ]]; then config_arguments+=(--toolset "$toolset"); fi
-if ((${#config_arguments[@]} == 0)); then config_arguments=(--apply); fi
-if ! node "$cli_js" config "${config_arguments[@]}" 2>&1 | sed 's/^/          /'; then
-	fail "the MCP client registration did not complete" \
-		"read the messages above, then run: $cua config; a config file that could not be read was left untouched"
+if ((${#config_arguments[@]} == 0)) && [[ ! -e "$apple_cua_home/config.json" ]] && can_ask; then
+	info "first run: choose the apps agents may use and the MCP clients to register with"
+	# Its questions must reach the terminal, so its output is not piped through sed like the other steps'.
+	node "$cli_js" config ||
+		fail "apple-cua config did not complete" "read the messages above, then run: $cua config"
+	ok "apple-cua config (answered above)"
+else
+	if ((${#config_arguments[@]} == 0)); then config_arguments=(--apply); fi
+	if ! node "$cli_js" config "${config_arguments[@]}" 2>&1 | sed 's/^/          /'; then
+		fail "the MCP client registration did not complete" \
+			"read the messages above, then run: $cua config; a config file that could not be read was left untouched"
+	fi
+	ok "apple-cua config ${config_arguments[*]}"
 fi
-ok "apple-cua config ${config_arguments[*]}"
 
-# --- 11. Doctor --------------------------------------------------------------------------------------------------
+# --- 11. Permissions -----------------------------------------------------------------------------------------------
+
+step "permissions of \"apple-cua-mcp\" (Accessibility, Screen Recording, Automation)"
+if can_ask; then
+	# Shows macOS's dialogs, opens System Settings and waits for each switch; Enter skips one.
+	if node "$cli_js" permissions grant; then
+		ok "every permission is granted"
+	else
+		warn "some permissions are still missing; finish them any time with: $cua permissions grant"
+	fi
+else
+	ok "skipped: --yes was given, or there is no terminal to answer macOS's dialogs on"
+	info "grant them in a terminal with: $cua permissions grant"
+fi
+
+# --- 12. Doctor --------------------------------------------------------------------------------------------------
 
 step "doctor"
 if ((!run_doctor)); then
@@ -677,6 +719,7 @@ fi
 
 printf '\nNext:\n'
 printf '  %-28s %s\n' "$cua config" "choose the apps agents may use and the MCP clients to register with" \
+	"$cua permissions grant" "walk through the macOS permissions of \"apple-cua-mcp\"" \
 	"$cua doctor --fix" "check the installation and repair what is safe to repair" \
 	"$cua update" "update this checkout and everything setup built" \
 	"$cua uninstall" "remove apple-cua again"
@@ -684,8 +727,8 @@ printf '  %-28s %s\n' "$cua config" "choose the apps agents may use and the MCP 
 case "$doctor_verdict" in
 	ready) printf '\napple-cua is set up and ready.\n' ;;
 	manual)
-		printf '\napple-cua is set up. One step is left to do by hand: grant the permissions the doctor lists above to\n'
-		printf '"apple-cua MCP" in System Settings > Privacy & Security, then restart your MCP client.\n'
+		printf '\napple-cua is set up. One step is left: grant "apple-cua-mcp" the permissions the doctor lists above.\n'
+		printf 'Run %s permissions grant: it shows the dialogs, opens System Settings and waits for each switch.\n' "$cua"
 		;;
 	*)
 		fail "the doctor found problems beyond permissions" \

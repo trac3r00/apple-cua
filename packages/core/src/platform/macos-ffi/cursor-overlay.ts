@@ -112,10 +112,28 @@ function overlayBinaryPath(): string | undefined {
 
 // Default transport: send each command over a short-lived connection to the shared
 // overlay daemon, spawning the daemon (detached) whenever no one is listening.
-export function defaultSocketTransport(now: () => number = Date.now): OverlayTransport {
+export type SpawnOverlayProcess = (
+	command: string,
+	args: readonly string[],
+	options: { readonly detached: boolean; readonly stdio: "ignore" },
+) => {
+	on(event: "error", listener: (error: Error) => void): unknown;
+	unref(): void;
+};
+
+export function defaultSocketTransport(
+	now: () => number = Date.now,
+	spawnProcess: SpawnOverlayProcess = spawn,
+): OverlayTransport {
 	let lastSpawnAt = Number.NEGATIVE_INFINITY;
+	// A binary that cannot be executed (ENOENT/EACCES) will not become executable by retrying every
+	// second, so one failure turns daemon spawning off; the overlay then stays a silent no-op.
+	let spawnFailed = false;
 
 	function ensureDaemon(): void {
+		if (spawnFailed) {
+			return;
+		}
 		const time = now();
 		if (time - lastSpawnAt < DAEMON_RESPAWN_GUARD_MILLISECONDS) {
 			return;
@@ -126,9 +144,17 @@ export function defaultSocketTransport(now: () => number = Date.now): OverlayTra
 			return;
 		}
 		try {
-			const child = spawn(binaryPath, ["--socket", overlaySocketPath, "--idle", overlayIdleSeconds], {
+			const child = spawnProcess(binaryPath, ["--socket", overlaySocketPath, "--idle", overlayIdleSeconds], {
 				detached: true,
 				stdio: "ignore",
+			});
+			// Spawn failures such as ENOENT arrive asynchronously as an 'error' event; without a listener
+			// Node rethrows it as an uncaught exception and takes the whole server down.
+			child.on("error", (error: Error) => {
+				if (!spawnFailed) {
+					spawnFailed = true;
+					process.stderr.write(`apple-cua: cursor overlay unavailable, continuing without it: ${error.message}\n`);
+				}
 			});
 			child.unref();
 		} catch {}

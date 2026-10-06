@@ -6,7 +6,7 @@ vi.mock("node:fs", () => ({ existsSync: () => true }));
 vi.mock("node:child_process", () => ({
 	spawn: () => {
 		spawned.count += 1;
-		return { unref: () => undefined };
+		return { on: () => undefined, unref: () => undefined };
 	},
 }));
 // Nobody listens on the socket: every connection fails, as after the daemon's idle exit.

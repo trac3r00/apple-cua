@@ -41,9 +41,11 @@ export async function click(
 	const modifiers = normalizeModifiers(input.modifiers);
 	if (input.element_index !== undefined) {
 		const index = parseElementIndex(input.element_index);
-		if (modifiers.length > 0) {
-			// AXPress cannot carry modifiers, so the element is clicked at its centre through the pointer route.
-			const centre = await elementCentre(computer, targetPid, index, "click with modifiers");
+		if (modifiers.length > 0 || button !== "left") {
+			// AXPress is a plain left press: it carries no modifiers and cannot be a right or middle click (pressing
+			// a Delete button instead of opening its context menu). The element's centre goes through the pointer route.
+			const gesture = button === "left" ? "click with modifiers" : `${button}-click`;
+			const centre = await elementCentre(computer, targetPid, index, gesture);
 			return await clickScreenPoint(computer, targetPid, centre, button, pressCount, modifiers);
 		}
 		try {

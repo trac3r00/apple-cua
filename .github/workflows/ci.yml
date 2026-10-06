@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -14,8 +14,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Seconds on Linux: catches formatting, shell and workflow mistakes before four macOS runners spend minutes each.
+  preflight:
+    name: preflight (Biome, shellcheck, actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # Takes the Biome version from pnpm-lock.yaml.
+      - uses: biomejs/setup-biome@v2
+      - name: Biome
+        run: biome ci .
+      - name: shellcheck
+        run: shellcheck install.sh scripts/*.sh packages/core/native/build.sh
+      - name: actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+
   check:
     name: ${{ matrix.runner }} (${{ matrix.arch }})
+    needs: preflight
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:

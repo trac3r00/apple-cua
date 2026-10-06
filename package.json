@@ -18,9 +18,10 @@
 		"lint:fix": "biome check . --write",
 		"test": "vitest --run",
 		"test:watch": "vitest",
-		"check": "biome check . && pnpm -r typecheck && pnpm typecheck:tests && vitest --run",
+		"check": "biome check . && pnpm -r typecheck && pnpm typecheck:tests && vitest --run && pnpm test:scripts",
 		"setup": "./scripts/setup.sh",
-		"doctor": "node packages/cli/dist/cli.js doctor"
+		"doctor": "node packages/cli/dist/cli.js doctor",
+		"test:scripts": "node --test scripts/bench-v2/*.test.mjs"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",

@@ -2,15 +2,15 @@
 # Installs apple-cua for this user: clones it into ~/.apple-cua/app, runs its setup, and puts the `apple-cua`
 # command into ~/.local/bin.
 #
-#   curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/master/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/master/install.sh | bash -s -- --add-to-path
+#   curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash -s -- --add-to-path
 #
 # Options go to scripts/setup.sh: --add-to-path (append the line that puts ~/.local/bin on PATH to your shell
 # startup file, backed up first), --register omo|claude|codex|json, --allow <apps>, --yes, ...
 #
 #   APPLE_CUA_HOME     where apple-cua keeps its state, and the checkout in app/ (default ~/.apple-cua)
 #   APPLE_CUA_REPO     the git repository to clone (default https://github.com/trac3r00/apple-cua.git)
-#   APPLE_CUA_REF      the branch, tag or commit to install (default master)
+#   APPLE_CUA_REF      the branch, tag or commit to install (default main)
 #   APPLE_CUA_BIN_DIR  where the apple-cua command goes (default ~/.local/bin)
 #
 # Running it again repairs the installation. `apple-cua update` updates it; `apple-cua uninstall` removes it.
@@ -41,7 +41,7 @@ json_string() {
 
 usage() {
 	cat <<'EOF'
-usage: curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/master/install.sh | bash [-s -- options]
+usage: curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash [-s -- options]
 
 Clones apple-cua into ~/.apple-cua/app (APPLE_CUA_HOME), runs its scripts/setup.sh, and installs the apple-cua
 command into ~/.local/bin (APPLE_CUA_BIN_DIR). APPLE_CUA_REPO and APPLE_CUA_REF choose what to clone.
@@ -64,7 +64,7 @@ main() {
 	done
 	local home="${APPLE_CUA_HOME:-$HOME/.apple-cua}"
 	local repo="${APPLE_CUA_REPO:-https://github.com/trac3r00/apple-cua.git}"
-	local ref="${APPLE_CUA_REF:-master}"
+	local ref="${APPLE_CUA_REF:-main}"
 	if [[ "$home" != /* ]]; then
 		home="$PWD/$home"
 	fi

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
 	StopSwitch,
@@ -32,6 +33,7 @@ import { PhoneGuardSession, type PhoneToolSource } from "./phone-session.js";
 import { registerPhoneTools } from "./phone-tools.js";
 import { registerPowerTools } from "./power-tools.js";
 import { registerScriptTools } from "./script-tools.js";
+import { SELF_CHECK_FLAG, selfCheckReport } from "./self-check.js";
 import { SERVER_INFO } from "./server-info.js";
 import { toolNamesFor } from "./tool-names.js";
 import {
@@ -254,10 +256,31 @@ function exitOnTerminationSignals(): void {
 	}
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	main().catch((error: unknown) => {
-		const details = error instanceof Error ? (error.stack ?? error.message) : String(error);
-		process.stderr.write(`Fatal error: ${details}\n`);
-		process.exit(1);
-	});
+/**
+ * Whether this file is the process entry point. The loader resolves the module's own path through symlinks while
+ * argv keeps the path as typed, so both sides are compared as real paths: a checkout under a symlinked directory
+ * (/tmp is one on macOS) would otherwise never start the server.
+ */
+function isEntryPoint(): boolean {
+	const entry = process.argv[1];
+	if (entry === undefined) {
+		return false;
+	}
+	try {
+		return realpathSync(entry) === fileURLToPath(import.meta.url);
+	} catch {
+		return false;
+	}
+}
+
+if (isEntryPoint()) {
+	if (process.argv.includes(SELF_CHECK_FLAG)) {
+		process.stdout.write(`${JSON.stringify(selfCheckReport())}\n`, () => process.exit(0));
+	} else {
+		main().catch((error: unknown) => {
+			const details = error instanceof Error ? (error.stack ?? error.message) : String(error);
+			process.stderr.write(`Fatal error: ${details}\n`);
+			process.exit(1);
+		});
+	}
 }

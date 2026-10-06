@@ -74,6 +74,9 @@ const CGEventPostToPSN = coreGraphics.func("CGEventPostToPSN", "void", ["void *"
 
 const objcGetClass = objc.func("objc_getClass", "void *", ["str"]) as KoffiFunc<(name: string) => object | null>;
 const selRegisterName = objc.func("sel_registerName", "void *", ["str"]) as KoffiFunc<(name: string) => object | null>;
+const classGetClassMethod = objc.func("class_getClassMethod", "void *", ["void *", "void *"]) as KoffiFunc<
+	(cls: object, selector: object) => object | null
+>;
 const objcMsgSendAuthenticationMessage = objc.func("objc_msgSend", "void *", [
 	"void *",
 	"void *",
@@ -86,6 +89,16 @@ const objcMsgSendAuthenticationMessage = objc.func("objc_msgSend", "void *", [
 
 const authenticationMessageClass = objcGetClass("SLSEventAuthenticationMessage");
 const authenticationMessageSelector = selRegisterName("messageWithEventRecord:pid:version:");
+/**
+ * macOS 14 ships SLSEventAuthenticationMessage without +messageWithEventRecord:pid:version: (it arrived in macOS
+ * 15), and sending a class a selector it does not implement raises an Objective-C exception that aborts the whole
+ * process. Asked once up front, so there authenticated delivery reports itself unavailable and keyboard input takes
+ * the window owner's CoreGraphics path instead.
+ */
+const authenticationMessageAvailable =
+	authenticationMessageClass !== null &&
+	authenticationMessageSelector !== null &&
+	classGetClassMethod(authenticationMessageClass, authenticationMessageSelector) !== null;
 const K_CPS_NO_WINDOWS = 0x400;
 const K_CPS_USER_GENERATED = 0x200;
 
@@ -280,7 +293,11 @@ function processSerialNumberForWindow(windowId: number): Buffer | null {
 }
 
 function authenticationMessage(pid: number, event: CGEventRef): object | null {
-	if (authenticationMessageClass === null || authenticationMessageSelector === null) {
+	if (
+		!authenticationMessageAvailable ||
+		authenticationMessageClass === null ||
+		authenticationMessageSelector === null
+	) {
 		return null;
 	}
 	const record = eventRecord(event);

@@ -72,6 +72,7 @@ export {
 export { type AppApprovalDecision, AppApprovalStore } from "./permission/app-approval.js";
 export { type LockScreenMonitorCallbacks, LockScreenMonitor } from "./platform/lock-screen-monitor.js";
 export { type HostCapabilities, probeHostCapabilities } from "./platform/host-capabilities.js";
+export { getSckitLoadError, isSckitAvailable } from "./platform/macos-ffi/sckit.js";
 export {
 	type PassiveMemoryConfig,
 	type PassiveMemoryContext,

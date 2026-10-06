@@ -1,40 +1,55 @@
 # Installation and local permissions
 
-apple-cua runs on the Mac being controlled, in its logged-in graphical session: macOS 14 (Sonoma)
-or later, on Apple Silicon or Intel. Autonomous harnesses should use the guarded MCP server. See
+apple-cua runs on the Mac being controlled, in its logged-in graphical session: macOS 15 (Sequoia)
+or macOS 26 (Tahoe), on Apple Silicon or Intel. Older macOS versions are not supported; setup and the
+doctor refuse them. Autonomous harnesses should use the guarded MCP server. See
 [harness configuration](harnesses.md) for OpenClaw/Hermes examples and the required local app
 allowlist.
 
 ## Install with one command
 
 ```bash
-git clone https://github.com/trac3r00/apple-cua.git && cd apple-cua && ./scripts/setup.sh
+curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/master/install.sh | bash
 ```
 
-`setup.sh` is safe to re-run and stops with an actionable message when something is missing. It
-checks macOS and the Xcode Command Line Tools (`xcode-select --install` when they are absent), uses
-Node.js 20+ from PATH or downloads the official LTS into `~/.apple-cua/node` (verified against
+The installer clones apple-cua into `~/.apple-cua/app`, runs `scripts/setup.sh` there, and puts the
+`apple-cua` command into `~/.local/bin`. With `bash -s -- --add-to-path` it also appends the one line
+that puts `~/.local/bin` on `PATH` to your shell startup file, after backing the file up; without it,
+setup prints the line to add. `APPLE_CUA_HOME`, `APPLE_CUA_REPO`, `APPLE_CUA_REF` and
+`APPLE_CUA_BIN_DIR` override where it installs and what it clones. In a checkout of your own,
+`./scripts/setup.sh` does the same for that checkout. Running either again repairs the installation.
+
+Setup is safe to re-run and stops with an actionable message when something is missing. It checks
+macOS and the Xcode Command Line Tools (`xcode-select --install` when they are absent), uses Node.js
+20+ from PATH or downloads the official LTS into `~/.apple-cua/node` (verified against
 `SHASUMS256.txt`), installs with the pnpm version `package.json` pins, builds every package, keeps
 the committed universal (arm64 + x86_64) native binaries unless their sources changed, builds the
-signed helper app "apple-cua MCP" only when it is missing or broken, and ends with
-`apple-cua doctor`. Flags: `--register omo|claude|codex|json` (repeatable), `--allow <bundle ids>`,
-`--delivery background|attended`, `--toolset lean|full`, `--rebuild-native`, `--rebuild-helper`,
-`--yes`.
+signed helper app "apple-cua MCP" only when it is missing, broken or built from another launcher,
+installs the `apple-cua` command, re-applies your MCP client registrations, and ends with
+`apple-cua doctor`. Flags: `--add-to-path`, `--rebuild-native`, `--rebuild-helper`, `--yes`,
+`--no-doctor`, and `--register`, `--allow`, `--delivery`, `--toolset` as shortcuts for
+`apple-cua config`.
 
 The built entry points are:
 
-- CLI: `packages/cli/dist/cli.js`
+- CLI: the `apple-cua` command (a launcher for `packages/cli/dist/cli.js`)
 - Stdio MCP: `packages/mcp/dist/server.js`, launched through the helper as
   `packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp <absolute path to server.js>`
 
-Use absolute paths in harness configuration; `./scripts/setup.sh --register json` prints a ready
+Use absolute paths in harness configuration; `apple-cua config --register json` prints a ready
 block. The optional Pi extension is not required for Hermes, OpenClaw or another MCP client. Do not
 assume workspace-local bin aliases are on PATH in a background gateway process.
 
-## Register with an MCP client
+## Configure apps and MCP clients
 
-`./scripts/setup.sh --register <client>` (or `node scripts/register-mcp.mjs <client>` once setup
-has run) writes the helper and this checkout's absolute paths into the client:
+`apple-cua config` keeps the settings in `~/.apple-cua/config.json` and writes them into every client
+it is registered with. Without flags, in a terminal, it asks one question per setting; with flags it
+asks nothing:
+
+```bash
+apple-cua config --allow TextEdit,com.apple.finder --register omo,codex
+apple-cua config --show
+```
 
 | Client | Where |
 |---|---|
@@ -43,10 +58,11 @@ has run) writes the helper and this checkout's absolute paths into the client:
 | `codex` | `~/.codex/config.toml`, `[mcp_servers.apple-cua]` |
 | `json` | prints a block to paste into any other client |
 
-A file is copied to `<file>.bak-<timestamp>` before it changes, and merged: other servers and
-settings, and unknown keys of an existing `apple-cua` entry, are kept, and an option left out keeps
-the entry's current value. Repeating a registration changes nothing. Without `--register`, setup
-neither reads nor writes any client configuration.
+Apps are given by name (resolved to their bundle id) or by bundle id. A client config file is copied
+to `<file>.bak-<timestamp>` before it changes, and merged: other servers and settings, and unknown
+keys of an existing `apple-cua` entry, are kept. Repeating a registration that already matches changes
+nothing. `--unregister <client>` removes only the `apple-cua` entry. A client you never registered
+is never read or written.
 
 ## Grant permissions through the user
 
@@ -56,35 +72,55 @@ The process macOS identifies needs:
 - **Accessibility** for AX queries/actions and native input.
 - **Automation / Apple Events** where System Events or browser scripting is used.
 
-Through the helper that process is **apple-cua MCP**: grant it Screen Recording and Accessibility
-in **System Settings → Privacy & Security** once, then restart the MCP client. It is listed there
-after the server first asks, and can also be added with + from
-`packages/mcp/dist/apple-cua-mcp.app`. Re-running setup keeps the helper and so the grants;
-`--rebuild-helper` creates a new code identity that macOS asks about again. The CLI, and a server
-started with plain `node`, use the identity of the terminal, app or launcher that starts them
-instead. Permission state belongs to the real process chain and user account, not to a project
-directory. A working terminal test does not prove a separately launched gateway has the same grants.
+Through the helper that process is **apple-cua MCP**: grant it Accessibility and Screen & System
+Audio Recording in **System Settings → Privacy & Security** once, then restart the MCP client;
+`apple-cua doctor --fix` opens the pane. It is listed there after the server first asks, and can also
+be added with + from `packages/mcp/dist/apple-cua-mcp.app` in the checkout. Setup and
+`apple-cua update` keep the helper, and so the grants, unless its launcher or Info.plist changed;
+`apple-cua doctor --fix --rebuild-helper` creates a new code identity that macOS asks about again.
+The CLI, and a server started with plain `node`, use the identity of the terminal, app or launcher
+that starts them instead. Permission state belongs to the real process chain and user account, not
+to a project directory. A working terminal test does not prove a separately launched gateway has the
+same grants.
 
 Do not automate clicks to approve permissions. If a request is denied or the captured image
 is unusable, stop input and resolve the permission issue with the human. Restart the relevant
 launcher if macOS requires it after a grant.
 
-Read-only checks from the checkout; none of them raises a permission prompt:
+Read-only checks; none of them raises a permission prompt:
 
 ```bash
-node packages/cli/dist/cli.js doctor          # binaries, Node, helper, the helper's grants, stop switch; exit 0 = ready
-node packages/cli/dist/cli.js --json doctor   # the same report as JSON
-node packages/cli/dist/cli.js permissions check screen
-node packages/cli/dist/cli.js permissions check accessibility
-node packages/cli/dist/cli.js permissions check apple-events
-node packages/cli/dist/cli.js --json apps list
+apple-cua doctor                  # Mac, Node, binaries, helper, its grants, client registrations, stop switch; exit 0 = ready
+apple-cua --json doctor           # the same report as JSON
+apple-cua config --show           # the settings and where each client is registered
+apple-cua permissions check screen
+apple-cua permissions check accessibility
+apple-cua permissions check apple-events
+apple-cua --json apps list
 ```
+
+## Repair, update and uninstall
+
+- `apple-cua doctor --fix` rebuilds missing or outdated native binaries and re-registers clients
+  whose entry went stale. It asks before rebuilding a broken helper (`--rebuild-helper` consents up
+  front) and before lifting a stop, opens System Settings at a missing permission (`--no-open`
+  prints the command instead), and reports what it fixed and what is left.
+- `apple-cua update` refuses a checkout with local changes or commits its upstream lacks, then
+  fast-forwards it, reruns setup, re-applies the registrations, runs the doctor, and prints the old
+  and new version and commit. It warns first when the helper must be rebuilt, since the rebuilt
+  helper needs both permissions again.
+- `apple-cua uninstall` lists what it will remove and asks first (`--yes` skips the question,
+  `--dry-run` only lists): this installation's client registrations (each file backed up first),
+  running apple-cua servers and the cursor overlay, the helper app and its Accessibility and Screen
+  Recording entries, the `apple-cua` command and its PATH line, `~/.apple-cua`, and the checkout if
+  the installer created it. A developer checkout stays unless `--purge` is given. Registrations,
+  launchers and permissions that belong to another installation are left alone.
 
 ## Configure MCP app approval
 
-The host owner sets `APPLE_CUA_ALLOWED_BUNDLE_IDS` to exact approved bundle IDs. Empty or
-unset defaults to no approved apps. The server does not expose an approval tool to the model.
-Example for a host-authorized TextEdit task:
+The host owner sets `APPLE_CUA_ALLOWED_BUNDLE_IDS` to exact approved bundle IDs; `apple-cua config
+--allow` writes it into every registration. Empty or unset defaults to no approved apps. The server
+does not expose an approval tool to the model. Example for a host-authorized TextEdit task:
 
 ```bash
 APPLE_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit node packages/mcp/dist/server.js
@@ -113,13 +149,6 @@ The user must also pair iPhone Mirroring with the phone by hand once and unlock 
 work is running; a locked phone pauses mirroring. A session that is `blocked` (an interstitial
 is on screen) or `not-running` is refused, with the message relayed to the user. apple-cua
 never taps through an interstitial and never types a password for the user.
-
-## Optional CLI alias
-
-After building, either keep using `node /absolute/path/to/packages/cli/dist/cli.js` or create an
-alias/symlink in a directory already on your PATH. Do not replace an existing installation
-without checking it. Direct CLI commands are low-level and do not enforce MCP observation
-tokens or the server's app allowlist.
 
 ## Smoke-test without input
 

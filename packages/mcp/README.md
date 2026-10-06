@@ -20,9 +20,11 @@ APPLE_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit node packages/mcp/dist/server.js
 scripts/build-tcc-helper.sh
 ```
 
-The helper bundles a self-contained `node` (Homebrew's build links `libnode.dylib` and cannot be
-copied into a bundle); set `APPLE_CUA_NODE` to choose one, and `APPLE_CUA_SIGN_IDENTITY` to keep a
-stable code identity across rebuilds.
+The helper bundles a self-contained `node` built for this Mac's CPU (Homebrew's build links
+`libnode.dylib` and cannot be copied into a bundle); set `APPLE_CUA_NODE` to choose one,
+`APPLE_CUA_BUNDLE_ID` for another bundle id, and `APPLE_CUA_SIGN_IDENTITY` to keep a stable code
+identity across rebuilds. `apple-cua config --register` writes the helper into Omo, Claude Code or
+Codex.
 
 Docs: [root README](../../README.md) · [usage](../../skills/apple-cua/references/usage.md) ·
 [harness setup](../../skills/apple-cua/references/harnesses.md). MIT licensed — see [LICENSE](../../LICENSE).

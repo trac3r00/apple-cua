@@ -6,7 +6,7 @@ Native macOS computer-use control, designed for the OpenAI computer-use action v
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js >=20](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
-[![platform: macOS 14+, Apple Silicon and Intel](https://img.shields.io/badge/platform-macOS%2014%2B%20%C2%B7%20Apple%20Silicon%20%7C%20Intel-blue.svg)](#permissions)
+[![platform: macOS 15+, Apple Silicon and Intel](https://img.shields.io/badge/platform-macOS%2015%2B%20%C2%B7%20Apple%20Silicon%20%7C%20Intel-blue.svg)](#permissions)
 [![MCP: stdio server](https://img.shields.io/badge/MCP-stdio%20server-6f42c1.svg)](#mcp-server)
 
 **Contents** — [Why this exists](#why-this-exists) · [Quickstart](#quickstart) · [The four surfaces](#the-four-surfaces) · [MCP server](#mcp-server) · [Targeting by description](#targeting-elements-by-description) · [Observation cost](#observation-cost) · [Action surface](#action-surface) · [Permissions](#permissions) · [Architecture](#architecture) · [Repository layout](#repository-layout) · [Roadmap](#roadmap) · [Development](#development) · [Comparison](#comparison-vs-cua--codex) · [License](#license)
@@ -33,11 +33,16 @@ The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-co
 ## Quickstart
 
 ```bash
-git clone https://github.com/trac3r00/apple-cua.git && cd apple-cua && ./scripts/setup.sh
+curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/master/install.sh | bash
 ```
 
-One command on any Mac with **macOS 14 (Sonoma) or later**, **Apple Silicon or Intel**. `setup.sh` is safe to re-run:
-every step checks before it acts, and a run after a failure picks up where the last one stopped. It
+One command on a Mac with **macOS 15 (Sequoia) or macOS 26 (Tahoe)**, **Apple Silicon or Intel**. It clones apple-cua
+into `~/.apple-cua/app`, runs its `scripts/setup.sh`, and puts the `apple-cua` command into `~/.local/bin`. Use
+`bash -s -- --add-to-path` to also add the one line that puts `~/.local/bin` on your `PATH` (your shell startup file
+is backed up first). In a checkout of your own, `./scripts/setup.sh` does the same for that checkout.
+
+Setup is safe to re-run: every step checks before it acts, and a run after a failure picks up where the last one
+stopped. It
 
 1. checks the macOS version and CPU, and the Xcode Command Line Tools (it tells you to run `xcode-select --install`
    when they are missing);
@@ -45,64 +50,104 @@ every step checks before it acts, and a run after a failure picks up where the l
    nodejs.org's `SHASUMS256.txt`;
 3. runs the pnpm version `package.json` pins, `pnpm install --frozen-lockfile`, and builds every package;
 4. uses the committed universal (arm64 + x86_64) native binaries, rebuilding them only when their sources changed;
-5. builds the signed helper app **apple-cua MCP** only when it is missing or broken, bundling a self-contained
-   `node` (Homebrew's links `libnode.dylib` and cannot be bundled, so setup downloads the official build instead);
-6. finishes with `apple-cua doctor`.
+5. builds the signed helper app **apple-cua MCP** only when it is missing, broken, or built from another launcher than
+   the checkout has, bundling a self-contained `node` for this Mac's CPU (Homebrew's links `libnode.dylib` and cannot
+   be bundled, so setup downloads the official build instead);
+6. installs the `apple-cua` command, writes your saved settings into every MCP client you registered, and finishes
+   with `apple-cua doctor`.
 
-It changes nothing outside the checkout and `~/.apple-cua` unless you ask it to register the MCP server with a client.
-Config files are backed up (`<file>.bak-<timestamp>`) and merged, never replaced:
+From then on one command covers the whole lifecycle:
 
-```bash
-./scripts/setup.sh --register claude --allow com.apple.TextEdit,com.apple.finder
-./scripts/setup.sh --register omo --register codex --toolset lean
-./scripts/setup.sh --register json       # prints a block to paste into any other client
-```
-
-| Flag | Effect |
+| Command | What it does |
 |---|---|
-| `--register omo\|claude\|codex\|json` | Omo (`~/.omo/agent/mcp.json`), Claude Code (`claude mcp add --scope user`), Codex (`~/.codex/config.toml`), or a printed JSON block. Repeatable. |
-| `--allow <bundle ids>` | Apps the server may observe and drive (`APPLE_CUA_ALLOWED_BUNDLE_IDS`). Left out, an existing list is kept; with no list, no app is approved. |
-| `--delivery background\|attended`, `--toolset lean\|full` | Written into the registration as `APPLE_CUA_DELIVERY` and `APPLE_CUA_TOOLSET`. |
-| `--rebuild-native` | Rebuild `packages/core/native` even though the committed binaries match their sources. |
-| `--rebuild-helper` | Rebuild the helper even though it works. Each build is a new code identity, so macOS asks for both permissions again. |
-| `--yes` | Never ask: download Node.js when needed and keep the current allow list. |
+| `apple-cua config` | Choose the apps agents may use and the MCP clients to register with; asks in a terminal, takes flags in scripts |
+| `apple-cua doctor [--fix]` | Check everything without raising a permission prompt; `--fix` repairs what is safe and asks before the rest |
+| `apple-cua update` | Fast-forward the checkout, rerun setup, re-apply the registrations, run the doctor |
+| `apple-cua uninstall` | Remove the registrations (backed up), the helper and its permissions, the command and its PATH line, `~/.apple-cua`, and the checkout the installer made |
 
-**The one manual step.** Only a person can grant macOS privacy permissions. Grant **Accessibility** and **Screen
-Recording** to **apple-cua MCP** in System Settings → Privacy & Security, once, then restart your MCP client. The app is
-listed there after the server first asks; you can also add `packages/mcp/dist/apple-cua-mcp.app` with **+**. Re-running
-`setup.sh` keeps the existing helper, so the grants keep working.
+### Configure
 
-**Check the installation** at any time. The doctor never raises a permission prompt: it reads the helper's own
-permissions by running the server through it in a read-only self-check (`server.js --doctor`), and exits 0 when
-everything is in place, 1 otherwise, with the fix for each failing item.
+Settings live in `~/.apple-cua/config.json` and are the source of truth for every registration: each registered
+client's `apple-cua` entry carries them as environment variables, and changing a setting rewrites every registration.
+Client config files are merged, never replaced: other servers stay as they are, and a file is copied to
+`<file>.bak-<timestamp>` before it changes.
 
 ```bash
-node packages/cli/dist/cli.js doctor      # or: pnpm doctor; add --json for a machine-readable report
+apple-cua config                                       # in a terminal: asks, and Enter keeps a value
+apple-cua config --allow TextEdit,com.apple.finder     # approve apps by name or bundle id
+apple-cua config --register omo,codex --toolset lean   # omo, claude, codex, or json (prints a block to paste)
+apple-cua config --unregister codex --disallow all
+apple-cua config --show                                # the settings, and where each client is registered
 ```
+
+| Option | Effect |
+|---|---|
+| `--allow <apps>`, `--disallow <apps>` | Approve or withdraw apps (`APPLE_CUA_ALLOWED_BUNDLE_IDS`); `--disallow all` empties the list. With no app approved, agents can list apps but not observe or drive them. |
+| `--register`, `--unregister omo\|claude\|codex\|json` | Omo (`~/.omo/agent/mcp.json`), Claude Code (`claude mcp add --scope user`), Codex (`~/.codex/config.toml`), or a printed JSON block for any other client. |
+| `--delivery background\|attended`, `--toolset full\|lean`, `--iphone`, `--no-iphone` | `APPLE_CUA_DELIVERY`, `APPLE_CUA_TOOLSET` and `APPLE_CUA_IPHONE` in every registration. |
+| `--apply` | Write the saved settings into every registered client again; setup and `apple-cua update` do this. |
+
+### The one manual step
+
+Only a person can grant macOS privacy permissions. Grant **Accessibility** and **Screen & System Audio Recording** to
+**apple-cua MCP** in System Settings → Privacy & Security, once, then restart your MCP client; `apple-cua doctor --fix`
+opens the pane. The app is listed there after the server first asks, or add
+`~/.apple-cua/app/packages/mcp/dist/apple-cua-mcp.app` with **+**. Setup and updates keep the helper unless its
+launcher changed, so the grants keep working.
+
+### Check and repair
+
+The doctor never raises a permission prompt: it reads the helper's own permissions by running the server through it
+in a read-only self-check (`server.js --doctor`), and exits 0 when everything is in place, 1 otherwise, with the fix
+for each item. It also catches an Intel build of Node running under Rosetta on Apple Silicon and points to the native
+one.
 
 ```text
 apple-cua doctor
   ok    macOS 26.7 on Apple Silicon (arm64)
-  ok    Node v26.5.0 (/opt/homebrew/Cellar/node/26.5.0/bin/node)
+  ok    Node v22.23.2 (/Users/you/.apple-cua/node/bin/node)
   ok    libsckit.dylib: x86_64 + arm64
   ok    cursor-overlay: x86_64 + arm64
-  ok    MCP server built (/Users/you/apple-cua/packages/mcp/dist/server.js)
-  ok    helper app /Users/you/apple-cua/packages/mcp/dist/apple-cua-mcp.app (signature valid, bundled Node v22.23.2)
+  ok    MCP server built (/Users/you/.apple-cua/app/packages/mcp/dist/server.js)
+  ok    helper app /Users/you/.apple-cua/app/packages/mcp/dist/apple-cua-mcp.app (signature valid, bundled Node v22.23.2)
   ok    server.js answered through the helper (Node v22.23.2, arm64)
   ok    Accessibility granted to "apple-cua MCP"
   FAIL  Screen Recording not granted to "apple-cua MCP" (needed for screenshots)
   ok    ScreenCaptureKit capture loads in the helper
+  ok    omo: registered in ~/.omo/agent/mcp.json
   ok    stop switch: not stopped (Control+Option+Command or `apple-cua stop` stops every agent)
 
 Installed. One manual step remains, granting permissions to "apple-cua MCP":
-  1. Grant Screen Recording to "apple-cua MCP" in System Settings > Privacy & Security > Screen Recording. ...
+  1. Grant Screen Recording to "apple-cua MCP" in System Settings > Privacy & Security > Screen & System Audio Recording (apple-cua doctor --fix opens it). ...
 ```
 
-The CLI is built too. It runs with your terminal's permissions rather than the helper's, so CLI screenshots need
-Screen Recording granted to the terminal:
+`apple-cua doctor --fix` rebuilds missing or outdated native binaries and re-registers clients whose entry went stale.
+It asks before rebuilding a broken helper, because a rebuild is a new code identity that needs both permissions again
+(`--rebuild-helper` consents up front), and before lifting a stop. It opens System Settings at a missing permission
+(`--no-open` prints the command instead) and ends with what it fixed and what is left.
+
+### Update and uninstall
+
+`apple-cua update` refuses when the checkout has local changes or commits its upstream lacks, then fast-forwards to the
+upstream (the ref the installer cloned), reruns setup and prints the old and new version and commit. When an update
+changes the helper's launcher or Info.plist, it says so first, since the rebuilt helper needs both permissions again.
+
+`apple-cua uninstall` lists what it will remove and asks (`--yes` skips the question, `--dry-run` only lists): this
+installation's registration in every client config (each file backed up first), running apple-cua servers and the
+cursor overlay, the helper app and its Accessibility and Screen Recording entries (`tccutil reset`), the `apple-cua`
+command and the PATH line setup added, `~/.apple-cua`, and the checkout if the installer created it. A developer
+checkout stays unless you add `--purge`.
+
+The installer reads `APPLE_CUA_HOME` (default `~/.apple-cua`), `APPLE_CUA_REPO`, `APPLE_CUA_REF` (default `master`) and
+`APPLE_CUA_BIN_DIR` (default `~/.local/bin`); `APPLE_CUA_BUNDLE_ID` gives the helper another bundle id.
+`./scripts/setup.sh --help` lists setup's own options (`--rebuild-native`, `--rebuild-helper`, `--yes`, `--no-doctor`,
+and shortcuts for `apple-cua config`).
+
+The CLI runs with your terminal's permissions rather than the helper's, so CLI screenshots need Screen Recording granted
+to the terminal:
 
 ```bash
-node packages/cli/dist/cli.js screenshot -o /tmp/shot.png
+apple-cua screenshot -o /tmp/shot.png
 ```
 
 See [`skills/apple-cua/references/installation.md`](./skills/apple-cua/references/installation.md) for the full
@@ -213,10 +258,11 @@ Merge configuration rather than replacing unrelated settings.
 }
 ```
 
-For a grant that survives rebuilds, run the server through the signed helper app instead of
-`node` directly: the bundle carries its own TCC identity (`dev.applecua.mcp`), so Screen
-Recording and Accessibility attach to it rather than to whatever launched the server.
-`./scripts/setup.sh` builds it, and `--register` writes it into Omo, Claude Code or Codex. By hand:
+For a grant that survives updates, run the server through the signed helper app instead of
+`node` directly: the bundle carries its own TCC identity (`dev.applecua.mcp`, or `APPLE_CUA_BUNDLE_ID`), so Screen
+Recording and Accessibility attach to it rather than to whatever launched the server. Setup builds it, and
+`apple-cua config --register` writes it into Omo, Claude Code or Codex (`--register json` prints the block for any
+other client). By hand:
 
 ```bash
 scripts/build-tcc-helper.sh
@@ -228,13 +274,14 @@ grok mcp add apple-cua -s user \
 ```
 
 The first run prompts for Screen Recording and Accessibility for "apple-cua MCP"; grant both in
-System Settings and restart the server. The helper bundles a self-contained `node` (Homebrew's build
-links `libnode.dylib` and cannot be copied into a bundle), resolved in this order: `APPLE_CUA_NODE`,
-then the first standalone node on `PATH`, then `~/.local/bin/node` and `/usr/local/bin/node` — and the
-build fails loudly when none of them is self-contained. `setup.sh` passes `APPLE_CUA_NODE` itself and
-downloads the official Node.js LTS when no self-contained node exists. Ad-hoc signing gives each rebuild a new code
-identity, so macOS asks for the two grants again after a rebuild; set `APPLE_CUA_SIGN_IDENTITY` to a
-stable certificate to keep one identity across builds.
+System Settings and restart the server. The helper bundles a self-contained `node` built for this Mac's CPU
+(Homebrew's build links `libnode.dylib` and cannot be copied into a bundle), resolved in this order: `APPLE_CUA_NODE`,
+then the first standalone node on `PATH`, then `~/.local/bin/node`, `/usr/local/bin/node` and `~/.apple-cua/node` —
+and the build fails loudly when none of them fits. `setup.sh` passes `APPLE_CUA_NODE` itself and downloads the
+official Node.js LTS when no self-contained node exists. Ad-hoc signing gives each rebuild a new code identity, so
+macOS asks for the two grants again after a rebuild; setup therefore rebuilds the helper only when its launcher or
+Info.plist changed (each build records their digest in `Contents/Resources/helper-inputs.sha256`), and
+`APPLE_CUA_SIGN_IDENTITY` set to a stable certificate keeps one identity across builds.
 
 Beyond observe-and-act tools, the server offers `run_script` (one JavaScript body that loops, branches and
 reads while every action stays token-guarded and verified), `get_capabilities` (permissions, locked or remote
@@ -539,23 +586,24 @@ Every tool/action exposed by CLI, MCP, and pi-extension:
 
 ## Permissions
 
-apple-cua supports **macOS 14 (Sonoma) or later on Apple Silicon and Intel Macs**. The native binaries are universal
-(arm64 + x86_64): `libsckit.dylib` loads from macOS 12.3 and captures with ScreenCaptureKit's screenshot API, which
-arrived in 14.0, and `cursor-overlay` runs from 11.0. Their deployment targets are enforced at build time, and when the
-capture library cannot load or capture, screenshots fall back to CoreGraphics and `screencapture`.
+apple-cua supports **macOS 15 (Sequoia) and macOS 26 (Tahoe)**, the latest release and the one before it, **on Apple
+Silicon and Intel Macs**; setup and the doctor refuse anything older. The native binaries are universal (arm64 +
+x86_64) and target macOS 15.0, enforced at build time, and CI builds and tests all four combinations. When the capture
+library cannot load (for example a binary without this Mac's slice), screenshots fall back to CoreGraphics and
+`screencapture`.
 
 macOS keys screen capture and input synthesis to the identity of the process that asks:
 
-1. **The MCP server through the signed helper** (what `setup.sh` builds and `--register` configures): grant
+1. **The MCP server through the signed helper** (what setup builds and `apple-cua config --register` configures): grant
    **Screen Recording** and **Accessibility** to **apple-cua MCP** in System Settings → Privacy & Security. One grant
-   serves every MCP client and survives re-running `setup.sh`; only a helper rebuild (`--rebuild-helper`) asks again.
+   serves every MCP client and survives setup and `apple-cua update`; only a helper rebuild asks again.
 2. **The CLI, or `node packages/mcp/dist/server.js` run directly**: grant both to the terminal or IDE that launches
    it. Permission is per binary: switching from iTerm2 to Ghostty means granting again.
 3. **Apple Events / Automation**: allow the launcher if you use `--target-bundle-id` or permission helpers that query
    System Events.
 
 Restart the client or terminal after a grant (some apps cache the permission state at launch).
-`node packages/cli/dist/cli.js doctor` reports what is missing without raising a prompt.
+`apple-cua doctor` reports what is missing without raising a prompt, and `apple-cua doctor --fix` opens the pane.
 
 Full walkthrough: [`skills/apple-cua/references/installation.md`](./skills/apple-cua/references/installation.md).
 
@@ -604,7 +652,7 @@ Full walkthrough: [`skills/apple-cua/references/installation.md`](./skills/apple
 | [`packages/pi-extension`](./packages/pi-extension) | Pi coding-agent tools, including native Anthropic/OpenAI computer-use shapes |
 | [`skills/apple-cua`](./skills/apple-cua) | The portable agent skill: workflow, usage, permissions, harness setup |
 | [`docs`](./docs) | Research and head-to-head write-ups ([driver shootout](./docs/driver-shootout-cua.md), [scorecard](./docs/driver-scorecard.md), [OMO/Grok integration](./docs/omo-cua-hand.md)) |
-| [`scripts`](./scripts) | `setup.sh` (one-command install), `register-mcp.mjs` (MCP client registration), the signed helper build, the evidence harnesses (`measure-cua-shootout`, `measure-strategic-targeting`), and fixture generators |
+| [`scripts`](./scripts) | `setup.sh` (sets up a checkout; [`install.sh`](./install.sh) at the root clones one and runs it), the signed helper build, the evidence harnesses (`measure-cua-shootout`, `measure-strategic-targeting`), and fixture generators |
 | `.sisyphus/evidence` | Raw transcripts and measurement artifacts the docs cite |
 
 ## Roadmap
@@ -660,8 +708,10 @@ pnpm --filter @apple-cua/pi-extension build
 
 Standards: ultra-strict TypeScript, ESM with `.js` imports, Biome formatting, Vitest, tabs, line width 120. See [`AGENTS.md`](./AGENTS.md) for the full convention.
 
-CI runs the same `pnpm check` on `macos-latest` (lint, package and test typechecks, then the full
-Vitest suite) — see [`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
+CI runs setup and `pnpm check` (lint, package and test typechecks, then the full Vitest suite) on macOS 26 and macOS 15,
+each on Apple Silicon and on Intel runners, then checks that the native binaries are universal and target macOS 15, that
+the helper is built for the runner's CPU, and that the doctor passes everything but the permission grants — see
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
 
 ## Comparison vs cua / codex
 

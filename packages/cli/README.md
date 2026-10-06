@@ -14,5 +14,9 @@ Input defaults to the globally focused application; pass `--target-pid` (after t
 visible window) to drive one app's window while another stays frontmost. The CLI is a low-level
 interface: it does not carry the MCP observation-token guard.
 
+It also manages the installation: `apple-cua config` (approved apps and MCP client registrations),
+`apple-cua doctor [--fix]`, `apple-cua update` and `apple-cua uninstall`; see the
+[Quickstart](../../README.md#quickstart).
+
 Docs: [root README](../../README.md) · [usage](../../skills/apple-cua/references/usage.md).
 MIT licensed — see [LICENSE](../../LICENSE).

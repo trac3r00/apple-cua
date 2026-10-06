@@ -328,7 +328,7 @@ export async function askForChanges(
 	};
 }
 
-export function formatSettings(
+function formatSettings(
 	settings: Settings,
 	state: { readonly saved: boolean; readonly adopted: boolean },
 	layout: Layout,

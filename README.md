@@ -17,7 +17,7 @@ OpenAI Codex Computer Use is fast because it runs on the host with macOS-native 
 
 `apple-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same app-oriented `list_apps / get_app_state / click / type_text / press_keys / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs: ScreenCaptureKit for window and main-display capture, `koffi`-bound CoreGraphics for global input, Accessibility for app state/actions, and SkyLight/AppKit FFI for app-targeted window sessions. No Docker, no QEMU, no VNC, no bundled helper service, no cloud API key.
 
-The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-comparison.md). If you need strong VM isolation, use cua. If you need low-latency host-native control, use this.
+If you need strong VM isolation, use cua. If you need low-latency host-native control, use this.
 
 | | Codex | cua | apple-cua |
 |---|---|---|---|
@@ -33,7 +33,7 @@ The design trade-off is documented in [`codex-cua-comparison.md`](./codex-cua-co
 ## Quickstart
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash
 ```
 
 One command on a Mac with **macOS 15 (Sequoia) or macOS 26 (Tahoe)**, **Apple Silicon or Intel**. It clones apple-cua
@@ -153,7 +153,7 @@ cursor overlay, the helper app and its Accessibility and Screen Recording entrie
 command and the PATH line setup added, `~/.apple-cua`, and the checkout if the installer created it. A developer
 checkout stays unless you add `--purge`.
 
-The installer reads `APPLE_CUA_HOME` (default `~/.apple-cua`), `APPLE_CUA_REPO`, `APPLE_CUA_REF` (default `master`) and
+The installer reads `APPLE_CUA_HOME` (default `~/.apple-cua`), `APPLE_CUA_REPO`, `APPLE_CUA_REF` (default `main`) and
 `APPLE_CUA_BIN_DIR` (default `~/.local/bin`); `APPLE_CUA_BUNDLE_ID` gives the helper another bundle id.
 `./scripts/setup.sh --help` lists setup's own options (`--rebuild-native`, `--rebuild-helper`, `--yes`, `--no-doctor`,
 and shortcuts for `apple-cua config`).
@@ -389,8 +389,7 @@ tools take a description and do the resolving server-side:
 Measured on this machine against the loop an agent otherwise runs (`get_app_state` → pick an id →
 `click` → `verify_state`), same TextEdit text area, five runs each, medians, server through the
 signed helper: **283 ms and 1,839 bytes for one `click_target`** against **694 ms and 47,750 bytes for
-the three-call loop**, both verified 5/5 and resolving the same element every run. The full transcript
-and the AXPress-route proof live in [`.sisyphus/evidence/`](./.sisyphus/evidence).
+the three-call loop**, both verified 5/5 and resolving the same element every run.
 
 ### pi-extension
 
@@ -510,9 +509,7 @@ format on every path: JPEG is 4.6x smaller than PNG for a full 1920x1080 display
 against 1,363 KB) and 5.2x smaller for a 600x400 region (118 KB against 612 KB) at quality
 72. Main-display capture falls back to CoreGraphics when the ScreenCaptureKit path is
 unavailable; window capture falls back to `screencapture -l` plus `sips` when the native
-library or the window itself is not capturable. Driver-level numbers, the conditions they were
-measured under, and the dimensions this driver does *not* measure are recorded in
-[`driver-scorecard.md`](./docs/driver-scorecard.md).
+library or the window itself is not capturable.
 
 ## Working while the agent works
 
@@ -668,9 +665,8 @@ Full walkthrough: [`skills/apple-cua/references/installation.md`](./skills/apple
 | [`packages/cli`](./packages/cli) | The `apple-cua` command line |
 | [`packages/pi-extension`](./packages/pi-extension) | Pi coding-agent tools, including native Anthropic/OpenAI computer-use shapes |
 | [`skills/apple-cua`](./skills/apple-cua) | The portable agent skill: workflow, usage, permissions, harness setup |
-| [`docs`](./docs) | Research and head-to-head write-ups ([driver shootout](./docs/driver-shootout-cua.md), [scorecard](./docs/driver-scorecard.md), [OMO/Grok integration](./docs/omo-cua-hand.md)) |
-| [`scripts`](./scripts) | `setup.sh` (sets up a checkout; [`install.sh`](./install.sh) at the root clones one and runs it), the signed helper build, the evidence harnesses (`measure-cua-shootout`, `measure-strategic-targeting`), and fixture generators |
-| `.sisyphus/evidence` | Raw transcripts and measurement artifacts the docs cite |
+| [`docs`](./docs) | Design notes: what apple-cua took from Codex computer use, Cua Driver and OmO ([unified-cua.md](./docs/unified-cua.md)) |
+| [`scripts`](./scripts) | `setup.sh` (sets up a checkout; [`install.sh`](./install.sh) at the root clones one and runs it), the signed helper build, the task benchmark ([`bench-v2`](./scripts/bench-v2/README.md)), and fixture generators |
 
 ## Roadmap
 
@@ -745,10 +741,6 @@ the helper is built for the runner's CPU, and that the doctor passes everything 
 What apple-cua took from Codex computer use, Cua Driver and OmO's `computer` tool (`run_script`, the stop
 switch, `get_capabilities`, skill resources), with a measured three-way Calculator run:
 [`docs/unified-cua.md`](./docs/unified-cua.md).
-
-Full analysis: [`codex-cua-comparison.md`](./codex-cua-comparison.md).
-Measured head-to-head against Cua Driver 0.28.2 (latency, payloads, background delivery):
-[`docs/driver-shootout-cua.md`](./docs/driver-shootout-cua.md).
 
 ## License
 

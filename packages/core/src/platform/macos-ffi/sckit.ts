@@ -186,13 +186,6 @@ export function captureWindowViaSck(
 	}
 }
 
-export function invalidateSckitCache(): void {
-	const bindings = tryLoadSckitBindings();
-	if (bindings !== null) {
-		bindings.invalidateCache();
-	}
-}
-
 function describeSckError(code: number): string {
 	switch (code) {
 		case SCK_ERR_NO_SHAREABLE_CONTENT:

@@ -1302,7 +1302,7 @@ async function getFinderDesktopBounds(): Promise<{ width: number; height: number
 	return bounds;
 }
 
-export function parseFinderDesktopBounds(output: string): { width: number; height: number } | undefined {
+function parseFinderDesktopBounds(output: string): { width: number; height: number } | undefined {
 	const match = output.match(
 		/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/,
 	);

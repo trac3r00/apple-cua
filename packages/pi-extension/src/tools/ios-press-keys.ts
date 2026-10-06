@@ -2,11 +2,8 @@ import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../pi/index.js";
 import { type PhoneObservationKeys, phoneTool } from "./ios-shared.js";
 
-export const IosPressKeysParams = Type.Object(
-	{ combo: Type.String({ minLength: 1 }) },
-	{ additionalProperties: false },
-);
-export type IosPressKeysInput = Static<typeof IosPressKeysParams>;
+const IosPressKeysParams = Type.Object({ combo: Type.String({ minLength: 1 }) }, { additionalProperties: false });
+type IosPressKeysInput = Static<typeof IosPressKeysParams>;
 export function createIosPressKeysTool(keys: PhoneObservationKeys): ToolDefinition {
 	return phoneTool(
 		"ios_press_keys",

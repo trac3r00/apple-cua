@@ -414,7 +414,7 @@ function bundleIdOf(app: string): string | undefined {
 }
 
 /** The checkout a launcher written by setup runs; undefined for any other file. */
-export function launcherCheckout(text: string): string | undefined {
+function launcherCheckout(text: string): string | undefined {
 	const line = text.split("\n").find((entry) => entry.startsWith(LAUNCHER_MARKER));
 	return line === undefined ? undefined : canonicalPath(line.slice(LAUNCHER_MARKER.length).trim());
 }
@@ -443,7 +443,7 @@ function readLaunchers(layout: Layout, env: Environment): UninstallFacts["launch
 	return launchers;
 }
 
-export function shellStartupFiles(home: string, env: Environment): string[] {
+function shellStartupFiles(home: string, env: Environment): string[] {
 	const zdotdir = env["ZDOTDIR"] !== undefined && env["ZDOTDIR"] !== "" ? env["ZDOTDIR"] : home;
 	return [
 		...new Set([

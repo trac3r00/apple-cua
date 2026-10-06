@@ -118,7 +118,6 @@ export {
 	recognizeTextInFile,
 	recognizeTextInImage,
 } from "./platform/macos-ffi/vision.js";
-export { renamedEnvironmentVariable } from "./platform/renamed-environment.js";
 export {
 	type StopSource,
 	type StopStatus,

@@ -93,7 +93,7 @@ const clockGetTimeNanoseconds = systemLibrary.func("clock_gettime_nsec_np", "uin
 	(clockId: number) => bigint
 >;
 
-export function currentUptimeNanoseconds(): bigint {
+function currentUptimeNanoseconds(): bigint {
 	return clockGetTimeNanoseconds(CLOCK_UPTIME_RAW);
 }
 

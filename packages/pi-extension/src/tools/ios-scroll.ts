@@ -3,7 +3,7 @@ import type { ToolDefinition } from "../pi/index.js";
 import { type PhoneObservationKeys, phoneTool } from "./ios-shared.js";
 
 const Direction = Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")]);
-export const IosScrollParams = Type.Object(
+const IosScrollParams = Type.Object(
 	{
 		direction: Direction,
 		amount: Type.Optional(Type.Number({ minimum: 0 })),
@@ -12,7 +12,7 @@ export const IosScrollParams = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-export type IosScrollInput = Static<typeof IosScrollParams>;
+type IosScrollInput = Static<typeof IosScrollParams>;
 export function createIosScrollTool(keys: PhoneObservationKeys): ToolDefinition {
 	return phoneTool(
 		"ios_scroll",

@@ -5,13 +5,13 @@ import {
 	resolveScreenPoint,
 	withTargetedApp,
 } from "@apple-cua/core";
-import { type Static, Type } from "typebox";
+import { Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
 import type { AppObservationKeys } from "./observations.js";
 import { observedActionCompleteResult } from "./result.js";
 
-export const DragParams = Type.Object(
+const DragParams = Type.Object(
 	{
 		app: Type.String({ description: "App name or bundle identifier." }),
 		from_x: Type.Number({ description: "Start X coordinate." }),
@@ -21,8 +21,6 @@ export const DragParams = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-
-export type DragInput = Static<typeof DragParams>;
 
 export function createDragTool(computer: ComputerInterface, observations: AppObservationKeys): ToolDefinition {
 	return defineTool({

@@ -5,7 +5,7 @@ import { HELPER_INPUTS_STAMP } from "./doctor.js";
 import { type Environment, type InstallMarker, type Layout, canonicalPath } from "./layout.js";
 
 /** Build outputs setup regenerates. Rebuilding them locally is not a local change, and an update restores them. */
-export const DERIVED_PATHS: readonly string[] = [
+const DERIVED_PATHS: readonly string[] = [
 	"packages/core/native/libsckit.dylib",
 	"packages/core/native/cursor-overlay",
 	"packages/core/native/build-inputs.sha256",

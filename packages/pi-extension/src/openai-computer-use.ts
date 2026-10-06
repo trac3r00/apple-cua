@@ -5,24 +5,15 @@ import { type DisplayConfig, unscaleCoord } from "./computer-use/coords.js";
 import { screenshotResultWithCursor } from "./computer-use/screenshot-result.js";
 import type { OpenAIComputerAction, OpenAIComputerToolInput } from "./openai-payload.js";
 export {
-	OPENAI_COMPUTER_TOOL_TYPE,
 	addOpenAIComputerUseToPayload,
 	openaiComputerActionBatchSchema,
 	openaiComputerToolSchema,
 	sanitizeOpenAIComputerUsePayload,
 } from "./openai-payload.js";
-export type { OpenAIComputerAction, OpenAIComputerActionBatch, OpenAIComputerToolInput } from "./openai-payload.js";
+export type { OpenAIComputerAction, OpenAIComputerActionBatch } from "./openai-payload.js";
 
 type KeyModifier = "command" | "option" | "control" | "shift";
 type ScrollDirection = ScrollOptions["direction"];
-
-export async function executeOpenAINativeComputerAction(
-	input: OpenAIComputerToolInput,
-	computer: ComputerInterface,
-	display: DisplayConfig,
-): Promise<ComputerUseResult> {
-	return executeOpenAIComputerAction(input, computer, display);
-}
 
 export async function executeOpenAIComputerAction(
 	input: OpenAIComputerAction,

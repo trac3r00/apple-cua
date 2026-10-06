@@ -34,9 +34,8 @@ describe("#given the package entry point #when the phone capability is imported 
 		expect(typeof core.typeIntoMirroring).toBe("function");
 	});
 
-	it("exports the OCR surface and the renamed-environment helper", () => {
+	it("exports the OCR surface", () => {
 		expect(typeof core.recognizeTextInImage).toBe("function");
 		expect(typeof core.readImagePixelSize).toBe("function");
-		expect(typeof core.renamedEnvironmentVariable).toBe("function");
 	});
 });

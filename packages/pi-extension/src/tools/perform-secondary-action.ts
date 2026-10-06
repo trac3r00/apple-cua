@@ -1,11 +1,11 @@
 import { type ComputerInterface, observeAction, parseElementIndex, resolveAppPid } from "@apple-cua/core";
-import { type Static, Type } from "typebox";
+import { Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
 import type { AppObservationKeys } from "./observations.js";
 import { observedActionCompleteResult } from "./result.js";
 
-export const PerformSecondaryActionParams = Type.Object(
+const PerformSecondaryActionParams = Type.Object(
 	{
 		app: Type.String({ description: "App name or bundle identifier." }),
 		element_index: Type.String({ description: "Element index from get_app_state." }),
@@ -13,8 +13,6 @@ export const PerformSecondaryActionParams = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-
-export type PerformSecondaryActionInput = Static<typeof PerformSecondaryActionParams>;
 
 export function createPerformSecondaryActionTool(
 	computer: ComputerInterface,

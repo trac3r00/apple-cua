@@ -75,6 +75,3 @@ current, inspect outcomes and stop on uncertainty.
 
 VM/cloud platform classes are interfaces/stubs, not alternative working backends. General
 remote transport and cross-harness user-consent services are outside this implementation.
-
-For the evidence and limits of the ChatGPT.app comparison, see the repository report at
-`docs/chatgpt-cua-reverse-engineering.md` (not needed for normal agent operation).

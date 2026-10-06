@@ -25,7 +25,7 @@ export const SELF_CHECK_FLAG = "--doctor";
 export const PERMISSION_REQUEST_FLAG = "--request-permissions";
 
 /** The apps the server sends Apple Events to on its own: window lookup through System Events, desktop size from Finder. */
-export const AUTOMATION_TARGETS = ["com.apple.systemevents", "com.apple.finder"] as const;
+const AUTOMATION_TARGETS = ["com.apple.systemevents", "com.apple.finder"] as const;
 
 const SYSTEM_EVENTS = "com.apple.systemevents";
 const LAUNCH_WAIT_MS = 10_000;

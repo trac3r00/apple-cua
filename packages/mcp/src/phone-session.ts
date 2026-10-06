@@ -132,7 +132,7 @@ export class PhoneGuardSession {
 	}
 }
 
-export function projectObservation(observation: MirroringObservation): Record<string, unknown> {
+function projectObservation(observation: MirroringObservation): Record<string, unknown> {
 	return {
 		state: observation.state,
 		window: observation.window,

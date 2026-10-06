@@ -1,4 +1,4 @@
-import { AppApprovalStore, MacOSHostComputer, listTopLevelWindows, renamedEnvironmentVariable } from "@apple-cua/core";
+import { AppApprovalStore, MacOSHostComputer, listTopLevelWindows } from "@apple-cua/core";
 import type { GuardedComputerInterface, InputDelivery, WindowProbe } from "@apple-cua/core";
 
 export function allowedBundleIdsFromEnvironment(value: string | undefined): readonly string[] {
@@ -13,20 +13,18 @@ export function allowedBundleIdsFromEnvironment(value: string | undefined): read
  * person's cursor, so they can keep using the Mac. "attended" opts into routes that may briefly
  * take the foreground.
  */
-export function deliveryFromEnvironment(value: string | undefined): InputDelivery {
+function deliveryFromEnvironment(value: string | undefined): InputDelivery {
 	return value?.trim().toLowerCase() === "attended" ? "attended" : "background";
 }
 
-/** Approved bundle IDs from the host environment; the pre-rename variable name is still honoured. */
+/** Approved bundle IDs from the host environment. */
 export function allowedBundleIdsFromProcessEnvironment(): readonly string[] {
-	return allowedBundleIdsFromEnvironment(
-		renamedEnvironmentVariable("APPLE_CUA_ALLOWED_BUNDLE_IDS", "MACOS_CUA_ALLOWED_BUNDLE_IDS"),
-	);
+	return allowedBundleIdsFromEnvironment(process.env["APPLE_CUA_ALLOWED_BUNDLE_IDS"]);
 }
 
-/** Delivery mode from the host environment; the pre-rename variable name is still honoured. */
+/** Delivery mode from the host environment. */
 export function deliveryFromProcessEnvironment(): InputDelivery {
-	return deliveryFromEnvironment(renamedEnvironmentVariable("APPLE_CUA_DELIVERY", "MACOS_CUA_DELIVERY"));
+	return deliveryFromEnvironment(process.env["APPLE_CUA_DELIVERY"]);
 }
 
 export function createNativeComputer(): GuardedComputerInterface {

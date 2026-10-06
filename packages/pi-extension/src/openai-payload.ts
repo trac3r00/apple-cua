@@ -2,7 +2,7 @@ import { type Static, Type } from "typebox";
 
 import type { DisplayConfig } from "./computer-use/coords.js";
 
-export const OPENAI_COMPUTER_TOOL_TYPE = "computer";
+const OPENAI_COMPUTER_TOOL_TYPE = "computer";
 const OPENAI_COMPUTER_TOOL_NAME = "computer";
 
 const actionPointSchema = Type.Object({ x: Type.Number(), y: Type.Number() }, { additionalProperties: false });

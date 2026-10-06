@@ -1,11 +1,11 @@
 import { type ComputerInterface, observeAction, parseElementIndex, resolveAppPid } from "@apple-cua/core";
-import { type Static, Type } from "typebox";
+import { Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
 import type { AppObservationKeys } from "./observations.js";
 import { observedActionCompleteResult } from "./result.js";
 
-export const SetValueParams = Type.Object(
+const SetValueParams = Type.Object(
 	{
 		app: Type.String({ description: "App name or bundle identifier." }),
 		element_index: Type.String({ description: "Element index from get_app_state." }),
@@ -13,8 +13,6 @@ export const SetValueParams = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-
-export type SetValueInput = Static<typeof SetValueParams>;
 
 export function createSetValueTool(computer: ComputerInterface, observations: AppObservationKeys): ToolDefinition {
 	return defineTool({

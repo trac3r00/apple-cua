@@ -3,7 +3,7 @@ import type { ToolDefinition } from "../pi/index.js";
 import { type PhoneObservationKeys, phoneTool } from "./ios-shared.js";
 
 const Direction = Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")]);
-export const IosSwipeParams = Type.Object(
+const IosSwipeParams = Type.Object(
 	{
 		direction: Direction,
 		distance: Type.Optional(Type.Number({ minimum: 0 })),
@@ -13,7 +13,7 @@ export const IosSwipeParams = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-export type IosSwipeInput = Static<typeof IosSwipeParams>;
+type IosSwipeInput = Static<typeof IosSwipeParams>;
 export function createIosSwipeTool(keys: PhoneObservationKeys): ToolDefinition {
 	return phoneTool(
 		"ios_swipe",

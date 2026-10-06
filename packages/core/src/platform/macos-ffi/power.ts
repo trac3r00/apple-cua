@@ -70,5 +70,3 @@ const defaultBinding: AssertionBinding = {
 		IOPMAssertionRelease(id);
 	},
 };
-
-export { ASSERTION_REASON };

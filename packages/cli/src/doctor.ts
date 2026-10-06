@@ -9,9 +9,9 @@ import { type Environment, type Layout, displayPath, homeDirectory, resolveLayou
 import { desiredRegistration, loadSettings } from "./settings.js";
 
 /** The oldest macOS apple-cua supports: the latest major release and the one before it (Tahoe and Sequoia). */
-export const MINIMUM_MACOS = "15.0";
-export const MINIMUM_MACOS_NAME = "Sequoia";
-export const MINIMUM_NODE_MAJOR = 20;
+const MINIMUM_MACOS = "15.0";
+const MINIMUM_MACOS_NAME = "Sequoia";
+const MINIMUM_NODE_MAJOR = 20;
 /** How the signed helper app appears in System Settings, and so the name the user grants permissions to. */
 export const HELPER_DISPLAY_NAME = "apple-cua-mcp";
 /** The System Settings panes `apple-cua doctor --fix` opens for a missing grant. */
@@ -179,7 +179,7 @@ export function machOArchitectures(header: Buffer): MachArchitecture[] | undefin
 	return undefined;
 }
 
-export function nodeArchitecture(arch: string): MachArchitecture | undefined {
+function nodeArchitecture(arch: string): MachArchitecture | undefined {
 	if (arch === "arm64") {
 		return "arm64";
 	}
@@ -752,7 +752,7 @@ export function readNativeInputs(nativeDir: string): DoctorFacts["nativeInputs"]
 }
 
 /** The helper's inputs stamp and the digest this checkout's build script computes now. */
-export function readHelperInputs(layout: Pick<Layout, "helperApp" | "helperBuildScript">): HelperFacts["inputs"] {
+function readHelperInputs(layout: Pick<Layout, "helperApp" | "helperBuildScript">): HelperFacts["inputs"] {
 	let built: string;
 	try {
 		built = readFileSync(join(layout.helperApp, HELPER_INPUTS_STAMP), "utf8").trim();

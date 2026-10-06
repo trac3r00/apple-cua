@@ -135,7 +135,7 @@ function prepareClipboardInput(input: ClipboardWriteInput): ClipboardWriteInput 
 	return input;
 }
 
-export function absoluteExistingFile(path: string): string {
+function absoluteExistingFile(path: string): string {
 	if (!isAbsolute(path)) {
 		throw new Error("clipboard_write: file paths must be absolute");
 	}

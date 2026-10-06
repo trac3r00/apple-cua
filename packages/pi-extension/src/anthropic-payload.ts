@@ -70,7 +70,7 @@ export function supportsAnthropicNativeComputerUse(modelId: string | undefined):
 	return SUPPORTS_NATIVE_COMPUTER_MODEL_MARKERS.some((marker) => normalized.includes(marker));
 }
 
-export function sanitizeTools(tools: readonly unknown[]): ToolDefinition[] {
+function sanitizeTools(tools: readonly unknown[]): ToolDefinition[] {
 	const sanitizedTools: ToolDefinition[] = [];
 	for (const tool of tools) {
 		if (!isRecord(tool)) {
@@ -85,7 +85,7 @@ export function sanitizeTools(tools: readonly unknown[]): ToolDefinition[] {
 	return sanitizedTools;
 }
 
-export function mergeBetaHeader(existing: unknown): string {
+function mergeBetaHeader(existing: unknown): string {
 	const existingParts =
 		typeof existing === "string"
 			? existing

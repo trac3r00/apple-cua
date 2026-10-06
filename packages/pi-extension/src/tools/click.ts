@@ -17,7 +17,7 @@ import { observedActionCompleteResult } from "./result.js";
 
 const MouseButton = Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("middle")]);
 
-export const ClickParams = Type.Object(
+const ClickParams = Type.Object(
 	{
 		app: Type.String({ description: "App name or bundle identifier." }),
 		element_index: Type.Optional(Type.String({ description: "Element index from get_app_state." })),
@@ -29,7 +29,7 @@ export const ClickParams = Type.Object(
 	{ additionalProperties: false },
 );
 
-export type ClickInput = Static<typeof ClickParams>;
+type ClickInput = Static<typeof ClickParams>;
 
 export function createClickTool(computer: ComputerInterface, observations: AppObservationKeys): ToolDefinition {
 	return defineTool({

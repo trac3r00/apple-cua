@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import type { ToolDefinition } from "../pi/index.js";
 import { type PhoneObservationKeys, phoneTool } from "./ios-shared.js";
 
-export const IosHomeParams = Type.Object({}, { additionalProperties: false });
+const IosHomeParams = Type.Object({}, { additionalProperties: false });
 export function createIosHomeTool(keys: PhoneObservationKeys): ToolDefinition {
 	return phoneTool(
 		"ios_home",

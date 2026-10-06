@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { MacOSHostComputer, renamedEnvironmentVariable } from "@apple-cua/core";
+import { MacOSHostComputer } from "@apple-cua/core";
 import { Type } from "typebox";
 
 import {
@@ -43,9 +43,7 @@ interface ComputerUseModel {
 }
 
 const DISABLE_COMPUTER_USE_BETA_ENV = "APPLE_CUA_DISABLE_COMPUTER_USE_BETA";
-const DISABLE_COMPUTER_USE_BETA_LEGACY_ENV = "MACOS_CUA_DISABLE_COMPUTER_USE_BETA";
 const OPENAI_NATIVE_TRANSPORT_ENV = "APPLE_CUA_OPENAI_NATIVE_TRANSPORT";
-const OPENAI_NATIVE_TRANSPORT_LEGACY_ENV = "MACOS_CUA_OPENAI_NATIVE_TRANSPORT";
 
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(sourceDirectory, "..");
@@ -67,9 +65,7 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
 		const computer = new MacOSHostComputer();
 		const display = resolveDisplayConfig(await computer.getScreenSize());
-		const enabled = !isOptedOut(
-			renamedEnvironmentVariable(DISABLE_COMPUTER_USE_BETA_ENV, DISABLE_COMPUTER_USE_BETA_LEGACY_ENV),
-		);
+		const enabled = !isOptedOut(process.env[DISABLE_COMPUTER_USE_BETA_ENV]);
 		state = { computer, display, enabled };
 		registerAllTools(pi, { computer });
 
@@ -183,7 +179,7 @@ function shouldInjectOpenAINativeComputerUse(model: ComputerUseModel | undefined
 	if (!isDirectOpenAIEndpoint(model.baseUrl)) {
 		return false;
 	}
-	if (isTruthyFlag(renamedEnvironmentVariable(OPENAI_NATIVE_TRANSPORT_ENV, OPENAI_NATIVE_TRANSPORT_LEGACY_ENV))) {
+	if (isTruthyFlag(process.env[OPENAI_NATIVE_TRANSPORT_ENV])) {
 		return true;
 	}
 	warnOpenAINativeTransportUnavailable(model.id);

@@ -13,7 +13,7 @@ import { observedActionCompleteResult } from "./result.js";
 
 const Selection = Type.Union([Type.Literal("text"), Type.Literal("before"), Type.Literal("after")]);
 
-export const SelectTextParams = Type.Object(
+const SelectTextParams = Type.Object(
 	{
 		app: Type.String({ description: "App name or bundle identifier." }),
 		element_index: Type.String({ description: "Text element index from get_app_state." }),
@@ -29,7 +29,7 @@ export const SelectTextParams = Type.Object(
 	{ additionalProperties: false },
 );
 
-export type SelectTextInput = Static<typeof SelectTextParams>;
+type SelectTextInput = Static<typeof SelectTextParams>;
 
 export function createSelectTextTool(computer: ComputerInterface, observations: AppObservationKeys): ToolDefinition {
 	return defineTool({

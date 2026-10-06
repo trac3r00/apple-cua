@@ -2,7 +2,7 @@ import type { AxEventWaiter } from "./macos-ffi/ax-observer.js";
 import { waitForAxQuiet } from "./macos-ffi/ax-observer.js";
 
 /** Keys older than this have long been handled, so text typed after them needs no fence. */
-export const KEYBOARD_FENCE_WINDOW_MS = 500;
+const KEYBOARD_FENCE_WINDOW_MS = 500;
 /** How long after the keys an app may take to react before it is taken to have nothing to report. */
 export const KEYBOARD_FENCE_REACTION_MS = 150;
 /** Once the app reacts, it has finished when it stays silent this long. */

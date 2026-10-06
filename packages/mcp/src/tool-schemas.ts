@@ -9,13 +9,13 @@ const fullStateSchema = z.boolean().optional();
 const includeScreenshotSchema = z.boolean().optional();
 
 /** Upper bound for one verified field-update call, so a single request stays reviewable. */
-export const MAX_SET_FIELD_UPDATES = 10;
+const MAX_SET_FIELD_UPDATES = 10;
 /** Upper bound for one ordered action batch, so a single request stays reviewable. */
 export const MAX_RUN_STEPS = 20;
 /** Upper bound for one wait_for step inside a batch. */
 const MAX_WAIT_MILLISECONDS = 10_000;
 /** Upper bound for the matches one element query answers with. */
-export const MAX_FIND_RESULTS = 25;
+const MAX_FIND_RESULTS = 25;
 
 export const emptySchema = z.object({});
 
@@ -315,7 +315,7 @@ export const pressKeysSchema = z.object({
  * lets one batch act on UI an earlier step created (a sheet, a menu, a new row).
  */
 /** Upper bound for the pages one scroll-until-found search may scroll. */
-export const MAX_FIND_PAGES = 50;
+const MAX_FIND_PAGES = 50;
 export const DEFAULT_FIND_PAGES = 10;
 
 /**
@@ -532,7 +532,7 @@ export const runStepsSchema = z.object({
 });
 
 /** Upper bound for the apps one parallel call observes or drives. */
-export const MAX_PARALLEL_APPS = 6;
+const MAX_PARALLEL_APPS = 6;
 
 export const observeAppsSchema = z.object({
 	apps: z.array(appSchema).min(2).max(MAX_PARALLEL_APPS),
@@ -563,13 +563,9 @@ export const runParallelSchema = z.object({
 });
 
 export type ClickInput = z.infer<typeof clickSchema>;
-export type ClickTargetInput = z.infer<typeof clickTargetSchema>;
 export type DragInput = z.infer<typeof dragSchema>;
-export type FindElementsInput = z.infer<typeof findElementsSchema>;
-export type OpenAppInput = z.infer<typeof openAppSchema>;
 export type PressKeysInput = z.infer<typeof pressKeysSchema>;
 export type SelectTextInput = z.infer<typeof selectTextSchema>;
-export type SetFieldsInput = z.infer<typeof setFieldsSchema>;
 export type RunStep = z.infer<typeof runStepSchema>;
 export type RunStepsInput = z.infer<typeof runStepsSchema>;
 

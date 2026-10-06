@@ -2,11 +2,11 @@ import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../pi/index.js";
 import { type PhoneObservationKeys, phonePoint, phoneTool } from "./ios-shared.js";
 
-export const IosTapParams = Type.Object(
+const IosTapParams = Type.Object(
 	{ x: Type.Number(), y: Type.Number(), long_press_ms: Type.Optional(Type.Number({ minimum: 0 })) },
 	{ additionalProperties: false },
 );
-export type IosTapInput = Static<typeof IosTapParams>;
+type IosTapInput = Static<typeof IosTapParams>;
 export function createIosTapTool(keys: PhoneObservationKeys): ToolDefinition {
 	return phoneTool(
 		"ios_tap",

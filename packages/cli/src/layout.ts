@@ -60,7 +60,7 @@ export function canonicalPath(path: string): string {
 }
 
 /** The checkout that contains this module (packages/cli/src or packages/cli/dist). */
-export function defaultCheckout(): string {
+function defaultCheckout(): string {
 	return canonicalPath(resolve(dirname(fileURLToPath(import.meta.url)), "../../.."));
 }
 

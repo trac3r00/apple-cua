@@ -275,10 +275,6 @@ export function captureDisplayImage(
 	}
 }
 
-export function captureMainDisplayPng(targetWidth: number, targetHeight: number): CapturedScreenshot {
-	return captureDisplayImage(CGMainDisplayID(), targetWidth, targetHeight, "png", 100);
-}
-
 /** Zooms a region of one display. CoreGraphics has no region-capture call, so the full display
  * image is taken and cropped in memory before encoding. */
 export function captureDisplayRegionImage(

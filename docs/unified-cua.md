@@ -79,7 +79,7 @@ zod and core with no single heavy module (the best candidate saved about 9 ms).
 
 ## Review fixes (2026-10-06)
 
-After all of these, the six complex background scenarios (docs/complex-scenarios-vs-omo.md) still pass 18/18 with
+After all of these, the six complex background scenarios still pass 18/18 with
 0 real-cursor moves and 0 front-app changes, and are faster: Finder multi-select 2.9 -> 2.55 s, TextEdit save 0.84 ->
 0.65 s, cross-app save 1.3 -> 1.06 s, two-window save 0.87 -> 0.66 s, New Folder 1.27 -> 1.15 s (medians, n=3).
 

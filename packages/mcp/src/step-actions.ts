@@ -43,7 +43,7 @@ export function expectFromInput(expect: RunStepsInput["expect"]): VerifyRequest 
 	};
 }
 
-export function stepElementIndex(step: RunStep): number | undefined {
+function stepElementIndex(step: RunStep): number | undefined {
 	return "element_index" in step && step.element_index !== undefined
 		? parseElementIndex(step.element_index)
 		: undefined;
@@ -68,7 +68,7 @@ function toStepFind(input: FindInput): StepFind {
 	};
 }
 
-export function stepTarget(step: RunStep): StepTarget | undefined {
+function stepTarget(step: RunStep): StepTarget | undefined {
 	if (step.type === "wait_for" || !("target" in step) || step.target === undefined) {
 		return undefined;
 	}
@@ -79,7 +79,7 @@ export function stepTarget(step: RunStep): StepTarget | undefined {
 	};
 }
 
-export function stepWait(step: RunStep): StepWait | undefined {
+function stepWait(step: RunStep): StepWait | undefined {
 	if (step.type !== "wait_for") {
 		return undefined;
 	}
@@ -91,7 +91,7 @@ export function stepWait(step: RunStep): StepWait | undefined {
 	};
 }
 
-export function resolveStepElement(step: RunStep, elementIndex: number): RunStep {
+function resolveStepElement(step: RunStep, elementIndex: number): RunStep {
 	return "target" in step && step.type !== "wait_for"
 		? { ...step, element_index: String(elementIndex), target: undefined, find: undefined }
 		: step;
@@ -101,7 +101,7 @@ export function resolveStepElement(step: RunStep, elementIndex: number): RunStep
  * The step aimed at a screen point where text was read from the window's pixels. Only a click can act on
  * a point: every other step needs the element behind it.
  */
-export function resolveStepAtPoint(step: RunStep, observation: InputObservation, point: Point): RunStep {
+function resolveStepAtPoint(step: RunStep, observation: InputObservation, point: Point): RunStep {
 	if (step.type !== "click") {
 		throw new Error(
 			`${step.type} cannot act on text found only in the window's pixels (no accessibility element matched); use find.vision "off" or a target accessibility can match`,
@@ -120,7 +120,7 @@ export function resolveStepAtPoint(step: RunStep, observation: InputObservation,
 	};
 }
 
-export function validateStep(step: RunStep, observation: InputObservation): void {
+function validateStep(step: RunStep, observation: InputObservation): void {
 	if (step.type === "wait_for") {
 		if (step.target === undefined && step.window_title === undefined) {
 			throw new Error("wait_for needs a target, a window_title, or both");
@@ -172,7 +172,7 @@ function requiredElementIndex(step: RunStep): number {
 	return index;
 }
 
-export async function dispatchStep(
+async function dispatchStep(
 	computer: GuardedComputerInterface,
 	step: RunStep,
 	targetPid: number,

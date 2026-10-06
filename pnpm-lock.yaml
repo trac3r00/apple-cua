@@ -111,6 +111,9 @@ importers:
       '@apple-cua/core':
         specifier: workspace:*
         version: link:../core
+      '@mariozechner/pi-ai':
+        specifier: '*'
+        version: 0.73.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.1)(zod@4.4.3)
       pngjs:
         specifier: 7.0.0
         version: 7.0.0
@@ -118,9 +121,6 @@ importers:
         specifier: 1.1.38
         version: 1.1.38
     devDependencies:
-      '@mariozechner/pi-ai':
-        specifier: ^0.73.1
-        version: 0.73.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.1)(zod@4.4.3)
       '@mariozechner/pi-coding-agent':
         specifier: ^0.73.1
         version: 0.73.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.1)(zod@4.4.3)
@@ -825,6 +825,7 @@ packages:
   '@smithy/core@3.24.1':
     resolution: {integrity: sha512-3mT7o4qQyUWttYnVK3A0Z/u3Xha3E81tXn32Tz6vjZiUXhBrkEivpw1hBYfh84iFF9CSzkBU9Y1DJ3Q6RQ231g==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to bug in browser bundling instructions https://github.com/smithy-lang/smithy-typescript/issues/2025
 
   '@smithy/credential-provider-imds@4.3.1':
     resolution: {integrity: sha512-0S/acwHnqX4WrjXzhdiDRxsG2s9SC0cpPIK9nZ1R6UOHd+j7uL28+4bHu22urbLk2TVw3fkp6na/+fkUt/pLNQ==}

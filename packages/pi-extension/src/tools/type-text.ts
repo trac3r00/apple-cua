@@ -1,18 +1,16 @@
 import { type ComputerInterface, observeAction, resolveAppPid, withTargetedApp } from "@apple-cua/core";
-import { type Static, Type } from "typebox";
+import { Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
 import { observedActionCompleteResult } from "./result.js";
 
-export const TypeTextParams = Type.Object(
+const TypeTextParams = Type.Object(
 	{
 		app: Type.String({ description: "App name or bundle identifier." }),
 		text: Type.String({ description: "Literal text to type." }),
 	},
 	{ additionalProperties: false },
 );
-
-export type TypeTextInput = Static<typeof TypeTextParams>;
 
 export function createTypeTextTool(computer: ComputerInterface): ToolDefinition {
 	return defineTool({

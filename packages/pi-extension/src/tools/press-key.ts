@@ -25,7 +25,7 @@ const KeyEntryParams = Type.Union([
 	),
 ]);
 
-export const PressKeysParams = Type.Object(
+const PressKeysParams = Type.Object(
 	{
 		app: Type.String({ description: "App name or bundle identifier." }),
 		keys: Type.Array(KeyEntryParams, { minItems: 1, description: "Keys or key combinations to press in order." }),
@@ -39,7 +39,7 @@ export const PressKeysParams = Type.Object(
 	{ additionalProperties: false },
 );
 
-export type PressKeysInput = Static<typeof PressKeysParams>;
+type PressKeysInput = Static<typeof PressKeysParams>;
 
 export function createPressKeysTool(computer: ComputerInterface): ToolDefinition {
 	return defineTool({

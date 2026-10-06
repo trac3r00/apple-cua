@@ -9,7 +9,7 @@ import { toolNamesFor } from "./tool-names.js";
 import { textResult } from "./tool-result.js";
 import type { ToolsetProfile } from "./toolset.js";
 
-export const STOP_CHORD = "Control+Option+Command (hold together)";
+const STOP_CHORD = "Control+Option+Command (hold together)";
 export const DEFAULT_SKILL_DIR = fileURLToPath(new URL("../../../skills/apple-cua/", import.meta.url));
 
 export interface CapabilitySources {

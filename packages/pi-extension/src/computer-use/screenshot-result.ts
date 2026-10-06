@@ -28,7 +28,7 @@ export async function screenshotResultWithCursor(
 	return imageResult(drawCursorOnScreenshot(screenshot, cursor, display).toString("base64"));
 }
 
-export function drawCursorOnScreenshot(screenshot: ScreenshotResult, cursor: Point, display: DisplayConfig): Buffer {
+function drawCursorOnScreenshot(screenshot: ScreenshotResult, cursor: Point, display: DisplayConfig): Buffer {
 	const png = decodePngOrUndefined(screenshot.data);
 	if (png === undefined) {
 		return screenshot.data;

@@ -79,7 +79,7 @@ export async function findRunningApp(identifier: RunningApplicationIdentifier): 
 	}
 }
 
-export async function getRunningMacOSAppsWithJxa(): Promise<RunningAppInfo[]> {
+async function getRunningMacOSAppsWithJxa(): Promise<RunningAppInfo[]> {
 	const result = await execFileAsync("osascript", ["-l", "JavaScript", "-e", LIST_APPS_JXA], {
 		encoding: "utf8",
 		timeout: LIST_APPS_TIMEOUT_MILLISECONDS,

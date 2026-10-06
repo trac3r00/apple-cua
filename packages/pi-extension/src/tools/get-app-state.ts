@@ -1,10 +1,10 @@
 import { type ComputerInterface, getAppStateForApp } from "@apple-cua/core";
-import { type Static, Type } from "typebox";
+import { Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
 import type { AppObservationKeys } from "./observations.js";
 
-export const GetAppStateParams = Type.Object(
+const GetAppStateParams = Type.Object(
 	{
 		app: Type.String({ description: "App name or bundle identifier." }),
 		diff_only: Type.Optional(
@@ -45,8 +45,6 @@ export const GetAppStateParams = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-
-export type GetAppStateInput = Static<typeof GetAppStateParams>;
 
 export function createGetAppStateTool(computer: ComputerInterface, observations: AppObservationKeys): ToolDefinition {
 	return defineTool({

@@ -92,10 +92,7 @@ async function main() {
 	const runs = Number(option("runs", "5"));
 	if (!Number.isInteger(runs) || runs < 1) throw new Error("--runs must be a positive integer");
 	const commit = command("git", ["rev-parse", "HEAD"]);
-	const out = option(
-		"out",
-		`.sisyphus/evidence/bench-v2/${new Date().toISOString().replaceAll(":", "-")}-${commit.slice(0, 8)}.json`,
-	);
+	const out = option("out", `.bench/${new Date().toISOString().replaceAll(":", "-")}-${commit.slice(0, 8)}.json`);
 	const report = {
 		schema: "bench-v2",
 		started_at: new Date().toISOString(),

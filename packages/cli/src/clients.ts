@@ -24,7 +24,7 @@ import {
 import { delimiter, dirname, join } from "node:path";
 import { canonicalPath, isInside } from "./layout.js";
 
-export const SERVER_NAME = "apple-cua";
+const SERVER_NAME = "apple-cua";
 export const CLIENT_NAMES = ["omo", "claude", "codex", "json"] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
@@ -101,7 +101,7 @@ function stringRecord(value: unknown): Record<string, string> {
 	);
 }
 
-export function toRegisteredEntry(value: unknown): RegisteredEntry | undefined {
+function toRegisteredEntry(value: unknown): RegisteredEntry | undefined {
 	if (!isPlainObject(value)) {
 		return undefined;
 	}
@@ -114,7 +114,7 @@ export function toRegisteredEntry(value: unknown): RegisteredEntry | undefined {
 	};
 }
 
-export function entryIsCurrent(entry: RegisteredEntry, desired: DesiredRegistration): boolean {
+function entryIsCurrent(entry: RegisteredEntry, desired: DesiredRegistration): boolean {
 	return (
 		entry.command === desired.launch.command &&
 		entry.args.length === desired.launch.args.length &&
@@ -160,14 +160,14 @@ function applyEnvUpdate(existing: JsonObject, update: EnvUpdate): JsonObject {
 }
 
 /** The desired launch command and env on top of an existing entry, whose other keys (type, enabled, ...) are kept. */
-export function mergeServerEntry(existing: unknown, desired: DesiredRegistration): JsonObject {
+function mergeServerEntry(existing: unknown, desired: DesiredRegistration): JsonObject {
 	const base = isPlainObject(existing) ? existing : {};
 	const env = applyEnvUpdate(isPlainObject(base["env"]) ? base["env"] : {}, desired.env);
 	const merged: JsonObject = { ...base, command: desired.launch.command, args: [...desired.launch.args], env };
 	return Object.fromEntries(Object.entries(merged).filter(([key]) => key !== "env" || Object.keys(env).length > 0));
 }
 
-export interface FileEdit {
+interface FileEdit {
 	readonly text: string;
 	readonly changed: boolean;
 	readonly before: RegisteredEntry | undefined;
@@ -193,7 +193,7 @@ function parseJsonConfig(text: string | undefined): { config: JsonObject; server
 	return { config: parsed, servers };
 }
 
-export function mergeJsonConfig(text: string | undefined, desired: DesiredRegistration): FileEdit {
+function mergeJsonConfig(text: string | undefined, desired: DesiredRegistration): FileEdit {
 	const { config, servers } = parseJsonConfig(text);
 	const before = toRegisteredEntry(servers[SERVER_NAME]);
 	if (text !== undefined && before !== undefined && entryIsCurrent(before, desired)) {
@@ -204,7 +204,7 @@ export function mergeJsonConfig(text: string | undefined, desired: DesiredRegist
 	return { text: `${JSON.stringify(next, null, detectIndent(text))}\n`, changed: true, before, after };
 }
 
-export function removeFromJsonConfig(text: string | undefined): FileEdit {
+function removeFromJsonConfig(text: string | undefined): FileEdit {
 	if (text === undefined) {
 		return { text: "", changed: false, before: undefined };
 	}
@@ -423,7 +423,7 @@ function readCodexTable(source: string, path: string): CodexTable {
  * Rewrites only the [mcp_servers.apple-cua] table (in place, or appended) and keeps every other byte; a table that
  * already does what `desired` says is left alone.
  */
-export function mergeCodexToml(text: string | undefined, desired: DesiredRegistration, path = "config.toml"): FileEdit {
+function mergeCodexToml(text: string | undefined, desired: DesiredRegistration, path = "config.toml"): FileEdit {
 	const source = text ?? "";
 	const table = readCodexTable(source, path);
 	if (table.before !== undefined && entryIsCurrent(table.before, desired)) {
@@ -477,7 +477,7 @@ export function mergeCodexToml(text: string | undefined, desired: DesiredRegistr
 }
 
 /** Removes [mcp_servers.apple-cua] and its sub-tables, and the blank line that separated them from the rest. */
-export function removeFromCodexToml(text: string | undefined, path = "config.toml"): FileEdit {
+function removeFromCodexToml(text: string | undefined, path = "config.toml"): FileEdit {
 	const source = text ?? "";
 	const table = readCodexTable(source, path);
 	if (table.start === -1) {
@@ -509,7 +509,7 @@ function timestamp(now: Date): string {
 	return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 }
 
-export function backupPathFor(path: string, now: Date): string {
+function backupPathFor(path: string, now: Date): string {
 	const base = `${path}.bak-${timestamp(now)}`;
 	let candidate = base;
 	for (let suffix = 2; existsSync(candidate); suffix += 1) {
@@ -519,7 +519,7 @@ export function backupPathFor(path: string, now: Date): string {
 }
 
 /** Copies a file to <file>.bak-<timestamp> with its permissions and returns the copy's path. */
-export function backupFile(path: string, now: Date): string {
+function backupFile(path: string, now: Date): string {
 	const target = realpathSync(path);
 	const backup = backupPathFor(target, now);
 	copyFileSync(target, backup);
@@ -552,7 +552,7 @@ function readText(path: string): string | undefined {
 	return existsSync(path) ? readFileSync(path, "utf8") : undefined;
 }
 
-export function findExecutable(name: string, pathVariable: string | undefined): string | undefined {
+function findExecutable(name: string, pathVariable: string | undefined): string | undefined {
 	for (const directory of (pathVariable ?? "").split(delimiter)) {
 		if (directory === "") {
 			continue;
@@ -572,7 +572,7 @@ function nonEmpty(value: string | undefined): string | undefined {
 }
 
 /** The file a client keeps its MCP servers in; undefined for json, which has no file. */
-export function clientConfigPath(client: ClientName, context: ClientContext): string | undefined {
+function clientConfigPath(client: ClientName, context: ClientContext): string | undefined {
 	switch (client) {
 		case "omo":
 			return join(context.home, ".omo/agent/mcp.json");

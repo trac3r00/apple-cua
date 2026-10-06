@@ -107,7 +107,7 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 		expect(backupsOf(path)).toHaveLength(1);
 	});
 
-	it("leaves an older entry alone when it already means the same settings, legacy variable names included", () => {
+	it("leaves an older entry alone when it already means the same settings", () => {
 		const path = join(home, ".omo/agent/mcp.json");
 		const text = `${JSON.stringify(
 			{
@@ -115,7 +115,7 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 					"apple-cua": {
 						command: LAYOUT.helperExecutable,
 						args: [LAYOUT.server],
-						env: { MACOS_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit" },
+						env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit" },
 					},
 				},
 			},
@@ -140,7 +140,7 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 					"apple-cua": {
 						command: "/old/launcher",
 						args: ["/old/server.js"],
-						env: { MACOS_CUA_ALLOWED_BUNDLE_IDS: "com.apple.finder", EXTRA: "1" },
+						env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.finder", EXTRA: "1" },
 						enabled: true,
 					},
 				},

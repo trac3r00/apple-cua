@@ -43,7 +43,7 @@ const clipboardWriteSchema = z
 		},
 	);
 
-export interface PowerComputerExtensions {
+interface PowerComputerExtensions {
 	invokeMenu?(
 		pid: number,
 		path: readonly string[],
@@ -62,7 +62,7 @@ export interface PowerComputerExtensions {
 	writeClipboard?(input: Parameters<typeof writeClipboard>[0]): ReturnType<typeof writeClipboard>;
 }
 
-export type PowerComputer = GuardedComputerInterface & PowerComputerExtensions;
+type PowerComputer = GuardedComputerInterface & PowerComputerExtensions;
 
 /** Dispatch the power-tool step types inside a run_steps batch; returns undefined for other types. */
 export async function dispatchPowerStep(
@@ -195,7 +195,7 @@ async function setFrame(
 		setWindowFrame(pid, observation.windowId, requested));
 }
 
-export function clipboardInput(input: {
+function clipboardInput(input: {
 	readonly text?: string | undefined;
 	readonly image_path?: string | undefined;
 	readonly file_path?: string | undefined;

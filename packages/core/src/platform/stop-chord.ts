@@ -8,9 +8,9 @@ const FLAG_COMMAND = 0x00100000;
 
 export const STOP_CHORD_MASK = FLAG_CONTROL | FLAG_ALTERNATE | FLAG_COMMAND;
 export const STOP_CHORD_LABEL = "keyboard chord Control+Option+Command";
-export const STOP_CHORD_POLL_MS = 50;
+const STOP_CHORD_POLL_MS = 50;
 /** Consecutive samples the chord must be held for (3 x 50 ms = ~150 ms). */
-export const STOP_CHORD_REQUIRED_SAMPLES = 3;
+const STOP_CHORD_REQUIRED_SAMPLES = 3;
 
 /** Starts a repeating callback and returns the function that cancels it. */
 export type StopChordTimer = (callback: () => void, milliseconds: number) => () => void;

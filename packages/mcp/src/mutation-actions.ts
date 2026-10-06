@@ -225,7 +225,7 @@ export async function drag(
  * events posted to the app's process with modifier flags do not scroll it, yet the post itself reports
  * success, so sending them would claim a scroll that never happened.
  */
-export const SCROLL_MODIFIERS_REFUSAL =
+const SCROLL_MODIFIERS_REFUSAL =
 	"scroll with modifiers is refused: wheel events with modifier keys do not scroll a background app's view (they are accepted and then ignored), so nothing was sent. Scroll without modifiers (a page-scroll accessibility action), or use `find` on a target to scroll until it is shown.";
 
 /**

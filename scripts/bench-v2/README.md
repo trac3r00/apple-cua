@@ -8,7 +8,7 @@ node --test scripts/bench-v2/*.test.mjs
 # After unlocking the Mac and starting both servers:
 node scripts/bench-v2/run.mjs --drivers apple,cua --runs 1 --scenarios textedit-fill-save
 node scripts/bench-v2/run.mjs --drivers apple,cua --runs 5 --scenarios all
-node scripts/bench-v2/run.mjs --drivers apple,cua --runs 5 --scenarios all --out .sisyphus/evidence/bench-v2/manual.json
+node scripts/bench-v2/run.mjs --drivers apple,cua --runs 5 --scenarios all --out .bench/manual.json
 node scripts/bench-v2/dashboard.mjs
 ```
 
@@ -20,72 +20,4 @@ A **run** is one attempt for each selected scenario and driver; `n` is the numbe
 
 `text_bytes` includes UTF-8 response text and serialized structured content; `image_base64_bytes` counts the model-facing encoded image characters. `estimated_tokens = text_bytes / 4 + sum(ceil(image_width * image_height / 750))` for PNG/JPEG screenshot blocks. Unknown image dimensions contribute zero image tokens, not an invented estimate. `payload KB` uses `(text_bytes + image_base64_bytes) / 1024`; p50 seconds is the median of run-level summed driver-call seconds, whereas calls, payload, and tokens are mean per attempt. `call_ms` stores each individual tool call's wall-clock latency including failed calls; the dashboard pools calls by driver for p50/p95 (linear percentile interpolation). `disturbed_focus` compares the frontmost application bundle ID before the first and after the last driver call; `disturbed_pointer` compares hardware cursor coordinates at those points (>2 pt Euclidean motion). `Disturbed user` is the percentage of measured attempts with either flag. Fixture setup activations, oracle reads and clipboard restoration are excluded; these endpoint probes do not detect intermediate changes that are undone before the final probe. Legacy records store whole-response `payload_bytes`, not split bytes; their chart bars are approximate and **not directly comparable** to v2 bars. Legacy estimated tokens and classification rates remain `not measured` rather than zero. Summary success rates weight individual attempts; per-commit trends include only v2 evidence with a commit hash. Dirty-tree runs carry `dirty: true` and should not be attributed to the commit alone.
 
-Evidence defaults to `.sisyphus/evidence/bench-v2/<ISO>-<shortsha>.json`; the static self-contained dashboard is `docs/bench/dashboard.html`. The dashboard also loads the checked-in 2026-09-17 legacy task shootout. Its provenance table states what was included. Unit tests run under **node:test**, not Vitest (the repository's Vitest glob covers only `packages/**/*.test.ts`).
-
-## Results: 2026-09-24, apple-cua, on the physical console
-
-Run 16, stored as `.sisyphus/evidence/bench-v2/2026-09-24-run16-apple-console.json`, with background delivery (the default) while a person was at the machine:
-
-| Metric (105 attempts) | Run 1 (off-console baseline) | Run 16 (console) |
-| --- | --- | --- |
-| Pass | 27 | **105** |
-| p50 / p95 call ms | 5185 / n/a | **159 / 458** |
-| Calls per task | 2.8 | 6.4 |
-| Estimated tokens per task | 1659 | 4115 |
-| Focus changed / pointer moved | 1 / 5 | **0 / 1** |
-| Attempts with cleanup leftovers / forced cleanups | 20 / n/a | **0 / 0** |
-
-All 21 scenarios pass 5/5. The single pointer reading is in `finder-navigate`, which sends only keys, so it was most likely the person's own mouse. The metric cannot tell whose hand moved the pointer.
-
-Driver changes found on the console:
-
-- A pressed text field is focused with AXFocused. Typing into web content uses real key events, because pages ignore accessibility writes.
-- Keys for an open Save or Open panel go to AppKit's panel service process, the only place they are received.
-- Cmd+V into a web page of a background app types the clipboard's plain text, because WebKit pastes only for the active app.
-- The focus guard also covers element presses.
-- Keyboard targeting never raises a window over an untitled helper window, such as Finder's rename editor.
-- The accessibility typing route is used only for text-entry fields.
-
-Harness fixes found on the console:
-
-- `safari-link` compares the page's report without its #hash.
-- The Safari oracles look for this attempt's unique URL in any document, not just the front one.
-- Click steps match element values as well as labels.
-- A refusal because the window changed is retried after re-observing.
-- Fixture `open` retries LaunchServices error -600 while an app is still quitting.
-
-## Results: 2026-09-24, apple-cua, off-console session
-
-Measured in a session that did not own the physical console (Screen Sharing into `bob` while another user's console session was locked), with background delivery, the default. Run 1 is the first baseline and run 3 the midpoint, both from earlier the same day. Run 11 is the latest code, stored as `.sisyphus/evidence/bench-v2/2026-09-24-run11-apple-offconsole.json`.
-
-| Metric (105 attempts) | Run 1 | Run 3 | Run 11 |
-| --- | --- | --- | --- |
-| Pass | 27 | 72 | **85** |
-| p50 / p95 call ms | 5185 / n/a | 5229 / 5630 | **381 / 741** |
-| Calls per task | 2.8 | 5.9 | 6.1 |
-| Estimated tokens per task | 1659 | 3365 | 3347 |
-| Focus changed / pointer moved | 1 / 5 | 5 / 1 | **0 / 0** |
-| Attempts with cleanup leftovers | 20 | 42 | 3 |
-
-In run 11, 17 of the 21 scenarios pass 5/5. The four that fail need input that this kind of session does not deliver without taking focus or moving the pointer:
-
-- Safari page content (`safari-form`, `safari-link`, `clipboard-cross-app`) is not reachable by keyboard or accessibility off-console.
-- The Save panel (`textedit-save-sheet`) ignores background keys off-console.
-
-Those 20 attempts are the off-console ceiling under the "stay background" rule; they need an on-console run. The 3 leftovers are Safari tab checks, because Safari's AppleScript does not answer off-console. The 5 forced cleanups are TextEdit quits after the stuck Save panel, and each one is disclosed in `cleanup.forced`.
-
-Driver changes behind these numbers:
-
-- Keyboard input is aimed at the observed window. apple-cua raises it inside its app with AXRaise, or off-console selects it from the app's Window menu. It never raises over a sheet or dialog.
-- Background delivery sends a self-activating target app (Finder's Go to Folder) back behind the user's app.
-- Element clicks tolerate a window that moved since observation.
-- The app list no longer goes stale after an app relaunches.
-
-Harness fixes:
-
-- `finder-selected` now compares real paths. It could never pass before, because `/tmp` resolves to `/private/tmp`.
-- Oracles wait a bounded time for asynchronous saves.
-- Off-console, checks use OCR of a window matched by title instead of AppleScript.
-- TextEdit auto-capitalization, spelling correction and state restoration are scoped off for the run and restored afterwards.
-- Stuck Finder alerts and windows that close late are cleaned up.
-- A signal stops the run after the current attempt and restores the clipboard and preferences.
+Evidence defaults to `.bench/<ISO>-<shortsha>.json`; the static self-contained dashboard is `.bench/dashboard.html`; `.bench/` is git-ignored. Unit tests run under **node:test**, not Vitest (the repository's Vitest glob covers only `packages/**/*.test.ts`).

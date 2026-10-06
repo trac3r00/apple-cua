@@ -10,7 +10,7 @@ export function dragSteps(duration: number): number {
 	return Math.max(1, Math.min(MAX_DRAG_STEPS, Math.ceil(duration / DEFAULT_DRAG_FRAME_MILLISECONDS)));
 }
 
-export function interpolatePoint(from: Point, to: Point, progress: number): Point {
+function interpolatePoint(from: Point, to: Point, progress: number): Point {
 	return {
 		x: Math.round(from.x + (to.x - from.x) * progress),
 		y: Math.round(from.y + (to.y - from.y) * progress),

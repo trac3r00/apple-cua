@@ -2,8 +2,8 @@ import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../pi/index.js";
 import { type PhoneObservationKeys, phoneTool } from "./ios-shared.js";
 
-export const IosOpenAppParams = Type.Object({ name: Type.String({ minLength: 1 }) }, { additionalProperties: false });
-export type IosOpenAppInput = Static<typeof IosOpenAppParams>;
+const IosOpenAppParams = Type.Object({ name: Type.String({ minLength: 1 }) }, { additionalProperties: false });
+type IosOpenAppInput = Static<typeof IosOpenAppParams>;
 export function createIosOpenAppTool(keys: PhoneObservationKeys): ToolDefinition {
 	return phoneTool(
 		"ios_open_app",

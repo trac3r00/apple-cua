@@ -32,18 +32,18 @@ export {
 } from "./ax-timeout.js";
 
 export type AXUIElementRef = CFTypeRef;
-export type AXValueRef = CFTypeRef;
+type AXValueRef = CFTypeRef;
 
 export const K_AX_PRESS_ACTION = "AXPress";
 export const K_AX_VALUE_ATTRIBUTE = "AXValue";
-export const K_AX_FOCUSED_UI_ELEMENT_ATTRIBUTE = "AXFocusedUIElement";
+const K_AX_FOCUSED_UI_ELEMENT_ATTRIBUTE = "AXFocusedUIElement";
 export const K_AX_ROLE_ATTRIBUTE = "AXRole";
 export const K_AX_TITLE_ATTRIBUTE = "AXTitle";
 export const K_AX_DESCRIPTION_ATTRIBUTE = "AXDescription";
-export const K_AX_POSITION_ATTRIBUTE = "AXPosition";
-export const K_AX_SIZE_ATTRIBUTE = "AXSize";
+const K_AX_POSITION_ATTRIBUTE = "AXPosition";
+const K_AX_SIZE_ATTRIBUTE = "AXSize";
 export const K_AX_CHILDREN_ATTRIBUTE = "AXChildren";
-export const K_AX_SELECTED_TEXT_ATTRIBUTE = "AXSelectedText";
+const K_AX_SELECTED_TEXT_ATTRIBUTE = "AXSelectedText";
 export const K_AX_SELECTED_TEXT_RANGE_ATTRIBUTE = "AXSelectedTextRange";
 
 const AX_SUCCESS = 0;
@@ -527,7 +527,7 @@ export function setAttributeValue(element: AXUIElementRef, attribute: string, va
 	});
 }
 
-export function setStringAttributeValue(element: AXUIElementRef, attribute: string, value: string): void {
+function setStringAttributeValue(element: AXUIElementRef, attribute: string, value: string): void {
 	const valueReference = toCFString(value);
 	try {
 		setAttributeValue(element, attribute, valueReference);
@@ -589,7 +589,7 @@ export function elementFrameByIndex(pid: number, elementIndex: number): AXElemen
 	}
 }
 
-export const AX_SCROLL_TO_VISIBLE_ACTION = "AXScrollToVisible";
+const AX_SCROLL_TO_VISIBLE_ACTION = "AXScrollToVisible";
 
 /**
  * An observed element that is expected to have MOVED since the observation (it is about to be

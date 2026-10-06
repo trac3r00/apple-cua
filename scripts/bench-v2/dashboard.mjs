@@ -119,17 +119,13 @@ export function renderDashboard(runs) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-	const directory = resolve(".sisyphus/evidence/bench-v2");
+	const directory = resolve(".bench");
 	mkdirSync(directory, { recursive: true });
 	const files = readdirSync(directory, { withFileTypes: true })
 		.filter((e) => e.isFile() && e.name.endsWith(".json"))
 		.map((e) => resolve(directory, e.name));
-	// Runs taken while the Mac was locked measure the lock screen, not the drivers, so they stay out.
-	const legacy = [".sisyphus/evidence/driver-task-shootout-2026-09-17.json"];
-	const { existsSync } = await import("node:fs");
-	const runs = [...files, ...legacy.filter(existsSync)].map(loadReport);
-	mkdirSync("docs/bench", { recursive: true });
-	writeFileSync("docs/bench/dashboard.html", renderDashboard(runs));
+	const runs = files.map(loadReport);
+	writeFileSync(resolve(directory, "dashboard.html"), renderDashboard(runs));
 	process.stdout.write(
 		`Dashboard: ${runs.length} reports, ${runs.reduce((n, r) => n + r.results.length, 0)} attempts\n`,
 	);

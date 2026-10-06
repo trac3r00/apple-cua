@@ -330,7 +330,7 @@ export function applicationIsFrontmost(
  * Whether the item at `path` is enabled, read without opening any menu; undefined when it cannot be
  * resolved that way (a submenu that only fills while it is shown).
  */
-export function menuItemEnabled(
+function menuItemEnabled(
 	pid: number,
 	path: readonly string[],
 	accessibility: MenuAccessibility = nativeMenuAccessibility,
@@ -360,7 +360,7 @@ export function menuItemEnabled(
  * is waited for too. True once it reads enabled; false when it stays disabled (the command does not apply
  * to that window right now) or never resolves without opening a menu.
  */
-export async function waitForMenuItemEnabled(
+async function waitForMenuItemEnabled(
 	pid: number,
 	path: readonly string[],
 	accessibility: MenuAccessibility = nativeMenuAccessibility,

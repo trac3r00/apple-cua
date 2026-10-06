@@ -3,11 +3,11 @@ import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../pi/index.js";
 import { type PhoneObservationKeys, phoneTool } from "./ios-shared.js";
 
-export const IosTapTextParams = Type.Object(
+const IosTapTextParams = Type.Object(
 	{ query: Type.String(), index: Type.Optional(Type.Integer({ minimum: 0 })), exact: Type.Optional(Type.Boolean()) },
 	{ additionalProperties: false },
 );
-export type IosTapTextInput = Static<typeof IosTapTextParams>;
+type IosTapTextInput = Static<typeof IosTapTextParams>;
 export function createIosTapTextTool(keys: PhoneObservationKeys): ToolDefinition {
 	return phoneTool(
 		"ios_tap_text",

@@ -110,7 +110,7 @@ describe("#given settings #when a change is applied #then apps resolve by name a
 });
 
 describe("#given the server's environment variables #when settings are mapped to them #then the server's own rules apply", () => {
-	it("writes every managed variable, drops the pre-rename names, and reads defaults and legacy names like the server", () => {
+	it("writes every managed variable and reads defaults like the server", () => {
 		const settings = { ...DEFAULT_SETTINGS, allowedApps: ["com.apple.TextEdit"] };
 
 		expect(envForSettings(settings)).toEqual({
@@ -118,16 +118,8 @@ describe("#given the server's environment variables #when settings are mapped to
 			APPLE_CUA_DELIVERY: "background",
 			APPLE_CUA_TOOLSET: "full",
 			APPLE_CUA_IPHONE: undefined,
-			MACOS_CUA_ALLOWED_BUNDLE_IDS: undefined,
-			MACOS_CUA_DELIVERY: undefined,
 		});
-		expect(envMatchesSettings({ MACOS_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit" }, settings)).toBe(true);
-		expect(
-			envMatchesSettings(
-				{ APPLE_CUA_ALLOWED_BUNDLE_IDS: "", MACOS_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit" },
-				settings,
-			),
-		).toBe(true);
+		expect(envMatchesSettings({ APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit" }, settings)).toBe(true);
 		expect(
 			envMatchesSettings(
 				{ APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit", APPLE_CUA_TOOLSET: "LEAN" },

@@ -41,31 +41,13 @@ import {
 	setSkyLightWindowLocation,
 } from "./skylight.js";
 
-export type {
-	CGEventRef,
-	CGEventSourceRef,
-	CGPoint,
-	KeyboardEventOptions,
-	MouseButton,
-	MouseEventKind,
-	MouseEventOptions,
-	ScrollEventOptions,
-} from "./coregraphics-types.js";
+export type { MouseButton } from "./coregraphics-types.js";
 export {
 	K_CG_EVENT_FLAG_MASK_ALTERNATE,
 	K_CG_EVENT_FLAG_MASK_COMMAND,
 	K_CG_EVENT_FLAG_MASK_CONTROL,
 	K_CG_EVENT_FLAG_MASK_SHIFT,
-	K_CG_EVENT_SOURCE_STATE_HID_SYSTEM_STATE,
-	K_CG_HID_EVENT_TAP,
-	K_CG_MOUSE_EVENT_BUTTON_NUMBER,
-	K_CG_MOUSE_EVENT_CLICK_STATE,
-	K_CG_MOUSE_EVENT_SUBTYPE,
-	K_CG_MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER,
-	K_CG_MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER_THAT_CAN_HANDLE_THIS_EVENT,
-	K_CG_SCROLL_EVENT_UNIT_LINE,
 } from "./coregraphics-types.js";
-export { currentUptimeNanoseconds } from "./coregraphics-bindings.js";
 
 export function postMouseEvent(options: MouseEventOptions): void {
 	const event = makeMouseEvent(options.kind, options.position, options.button, options.targetWindow, options.flags);

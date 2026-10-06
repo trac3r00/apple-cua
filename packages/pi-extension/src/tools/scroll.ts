@@ -6,14 +6,14 @@ import {
 	scrollElement,
 	withTargetedApp,
 } from "@apple-cua/core";
-import { type Static, Type } from "typebox";
+import { Type } from "typebox";
 
 import { type ToolDefinition, defineTool } from "../pi/index.js";
 import { observedActionCompleteResult } from "./result.js";
 
 const LINES_PER_PAGE = 10;
 
-export const ScrollParams = Type.Object(
+const ScrollParams = Type.Object(
 	{
 		app: Type.String({ description: "App name or bundle identifier." }),
 		direction: Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")], {
@@ -24,8 +24,6 @@ export const ScrollParams = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-
-export type ScrollInput = Static<typeof ScrollParams>;
 
 export function createScrollTool(computer: ComputerInterface): ToolDefinition {
 	return defineTool({

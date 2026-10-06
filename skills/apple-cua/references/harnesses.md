@@ -124,10 +124,6 @@ that queue. Avoid multiple desktop controllers.
   MCP for this workflow; custom low-level integrations must enforce their own policy.
 - The phone tools (`ios_*`) follow the same rule: `ios_observe` returns the token, every
   `ios_*` mutation needs it, and a mutation answers with a fresh observation and a new token.
-- Environment variables were renamed with the project. `APPLE_CUA_ALLOWED_BUNDLE_IDS`,
-  `APPLE_CUA_DELIVERY`, `APPLE_CUA_DISABLE_COMPUTER_USE_BETA` and
-  `APPLE_CUA_OPENAI_NATIVE_TRANSPORT` are the current names; the pre-rename `MACOS_CUA_*`
-  names are still honoured as fallbacks, so existing configuration does not need to change.
 
 ## Upstream references
 

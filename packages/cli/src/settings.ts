@@ -42,34 +42,23 @@ export const DEFAULT_SETTINGS: Settings = {
 	clients: [],
 };
 
-export const ALLOW_ENV = "APPLE_CUA_ALLOWED_BUNDLE_IDS";
-export const DELIVERY_ENV = "APPLE_CUA_DELIVERY";
-export const TOOLSET_ENV = "APPLE_CUA_TOOLSET";
-export const IPHONE_ENV = "APPLE_CUA_IPHONE";
-const LEGACY_ALLOW_ENV = "MACOS_CUA_ALLOWED_BUNDLE_IDS";
-const LEGACY_DELIVERY_ENV = "MACOS_CUA_DELIVERY";
+const ALLOW_ENV = "APPLE_CUA_ALLOWED_BUNDLE_IDS";
+const DELIVERY_ENV = "APPLE_CUA_DELIVERY";
+const TOOLSET_ENV = "APPLE_CUA_TOOLSET";
+const IPHONE_ENV = "APPLE_CUA_IPHONE";
 
-export function parseAllowList(value: string | undefined): string[] {
+function parseAllowList(value: string | undefined): string[] {
 	return (value ?? "")
 		.split(",")
 		.map((id) => id.trim())
 		.filter((id, index, all) => id !== "" && all.indexOf(id) === index);
 }
 
-/** The current name, else the pre-rename one, the way the server reads them (an empty value counts as unset). */
-function renamed(env: EnvMap, primary: string, legacy: string): string | undefined {
-	const value = env[primary];
-	return value !== undefined && value !== "" ? value : env[legacy];
-}
-
 /** What a server started with `env` would do, read with the server's own rules. */
-export function settingsFromEnv(env: EnvMap): Omit<Settings, "clients"> {
+function settingsFromEnv(env: EnvMap): Omit<Settings, "clients"> {
 	return {
-		allowedApps: parseAllowList(renamed(env, ALLOW_ENV, LEGACY_ALLOW_ENV)),
-		delivery:
-			renamed(env, DELIVERY_ENV, LEGACY_DELIVERY_ENV)?.trim().toLowerCase() === "attended"
-				? "attended"
-				: "background",
+		allowedApps: parseAllowList(env[ALLOW_ENV]),
+		delivery: env[DELIVERY_ENV]?.trim().toLowerCase() === "attended" ? "attended" : "background",
 		toolset: env[TOOLSET_ENV]?.trim().toLowerCase() === "lean" ? "lean" : "full",
 		iphone: env[IPHONE_ENV]?.trim() === "1",
 	};
@@ -90,15 +79,13 @@ export function envMatchesSettings(env: EnvMap, settings: Settings): boolean {
 	);
 }
 
-/** The env a registration carries for `settings`; undefined removes a key (and the pre-rename names). */
+/** The env a registration carries for `settings`; undefined removes a key. */
 export function envForSettings(settings: Settings): EnvUpdate {
 	return {
 		[ALLOW_ENV]: settings.allowedApps.length === 0 ? undefined : settings.allowedApps.join(","),
 		[DELIVERY_ENV]: settings.delivery,
 		[TOOLSET_ENV]: settings.toolset,
 		[IPHONE_ENV]: settings.iphone ? "1" : undefined,
-		[LEGACY_ALLOW_ENV]: undefined,
-		[LEGACY_DELIVERY_ENV]: undefined,
 	};
 }
 

@@ -27,7 +27,7 @@ const MAX_LOG_CHARS = 2_000;
 const MAX_FIND_RESULTS = 25;
 const MAX_BATCH_STEPS = MAX_RUN_STEPS;
 
-export const runScriptSchema = z.object({
+const runScriptSchema = z.object({
 	code: z.string().min(1).max(MAX_CODE_LENGTH),
 	timeout_ms: z.number().int().min(1).max(MAX_TIMEOUT_MS).optional(),
 	read_only: z.boolean().optional(),
@@ -48,7 +48,7 @@ Scroll-until-found: click/setValue/selectText/secondaryAction with a query targe
 log(...values); await sleep(ms); JSON, Math, Date available.
 Actions return the parsed result (status, changes, observation_token...); the latest token is reused. Acting by element id/coordinates needs an earlier observe()/find(); query targets, type, press, menu, waitFor observe themselves. A refusal or failed step throws ScriptActionError (message, kind, refused, payload), catchable; uncaught, the call errors with {error,kind,failedAction,payload,log,actions}. read_only=true makes every mutation throw before dispatch. timeout_ms (default 30000, max 120000) or cancelling stops further actions and terminates a script that never yields. Different apps overlap under background delivery (Promise.all); the same app runs in call order; attended delivery serializes all. Answers {ok,value,log,actions:[{n,app,kind,ms,status}],elapsedMs}; value must be JSON-serializable (cut at 20 KB). include_screenshot=true attaches the last window image.`;
 
-export class ScriptActionError extends Error {
+class ScriptActionError extends Error {
 	readonly kind: string;
 	readonly payload: unknown;
 	readonly refused: string | undefined;

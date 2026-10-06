@@ -50,13 +50,6 @@ const macOSHostComputerMock = vi.hoisted(() => {
 
 vi.mock("@apple-cua/core", () => ({
 	MacOSHostComputer: macOSHostComputerMock.constructor,
-	// Same contract as the real helper: the current name wins, the pre-rename name still applies,
-	// and an empty value counts as unset. The helper's own semantics are unit-tested in core; this
-	// mock exists so the extension test can assert which names it asks for.
-	renamedEnvironmentVariable: (primary: string, legacy: string, environment: NodeJS.ProcessEnv = process.env) => {
-		const value = environment[primary];
-		return value !== undefined && value !== "" ? value : environment[legacy];
-	},
 }));
 
 import macosCuaExtension from "./index.js";
@@ -403,47 +396,6 @@ describe("#given enabled session #when model changes to direct OpenAI Responses 
 			});
 
 			expect(pi.getActiveTools()).toContain("computer");
-		} finally {
-			vi.unstubAllEnvs();
-		}
-	});
-});
-
-describe("#given the pre-rename opt-out variable #when session_start runs #then the native computer tool stays suppressed", () => {
-	it("keeps honouring MACOS_CUA_DISABLE_COMPUTER_USE_BETA after the rename", async () => {
-		vi.stubEnv("APPLE_CUA_DISABLE_COMPUTER_USE_BETA", "");
-		vi.stubEnv("MACOS_CUA_DISABLE_COMPUTER_USE_BETA", "1");
-		try {
-			const pi = createMockPi();
-			macosCuaExtension(pi);
-
-			await runSessionStart(pi);
-
-			expect(pi.registeredTools.map((tool) => tool.name)).not.toContain("computer");
-		} finally {
-			vi.unstubAllEnvs();
-		}
-	});
-});
-
-describe("#given the pre-rename native transport variable #when the OpenAI payload hook runs #then the native computer tool is still opted in", () => {
-	it("keeps honouring MACOS_CUA_OPENAI_NATIVE_TRANSPORT after the rename", async () => {
-		vi.stubEnv("APPLE_CUA_OPENAI_NATIVE_TRANSPORT", "");
-		vi.stubEnv("MACOS_CUA_OPENAI_NATIVE_TRANSPORT", "1");
-		try {
-			const pi = createMockPi();
-			macosCuaExtension(pi);
-			await runSessionStart(pi);
-			const computerFunction = { type: "function", name: "computer", parameters: { anyOf: [] } };
-			const shellTool = { type: "function", name: "shell" };
-
-			const result = runBeforeProviderRequest(
-				pi,
-				{ api: "openai-responses", provider: "openai", baseUrl: "https://api.openai.com/v1" },
-				{ tools: [computerFunction, shellTool] },
-			);
-
-			expect(result).toEqual({ tools: [shellTool, { type: "computer" }] });
 		} finally {
 			vi.unstubAllEnvs();
 		}

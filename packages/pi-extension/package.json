@@ -32,7 +32,6 @@
 		"typebox": "1.1.38"
 	},
 	"devDependencies": {
-		"@mariozechner/pi-ai": "^0.73.1",
 		"@mariozechner/pi-coding-agent": "^0.73.1",
 		"@types/node": "^20.0.0",
 		"typescript": "^5.7.0",

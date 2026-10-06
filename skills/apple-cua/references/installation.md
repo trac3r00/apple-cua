@@ -9,7 +9,7 @@ allowlist.
 ## Install with one command
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash
 ```
 
 The installer clones apple-cua into `~/.apple-cua/app`, runs `scripts/setup.sh` there, and puts the
@@ -134,12 +134,6 @@ Normally the harness starts this process and owns stdin/stdout. Configure the sa
 in its MCP server definition instead of starting a competing manual instance. Never run two
 controllers against the same desktop and expect the server's per-process queue to coordinate
 them. See [harnesses.md](harnesses.md) for complete configuration examples.
-
-Before the rename to apple-cua these were `MACOS_CUA_ALLOWED_BUNDLE_IDS` and
-`MACOS_CUA_DELIVERY`. Both names still work: the current name wins and the old one is honoured
-as a fallback, so an MCP block or shell profile written earlier keeps its allowlist and delivery
-mode. The same applies to `APPLE_CUA_DISABLE_COMPUTER_USE_BETA` and
-`APPLE_CUA_OPENAI_NATIVE_TRANSPORT` in the Pi extension.
 
 ## iPhone Mirroring permissions
 

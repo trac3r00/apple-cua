@@ -72,7 +72,7 @@ export interface ActionEscalation {
 	readonly reason: EscalationReason;
 }
 
-export interface ActionEnvelope {
+interface ActionEnvelope {
 	/**
 	 * How strongly this driver can account for the action: `confirmed` needs readback
 	 * evidence that the requested value holds, `partial` means some of several updates

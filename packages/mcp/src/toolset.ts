@@ -17,13 +17,13 @@ export interface ResolvedServerOptions {
 	readonly iphone: boolean;
 }
 
-export const TOOLSET_ENV = "APPLE_CUA_TOOLSET";
-export const IPHONE_ENV = "APPLE_CUA_IPHONE";
+const TOOLSET_ENV = "APPLE_CUA_TOOLSET";
+const IPHONE_ENV = "APPLE_CUA_IPHONE";
 
 const warnedToolsets = new Set<string>();
 
 /** Parse a toolset name. An unknown value falls back to `full` and is reported on stderr once per value. */
-export function toolsetFromEnvironment(value: string | undefined): ToolsetProfile {
+function toolsetFromEnvironment(value: string | undefined): ToolsetProfile {
 	const name = value?.trim().toLowerCase() ?? "";
 	if (name === "" || name === "full") {
 		return "full";
@@ -38,7 +38,7 @@ export function toolsetFromEnvironment(value: string | undefined): ToolsetProfil
 	return "full";
 }
 
-export function iphoneFromEnvironment(value: string | undefined): boolean {
+function iphoneFromEnvironment(value: string | undefined): boolean {
 	return value?.trim() === "1";
 }
 

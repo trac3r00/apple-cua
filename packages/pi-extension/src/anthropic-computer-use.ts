@@ -6,10 +6,7 @@ export {
 	ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
 	ANTHROPIC_NATIVE_COMPUTER_TOOL_TYPE,
 	addAnthropicComputerUseToPayload,
-	anthropicComputerToolSchema,
 	computerToolSchema,
-	mergeBetaHeader,
-	sanitizeTools,
 	supportsAnthropicNativeComputerUse,
 } from "./anthropic-payload.js";
 export type { ComputerToolInput } from "./anthropic-payload.js";

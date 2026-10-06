@@ -47,6 +47,8 @@ const skyLightMock = vi.hoisted(() => {
 vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
 // The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
 setOpenWindowsSourceForTesting(() => undefined);
+// The focus-lease and primer pauses only give a real app time to react; no assertion here depends on them.
+vi.mock("node:timers/promises", () => ({ setTimeout: () => Promise.resolve() }));
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/skylight.js", () => ({
 	beginFocusWithoutRaise: skyLightMock.beginFocusWithoutRaise,

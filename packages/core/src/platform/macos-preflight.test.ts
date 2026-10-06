@@ -71,6 +71,8 @@ import { MacOSHostComputer } from "./macos.js";
 const TARGET_PID = 1234;
 const BUNDLE_ID = "com.apple.finder";
 const WINDOW_BOUNDS = { x: 100, y: 50, width: 800, height: 600 };
+/** How long getAppState waits for a required window to appear before refusing (macos.ts). */
+const WINDOW_APPEAR_WAIT_MILLISECONDS = 3_000;
 
 function fakePng(width = 800, height = 600): Buffer {
 	const data = globalThis.Buffer.alloc(24);
@@ -259,9 +261,17 @@ describe("MacOSHostComputer input observations", () => {
 		const screenshotReads = childProcessMock.execFile.mock.calls.filter(([file]) => file === "sh").length;
 		const axReads = accessibilityMock.extractAccessibilityTree.mock.calls.length;
 
-		await expect(computer.getAppState(TARGET_PID, { settleMs: 0, requireWindow: true })).rejects.toThrow(
-			/visible target window/i,
-		);
+		// getAppState waits a bounded real time for the window to appear; fake the clock so that wait is not real.
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+		try {
+			const refusal = expect(computer.getAppState(TARGET_PID, { settleMs: 0, requireWindow: true })).rejects.toThrow(
+				/visible target window/i,
+			);
+			await vi.advanceTimersByTimeAsync(WINDOW_APPEAR_WAIT_MILLISECONDS);
+			await refusal;
+		} finally {
+			vi.useRealTimers();
+		}
 
 		expect(childProcessMock.execFile.mock.calls.filter(([file]) => file === "sh")).toHaveLength(screenshotReads);
 		expect(screenshotMock.captureDisplayImage).not.toHaveBeenCalled();

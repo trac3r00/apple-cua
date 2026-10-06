@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { InstallMarker } from "./layout.js";
 import { classifyLocalChanges, gitIn, runUpdate, updateSource } from "./update.js";
 
@@ -17,6 +17,8 @@ const GIT_ENV = {
 };
 const NATIVE_INPUTS = "packages/core/native/build-inputs.sha256";
 
+/** The upstream, the author clone and the checkout, built once; every test works on its own copy of it. */
+let template = "";
 let root = "";
 let author = "";
 let checkout = "";
@@ -68,16 +70,34 @@ function update(options: { readonly stamp?: string; readonly digest?: string; re
 	return { status, output: output.join("\n"), setupRuns };
 }
 
-beforeEach(() => {
-	root = realpathSync(mkdtempSync(join(tmpdir(), "apple-cua-update-")));
-	const upstream = join(root, "upstream.git");
-	author = join(root, "author");
-	checkout = join(root, "checkout");
-	git(root, "init", "--quiet", "--bare", "-b", "master", upstream);
-	git(root, "clone", "--quiet", upstream, author);
+beforeAll(() => {
+	template = realpathSync(mkdtempSync(join(tmpdir(), "apple-cua-update-template-")));
+	const upstream = join(template, "upstream.git");
+	author = join(template, "author");
+	git(template, "init", "--quiet", "--bare", "-b", "master", upstream);
+	git(template, "clone", "--quiet", upstream, author);
 	writeFile(join(author, NATIVE_INPUTS), "abc  build.sh\n");
 	publish("0.1.0");
-	git(root, "clone", "--quiet", upstream, checkout);
+	git(template, "clone", "--quiet", upstream, join(template, "checkout"));
+});
+
+afterAll(() => {
+	rmSync(template, { recursive: true, force: true });
+});
+
+/** Points the copy's clones at the copy's own upstream; the template path is the only thing git recorded about it. */
+function retargetRemote(clone: string): void {
+	const config = join(clone, ".git", "config");
+	writeFileSync(config, readFileSync(config, "utf8").replaceAll(template, root));
+}
+
+beforeEach(() => {
+	root = realpathSync(mkdtempSync(join(tmpdir(), "apple-cua-update-")));
+	cpSync(template, root, { recursive: true });
+	author = join(root, "author");
+	checkout = join(root, "checkout");
+	retargetRemote(author);
+	retargetRemote(checkout);
 });
 
 afterEach(() => {

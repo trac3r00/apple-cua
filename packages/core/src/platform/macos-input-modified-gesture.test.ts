@@ -43,6 +43,8 @@ vi.mock("get-windows", () => ({
 	),
 }));
 setOpenWindowsSourceForTesting(() => undefined);
+// The focus-lease and primer pauses only give a real app time to react; no assertion here depends on them.
+vi.mock("node:timers/promises", () => ({ setTimeout: () => Promise.resolve() }));
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/skylight.js", () => ({
 	focusGuardFor: skyLightMock.focusGuardFor,

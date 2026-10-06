@@ -31,7 +31,8 @@ function runCliAllowingFailure(args: string[]) {
 	});
 }
 
-describe("apple-cua CLI", () => {
+// Each test spawns its own CLI process and shares no state, so a describe's tests run concurrently.
+describe.concurrent("apple-cua CLI", () => {
 	it("#given package metadata #when --version runs #then it prints the package version", async () => {
 		// given
 		const expectedVersion = packageJson.version;
@@ -70,9 +71,11 @@ describe("apple-cua CLI", () => {
 		];
 
 		// when
-		const topLevelHelp = await runCli(["--help"]);
-		const permissionsHelp = await runCli(["permissions", "--help"]);
-		const windowsHelp = await runCli(["windows", "--help"]);
+		const [topLevelHelp, permissionsHelp, windowsHelp] = await Promise.all([
+			runCli(["--help"]),
+			runCli(["permissions", "--help"]),
+			runCli(["windows", "--help"]),
+		]);
 
 		// then
 		for (const command of expectedTopLevelCommands) {
@@ -150,7 +153,7 @@ describe("apple-cua CLI", () => {
 	}, 60_000);
 });
 
-describe("apple-cua CLI iOS commands", () => {
+describe.concurrent("apple-cua CLI iOS commands", () => {
 	it("#given the iOS command group #when help runs #then every iPhone command is listed", async () => {
 		// given
 		const expectedCommands = [
@@ -217,7 +220,7 @@ describe("apple-cua CLI iOS commands", () => {
 	});
 });
 
-describe("apple-cua CLI screenshot capture options", () => {
+describe.concurrent("apple-cua CLI screenshot capture options", () => {
 	it("#given the screenshot command #when help runs #then region and display selection are documented", async () => {
 		// when
 		const result = await runCli(["screenshot", "--help"]);

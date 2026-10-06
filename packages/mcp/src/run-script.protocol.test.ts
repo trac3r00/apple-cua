@@ -573,6 +573,9 @@ describe("run_script #given a script that blocks its thread #when the deadline p
 			release = resolve;
 		});
 		harness.computer.onStateCall = () => release();
+		// Only the run_script deadline is faked, so it cannot fire until the test advances it: the 20 rounds below
+		// always run while the script is still running, however slow the machine is.
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		let settled = false;
 		const script = harness.client
 			.callTool({
@@ -598,6 +601,7 @@ describe("run_script #given a script that blocks its thread #when the deadline p
 		}
 		expect(settled).toBe(false);
 
+		await vi.advanceTimersByTimeAsync(1500);
 		const result = await script;
 		expect(result.isError).toBe(true);
 		expect(jsonPayload(result)).toMatchObject({ ok: false, kind: "timeout" });

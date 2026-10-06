@@ -1,10 +1,8 @@
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { KoffiFunc } from "koffi";
 import type { Rect } from "../../types/index.js";
 import { type CFTypeRef, cfRelease, toCFString, withCFString } from "./corefoundation.js";
 import { koffi } from "./koffi.js";
-import { captureMainDisplayPngViaSck, isSckitAvailable } from "./sckit.js";
+import { captureMainDisplayPngViaSck, captureWindowViaSck, getSckitLoadError, isSckitAvailable } from "./sckit.js";
 
 type CGImageRef = CFTypeRef;
 type CGImageDestinationRef = CFTypeRef;
@@ -51,56 +49,7 @@ const MAX_PIXEL_SIZE_KEY = "kCGImageDestinationImageMaxPixelSize";
 const LOSSY_QUALITY_KEY = "kCGImageDestinationLossyCompressionQuality";
 const CF_NUMBER_INT_TYPE = 9;
 const CF_NUMBER_DOUBLE_TYPE = 13;
-const SCK_WINDOW_FORMAT_PNG = 0;
-const SCK_WINDOW_FORMAT_JPEG = 1;
 const SCK_WINDOW_DEFAULT_QUALITY = 100;
-
-type SckWindowBindings = {
-	readonly captureWindow: KoffiFunc<
-		(
-			windowId: number,
-			maxWidth: number,
-			maxHeight: number,
-			format: number,
-			quality: number,
-			outLen: [number],
-		) => Buffer | null
-	>;
-	readonly freeBytes: KoffiFunc<(bytes: Buffer) => void>;
-};
-
-let sckWindowBindings: SckWindowBindings | null | undefined;
-
-function getSckWindowBindings(): SckWindowBindings | null {
-	if (sckWindowBindings !== undefined) {
-		return sckWindowBindings;
-	}
-	const moduleDirectory = dirname(fileURLToPath(import.meta.url));
-	const candidates = [
-		join(moduleDirectory, "../../../native/libsckit.dylib"),
-		join(moduleDirectory, "../../../../native/libsckit.dylib"),
-		join(moduleDirectory, "../../native/libsckit.dylib"),
-	];
-	for (const candidate of candidates) {
-		try {
-			const library = koffi.load(candidate);
-			sckWindowBindings = {
-				captureWindow: library.func("sckit_capture_window", "uint8_t *", [
-					"uint32_t",
-					"int32_t",
-					"int32_t",
-					"int32_t",
-					"int32_t",
-					koffi.out("int32_t *"),
-				]) as SckWindowBindings["captureWindow"],
-				freeBytes: library.func("sck_free", "void", ["uint8_t *"]) as SckWindowBindings["freeBytes"],
-			};
-			return sckWindowBindings;
-		} catch {}
-	}
-	sckWindowBindings = null;
-	return null;
-}
 
 const CGMainDisplayID = coreGraphics.func("CGMainDisplayID", "uint32_t", []) as KoffiFunc<() => number>;
 
@@ -209,28 +158,17 @@ export function captureWindowImage(
 	if (!Number.isSafeInteger(maxWidth) || !Number.isSafeInteger(maxHeight) || maxWidth <= 0 || maxHeight <= 0) {
 		throw new Error(`captureWindowImage requires positive integer dimensions, got ${maxWidth}x${maxHeight}`);
 	}
-	const bindings = getSckWindowBindings();
-	if (bindings === null) {
-		throw new Error("Native ScreenCaptureKit window capture library is unavailable");
-	}
-	const outLen: [number] = [0];
-	const bytesPointer = bindings.captureWindow(
+	const data = captureWindowViaSck(
 		windowId,
 		maxWidth,
 		maxHeight,
-		format === "jpeg" ? SCK_WINDOW_FORMAT_JPEG : SCK_WINDOW_FORMAT_PNG,
+		format,
 		Math.min(100, Math.max(1, Math.round(quality))),
-		outLen,
 	);
-	if (bytesPointer === null || outLen[0] <= 0) {
-		throw new Error(`Native ScreenCaptureKit window capture failed for window ${windowId}`);
+	if (data === null) {
+		throw new Error(`Native ScreenCaptureKit window capture is unavailable: ${getSckitLoadError()}`);
 	}
-	try {
-		const decoded: ArrayLike<number> = koffi.decode(bytesPointer, "uint8_t", outLen[0]);
-		return { data: Buffer.from(decoded) };
-	} finally {
-		bindings.freeBytes(bytesPointer);
-	}
+	return { data };
 }
 
 export function getMainDisplayId(): number {

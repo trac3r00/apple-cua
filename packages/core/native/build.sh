@@ -1,30 +1,40 @@
 #!/usr/bin/env bash
-# Build the libsckit.dylib helper for @apple-cua/core.
+# Builds the native helpers of @apple-cua/core as universal binaries (arm64 + x86_64), so one checkout
+# runs on Apple Silicon and Intel Macs alike:
 #
-# Requires:
-#   - clang (Xcode Command Line Tools)
-#   - macOS 14.0+ SDK (for ScreenCaptureKit)
+#   libsckit.dylib   ScreenCaptureKit capture shim. Deployment target 12.3, ScreenCaptureKit's own floor.
+#                    The screenshot APIs it calls arrived in macOS 14.0 and sit behind @available, so on an
+#                    older system the library still loads, answers "unavailable", and screenshot.ts takes its
+#                    CoreGraphics or screencapture fallback.
+#   cursor-overlay   the agent cursor overlay. Deployment target 11.0.
 #
-# Output:
-#   packages/core/native/libsckit.dylib
+# Calling an API newer than a deployment target without an @available check is a build error, which keeps
+# those targets true. The script ends by recording the hashes of its inputs in build-inputs.sha256;
+# scripts/setup.sh compares them to tell whether the committed binaries still match their sources.
+#
+# Requires the Xcode Command Line Tools (clang, lipo) with a macOS SDK that ships ScreenCaptureKit.
 
-set -eu
+set -euo pipefail
 
-native_dir="$(cd "$(dirname "$0")" && pwd)"
-source_path="${native_dir}/sckit.m"
-output_path="${native_dir}/libsckit.dylib"
+native_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+architectures=(-arch arm64 -arch x86_64)
+availability_errors=(-Werror=unguarded-availability -Werror=unguarded-availability-new)
 
-if [ ! -f "${source_path}" ]; then
-	echo "error: missing ${source_path}" >&2
-	exit 1
-fi
+for source in sckit.m cursor-overlay.m; do
+	if [[ ! -f "${native_dir}/${source}" ]]; then
+		echo "error: missing ${native_dir}/${source}" >&2
+		exit 1
+	fi
+done
 
 clang \
-	-arch arm64 \
+	"${architectures[@]}" \
 	-dynamiclib \
+	-install_name @rpath/libsckit.dylib \
 	-O2 \
 	-fobjc-arc \
-	-mmacosx-version-min=14.0 \
+	-mmacosx-version-min=12.3 \
+	"${availability_errors[@]}" \
 	-framework ScreenCaptureKit \
 	-framework CoreGraphics \
 	-framework CoreMedia \
@@ -32,27 +42,21 @@ clang \
 	-framework Foundation \
 	-framework ImageIO \
 	-framework CoreServices \
-	"${source_path}" \
-	-o "${output_path}"
-
-echo "built ${output_path}"
-
-overlay_source_path="${native_dir}/cursor-overlay.m"
-overlay_output_path="${native_dir}/cursor-overlay"
-
-if [ ! -f "${overlay_source_path}" ]; then
-	echo "error: missing ${overlay_source_path}" >&2
-	exit 1
-fi
+	"${native_dir}/sckit.m" \
+	-o "${native_dir}/libsckit.dylib"
+echo "built ${native_dir}/libsckit.dylib ($(lipo -archs "${native_dir}/libsckit.dylib"))"
 
 clang \
-	-arch arm64 \
+	"${architectures[@]}" \
 	-O2 \
 	-fobjc-arc \
 	-mmacosx-version-min=11.0 \
+	"${availability_errors[@]}" \
 	-framework Cocoa \
 	-framework Foundation \
-	"${overlay_source_path}" \
-	-o "${overlay_output_path}"
+	"${native_dir}/cursor-overlay.m" \
+	-o "${native_dir}/cursor-overlay"
+echo "built ${native_dir}/cursor-overlay ($(lipo -archs "${native_dir}/cursor-overlay"))"
 
-echo "built ${overlay_output_path}"
+(cd "${native_dir}" && shasum -a 256 build.sh sckit.m cursor-overlay.m >build-inputs.sha256)
+echo "recorded input hashes in ${native_dir}/build-inputs.sha256"

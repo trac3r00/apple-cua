@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { KoffiFunc } from "koffi";
@@ -14,6 +15,16 @@ type SckBindings = {
 			outHeight: [number],
 		) => number
 	>;
+	readonly captureWindow: KoffiFunc<
+		(
+			windowId: number,
+			maxWidth: number,
+			maxHeight: number,
+			format: number,
+			quality: number,
+			outLen: [number],
+		) => Buffer | null
+	>;
 	readonly freeBytes: KoffiFunc<(bytes: Buffer) => void>;
 	readonly invalidateCache: KoffiFunc<() => void>;
 };
@@ -25,6 +36,12 @@ const SCK_ERR_CAPTURE_FAILED = -3;
 const SCK_ERR_ENCODE_FAILED = -4;
 const SCK_ERR_INVALID_ARGS = -5;
 const SCK_ERR_TIMEOUT = -6;
+const SCK_ERR_UNAVAILABLE = -7;
+const SCK_WINDOW_FORMAT_PNG = 0;
+const SCK_WINDOW_FORMAT_JPEG = 1;
+
+const SCKIT_UNSUPPORTED_MESSAGE =
+	"this macOS has no ScreenCaptureKit screenshot API (it arrived in macOS 14.0), so screenshots use the CoreGraphics and screencapture fallbacks";
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const sckitDylibCandidatePaths: readonly string[] = [
@@ -37,15 +54,31 @@ let cachedBindings: SckBindings | null = null;
 let bindingsLoadAttempted = false;
 let loadErrorMessage = "";
 
+/**
+ * The native capture library, loaded once. Null when it cannot be used on this host: the file is missing,
+ * dlopen refuses it (for example a binary without this machine's architecture slice), or this macOS lacks the
+ * screenshot API it calls. Every caller then takes its CoreGraphics or screencapture fallback, and
+ * getSckitLoadError() says why.
+ */
 function tryLoadSckitBindings(): SckBindings | null {
 	if (bindingsLoadAttempted) {
 		return cachedBindings;
 	}
 	bindingsLoadAttempted = true;
 
-	for (const candidatePath of sckitDylibCandidatePaths) {
+	const existingPaths = sckitDylibCandidatePaths.filter((candidatePath) => existsSync(candidatePath));
+	if (existingPaths.length === 0) {
+		loadErrorMessage = `libsckit.dylib not found (looked in ${sckitDylibCandidatePaths.join(", ")})`;
+		return null;
+	}
+	for (const candidatePath of existingPaths) {
 		try {
 			const library = koffi.load(candidatePath);
+			const supported = library.func("sck_capture_supported", "int", []) as KoffiFunc<() => number>;
+			if (supported() !== 1) {
+				loadErrorMessage = SCKIT_UNSUPPORTED_MESSAGE;
+				return null;
+			}
 			const capture = library.func("sck_capture_main_display_png", "int", [
 				"int",
 				"int",
@@ -54,9 +87,17 @@ function tryLoadSckitBindings(): SckBindings | null {
 				koffi.out("int *"),
 				koffi.out("int *"),
 			]) as SckBindings["capture"];
+			const captureWindow = library.func("sckit_capture_window", "uint8_t *", [
+				"uint32_t",
+				"int32_t",
+				"int32_t",
+				"int32_t",
+				"int32_t",
+				koffi.out("int32_t *"),
+			]) as SckBindings["captureWindow"];
 			const freeBytes = library.func("sck_free", "void", ["uint8_t *"]) as SckBindings["freeBytes"];
 			const invalidateCache = library.func("sck_invalidate_cache", "void", []) as SckBindings["invalidateCache"];
-			cachedBindings = { capture, freeBytes, invalidateCache };
+			cachedBindings = { capture, captureWindow, freeBytes, invalidateCache };
 			return cachedBindings;
 		} catch (error) {
 			loadErrorMessage = error instanceof Error ? error.message : String(error);
@@ -120,6 +161,41 @@ export function captureMainDisplayPngViaSck(targetWidth: number, targetHeight: n
 	}
 }
 
+/**
+ * One window encoded by ScreenCaptureKit, or null when the native capture is unavailable on this host (see
+ * getSckitLoadError). Throws when the library is there but the capture itself fails.
+ */
+export function captureWindowViaSck(
+	windowId: number,
+	maxWidth: number,
+	maxHeight: number,
+	format: "png" | "jpeg",
+	quality: number,
+): Buffer | null {
+	const bindings = tryLoadSckitBindings();
+	if (bindings === null) {
+		return null;
+	}
+	const outLen: [number] = [0];
+	const bytesPointer = bindings.captureWindow(
+		windowId,
+		maxWidth,
+		maxHeight,
+		format === "jpeg" ? SCK_WINDOW_FORMAT_JPEG : SCK_WINDOW_FORMAT_PNG,
+		quality,
+		outLen,
+	);
+	if (bytesPointer === null || outLen[0] <= 0) {
+		throw new Error(`Native ScreenCaptureKit window capture failed for window ${windowId}`);
+	}
+	try {
+		const decoded: ArrayLike<number> = koffi.decode(bytesPointer, "uint8_t", outLen[0]);
+		return Buffer.from(decoded);
+	} finally {
+		bindings.freeBytes(bytesPointer);
+	}
+}
+
 export function invalidateSckitCache(): void {
 	const bindings = tryLoadSckitBindings();
 	if (bindings !== null) {
@@ -141,6 +217,8 @@ function describeSckError(code: number): string {
 			return "invalid arguments";
 		case SCK_ERR_TIMEOUT:
 			return "ScreenCaptureKit timed out";
+		case SCK_ERR_UNAVAILABLE:
+			return "ScreenCaptureKit screenshots need macOS 14.0 or later";
 		default:
 			return "unknown SCK error";
 	}

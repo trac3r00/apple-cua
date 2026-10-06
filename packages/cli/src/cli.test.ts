@@ -62,6 +62,7 @@ describe("apple-cua CLI", () => {
 			"permissions",
 			"windows",
 			"ios",
+			"doctor",
 		];
 
 		// when
@@ -89,6 +90,19 @@ describe("apple-cua CLI", () => {
 		// then
 		expect(expectedStatuses).toContain(result.stdout.trim());
 	});
+
+	it("#given this checkout in any state #when doctor runs with --json #then it prints one report and exits 0 only when ready", async () => {
+		// when
+		const result = await runCliAllowingFailure(["doctor", "--json"]);
+
+		// then
+		const report = JSON.parse(result.stdout) as { ready: boolean; checks: { id: string; status: string }[] };
+		expect(report.checks.map((item) => item.id)).toEqual(
+			expect.arrayContaining(["macos", "node", "native:libsckit.dylib", "native:cursor-overlay", "helper"]),
+		);
+		expect(report.ready).toBe(report.checks.every((item) => item.status !== "fail"));
+		expect(result.exitCode).toBe(report.ready ? 0 : 1);
+	}, 60_000);
 });
 
 describe("apple-cua CLI iOS commands", () => {

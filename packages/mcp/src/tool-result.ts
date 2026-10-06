@@ -280,11 +280,7 @@ export function textResult(text: string): ToolResult {
 	return { content: [{ type: "text", text }] };
 }
 
-export function stateResult(
-	state: AppState,
-	observationToken?: string,
-	elementFormat: ElementFormat = "json",
-): ToolResult {
+export function stateResult(state: AppState, observationToken?: string, elementFormat?: ElementFormat): ToolResult {
 	const extra = observationToken === undefined ? {} : { observation_token: observationToken };
 	return stateToolResult(state, extra, { elementFormat });
 }
@@ -515,7 +511,7 @@ const TREE_SKIPPED_NOTE =
 function stateToolResult(
 	state: AppState,
 	extra: Record<string, unknown>,
-	options: { readonly boundDiff?: boolean; readonly elementFormat?: ElementFormat } = {},
+	options: { readonly boundDiff?: boolean; readonly elementFormat?: ElementFormat | undefined } = {},
 ): ToolResult {
 	const payload: Record<string, unknown> = { ...state, screenshotBase64: undefined };
 	if (options.elementFormat === "table" && state.treeSkipped !== true && state.treeOmitted !== true) {
@@ -536,6 +532,26 @@ function stateToolResult(
 				if (bounded.omitted !== undefined) {
 					payload["axChangesOmitted"] = bounded.omitted;
 				}
+			}
+		} else if (state.axChanges !== undefined) {
+			// An observation's diff. An explicit element_format=json asks for everything; otherwise each bucket
+			// is capped (counting what was left out) and, for table, written as the same rows a full tree uses.
+			const capped = options.elementFormat === "json" ? { changes: state.axChanges } : capAxChanges(state.axChanges);
+			if (options.elementFormat === "table") {
+				payload["element_columns"] = ELEMENT_TABLE_COLUMNS;
+				payload["axChanges"] = {
+					added: capped.changes.added.map(elementRow),
+					removed: capped.changes.removed.map(elementRow),
+					changed: capped.changes.changed.map((entry) => ({
+						before: elementRow(entry.before),
+						after: elementRow(entry.after),
+					})),
+				};
+			} else {
+				payload["axChanges"] = capped.changes;
+			}
+			if (capped.omitted !== undefined) {
+				payload["axChangesOmitted"] = capped.omitted;
 			}
 		}
 	} else if (state.elementsTruncated === true) {
@@ -559,6 +575,24 @@ function stateToolResult(
 	const text: ToolContent = { type: "text", text: JSON.stringify({ ...payload, ...extra }) };
 	const content: ToolContent[] = state.screenshotBase64.length === 0 ? [text] : [stateImage(state), text];
 	return { content };
+}
+
+/** Each bucket cut to the compact-diff cap, with the exact count of entries left out when any were. */
+function capAxChanges(changes: AxTreeChanges): {
+	readonly changes: AxTreeChanges;
+	readonly omitted?: { added: number; removed: number; changed: number };
+} {
+	const capped: AxTreeChanges = {
+		added: changes.added.slice(0, MAX_COMPACT_DIFF_ELEMENTS),
+		removed: changes.removed.slice(0, MAX_COMPACT_DIFF_ELEMENTS),
+		changed: changes.changed.slice(0, MAX_COMPACT_DIFF_ELEMENTS),
+	};
+	const omitted = {
+		added: changes.added.length - capped.added.length,
+		removed: changes.removed.length - capped.removed.length,
+		changed: changes.changed.length - capped.changed.length,
+	};
+	return omitted.added + omitted.removed + omitted.changed > 0 ? { changes: capped, omitted } : { changes: capped };
 }
 
 function boundAxChanges(

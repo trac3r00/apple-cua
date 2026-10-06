@@ -6,17 +6,95 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
-    runs-on: macos-latest
+    name: ${{ matrix.runner }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # The supported macOS releases (the latest and the one before it), each on Apple Silicon and on Intel.
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    env:
+      EXPECTED_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
+      # Reads the pnpm version from package.json's packageManager field.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+
+      - name: Runner is the expected macOS and CPU
+        run: |
+          sw_vers
+          echo "uname -m: $(uname -m); node $(node -p 'process.version + " " + process.arch')"
+          test "$(uname -m)" = "$EXPECTED_ARCH"
+
+      - name: Setup, non-interactive, the way a user runs it
+        run: ./scripts/setup.sh --yes --no-doctor
+
+      - name: Lint, typecheck and test
+        run: pnpm check
+
+      - name: Native binaries are universal, target macOS 15, and build on this runner
+        run: |
+          check_natives() {
+            for binary in libsckit.dylib cursor-overlay; do
+              path="packages/core/native/$binary"
+              lipo "$path" -verify_arch arm64 x86_64
+              minos="$(otool -l "$path" | awk '$1 == "minos" { print $2; exit }')"
+              echo "$1 $binary: $(lipo -archs "$path"), minos $minos"
+              test "$minos" = "15.0"
+            done
+          }
+          check_natives committed
+          pnpm --filter @apple-cua/core build:native
+          check_natives rebuilt
+
+      - name: Helper app is built for this Mac
+        run: |
+          app=packages/mcp/dist/apple-cua-mcp.app
+          codesign --verify --deep --strict "$app"
+          echo "launcher $(lipo -archs "$app/Contents/MacOS/apple-cua-mcp"), bundled node $(lipo -archs "$app/Contents/Resources/node"), uname -m $(uname -m)"
+          test "$(lipo -archs "$app/Contents/MacOS/apple-cua-mcp")" = "$(uname -m)"
+          test "$(lipo -archs "$app/Contents/Resources/node")" = "$(uname -m)"
+          test "$(plutil -extract LSMinimumSystemVersion raw -o - "$app/Contents/Info.plist")" = "15.0"
+          # shellcheck disable=SC2016 # a JavaScript template literal, not a shell expansion
+          "$app/Contents/MacOS/apple-cua-mcp" -e 'console.log(`helper runs node ${process.version} on ${process.arch}`)'
+
+      - name: Doctor passes everything but the grants only a person can make
+        run: |
+          node packages/cli/dist/cli.js --json doctor > doctor.json || true
+          node <<'EOF'
+          const report = JSON.parse(require("node:fs").readFileSync("doctor.json", "utf8"));
+          for (const item of report.checks) console.log(`${item.status.padEnd(4)}  ${item.id}: ${item.summary}`);
+          // A runner never holds Screen Recording or Accessibility, and no MCP client is registered on it.
+          const expected = (id) => id.startsWith("permission:") || id === "clients";
+          const failing = report.checks.filter((item) => item.status === "fail" && !expected(item.id));
+          const required = ["macos", "node", "native:libsckit.dylib", "native:cursor-overlay", "server", "helper", "self-check"];
+          const notOk = required.filter((id) => report.checks.find((item) => item.id === id)?.status !== "ok");
+          const selfCheck = report.checks.find((item) => item.id === "self-check");
+          const archOk = selfCheck?.summary.includes(process.env.EXPECTED_ARCH) === true;
+          if (failing.length > 0 || notOk.length > 0 || !archOk) {
+            console.error(`failing: ${failing.map((item) => item.id).join(", ") || "none"}; not ok: ${notOk.join(", ") || "none"}; helper on ${process.env.EXPECTED_ARCH}: ${archOk}`);
+            process.exit(1);
+          }
+          EOF

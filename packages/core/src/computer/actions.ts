@@ -1,6 +1,7 @@
 import type { AppInfo, AppState } from "../accessibility/types.js";
 import { resolveElementCoordinate } from "../platform/macos-accessibility.js";
 import type { AppStateOptions, KeyModifierName, ScrollOptions } from "../types/index.js";
+import { currentInputScope, runInInputScope } from "./input-scope.js";
 import type { ComputerInterface } from "./interface.js";
 import { type KeyModifier, MODIFIER_ALIASES, normalizeModifiers } from "./modifiers.js";
 
@@ -75,7 +76,10 @@ export async function resolveAppPid(computer: ComputerInterface, app: string): P
 		return numericPid;
 	}
 
-	const match = findMatchingApp(await computer.listApps(), app);
+	// Identity is all name matching needs; listApps would enrich every app with usage (a spawned mdls).
+	const apps =
+		computer.listAppIdentities === undefined ? await computer.listApps() : await computer.listAppIdentities();
+	const match = findMatchingApp(apps, app);
 	if (match === undefined) {
 		throw new Error(`No running app matched "${app}"`);
 	}
@@ -90,17 +94,29 @@ export async function getAppStateForApp(
 	return await computer.getAppState(await resolveAppPid(computer, app), options);
 }
 
+/**
+ * Run `action` with its keyboard and pointer input aimed at `targetPid`. The target travels in the input scope of
+ * `action`'s own async flow instead of being set on the computer, so actions for different apps can overlap without
+ * one ever posting to the other's app (or, after the other finished, to none). A dispatch the guarded session already
+ * bound to an observed window of the same app keeps that window, and its stop check, for this action.
+ */
 export async function withTargetedApp<TValue>(
-	computer: ComputerInterface,
+	_computer: ComputerInterface,
 	targetPid: number,
 	action: () => Promise<TValue>,
 ): Promise<TValue> {
-	computer.setTarget(targetPid);
-	try {
-		return await action();
-	} finally {
-		computer.setTarget(undefined);
+	if (!Number.isSafeInteger(targetPid) || targetPid <= 0) {
+		throw new Error("target pid must be a positive integer");
 	}
+	const outer = currentInputScope();
+	const windowId = outer?.target?.pid === targetPid ? outer.target.windowId : undefined;
+	return await runInInputScope(
+		{
+			target: windowId === undefined ? { pid: targetPid } : { pid: targetPid, windowId },
+			...(outer?.interruption === undefined ? {} : { interruption: outer.interruption }),
+		},
+		action,
+	);
 }
 
 export async function resolvePointForElement(

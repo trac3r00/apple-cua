@@ -104,7 +104,8 @@ describe("run_steps pace #given a person-like chain #when pace is fast #then no 
 
 		expect(verifiedPayload["runSteps"]).not.toHaveProperty("pace");
 		expect(preDispatchReads(verified.computer)).toBe(2);
-		expect(verified.computer.preflightExpected).toHaveLength(1);
+		// Verified pace guards the window before every later step too: a tree read does not prove the window.
+		expect(verified.computer.preflightExpected).toHaveLength(5);
 	});
 
 	it("keeps the bounds requirement for pointer steps and drops it for keyboard steps", async () => {

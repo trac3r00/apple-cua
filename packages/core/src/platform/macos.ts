@@ -8,6 +8,7 @@ import type { OcrTextEntry, WindowInventoryEntry } from "../accessibility/types.
 import { resolveAppInstructions } from "../app-instructions/index.js";
 import { resolveDisplayMetadata } from "../computer/display-metadata.js";
 import type { InputObservation, PreflightOptions, PreflightResult } from "../computer/guarded-interface.js";
+import { currentInputScope } from "../computer/input-scope.js";
 import type { ComputerInterface, ScreenshotResult, WindowTextRead } from "../computer/interface.js";
 import { assertScreenUnlocked } from "../computer/lock-guard.js";
 import { type ScreenshotViewport, resolveWindowScreenshotSize, screenRectToScreenshot } from "../computer/viewport.js";
@@ -89,6 +90,7 @@ import { openWindowsForTargeting } from "./macos-open-windows.js";
 import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
 import { resolveTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
+import { resolveOcrCrop } from "./ocr-region.js";
 import { currentSystemPrompts } from "./system-prompts.js";
 
 const execFileAsync = promisify(execFile);
@@ -558,6 +560,7 @@ export class MacOSHostComputer extends HostComputer {
 			...(options?.includeMenuBar === undefined ? {} : { includeMenuBar: options.includeMenuBar }),
 			...(targetWindow === undefined ? {} : { windowId: targetWindow.id }),
 			...(options?.subtreeOf === undefined ? {} : { subtreeOf: options.subtreeOf }),
+			...(options?.visibleOnly === true ? { visibleOnly: true } : {}),
 		};
 		const captureTree = options?.includeAccessibilityTree !== false;
 		if (settleMs > 0 && captureTree) {
@@ -692,6 +695,7 @@ export class MacOSHostComputer extends HostComputer {
 		screenshot: { readonly data: Buffer; readonly width: number; readonly height: number },
 		size: { readonly width: number; readonly height: number },
 		window: SkyLightTargetWindow,
+		region?: Rect,
 	): Promise<readonly OcrTextEntry[] | undefined> {
 		try {
 			const image =
@@ -700,7 +704,14 @@ export class MacOSHostComputer extends HostComputer {
 					: await this.captureScreenshot({ targetSize: size, format: "jpeg" }, window.id);
 			const scaleX = window.bounds.width / image.width;
 			const scaleY = window.bounds.height / image.height;
-			return recognizeTextInImage(image.data).map((observation) => ({
+			// Only the searched region reaches Vision; boxes come back in whole-image pixels, so the mapping below
+			// is the same with or without a region.
+			const crop = region === undefined ? undefined : resolveOcrCrop(region, window.bounds, image);
+			if (region !== undefined && crop === undefined) {
+				return [];
+			}
+			const recognized = recognizeTextInImage(image.data, crop === undefined ? {} : { region: crop });
+			return recognized.map((observation) => ({
 				text: observation.text,
 				confidence: observation.confidence,
 				frame: {
@@ -822,6 +833,17 @@ export class MacOSHostComputer extends HostComputer {
 		};
 	}
 
+	async listAppIdentities(): Promise<AppInfo[]> {
+		const running = await getRunningMacOSApps();
+		return running.map((app) => ({
+			bundleId: app.bundleId,
+			name: app.name,
+			pid: app.pid,
+			isRunning: true,
+			isFrontmost: app.isActive,
+		}));
+	}
+
 	async listApps(): Promise<AppInfo[]> {
 		const running = await getRunningMacOSApps();
 		const usage = await collectAppUsage(running.map((app) => app.path).filter((path) => path.length > 0));
@@ -863,7 +885,10 @@ export class MacOSHostComputer extends HostComputer {
 
 	async pressAtPosition(targetPid: number, position: Point): Promise<boolean> {
 		this.input.showPointer(position, true);
-		return pressElementAtScreenPoint(targetPid, position.x, position.y);
+		// A press inside a dispatch bound to an observed window only takes an element of that window.
+		const target = currentInputScope()?.target;
+		const windowId = target?.pid === targetPid ? target.windowId : undefined;
+		return pressElementAtScreenPoint(targetPid, position.x, position.y, windowId);
 	}
 
 	/**
@@ -910,7 +935,7 @@ export class MacOSHostComputer extends HostComputer {
 		return frame;
 	}
 
-	async recognizeWindowText(targetPid: number): Promise<WindowTextRead> {
+	async recognizeWindowText(targetPid: number, options?: { readonly region?: Rect }): Promise<WindowTextRead> {
 		if (!screenCaptureAllowed()) {
 			return { unavailable: "screen-recording-permission" };
 		}
@@ -923,6 +948,7 @@ export class MacOSHostComputer extends HostComputer {
 			{ data: Buffer.alloc(0), width: size.width, height: size.height },
 			size,
 			window,
+			options?.region,
 		);
 		return entries === undefined ? { unavailable: "recognition-failed" } : { entries };
 	}

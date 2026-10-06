@@ -1,4 +1,5 @@
 import type { ComputerInterface } from "@apple-cua/core";
+import { currentInputScope } from "@apple-cua/core";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ExtensionContext } from "../pi/index.js";
@@ -67,8 +68,10 @@ describe("#given scroll tool #when executed #then it performs AX and targeted wh
 	it("performs AXScrollDownByPage on the element_index pages and sends targeted wheel fallback", async () => {
 		const computer = createComputer();
 		const performAction = vi.spyOn(computer, "performAction").mockResolvedValue(undefined);
-		const setTarget = vi.spyOn(computer, "setTarget");
-		const scroll = vi.spyOn(computer, "scroll").mockResolvedValue(undefined);
+		const scrolledFor: (number | undefined)[] = [];
+		const scroll = vi.spyOn(computer, "scroll").mockImplementation(async () => {
+			scrolledFor.push(currentInputScope()?.target?.pid);
+		});
 		const tool = createScrollTool(computer);
 
 		await tool.execute(
@@ -83,8 +86,11 @@ describe("#given scroll tool #when executed #then it performs AX and targeted wh
 		expect(performAction).toHaveBeenNthCalledWith(1, 1234, 7, "AXScrollDownByPage");
 		expect(performAction).toHaveBeenNthCalledWith(2, 1234, 7, "AXScrollDownByPage");
 		expect(performAction).toHaveBeenNthCalledWith(3, 1234, 7, "AXScrollDownByPage");
-		expect(setTarget).toHaveBeenNthCalledWith(1, 1234);
 		expect(scroll).toHaveBeenCalledWith({ direction: "down", amount: 30 });
+		// The wheel fallback is aimed at the app for that call only; no target is left set on the computer.
+		expect(scrolledFor).toEqual([1234]);
+		expect(currentInputScope()).toBeUndefined();
+		expect(computer.setTarget).not.toHaveBeenCalled();
 	});
 
 	it("throws when element_index is missing instead of taking over the cursor", async () => {

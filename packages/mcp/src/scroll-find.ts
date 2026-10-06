@@ -81,6 +81,7 @@ interface Page {
 	readonly elements: ReadonlyMap<number, AXTreeElement>;
 	readonly area: AXTreeElement | undefined;
 	readonly axSignature: string;
+	readonly axReadable: boolean;
 	ocr: (WindowTextRead | { readonly unavailable: "not-supported" }) | undefined;
 	parents: ReadonlyMap<number, number> | undefined;
 }
@@ -140,6 +141,29 @@ function areaSignature(elements: ReadonlyMap<number, AXTreeElement>, rootId: num
 		pending.push(...element.children);
 	}
 	return parts.join("\n");
+}
+
+/** Enough labelled elements under the area that its text is readable through accessibility. */
+const AX_READABLE_MIN_TEXTS = 3;
+
+function areaHasReadableText(elements: ReadonlyMap<number, AXTreeElement>, rootId: number): boolean {
+	let texts = 0;
+	const pending = [...(elements.get(rootId)?.children ?? [])];
+	while (pending.length > 0) {
+		const id = pending.pop();
+		const element = id === undefined ? undefined : elements.get(id);
+		if (element === undefined) {
+			continue;
+		}
+		if ((element.label ?? "").trim() !== "" || (element.value ?? "").trim() !== "") {
+			texts += 1;
+			if (texts >= AX_READABLE_MIN_TEXTS) {
+				return true;
+			}
+		}
+		pending.push(...element.children);
+	}
+	return false;
 }
 
 function ocrSignature(entries: readonly OcrTextEntry[]): string {
@@ -296,20 +320,27 @@ export async function findByScrolling(
 		elements,
 		area,
 		axSignature: area === undefined ? "" : areaSignature(elements, area.id),
+		axReadable: area !== undefined && areaHasReadableText(elements, area.id),
 		ocr: undefined,
 		parents: undefined,
 	});
 
 	const readOcr = async (page: Page): Promise<NonNullable<Page["ocr"]>> => {
 		if (page.ocr === undefined) {
-			const read = await ctx.computer.recognizeWindowText?.(ctx.pid);
+			// Only the scroll area is searched, so only its pixels are read; without an area the window is.
+			const region = page.area === undefined ? undefined : toScreenRect(page.area.frame, viewport);
+			const read = await ctx.computer.recognizeWindowText?.(ctx.pid, region === undefined ? undefined : { region });
 			page.ocr = read ?? { unavailable: "not-supported" };
 			visionNote = "entries" in page.ocr ? "used" : `skipped: ${page.ocr.unavailable}`;
 		}
 		return page.ocr;
 	};
 
-	/** One cheap read of just the scroll area: ids restart at 0 inside it, the area itself is id 0. */
+	/**
+	 * One cheap read of just the scroll area: ids restart at 0 inside it, the area itself is id 0. A list is read by
+	 * the rows it shows, not every row it holds, so a page costs a page of rows however long the list is; a row that
+	 * is found keeps its id in this read, which is the one the click that follows resolves against.
+	 */
 	const readPage = async (areaId: number): Promise<Page> => {
 		const state = await ctx.computer.getAppState(ctx.pid, {
 			requireWindow: true,
@@ -318,6 +349,7 @@ export async function findByScrolling(
 			windowId: ctx.observation.windowId,
 			subtreeOf: areaId,
 			probe: true,
+			visibleOnly: true,
 		});
 		const elements = new Map(state.elements.map((element) => [element.id, element] as const));
 		chain.elements = chain.keep ? elements : undefined;
@@ -426,7 +458,8 @@ export async function findByScrolling(
 		if (before.axSignature !== after.axSignature) {
 			return false;
 		}
-		if (find.vision === "off") {
+		// In auto mode a list whose text accessibility already exposes has its content change told by that signature.
+		if (find.vision === "off" || (find.vision === "auto" && before.axReadable && after.axReadable)) {
 			return true;
 		}
 		const left = await readOcr(before);
@@ -478,7 +511,10 @@ export async function findByScrolling(
 			}
 		}
 
-		if (find.vision !== "off" && !offscreenMatch) {
+		// Auto mode reads pixels only where accessibility cannot see the text: a list it already reads would not
+		// show the target to OCR either, and OCR costs about 220 ms a page.
+		const needsVision = find.vision === "only" || (find.vision === "auto" && !page.axReadable);
+		if (needsVision && !offscreenMatch) {
 			if (needle === undefined) {
 				visionNote = "skipped: the target names no text to read from the window";
 				if (find.vision === "only") {

@@ -9,15 +9,19 @@ const koffiMock = vi.hoisted(() => {
 		children?: Reference[];
 		readonly attributes?: Record<string, string>;
 		readonly actions?: readonly string[];
+		/** The rows a list shows (AXVisibleRows); absent for elements that do not name them. */
+		readonly visibleRows?: Reference[];
 	};
 
 	const observableState: {
 		fieldValue: string;
 		pressCount: number;
+		pressedTitles: string[];
 		selection: { location: number; length: number } | null;
 	} = {
 		fieldValue: "initial",
 		pressCount: 0,
+		pressedTitles: [],
 		selection: null,
 	};
 
@@ -47,6 +51,19 @@ const koffiMock = vi.hoisted(() => {
 		type: "ax",
 		attributes: { AXRole: "AXApplication", AXTitle: "Fixture" },
 		children: [windowElement],
+	};
+	const listRows: Reference[] = ["row-0", "row-1", "row-2", "row-3"].map((title) => ({
+		type: "ax",
+		attributes: { AXRole: "AXRow", AXTitle: title },
+		actions: ["AXPress"],
+		children: [],
+	}));
+	/** An outline that holds four rows and shows the middle two. */
+	const outlineElement: Reference = {
+		type: "ax",
+		attributes: { AXRole: "AXOutline", AXTitle: "list" },
+		children: listRows,
+		visibleRows: listRows.slice(1, 3),
 	};
 	const insertedPrefix: Reference = {
 		type: "ax",
@@ -102,6 +119,7 @@ const koffiMock = vi.hoisted(() => {
 		AXUIElementPerformAction: vi.fn((element: Reference, action: Reference) => {
 			if (action.value === undefined || !element.actions?.includes(action.value)) return -25206;
 			if (element === targetButton && action.value === "AXPress") observableState.pressCount += 1;
+			if (action.value === "AXPress") observableState.pressedTitles.push(element.attributes?.["AXTitle"] ?? "");
 			return 0;
 		}),
 		AXUIElementSetAttributeValue: vi.fn((element: Reference, attribute: Reference, value: Reference) => {
@@ -121,6 +139,10 @@ const koffiMock = vi.hoisted(() => {
 			(element: Reference, attribute: Reference, outValue: Array<Reference | null>) => {
 				if (attribute.value === "AXChildren") {
 					outValue[0] = { type: "array", children: element.children ?? [] };
+					return 0;
+				}
+				if (attribute.value === "AXVisibleRows" && element.visibleRows !== undefined) {
+					outValue[0] = { type: "array", children: element.visibleRows };
 					return 0;
 				}
 				const value = attribute.value === undefined ? undefined : element.attributes?.[attribute.value];
@@ -174,6 +196,7 @@ const koffiMock = vi.hoisted(() => {
 		coreFoundationFunctions,
 		insertedPrefix,
 		menuBarElement,
+		outlineElement,
 		observableState,
 		targetButton,
 		textField,
@@ -204,6 +227,7 @@ beforeEach(() => {
 	koffiMock.windowElement.children = [koffiMock.textField, koffiMock.targetButton];
 	koffiMock.observableState.fieldValue = "initial";
 	koffiMock.observableState.pressCount = 0;
+	koffiMock.observableState.pressedTitles.length = 0;
 	koffiMock.observableState.selection = null;
 	if (koffiMock.textField.attributes !== undefined) koffiMock.textField.attributes["AXValue"] = "initial";
 	if (koffiMock.targetButton.attributes !== undefined) {
@@ -562,5 +586,58 @@ describe("#given retained accessibility snapshots", () => {
 			walkKey: expect.any(String),
 		});
 		expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledTimes(4);
+	});
+});
+
+describe("#given an outline that holds more rows than it shows #when it is walked by its shown rows #then only those are read", () => {
+	it("returns the outline and its shown rows where a whole walk returns every row it holds", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+		koffiMock.windowElement.children = [koffiMock.outlineElement];
+
+		const whole = extractAccessibilityTree(process.pid, { windowId: 42 });
+		const shown = extractAccessibilityTree(process.pid, { windowId: 42, visibleOnly: true });
+
+		expect(whole.elements.map((element) => element.label)).toEqual([
+			"Fixture",
+			"list",
+			"row-0",
+			"row-1",
+			"row-2",
+			"row-3",
+		]);
+		expect(shown.elements.map((element) => element.label)).toEqual(["Fixture", "list", "row-1", "row-2"]);
+		expect(shown.elements[1]?.children).toEqual([2, 3]);
+		expect(shown.walkKey).not.toBe(whole.walkKey);
+	});
+
+	it("acts on the row an id names, with the ids numbered over the shown rows only", async () => {
+		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
+		koffiMock.windowElement.children = [koffiMock.outlineElement];
+		const outline = extractAccessibilityTree(process.pid, { windowId: 42 }).elements.find(
+			(element) => element.role === "AXOutline",
+		);
+
+		const page = extractAccessibilityTree(process.pid, {
+			windowId: 42,
+			subtreeOf: outline?.id ?? -1,
+			visibleOnly: true,
+		});
+		const row = page.elements.find((element) => element.label === "row-2");
+		performActionByIndex(process.pid, row?.id ?? -1, "AXPress");
+
+		expect(page.elements.map((element) => element.label)).toEqual(["list", "row-1", "row-2"]);
+		expect(koffiMock.observableState.pressedTitles).toEqual(["row-2"]);
+	});
+
+	it("finds the same row when the element has to be located by walking again", async () => {
+		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
+		koffiMock.windowElement.children = [koffiMock.outlineElement];
+		// A different element cap than the action's own, so the retained references are not used.
+		const shown = extractAccessibilityTree(process.pid, { windowId: 42, visibleOnly: true, maxElements: 50 });
+		const row = shown.elements.find((element) => element.label === "row-2");
+
+		performActionByIndex(process.pid, row?.id ?? -1, "AXPress");
+
+		expect(koffiMock.observableState.pressedTitles).toEqual(["row-2"]);
 	});
 });

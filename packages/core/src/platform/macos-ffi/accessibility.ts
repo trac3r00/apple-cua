@@ -79,6 +79,8 @@ interface AXWalkScope {
 	readonly includeMenuBar: boolean;
 	readonly scoped: boolean;
 	readonly subtreeOf: number | undefined;
+	/** Lists, tables and outlines were walked by the rows they show, so ordinals skip the rows they hold. */
+	readonly visibleOnly: boolean;
 }
 
 const UNMATCHED_WINDOW_SCOPE: AXWalkScope = {
@@ -86,6 +88,7 @@ const UNMATCHED_WINDOW_SCOPE: AXWalkScope = {
 	includeMenuBar: true,
 	scoped: false,
 	subtreeOf: undefined,
+	visibleOnly: false,
 };
 
 function walkKeyFor(scope: AXWalkScope, maxDepth: number, maxElements: number): string {
@@ -96,6 +99,7 @@ function walkKeyFor(scope: AXWalkScope, maxDepth: number, maxElements: number): 
 		scope.subtreeOf ?? null,
 		maxDepth,
 		maxElements,
+		...(scope.visibleOnly ? [true] : []),
 	]);
 }
 
@@ -605,7 +609,7 @@ function retainedRelocatableElement(pid: number, elementIndex: number): AXUIElem
 	if (observed === undefined || element === undefined) {
 		throw new Error(`element ${elementIndex} not found in snapshot`);
 	}
-	const facts = copyElementFacts(element, { useMultipleAttributes: true, skippedApplications: 0 });
+	const facts = copyElementFacts(element, { useMultipleAttributes: true, skippedApplications: 0, visibleOnly: false });
 	if (facts.role !== observed.role || facts.label !== observed.label) {
 		releaseAXElement(element);
 		throw new Error(
@@ -696,6 +700,12 @@ export interface AccessibilityTreeOptions {
 	 * whole tree in elements, latency or model tokens.
 	 */
 	readonly subtreeOf?: number | undefined;
+	/**
+	 * Walk an outline, table or list by the rows it shows (AXVisibleRows, AXVisibleChildren) instead of every
+	 * row it holds, so a long list costs a page of rows. A list that names no visible rows is walked whole.
+	 * Ids number the walk that was made, and an action on one re-walks the same way.
+	 */
+	readonly visibleOnly?: boolean;
 }
 
 export function extractAccessibilityTree(pid: number, options: AccessibilityTreeOptions = {}): AccessibilityTreeResult {
@@ -719,6 +729,7 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 				? resolveWalkScope(root, options)
 				: resolveSubtreeWalkScope(pid, options.subtreeOf, options);
 		walkRoots.push(...scope.roots);
+		const descriptor: AXWalkScope = { ...scope.descriptor, visibleOnly: options.visibleOnly === true };
 		if (scope.appChildren === 0) {
 			if (!keepIndexSpace) {
 				replaceElementSnapshot(pid, undefined);
@@ -737,7 +748,14 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 		// walk starts at the matched window because the application element is not part of
 		// a window observation.
 		const walkInputs = scope.scoped ? scope.roots : [root];
-		const skippedApplications = walkElements(walkInputs, maxDepth, maxElements, elements, snapshotElements);
+		const skippedApplications = walkElements(
+			walkInputs,
+			maxDepth,
+			maxElements,
+			elements,
+			snapshotElements,
+			descriptor.visibleOnly,
+		);
 		const contentUnavailable =
 			scope.degenerate > 0 || skippedApplications > 0 ? { windowContentUnavailable: true } : {};
 		if (elements.length === 0) {
@@ -756,7 +774,7 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 			replaceElementSnapshot(pid, {
 				maxDepth,
 				maxElements,
-				scope: scope.descriptor,
+				scope: descriptor,
 				elements: snapshotElements,
 				identity: elements.map((element) => ({
 					role: element.role,
@@ -769,7 +787,7 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 			elements,
 			axAvailable: true,
 			truncated: elements.length >= maxElements,
-			walkKey: walkKeyFor(scope.descriptor, maxDepth, maxElements),
+			walkKey: walkKeyFor(descriptor, maxDepth, maxElements),
 			...(scope.descriptor.windowId !== undefined &&
 			scope.descriptor.subtreeOf === undefined &&
 			elements[0]?.role === "AXWindow" &&
@@ -870,7 +888,7 @@ function resolveWalkScope(root: AXUIElementRef, options: AccessibilityTreeOption
 
 	return {
 		roots: [...windows, ...attached],
-		descriptor: { windowId, includeMenuBar, scoped: true, subtreeOf: undefined },
+		descriptor: { windowId, includeMenuBar, scoped: true, subtreeOf: undefined, visibleOnly: false },
 		scoped: true,
 		appChildren,
 		degenerate: degenerate.length,
@@ -894,6 +912,7 @@ function resolveSubtreeWalkScope(pid: number, subtreeOf: number, options: Access
 			includeMenuBar: options.includeMenuBar === true,
 			scoped: true,
 			subtreeOf,
+			visibleOnly: false,
 		},
 		scoped: true,
 		appChildren: 1,
@@ -924,8 +943,9 @@ function walkElements(
 	maxElements: number,
 	elements: AXTreeElement[],
 	snapshotElements: AXUIElementRef[],
+	visibleOnly: boolean,
 ): number {
-	const state: WalkState = { useMultipleAttributes: true, skippedApplications: 0 };
+	const state: WalkState = { useMultipleAttributes: true, skippedApplications: 0, visibleOnly };
 	for (const root of roots) {
 		if (elements.length >= maxElements) {
 			break;
@@ -939,6 +959,7 @@ interface WalkState {
 	useMultipleAttributes: boolean;
 	/** Nested application elements left out of the walk; see windowContentUnavailable. */
 	skippedApplications: number;
+	readonly visibleOnly: boolean;
 }
 
 /** An application element below the root is the app answering for a window it cannot expose. */
@@ -1243,7 +1264,74 @@ function tryAppendValue(element: AXUIElementRef, text: string): boolean {
 	});
 }
 
-export function pressElementAtScreenPoint(targetPid: number, x: number, y: number): boolean {
+const MAX_WINDOW_ANCESTORS = 64;
+
+/**
+ * The WindowServer ids of the windows containing `element`, innermost first: a control in a sheet answers the sheet,
+ * then the window the sheet belongs to. Empty when the window-id lookup is unavailable.
+ */
+function containingWindowIds(element: AXUIElementRef): number[] {
+	const ids: number[] = [];
+	if (AXUIElementGetWindowSpi === null) {
+		return ids;
+	}
+	let current: CFTypeRef | null = cfRetain(element);
+	try {
+		for (let depth = 0; current !== null && depth < MAX_WINDOW_ANCESTORS; depth++) {
+			const id = windowIdOf(current);
+			if (id !== undefined && id !== 0 && ids.at(-1) !== id) {
+				ids.push(id);
+			}
+			const parent = copyOptionalAttributeValue(current, "AXParent");
+			cfRelease(current);
+			current = parent;
+		}
+		return ids;
+	} finally {
+		cfRelease(current);
+	}
+}
+
+/**
+ * The windows containing the element `pid` shows at a screen point, innermost first (see containingWindowIds). The
+ * hit test is the app's own, over its windows only, so another app's window covering the point does not answer.
+ * undefined when accessibility cannot tell.
+ */
+export function windowIdsAtScreenPoint(pid: number, x: number, y: number): readonly number[] | undefined {
+	if (!AXIsProcessTrusted() || !isRunning(pid) || AXUIElementGetWindowSpi === null) {
+		return undefined;
+	}
+	let app: AXUIElementRef | null = null;
+	try {
+		app = createApplicationElement(pid);
+		const out: Array<AXUIElementRef | null> = [null];
+		if (AXUIElementCopyElementAtPosition(app, x, y, out) !== AX_SUCCESS) {
+			return undefined;
+		}
+		const element = out[0];
+		if (element === null || element === undefined) {
+			return undefined;
+		}
+		try {
+			return containingWindowIds(element);
+		} finally {
+			releaseAXElement(element);
+		}
+	} catch {
+		return undefined;
+	} finally {
+		if (app !== null) {
+			releaseAXElement(app);
+		}
+	}
+}
+
+/**
+ * Press the element at a screen point when it belongs to `targetPid` and advertises AXPress. With `windowId` (the
+ * observed window the press is bound to) the element must also lie in that window: where another window of the same
+ * app covers it, the control there is not the one the caller observed, so nothing is pressed and false comes back.
+ */
+export function pressElementAtScreenPoint(targetPid: number, x: number, y: number, windowId?: number): boolean {
 	if (!AXIsProcessTrusted() || !isRunning(targetPid)) {
 		return false;
 	}
@@ -1266,6 +1354,9 @@ export function pressElementAtScreenPoint(targetPid: number, x: number, y: numbe
 			const pidBuffer = new Int32Array(1);
 			const pidError = AXUIElementGetPid(element, pidBuffer);
 			if (pidError !== AX_SUCCESS || pidBuffer[0] !== targetPid) {
+				return false;
+			}
+			if (windowId !== undefined && !containingWindowIds(element).includes(windowId)) {
 				return false;
 			}
 			const actions = copyActionNames(element);
@@ -1336,7 +1427,7 @@ export function refetchElement(
 			}
 			walkRoots.push(subtreeRoot);
 			const cursor = { value: 0 };
-			const matched = findAXElement(subtreeRoot, elementIndex, 0, maxDepth, maxElements, cursor);
+			const matched = findAXElement(subtreeRoot, elementIndex, 0, maxDepth, maxElements, cursor, scope.visibleOnly);
 			if (matched !== null) {
 				try {
 					assertStillObservedControl(matched, snapshot?.identity[elementIndex], elementIndex);
@@ -1356,7 +1447,7 @@ export function refetchElement(
 		const walkInputs = resolved.scoped ? resolved.roots : [root];
 		const cursor = { value: 0 };
 		for (const walkInput of walkInputs) {
-			const matched = findAXElement(walkInput, elementIndex, 0, maxDepth, maxElements, cursor);
+			const matched = findAXElement(walkInput, elementIndex, 0, maxDepth, maxElements, cursor, scope.visibleOnly);
 			if (matched !== null) {
 				try {
 					assertStillObservedControl(matched, snapshot?.identity[elementIndex], elementIndex);
@@ -1397,6 +1488,7 @@ function appendAXElement(
 		}
 		return undefined;
 	}
+	const children = walkChildren(element, facts, state.visibleOnly);
 	const id = elements.length;
 	snapshotElements.push(cfRetain(element));
 	elements.push({
@@ -1411,7 +1503,6 @@ function appendAXElement(
 
 	const childIds: number[] = [];
 	if (depth < maxDepth) {
-		const children = facts.children;
 		try {
 			for (const child of children) {
 				if (elements.length >= maxElements) {
@@ -1428,7 +1519,7 @@ function appendAXElement(
 			}
 		}
 	} else {
-		for (const child of facts.children) {
+		for (const child of children) {
 			releaseAXElement(child);
 		}
 	}
@@ -1590,7 +1681,7 @@ function assertStillObservedControl(
 	if (observed === undefined) {
 		return;
 	}
-	const facts = copyElementFacts(element, { useMultipleAttributes: true, skippedApplications: 0 });
+	const facts = copyElementFacts(element, { useMultipleAttributes: true, skippedApplications: 0, visibleOnly: false });
 	if (facts.role === observed.role && facts.label === observed.label && Math.round(facts.frame.y) === observed.y) {
 		return;
 	}
@@ -1606,6 +1697,7 @@ function findAXElement(
 	maxDepth: number,
 	maxElements: number,
 	cursor: { value: number },
+	visibleOnly: boolean,
 ): AXUIElementRef | null {
 	if (depth > maxDepth || cursor.value >= maxElements) {
 		return null;
@@ -1619,14 +1711,14 @@ function findAXElement(
 		return null;
 	}
 
-	const children = copyElementChildren(element);
+	const children = copyWalkChildren(element, visibleOnly);
 	try {
 		for (const child of children) {
 			// Mirrors the walk, which leaves nested application elements out, so ids stay aligned.
 			if (isNestedApplication(child)) {
 				continue;
 			}
-			const matched = findAXElement(child, targetIndex, depth + 1, maxDepth, maxElements, cursor);
+			const matched = findAXElement(child, targetIndex, depth + 1, maxDepth, maxElements, cursor, visibleOnly);
 			if (matched !== null) {
 				return matched;
 			}
@@ -1741,6 +1833,57 @@ function copyElementChildren(element: AXUIElementRef): AXUIElementRef[] {
 	} finally {
 		cfRelease(value);
 	}
+}
+
+/** The attribute that names the rows a list, table or outline shows, by role. */
+const VISIBLE_CHILDREN_ATTRIBUTES: ReadonlyMap<string, string> = new Map([
+	["AXOutline", "AXVisibleRows"],
+	["AXTable", "AXVisibleRows"],
+	["AXList", "AXVisibleChildren"],
+]);
+
+/** The rows a list shows, or undefined when its role or app does not name them (the caller walks it whole). */
+function copyVisibleChildren(element: AXUIElementRef, role: string): AXUIElementRef[] | undefined {
+	const attribute = VISIBLE_CHILDREN_ATTRIBUTES.get(role);
+	if (attribute === undefined) {
+		return undefined;
+	}
+	const value = copyOptionalAttributeValue(element, attribute);
+	if (value === null) {
+		return undefined;
+	}
+	try {
+		const visible = childrenFromValue(value);
+		return visible.length === 0 ? undefined : visible;
+	} finally {
+		cfRelease(value);
+	}
+}
+
+/** The children a walk descends into: the shown rows of a list when asked, else everything it holds. */
+function walkChildren(element: AXUIElementRef, facts: AXElementFacts, visibleOnly: boolean): readonly AXUIElementRef[] {
+	if (!visibleOnly) {
+		return facts.children;
+	}
+	const visible = copyVisibleChildren(element, facts.role);
+	if (visible === undefined) {
+		return facts.children;
+	}
+	for (const child of facts.children) {
+		releaseAXElement(child);
+	}
+	return visible;
+}
+
+/** The same children as {@link walkChildren}, for a re-walk that has no facts read yet. */
+function copyWalkChildren(element: AXUIElementRef, visibleOnly: boolean): AXUIElementRef[] {
+	if (visibleOnly) {
+		const visible = copyVisibleChildren(element, copyStringAttribute(element, K_AX_ROLE_ATTRIBUTE) ?? "");
+		if (visible !== undefined) {
+			return visible;
+		}
+	}
+	return copyElementChildren(element);
 }
 
 function copyActionNames(element: AXUIElementRef): string[] {

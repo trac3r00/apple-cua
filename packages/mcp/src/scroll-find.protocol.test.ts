@@ -243,6 +243,23 @@ describe("scroll-until-found #given accessibility cannot see the rows #when visi
 		expect(clickPoint(clicks(computer.effects)[0]).y).toBeCloseTo(rowCentre(2).y, 3);
 	});
 
+	it("asks for the pixels of the scroll area only, on every page, in screen points", async () => {
+		const computer = listComputer(20, { virtualized: false });
+		const setup = await start(computer);
+
+		const report = await runFast(setup, [
+			{ type: "click", target: { text: "row-07" }, find: { vision: "only", max_pages: 5 } },
+		]);
+
+		expect(report.steps[0]).toMatchObject({ status: "dispatched", found: { found_by: "vision" } });
+		// The area is (0,100) 300x100 in the 500x400 screenshot of a 1000x800 window at (300,150): 2x.
+		const area = { x: 300, y: 350, width: 600, height: 200 };
+		expect(computer.recognizeOptions.length).toBeGreaterThan(1);
+		for (const options of computer.recognizeOptions) {
+			expect(options).toEqual({ region: area });
+		}
+	});
+
 	it("skips vision with the reason when Screen Recording is not granted and searches by accessibility only", async () => {
 		const computer = listComputer(8);
 		computer.axHidesRows = true;
@@ -320,5 +337,88 @@ describe("scroll-until-found #given a fast chain of two far-away targets #when i
 			computer.pointerHints.some((hint) => Math.abs(hint.x - target.x) < 0.01 && Math.abs(hint.y - target.y) < 0.01);
 		expect(near(rowCentre(2))).toBe(true);
 		expect(near(rowCentre(0))).toBe(true);
+	});
+});
+
+describe("scroll-until-found #given a list that holds every row #when each page is checked #then only the rows it shows are read", () => {
+	it("asks for the shown rows of the area on every page and reads a page of elements, not the whole list", async () => {
+		const computer = listComputer(40, { virtualized: false });
+		const setup = await start(computer);
+
+		const report = await runFast(setup, [
+			{ type: "click", target: { text: "row-23" }, find: { vision: "only", max_pages: 10 } },
+		]);
+
+		expect(report.steps[0]).toMatchObject({ status: "dispatched", found: { found_by: "vision", pages_scrolled: 4 } });
+		const probes = computer.stateOptions.filter((options) => options?.probe === true);
+		expect(probes).toHaveLength(4);
+		expect(probes.every((options) => options?.visibleOnly === true)).toBe(true);
+		// The area and the five rows in view each time, where the whole list is the area and forty rows.
+		expect(computer.probeElementCounts).toEqual([6, 6, 6, 6]);
+	});
+
+	it("still reaches the end of the content, and says so, when each page shows only part of the list", async () => {
+		const computer = listComputer(12, { virtualized: false });
+		const setup = await start(computer);
+
+		const report = await runFast(setup, [
+			{ type: "click", target: { text: "row-99" }, find: { vision: "only", max_pages: 30 } },
+		]);
+
+		expect(report.steps[0]).toMatchObject({
+			status: "skipped",
+			reason: expect.stringContaining("reached the end of the content"),
+			found: { pages_scrolled: 3 },
+		});
+		expect(Math.max(...computer.probeElementCounts)).toBe(6);
+		expect(clicks(computer.effects)).toHaveLength(0);
+	});
+});
+
+describe("scroll-until-found #given rows that are only created on later pages #when one is found #then the click that follows uses its own id", () => {
+	it("presses the found row through the id its page read gave it, for each target of a chain", async () => {
+		const computer = listComputer(40);
+		computer.rowsPressable = true;
+		const setup = await start(computer);
+
+		const report = await runFast(setup, [
+			{ type: "click", target: { text: "row-12" }, find: { vision: "off" } },
+			{ type: "click", target: { text: "row-30" }, find: { vision: "off" } },
+		]);
+
+		expect(report).toMatchObject({ completed: 2, stoppedEarly: false, tree_reads: 0 });
+		const pressed = computer.effects.flatMap((effect) =>
+			effect.kind === "performAction" && effect.action === "AXPress" ? [effect.id] : [],
+		);
+		// The fake maps the id a read gave back to the row it stood for: rows are 201 + their index.
+		expect(pressed).toEqual([201 + 12, 201 + 30]);
+		expect(report.steps.map((step) => step.found?.pages_scrolled)).toEqual([2, 4]);
+		expect(computer.probeElementCounts.every((count) => count <= 6)).toBe(true);
+	});
+});
+
+describe("scroll-until-found #given a list whose rows accessibility reads #when vision is auto #then no pixels are read", () => {
+	it("finds the row through accessibility and reads no pixels in auto mode", async () => {
+		const computer = listComputer(40);
+		const setup = await start(computer);
+
+		const report = await runFast(setup, [{ type: "click", target: { text: "row-23" }, find: { max_pages: 10 } }]);
+
+		expect(report.steps[0]).toMatchObject({
+			status: "dispatched",
+			found: { found_by: "accessibility", pages_scrolled: 4, vision: "not-needed" },
+		});
+		expect(computer.recognizeOptions).toHaveLength(0);
+	});
+
+	it("tells the end of the content from accessibility alone and still reads no pixels", async () => {
+		const computer = listComputer(12);
+		const setup = await start(computer);
+
+		const report = await runFast(setup, [{ type: "click", target: { text: "row 99" }, find: { max_pages: 30 } }]);
+
+		expect(report.steps[0]?.status).toBe("skipped");
+		expect(pageScrolls(computer.effects).length).toBeLessThan(30);
+		expect(computer.recognizeOptions).toHaveLength(0);
 	});
 });

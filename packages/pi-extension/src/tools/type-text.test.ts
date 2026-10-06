@@ -1,4 +1,5 @@
 import type { ComputerInterface } from "@apple-cua/core";
+import { currentInputScope } from "@apple-cua/core";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ExtensionContext } from "../pi/index.js";
@@ -82,6 +83,10 @@ describe("#given type_text tool #when AX focused write fails #then it falls back
 		// given
 		const computer = createComputer();
 		vi.spyOn(computer, "typeIntoFocused").mockResolvedValue(false);
+		const typedFor: (number | undefined)[] = [];
+		vi.spyOn(computer, "type").mockImplementation(async () => {
+			typedFor.push(currentInputScope()?.target?.pid);
+		});
 		const tool = createTypeTextTool(computer);
 
 		// when
@@ -95,8 +100,8 @@ describe("#given type_text tool #when AX focused write fails #then it falls back
 
 		// then
 		expect(computer.typeIntoFocused).toHaveBeenCalledWith(9001, "fallback");
-		expect(computer.setTarget).toHaveBeenNthCalledWith(1, 9001);
 		expect(computer.type).toHaveBeenCalledWith("fallback");
-		expect(computer.setTarget).toHaveBeenLastCalledWith(undefined);
+		expect(typedFor).toEqual([9001]);
+		expect(currentInputScope()).toBeUndefined();
 	});
 });

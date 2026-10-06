@@ -4,6 +4,7 @@ import {
 	parseElementIndex,
 	resolveAppPid,
 	scrollElement,
+	withTargetedApp,
 } from "@apple-cua/core";
 import { type Static, Type } from "typebox";
 
@@ -40,8 +41,9 @@ export function createScrollTool(computer: ComputerInterface): ToolDefinition {
 			const targetPid = await resolveAppPid(computer, params.app);
 			const state = await observeAction(computer, targetPid, async () => {
 				await scrollElement(computer, targetPid, elementIndex, params.direction, params.pages ?? 1);
-				computer.setTarget(targetPid);
-				await computer.scroll({ direction: params.direction, amount: pageCount(params.pages) * LINES_PER_PAGE });
+				await withTargetedApp(computer, targetPid, async () => {
+					await computer.scroll({ direction: params.direction, amount: pageCount(params.pages) * LINES_PER_PAGE });
+				});
 			});
 			return observedActionCompleteResult(state);
 		},

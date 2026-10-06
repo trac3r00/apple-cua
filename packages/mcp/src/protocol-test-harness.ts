@@ -1,3 +1,4 @@
+import { currentInputScope } from "@apple-cua/core";
 import type {
 	AXTreeElement,
 	AppState,
@@ -173,12 +174,33 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	scrollOffset = 0;
 	/** Rows are drawn and readable from pixels but absent from the accessibility tree. */
 	axHidesRows = false;
+	/** The options of every window-text read, in order. */
+	readonly recognizeOptions: ({ readonly region?: Rect } | undefined)[] = [];
 	/** Rows advertise AXScrollToVisible, which scrollElementIntoView then performs. */
 	scrollIntoViewAdvertised = false;
+	/** Rows advertise AXPress, so a click on a found row goes through its element id. */
+	rowsPressable = false;
+	/** How many elements each probe read (a scroll-until-found page check) returned, in order. */
+	readonly probeElementCounts: number[] = [];
 	/** Called after each page-scroll action with the pages scrolled so far. */
 	onScrollPage: ((pagesScrolled: number) => void) | undefined;
 	/** Where the drawn agent cursor was asked to glide, in order. */
 	readonly pointerHints: Point[] = [];
+	/**
+	 * Every synthetic keyboard and pointer input, with the app and window it went to: the input scope's target when
+	 * it went out, else the default setTarget left, which is where a native computer would deliver it.
+	 */
+	readonly targetedInputs: {
+		readonly effect: Effect;
+		readonly pid: number | undefined;
+		readonly windowId: number | undefined;
+	}[] = [];
+	/**
+	 * Awaited by each synthetic input before its target is read, as the native driver awaits its window lookup: a
+	 * test holds one app's input here while another app's runs.
+	 */
+	inputGate: ((effect: Effect) => Promise<void>) | undefined;
+	private defaultTarget: number | undefined;
 	private pagesScrolled = 0;
 	private subtreeIds: ReadonlyMap<number, number> | undefined;
 	private generation = 0;
@@ -205,7 +227,7 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 		const bundleId = targetPid === 5678 ? "com.example.other" : "com.apple.finder";
 		const captureTree = options?.includeAccessibilityTree !== false;
 		const probe = options?.probe === true;
-		let elements = captureTree ? this.currentElements() : [];
+		let elements = captureTree ? this.currentElements(options?.visibleOnly === true) : [];
 		if (captureTree && options?.subtreeOf !== undefined) {
 			const rebased = rebaseSubtree(
 				elements,
@@ -216,6 +238,9 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 			this.subtreeIds = rebased.ids;
 		} else if (captureTree) {
 			this.subtreeIds = undefined;
+		}
+		if (captureTree && probe) {
+			this.probeElementCounts.push(elements.length);
 		}
 		const previous = this.snapshotByPid.get(targetPid);
 		const axChanges = previous === undefined || !captureTree || probe ? undefined : diffElements(previous, elements);
@@ -328,10 +353,12 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 		this.scrollOffset = Math.min(Math.max(0, list.rows.length - list.visibleRows), id - FIRST_ROW_ID);
 		return this.globalRowFrame(id);
 	}
-	async recognizeWindowText(): Promise<WindowTextRead> {
+	async recognizeWindowText(_pid?: number, options?: { readonly region?: Rect }): Promise<WindowTextRead> {
+		this.recognizeOptions.push(options);
 		if (this.screenCaptureDenied) {
 			return { unavailable: "screen-recording-permission" };
 		}
+		const region = options?.region;
 		const list = this.scrollList;
 		const entries = (list?.rows ?? [])
 			.map((text, index) => ({ text, index }))
@@ -340,7 +367,16 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 				text,
 				confidence: 0.9,
 				frame: this.globalRowFrame(FIRST_ROW_ID + index),
-			}));
+			}))
+			// Like the native driver, read only the requested region: text outside it is never recognised.
+			.filter(
+				({ frame }) =>
+					region === undefined ||
+					(frame.x + frame.width / 2 >= region.x &&
+						frame.x + frame.width / 2 < region.x + region.width &&
+						frame.y + frame.height / 2 >= region.y &&
+						frame.y + frame.height / 2 < region.y + region.height),
+			);
 		return { entries };
 	}
 	showPointerAt(position: Point): void {
@@ -362,16 +398,16 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 		return false;
 	}
 	async click(point: Point, options?: PointerOptions): Promise<void> {
-		this.dispatch(clickEffect(point, options));
+		await this.deliver(clickEffect(point, options));
 	}
 	async drag(options: DragOptions): Promise<void> {
-		this.dispatch({ kind: "drag", options });
+		await this.deliver({ kind: "drag", options });
 	}
 	async type(text: string): Promise<void> {
-		this.dispatch({ kind: "type", text });
+		await this.deliver({ kind: "type", text });
 	}
 	async key(key: string, _options?: KeyOptions): Promise<void> {
-		this.dispatch({ kind: "key", key });
+		await this.deliver({ kind: "key", key });
 	}
 	async invokeMenu(pid: number, path: readonly string[]): Promise<InvokeMenuResult> {
 		this.dispatch({ kind: "invokeMenu", pid, path });
@@ -387,24 +423,26 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 		this.effects.push({ kind: "close" });
 	}
 
-	setTarget(_pid?: number): void {}
+	setTarget(pid?: number): void {
+		this.defaultTarget = pid;
+	}
 	async screenshot(_options?: ScreenshotOptions): Promise<ScreenshotResult> {
 		return { data: Buffer.from("png"), mimeType: "image/png", width: 1, height: 1 };
 	}
 	async move(position: Point): Promise<void> {
-		this.dispatch({ kind: "move", point: position });
+		await this.deliver({ kind: "move", point: position });
 	}
 	async rightClick(point: Point, options?: PointerOptions): Promise<void> {
-		this.dispatch(clickEffect(point, options));
+		await this.deliver(clickEffect(point, options));
 	}
 	async middleClick(point: Point, options?: PointerOptions): Promise<void> {
-		this.dispatch(clickEffect(point, options));
+		await this.deliver(clickEffect(point, options));
 	}
 	async doubleClick(point: Point, options?: PointerOptions): Promise<void> {
-		this.dispatch(clickEffect(point, options));
+		await this.deliver(clickEffect(point, options));
 	}
 	async scroll(options: ScrollOptions): Promise<void> {
-		this.dispatch({ kind: "scroll", options });
+		await this.deliver({ kind: "scroll", options });
 	}
 	async getCursorPosition(): Promise<Point> {
 		return { x: 0, y: 0 };
@@ -419,7 +457,8 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	private readonly sawSnapshot = new Set<number>();
 	private readonly snapshotByPid = new Map<number, AXTreeElement[]>();
 
-	private currentElements(): AXTreeElement[] {
+	/** `visibleOnly` walks the list by the rows it shows, like the driver does for a scroll-until-found page check. */
+	private currentElements(visibleOnly: boolean): AXTreeElement[] {
 		const elements: AXTreeElement[] = [
 			{
 				id: 9,
@@ -460,7 +499,9 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 				children: [],
 			});
 		}
-		return [...elements, ...this.scrollListElements()].filter((element) => !this.hiddenElementIds.has(element.id));
+		return [...elements, ...this.scrollListElements(visibleOnly)].filter(
+			(element) => !this.hiddenElementIds.has(element.id),
+		);
 	}
 
 	private rowFrame(index: number): Rect {
@@ -478,7 +519,7 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 		};
 	}
 
-	private scrollListElements(): AXTreeElement[] {
+	private scrollListElements(visibleOnly: boolean): AXTreeElement[] {
 		const list = this.scrollList;
 		if (list === undefined) {
 			return [];
@@ -487,7 +528,7 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 			index >= this.scrollOffset && index < this.scrollOffset + list.visibleRows;
 		const rows = list.rows
 			.map((label, index) => ({ label, index }))
-			.filter(({ index }) => !this.axHidesRows && (!list.virtualized || inView(index)));
+			.filter(({ index }) => !this.axHidesRows && (!(list.virtualized || visibleOnly) || inView(index)));
 		return [
 			{
 				id: SCROLL_AREA_ID,
@@ -504,10 +545,18 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 				label,
 				value: null,
 				frame: this.rowFrame(index),
-				actions: this.scrollIntoViewAdvertised ? ["AXScrollToVisible"] : [],
+				actions: this.rowsPressable ? ["AXPress"] : this.scrollIntoViewAdvertised ? ["AXScrollToVisible"] : [],
 				children: [],
 			})),
 		];
+	}
+
+	/** Synthetic input: wait at the gate, then record it with the target it went to, then apply it. */
+	private async deliver(effect: Effect): Promise<void> {
+		await this.inputGate?.(effect);
+		const target = currentInputScope()?.target;
+		this.targetedInputs.push({ effect, pid: target?.pid ?? this.defaultTarget, windowId: target?.windowId });
+		this.dispatch(effect);
 	}
 
 	private dispatch(effect: Effect): void {

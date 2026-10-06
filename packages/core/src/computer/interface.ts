@@ -36,6 +36,11 @@ export interface ComputerInterface {
 	readonly delivery?: InputDelivery;
 
 	screenshot(options?: ScreenshotOptions): Promise<ScreenshotResult>;
+	/**
+	 * The app input goes to when no input scope names one (see withTargetedApp and runInInputScope). One value
+	 * shared by every call, so it suits a single-action caller such as the CLI; calls that can overlap must aim
+	 * their input through a scope instead.
+	 */
 	setTarget(pid?: number): void;
 	move(position: Point): Promise<void>;
 	click(position: Point, options?: PointerOptions): Promise<void>;
@@ -62,6 +67,13 @@ export interface ComputerInterface {
 	 */
 	getScreenshotViewport(targetPid: number): Promise<ScreenshotViewport | undefined>;
 	listApps(): Promise<AppInfo[]>;
+	/**
+	 * Running apps with identity only (name, bundle id, pid, frontmost) and no usage enrichment.
+	 * Name resolution needs nothing more, and enriching every app costs a spawned `mdls` per call.
+	 * Always read fresh: a cached pid would name a recycled process. Callers fall back to
+	 * {@link ComputerInterface.listApps} when an implementation does not provide it.
+	 */
+	listAppIdentities?(): Promise<AppInfo[]>;
 	setValue(targetPid: number, elementIndex: number, value: string): Promise<void>;
 	selectText(targetPid: number, elementIndex: number, options: SelectTextOptions): Promise<void>;
 	performAction(targetPid: number, elementIndex: number, action: string): Promise<void>;
@@ -87,8 +99,10 @@ export interface ComputerInterface {
 	/**
 	 * Read the text of the observed window from a capture of it, frames in global logical points. Never
 	 * triggers the Screen Recording prompt: without the permission it answers `unavailable`.
+	 * With `region` (global logical points) only that part of the window, widened by a few points, is cut
+	 * from the capture and recognised, so only text inside it comes back.
 	 */
-	recognizeWindowText?(targetPid: number): Promise<WindowTextRead>;
+	recognizeWindowText?(targetPid: number, options?: { readonly region?: Rect }): Promise<WindowTextRead>;
 	/** Show the drawn agent cursor at a point (it glides there); never moves the real pointer. */
 	showPointerAt?(position: Point, press: boolean): void;
 	typeIntoFocused(targetPid: number, text: string): Promise<boolean>;

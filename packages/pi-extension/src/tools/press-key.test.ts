@@ -1,4 +1,5 @@
 import type { ComputerInterface } from "@apple-cua/core";
+import { currentInputScope } from "@apple-cua/core";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ExtensionContext } from "../pi/index.js";
@@ -55,10 +56,14 @@ function createComputer(): ComputerInterface {
 }
 
 describe("#given press_keys tool #when executed #then it presses a timed key sequence", () => {
-	it("sets the target app, presses keys in order, and restores the target", async () => {
+	it("aims every key at the target app, presses keys in order, and leaves nothing aimed afterwards", async () => {
 		// given
 		vi.useFakeTimers();
 		const computer = createComputer();
+		const pressedFor: (number | undefined)[] = [];
+		vi.spyOn(computer, "key").mockImplementation(async () => {
+			pressedFor.push(currentInputScope()?.target?.pid);
+		});
 		const tool = createPressKeysTool(computer);
 
 		// when
@@ -78,10 +83,10 @@ describe("#given press_keys tool #when executed #then it presses a timed key seq
 		await execution;
 
 		// then
-		expect(computer.setTarget).toHaveBeenNthCalledWith(1, 1234);
 		expect(computer.key).toHaveBeenNthCalledWith(1, "k", { modifiers: ["command"], holdMilliseconds: 100 });
 		expect(computer.key).toHaveBeenNthCalledWith(2, "Return", { holdMilliseconds: 250 });
-		expect(computer.setTarget).toHaveBeenLastCalledWith(undefined);
+		expect(pressedFor).toEqual([1234, 1234]);
+		expect(currentInputScope()).toBeUndefined();
 		expect(vi.getTimerCount()).toBe(0);
 		vi.useRealTimers();
 	});

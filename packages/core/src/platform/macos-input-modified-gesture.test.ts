@@ -5,6 +5,7 @@ import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
 
 const WINDOW = { id: 99, bounds: { x: 10, y: 20, width: 300, height: 200 } };
 const OTHER_WINDOW = { id: 98, bounds: { x: 400, y: 20, width: 300, height: 200 } };
+const MAIN_DISPLAY = { x: 0, y: 0, width: 1920, height: 1080 };
 const COMMAND = 0x00100000;
 const SHIFT = 0x00020000;
 const OPTION = 0x00080000;
@@ -73,7 +74,7 @@ interface KeyCall {
 	readonly flagsChanged?: boolean | undefined;
 }
 
-async function backgroundController(delivery: "background" | "attended" = "background") {
+async function backgroundController(delivery: "background" | "attended" = "background", backgroundActivation = true) {
 	const { MacOSInputController } = await import("./macos-input.js");
 	return new MacOSInputController(
 		1234,
@@ -81,6 +82,7 @@ async function backgroundController(delivery: "background" | "attended" = "backg
 		() => false,
 		{ acquire: vi.fn(), release: vi.fn() },
 		delivery,
+		backgroundActivation,
 	);
 }
 
@@ -89,8 +91,13 @@ async function resetDesktop(): Promise<void> {
 	vi.clearAllMocks();
 	log.events.length = 0;
 	setOnscreenWindowIdsSourceForTesting(() => [99, 98]);
-	const { setFocusStealWatcherForTesting, setKeyboardWindowFocuserForTesting, setKeyboardPidResolverForTesting } =
-		await import("./macos-input.js");
+	const {
+		setFocusStealWatcherForTesting,
+		setKeyboardWindowFocuserForTesting,
+		setKeyboardPidResolverForTesting,
+		setScreenLayoutSourceForTesting,
+	} = await import("./macos-input.js");
+	setScreenLayoutSourceForTesting(() => ({ displays: [MAIN_DISPLAY], windows: [WINDOW.bounds, OTHER_WINDOW.bounds] }));
 	setFocusStealWatcherForTesting(() => undefined);
 	setKeyboardPidResolverForTesting((pid) => pid);
 	setKeyboardWindowFocuserForTesting(async (pid, windowId) => {
@@ -303,6 +310,102 @@ describe("#given a background controller holding modifiers across a pointer gest
 		expect(coreGraphicsMock.postKeyboardEvent).not.toHaveBeenCalled();
 		expect(skyLightMock.setProcessAppActive).not.toHaveBeenCalled();
 		controller.close();
+	});
+});
+
+describe("#given an app behind the person's told it is active for a click (where its primer goes)", () => {
+	beforeEach(resetDesktop);
+
+	it("#when a display at a negative origin above and left of the main one covers (-1, -1) #then the primer clicks just outside every display and window, sent to the target window only", async () => {
+		const { setScreenLayoutSourceForTesting } = await import("./macos-input.js");
+		setScreenLayoutSourceForTesting(() => ({
+			displays: [MAIN_DISPLAY, { x: -2560, y: -1440, width: 2560, height: 1440 }],
+			windows: [WINDOW.bounds, OTHER_WINDOW.bounds, { x: -1200, y: -900, width: 1199, height: 899 }],
+		}));
+		const controller = await backgroundController();
+
+		await controller.click({ x: 50, y: 70 });
+
+		expect(log.events).toEqual([
+			"active:true:99",
+			"mouse:down:-2561,-1441:0",
+			"mouse:up:-2561,-1441:0",
+			"mouse:down:50,70:0",
+			"mouse:up:50,70:0",
+		]);
+		expect(coreGraphicsMock.postMouseEvent).toHaveBeenCalledWith(
+			expect.objectContaining({
+				kind: "down",
+				position: { x: -2561, y: -1441 },
+				targetPid: 1234,
+				targetWindow: WINDOW,
+			}),
+		);
+		controller.close();
+	});
+
+	it("#when the display and window layout cannot be read #then the primer is skipped and logged, and the click still goes out", async () => {
+		const { setScreenLayoutSourceForTesting } = await import("./macos-input.js");
+		setScreenLayoutSourceForTesting(() => undefined);
+		const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+		const controller = await backgroundController();
+
+		try {
+			await controller.click({ x: 50, y: 70 });
+
+			expect(log.events).toEqual(["active:true:99", "mouse:down:50,70:0", "mouse:up:50,70:0"]);
+			expect(stderr).toHaveBeenCalledWith(expect.stringContaining("activation primer skipped"));
+			expect(controller.holdsActivation(1234)).toBe(true);
+		} finally {
+			stderr.mockRestore();
+			controller.close();
+		}
+	});
+});
+
+describe("#given background activation turned off (APPLE_CUA_BACKGROUND_ACTIVATION=off)", () => {
+	beforeEach(resetDesktop);
+
+	it.each([
+		[undefined, true],
+		["on", true],
+		["off", false],
+		[" OFF ", false],
+		["0", false],
+		["false", false],
+		["no", false],
+	])("#when the variable is %j #then background activation is %s", async (value, enabled) => {
+		const { backgroundActivationEnabled } = await import("./macos-input.js");
+
+		expect(backgroundActivationEnabled(value === undefined ? {} : { APPLE_CUA_BACKGROUND_ACTIVATION: value })).toBe(
+			enabled,
+		);
+	});
+
+	it("#when clicking and running a window command behind the person's app #then the app is never told it is active, gets no primer, and nothing is held or released", async () => {
+		const controller = await backgroundController("background", false);
+
+		await controller.click({ x: 50, y: 70 }, "left", ["cmd"]);
+		await controller.withWindowCommand(
+			1234,
+			OTHER_WINDOW,
+			() => true,
+			async (held) => {
+				log.events.push(`command:${String(held)}`);
+			},
+		);
+		controller.close();
+
+		expect(skyLightMock.setProcessAppActive).not.toHaveBeenCalled();
+		expect(log.events).toEqual([
+			"key:55:down:100000",
+			"mouse:down:50,70:100000",
+			"mouse:up:50,70:100000",
+			"key:55:up:0",
+			"focus:1234:98",
+			"command:false",
+		]);
+		expect(controller.holdsActivation(1234)).toBe(false);
 	});
 });
 

@@ -1,4 +1,5 @@
 import type { ComputerInterface } from "@apple-cua/core";
+import { currentInputScope } from "@apple-cua/core";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ExtensionContext } from "../pi/index.js";
@@ -108,14 +109,20 @@ describe("#given click tool #when executed #then target app receives coordinates
 	it("falls back to the synthetic mouse only when AX hit-test cannot press the element", async () => {
 		const computer = createComputer();
 		const pressAtPosition = vi.spyOn(computer, "pressAtPosition").mockResolvedValue(false);
+		const clickedFor: (number | undefined)[] = [];
+		vi.spyOn(computer, "click").mockImplementation(async () => {
+			clickedFor.push(currentInputScope()?.target?.pid);
+		});
 		const tool = createClickTool(computer, testObservations());
 
 		await tool.execute("tool-call", { app: "Finder", x: 10, y: 20 }, undefined, undefined, {} as ExtensionContext);
 
 		expect(pressAtPosition).toHaveBeenCalledWith(1234, { x: 10, y: 20 });
-		expect(computer.setTarget).toHaveBeenNthCalledWith(1, 1234);
 		expect(computer.click).toHaveBeenCalledWith({ x: 10, y: 20 });
-		expect(computer.setTarget).toHaveBeenLastCalledWith(undefined);
+		// The click went out aimed at the app through its own input scope, which ends with the tool call.
+		expect(clickedFor).toEqual([1234]);
+		expect(currentInputScope()).toBeUndefined();
+		expect(computer.setTarget).not.toHaveBeenCalled();
 	});
 
 	it("presses the element under the cursor via AX without moving the mouse when AX accepts", async () => {

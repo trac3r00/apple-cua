@@ -26,6 +26,13 @@ export {
 	type ComputerUseMouseButton,
 } from "./computer/actions.js";
 export { resolveScreenPoint } from "./computer/coordinate.js";
+export {
+	type InputScope,
+	type InputTarget,
+	InputInterrupted,
+	currentInputScope,
+	runInInputScope,
+} from "./computer/input-scope.js";
 export { pressKeySequence, type KeySequenceEntry, type KeySequenceOptions } from "./computer/key-sequence.js";
 export {
 	type SelectionMode,

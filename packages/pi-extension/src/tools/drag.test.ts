@@ -1,4 +1,5 @@
 import type { ComputerInterface } from "@apple-cua/core";
+import { currentInputScope } from "@apple-cua/core";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ExtensionContext } from "../pi/index.js";
@@ -71,6 +72,10 @@ describe("#given drag tool factory #when built #then tool name is Codex-compatib
 describe("#given drag tool #when executed #then computer drag receives endpoints", () => {
 	it("drags from start to end", async () => {
 		const computer = createComputer();
+		const draggedFor: (number | undefined)[] = [];
+		vi.spyOn(computer, "drag").mockImplementation(async () => {
+			draggedFor.push(currentInputScope()?.target?.pid);
+		});
 		const tool = createDragTool(computer, testObservations());
 
 		await tool.execute(
@@ -81,9 +86,9 @@ describe("#given drag tool #when executed #then computer drag receives endpoints
 			{} as ExtensionContext,
 		);
 
-		expect(computer.setTarget).toHaveBeenNthCalledWith(1, 1234);
 		expect(computer.drag).toHaveBeenCalledWith({ from: { x: 1, y: 2 }, to: { x: 3, y: 4 } });
-		expect(computer.setTarget).toHaveBeenLastCalledWith(undefined);
+		expect(draggedFor).toEqual([1234]);
+		expect(currentInputScope()).toBeUndefined();
 	});
 
 	it("maps both endpoints from screenshot pixels onto the window's screen position", async () => {

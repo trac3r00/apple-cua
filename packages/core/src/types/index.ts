@@ -68,6 +68,11 @@ export interface AppStateOptions {
 	 * or the baseline later diffs compare against, and it leaves the overlay cursor alone.
 	 */
 	probe?: boolean;
+	/**
+	 * Walk an outline, table or list by the rows it shows instead of every row it holds, so a long list costs a
+	 * page of rows. Element ids number what was walked; a list that does not name its shown rows is walked whole.
+	 */
+	visibleOnly?: boolean;
 }
 
 /**

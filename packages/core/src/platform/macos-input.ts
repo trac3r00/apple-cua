@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { type InputScope, assertInputMayContinue, currentInputScope } from "../computer/input-scope.js";
 import { assertScreenUnlocked } from "../computer/lock-guard.js";
 import { VirtualPointer } from "../computer/virtual-pointer.js";
 import type { DragOptions, InputDelivery, KeyModifierName, KeyOptions, Point, ScrollOptions } from "../types/index.js";
@@ -9,6 +10,7 @@ import {
 	focusedWindowIsModal,
 	focusedWindowShowsFilePanel,
 	raiseWindowInApp,
+	windowIdsAtScreenPoint,
 	windowTitlesForPid,
 } from "./macos-ffi/accessibility.js";
 import {
@@ -19,6 +21,7 @@ import {
 	postUnicodeText,
 } from "./macos-ffi/coregraphics.js";
 import { NOOP_POINTER_OVERLAY, type PointerOverlay } from "./macos-ffi/cursor-overlay.js";
+import { onlineDisplayBounds } from "./macos-ffi/display-list.js";
 import { filePanelServicePid } from "./macos-ffi/file-panel-service.js";
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";
 import { type DisplaySleepAssertion, NOOP_DISPLAY_SLEEP } from "./macos-ffi/power.js";
@@ -28,15 +31,17 @@ import {
 	frontProcessSerialNumber,
 	setProcessAppActive,
 } from "./macos-ffi/skylight.js";
-import { listOnscreenWindows } from "./macos-ffi/window-list.js";
+import { listOnscreenWindows, listWindows } from "./macos-ffi/window-list.js";
 import { startFocusStealWatch } from "./macos-focus-watch.js";
 import { pointerModifierFlags, withHeldModifiers } from "./macos-input-modifiers.js";
 import {
 	type MousePost,
+	type ScreenLayout,
 	postActivationPrimer,
 	postClick,
 	postDoubleClick,
 	postDragSequence,
+	primerPosition,
 	runFocusLeasedClick,
 	runFocusLeasedDoubleClick,
 	runFocusLeasedDrag,
@@ -45,7 +50,7 @@ import { modifierFlags, virtualKeyCodeFor } from "./macos-keycodes.js";
 import { openWindowsForTargeting } from "./macos-open-windows.js";
 import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
-import { resolveTargetWindow } from "./macos-window-target.js";
+import { resolveTargetWindow, toTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
 
 /**
  * On-screen window ids in the WindowServer's front-to-back order. A window that is minimized or
@@ -166,6 +171,47 @@ export function setKeyboardWindowFocuserForTesting(focuser: (pid: number, window
 	keyboardWindowFocuser = focuser;
 }
 
+/**
+ * The windows containing the element an app shows at a screen point, innermost first: how a pointer event bound to
+ * an observed window tells a sheet of that window (which takes the event) from another window covering it.
+ */
+let pointWindowIds: (pid: number, position: Point) => readonly number[] | undefined = (pid, position) =>
+	windowIdsAtScreenPoint(pid, position.x, position.y);
+
+export function setPointWindowIdsForTesting(
+	source: (pid: number, position: Point) => readonly number[] | undefined,
+): void {
+	pointWindowIds = source;
+}
+
+/**
+ * Every display and on-screen window, read when an app is told it is active so that its activation primer lands clear
+ * of all of them; undefined when either list cannot be read. Desktop elements (wallpaper, desktop icons) are left out
+ * of the window list, and they lie on the displays, which are in it.
+ */
+let screenLayoutSource: () => ScreenLayout | undefined = () => {
+	const displays = onlineDisplayBounds();
+	const windows = listWindows()?.map((window) => window.bounds);
+	return displays === undefined || windows === undefined ? undefined : { displays, windows };
+};
+
+export function setScreenLayoutSourceForTesting(source: () => ScreenLayout | undefined): void {
+	screenLayoutSource = source;
+}
+
+/** Logged when an app was told it is active but no point is provably clear for its primer click. */
+const PRIMER_SKIPPED_MESSAGE =
+	"apple-cua: activation primer skipped: the display and window layout could not be read, so no point outside all of them is known; a first-mouse app (Finder) may spend the next background click on activating its window\n";
+
+/**
+ * Background activation (see MacOSInputController.activateBehind) is on unless APPLE_CUA_BACKGROUND_ACTIVATION turns it
+ * off (off, 0, false, no).
+ */
+export function backgroundActivationEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
+	const value = environment["APPLE_CUA_BACKGROUND_ACTIVATION"]?.trim().toLowerCase();
+	return !(value === "off" || value === "0" || value === "false" || value === "no");
+}
+
 /** Re-exported for callers that import the delivery mode beside the input controller. */
 export type { InputDelivery };
 
@@ -173,12 +219,28 @@ export type { InputDelivery };
 // target app's event loop and drops characters; ~12ms lets each be consumed.
 const TYPE_CHARACTER_DELAY_MS = 12;
 
+/** How often a held key checks whether its call was stopped, so a long hold is released soon after a stop. */
+const HOLD_CHECK_MILLISECONDS = 50;
+
+/**
+ * Whom one input call is for, and whether it may go on, fixed when the call starts (see beginCall) and handed down to
+ * every event it posts. Nothing another call does changes it, so calls for different apps that overlap never post to
+ * each other's app.
+ */
+interface InputCall {
+	readonly pid: number | undefined;
+	/** The observed window the call is bound to: its input reaches that window or is refused. */
+	readonly windowId: number | undefined;
+	readonly scope: InputScope | undefined;
+}
+
 /** How long an app behind the person's that background input told it is active stays so without another action. */
 export const BACKGROUND_ACTIVATION_IDLE_MILLISECONDS = 2_000;
 
 export class MacOSInputController {
-	private targetPid: number | undefined;
-	private lastTargetWindow: SkyLightTargetWindow | undefined;
+	/** The app input goes to when no input scope names one: the constructor's, or setTarget's. */
+	private defaultTargetPid: number | undefined;
+	/** The window each app's input last went to (or its observation named), by pid. */
 	private readonly targetWindowsByPid = new Map<number, SkyLightTargetWindow>();
 	private readonly keyboardInputAt = new Map<number, number>();
 	/** Apps behind the person's that this controller told they are active, by pid, to be told otherwise once idle. */
@@ -199,10 +261,9 @@ export class MacOSInputController {
 	private readonly isLocked: () => boolean;
 	private readonly displaySleep: DisplaySleepAssertion;
 	private gestureChain: Promise<void> = Promise.resolve();
-	private readonly postMouse: MousePost = async (kind, position, button, clickState, targetWindow, flags) => {
-		postMouseEvent({ kind, position, button, clickState, targetPid: this.targetPid, targetWindow, flags });
-	};
 	private readonly delivery: InputDelivery;
+	/** Whether background delivery may tell an app behind the person's that it is active (see activateBehind). */
+	private readonly backgroundActivation: boolean;
 
 	constructor(
 		targetPid?: number,
@@ -210,8 +271,10 @@ export class MacOSInputController {
 		isLocked: () => boolean = isScreenLocked,
 		displaySleep: DisplaySleepAssertion = NOOP_DISPLAY_SLEEP,
 		delivery: InputDelivery = "attended",
+		backgroundActivation: boolean = backgroundActivationEnabled(),
 	) {
 		this.delivery = delivery;
+		this.backgroundActivation = backgroundActivation;
 		this.overlay = overlay;
 		this.isLocked = isLocked;
 		this.displaySleep = displaySleep;
@@ -229,18 +292,37 @@ export class MacOSInputController {
 	}
 
 	/**
-	 * Background delivery may only use routes that leave the user's session alone: no frontmost
-	 * app change and no cursor movement. Anything that would need either is refused with the
-	 * action named, because silently taking focus is how an unattended run interrupts the person
-	 * using the machine.
+	 * Start one input call: whom it is for is read here, once. The input scope of the calling async flow names the app
+	 * (and the observed window) of the dispatch it belongs to; without a scope the default target applies. Background
+	 * delivery may only use routes that leave the user's session alone, so a call with no target app at all is refused
+	 * with the action named: untargeted events would take over the person's cursor and frontmost app.
 	 */
-	private requireBackgroundTarget(action: string): void {
-		if (!this.isBackground) {
-			return;
-		}
-		if (this.targetPid === undefined) {
+	private beginCall(action: string): InputCall {
+		const scope = currentInputScope();
+		const pid = scope?.target?.pid ?? this.defaultTargetPid;
+		if (this.isBackground && pid === undefined) {
 			throw new Error(
 				`background delivery cannot ${action} without a target app: global input would take over the cursor and focus`,
+			);
+		}
+		const call: InputCall = { pid, windowId: scope?.target?.windowId, scope };
+		this.checkpoint(call);
+		return call;
+	}
+
+	/** Stops the call (InputInterrupted) once its scope says input must stop: the stop switch, a client cancel. */
+	private checkpoint(call: InputCall): void {
+		assertInputMayContinue(call.scope);
+	}
+
+	/**
+	 * The last check before an event leaves. Under background delivery an event with no target app is never posted,
+	 * whatever path led to it: it would go through the session-wide HID tap to the app in front of the person.
+	 */
+	private assertDeliverable(pid: number | undefined): void {
+		if (pid === undefined && this.isBackground) {
+			throw new Error(
+				"background delivery refused an event with no target app: it would reach the app in front of the person",
 			);
 		}
 	}
@@ -258,6 +340,7 @@ export class MacOSInputController {
 	 * when it carries modifiers.
 	 */
 	private async holdModifiers<T>(
+		call: InputCall,
 		modifiers: ReadonlyArray<KeyModifierName> | undefined,
 		targetWindow: SkyLightTargetWindow | undefined,
 		activation: "pointer" | "wheel",
@@ -265,7 +348,7 @@ export class MacOSInputController {
 	): Promise<T> {
 		// Read first: an unknown modifier name is refused here, before anything is posted.
 		const modified = pointerModifierFlags(modifiers) !== 0;
-		const pid = this.targetPid;
+		const pid = call.pid;
 		let held = false;
 		if (pid !== undefined && targetWindow !== undefined) {
 			held =
@@ -274,7 +357,7 @@ export class MacOSInputController {
 					: this.postponeActivationRelease(pid);
 		}
 		try {
-			return await this.postWithHeldModifiers(modifiers, targetWindow, gesture);
+			return await this.postWithHeldModifiers(call, modifiers, targetWindow, gesture);
 		} finally {
 			if (held && pid !== undefined) {
 				this.scheduleActivationRelease(pid);
@@ -287,16 +370,20 @@ export class MacOSInputController {
 	 * its key window: no front-process change, no raise, nothing told to the person's app. An app that
 	 * believes it is active takes the first click of a gesture instead of spending it on activating the
 	 * window, reads modifier flags off a click, and enables its window commands (Save, New Folder). The
-	 * first click after the activation is still spent on it, so a click outside every window absorbs it.
+	 * first click after the activation is still spent on it, so a primer click at a point inside no display and no
+	 * window absorbs it; when no such point can be proven (the layout cannot be read) the primer is skipped and that is
+	 * logged, and the gesture's first click may then be spent on the activation.
 	 *
 	 * The app stays told until no background action has reached it for
 	 * {@link BACKGROUND_ACTIVATION_IDLE_MILLISECONDS} (or the controller closes): telling it otherwise
 	 * right after each action leaves some apps (Finder) deaf to the very next activation, while a chain of
 	 * actions shares one. An app held for another of its windows is told again, naming this one. True when
-	 * this controller holds the app active afterwards; the caller then schedules the release.
+	 * this controller holds the app active afterwards; the caller then schedules the release. Never done with
+	 * background activation turned off (APPLE_CUA_BACKGROUND_ACTIVATION=off), which avoids the release's autosave (see
+	 * releaseActivation) at the cost of the clicks and window commands above.
 	 */
 	private async activateBehind(pid: number, window: SkyLightTargetWindow): Promise<boolean> {
-		if (!this.isBackground) {
+		if (!this.isBackground || !this.backgroundActivation) {
 			return false;
 		}
 		this.cancelActivationRelease(pid);
@@ -312,7 +399,12 @@ export class MacOSInputController {
 		this.activations.set(pid, { window, psn: guard.targetPsn });
 		this.syncExitHook();
 		focusStealWatcher(window);
-		await postActivationPrimer(this.mousePostFor(pid), window);
+		const primer = primerPosition(screenLayoutSource());
+		if (primer === undefined) {
+			process.stderr.write(PRIMER_SKIPPED_MESSAGE);
+		} else {
+			await postActivationPrimer(this.mousePostFor(pid), window, primer);
+		}
 		return true;
 	}
 
@@ -347,6 +439,13 @@ export class MacOSInputController {
 	 * Tell a held app it is no longer active, unless the person brought it forward meanwhile: then it
 	 * really is the active app, and telling it otherwise would take that from them. Addressed by process,
 	 * so it still lands after the window it was activated with has closed.
+	 *
+	 * This is the deactivation event AppKit gets when a person switches away from the app, and the app reacts the same
+	 * way: -[NSApplication _handleDeactivateEvent:] posts NSApplicationWillResignActiveNotification before anything else,
+	 * and NSDocumentController autosaves every document of a class that autosaves in place (TextEdit, Preview, Pages),
+	 * so another document of the app with unsaved changes is written to its file. No narrower release exists: the
+	 * window named does not matter, the event autosaves even an app that is not active, and without it the app goes on
+	 * believing it is active (AXFrontmost) behind the person's. Only not activating avoids it (backgroundActivation).
 	 */
 	private releaseActivation(pid: number): void {
 		const held = this.activations.get(pid);
@@ -413,8 +512,8 @@ export class MacOSInputController {
 	}
 
 	/** Keys reaching an app this controller holds active keep it so: its idle period restarts after them. */
-	private async keepingActivation<T>(work: () => Promise<T>): Promise<T> {
-		const pid = this.targetPid;
+	private async keepingActivation<T>(call: InputCall, work: () => Promise<T>): Promise<T> {
+		const pid = call.pid;
 		const held = pid !== undefined && this.postponeActivationRelease(pid);
 		try {
 			return await work();
@@ -426,6 +525,7 @@ export class MacOSInputController {
 	}
 
 	private async postWithHeldModifiers<T>(
+		call: InputCall,
 		modifiers: ReadonlyArray<KeyModifierName> | undefined,
 		targetWindow: SkyLightTargetWindow | undefined,
 		gesture: (flags: number | undefined) => Promise<T>,
@@ -433,12 +533,13 @@ export class MacOSInputController {
 		return await withHeldModifiers(
 			modifiers,
 			(keyCode, keyDown, flags) => {
+				this.assertDeliverable(call.pid);
 				postKeyboardEvent({
 					keyCode,
 					keyDown,
 					flags,
 					text: undefined,
-					targetPid: this.targetPid,
+					targetPid: call.pid,
 					targetWindow,
 					flagsChanged: true,
 				});
@@ -456,12 +557,12 @@ export class MacOSInputController {
 		return result;
 	}
 
+	/** The default target: where input goes when no input scope names an app (see beginCall). */
 	setTarget(pid?: number): void {
 		if (pid !== undefined && (!Number.isSafeInteger(pid) || pid <= 0)) {
 			throw new Error("target pid must be a positive integer");
 		}
-		this.targetPid = pid;
-		this.lastTargetWindow = pid === undefined ? undefined : this.targetWindowsByPid.get(pid);
+		this.defaultTargetPid = pid;
 	}
 
 	async rememberTargetWindow(
@@ -478,16 +579,18 @@ export class MacOSInputController {
 				: await this.windowByIdForPid(pid, windowId, windows);
 		if (targetWindow !== undefined) {
 			this.targetWindowsByPid.set(pid, targetWindow);
-			if (this.targetPid === pid) {
-				this.lastTargetWindow = targetWindow;
-			}
 		}
 		return targetWindow;
 	}
 
 	async move(position: Point): Promise<void> {
+		const call = this.beginCall("move the pointer");
 		this.beforeInput();
-		await this.postMouse("move", position, "left", undefined, await this.targetWindow(position));
+		await this.postMove(call, position);
+	}
+
+	private async postMove(call: InputCall, position: Point): Promise<void> {
+		await this.mousePost(call)("move", position, "left", undefined, await this.pointerWindow(call, position));
 		this.markPointer(position);
 	}
 
@@ -496,24 +599,26 @@ export class MacOSInputController {
 		button: MouseButton = "left",
 		modifiers?: ReadonlyArray<KeyModifierName>,
 	): Promise<void> {
+		const call = this.beginCall("click");
 		await this.serialize(async () => {
 			this.beforeInput();
-			this.requireBackgroundTarget("click");
-			const targetWindow = await this.targetWindow(position);
-			this.requirePointerWindow(targetWindow);
-			this.lastTargetWindow = targetWindow;
-			await this.holdModifiers(modifiers, targetWindow, "pointer", async (flags) => {
-				if (this.targetPid === undefined) {
-					await this.move(position);
-					await postClick(this.postMouse, position, button, 1, targetWindow, flags);
+			const targetWindow = await this.pointerWindow(call, position);
+			this.requirePointerWindow(call, targetWindow);
+			// Read after waiting for the gesture before this one and for the window lookup: nothing goes down once stopped.
+			this.checkpoint(call);
+			const post = this.mousePost(call);
+			await this.holdModifiers(call, modifiers, targetWindow, "pointer", async (flags) => {
+				if (call.pid === undefined) {
+					await this.postMove(call, position);
+					await postClick(post, position, button, 1, targetWindow, flags);
 					this.markPointer(position);
 				} else if (targetWindow !== undefined) {
 					if (this.isBackground) {
-						await postClick(this.postMouse, position, button, 1, targetWindow, flags);
+						await postClick(post, position, button, 1, targetWindow, flags);
 						this.showPointer(position, true);
 						return;
 					}
-					await runFocusLeasedClick(targetWindow, position, button, this.postMouse, flags);
+					await runFocusLeasedClick(targetWindow, position, button, post, flags);
 					this.showPointer(position, true);
 				}
 			});
@@ -521,24 +626,25 @@ export class MacOSInputController {
 	}
 
 	async doubleClick(position: Point, modifiers?: ReadonlyArray<KeyModifierName>): Promise<void> {
+		const call = this.beginCall("double click");
 		await this.serialize(async () => {
 			this.beforeInput();
-			this.requireBackgroundTarget("double click");
-			const targetWindow = await this.targetWindow(position);
-			this.requirePointerWindow(targetWindow);
-			this.lastTargetWindow = targetWindow;
-			await this.holdModifiers(modifiers, targetWindow, "pointer", async (flags) => {
-				if (this.targetPid === undefined) {
-					await this.move(position);
-					await postDoubleClick(this.postMouse, position, targetWindow, flags);
+			const targetWindow = await this.pointerWindow(call, position);
+			this.requirePointerWindow(call, targetWindow);
+			this.checkpoint(call);
+			const post = this.mousePost(call);
+			await this.holdModifiers(call, modifiers, targetWindow, "pointer", async (flags) => {
+				if (call.pid === undefined) {
+					await this.postMove(call, position);
+					await postDoubleClick(post, position, targetWindow, flags);
 					this.markPointer(position);
 				} else if (targetWindow !== undefined) {
 					if (this.isBackground) {
-						await postDoubleClick(this.postMouse, position, targetWindow, flags);
+						await postDoubleClick(post, position, targetWindow, flags);
 						this.showPointer(position, true);
 						return;
 					}
-					await runFocusLeasedDoubleClick(targetWindow, position, this.postMouse, flags);
+					await runFocusLeasedDoubleClick(targetWindow, position, post, flags);
 					this.showPointer(position, true);
 				}
 			});
@@ -546,13 +652,14 @@ export class MacOSInputController {
 	}
 
 	async typeText(text: string): Promise<void> {
-		await this.keepingActivation(() => this.postText(text));
+		const call = this.beginCall("type");
+		await this.keepingActivation(call, () => this.postText(call, text));
 	}
 
-	private async postText(text: string): Promise<void> {
+	private async postText(call: InputCall, text: string): Promise<void> {
 		this.beforeInput();
-		const targetWindow = await this.requireSessionWindow("keyboard");
-		const keyboardPid = this.keyboardPid();
+		const targetWindow = await this.requireSessionWindow(call, "keyboard");
+		const keyboardPid = this.keyboardPid(call);
 		this.pingOverlay();
 		// Pace keystrokes: posting characters back-to-back outruns the target app's
 		// event processing and drops characters ("https://example.com" -> "https://e").
@@ -564,28 +671,34 @@ export class MacOSInputController {
 			if (segment === undefined) {
 				continue;
 			}
+			// Read before every character, so a stop or a cancel ends a long text part-way rather than after it.
+			this.checkpoint(call);
+			this.assertDeliverable(keyboardPid);
 			postUnicodeText(segment, keyboardPid, targetWindow);
+			this.noteKeyboardInput(call);
 			if (i < segments.length - 1) {
 				await delayMilliseconds(TYPE_CHARACTER_DELAY_MS);
 			}
 		}
-		this.noteKeyboardInput();
 	}
 
 	async pressKey(key: string, options?: KeyOptions): Promise<void> {
-		await this.keepingActivation(() => this.postKey(key, options));
+		const call = this.beginCall("press keys");
+		await this.keepingActivation(call, () => this.postKey(call, key, options));
 	}
 
-	private async postKey(key: string, options?: KeyOptions): Promise<void> {
+	private async postKey(call: InputCall, key: string, options?: KeyOptions): Promise<void> {
 		this.beforeInput();
-		if (await this.pasteAsTyping(key, options)) {
+		if (await this.pasteAsTyping(call, key, options)) {
 			return;
 		}
 		const keyCode = virtualKeyCodeFor(key);
 		const flags = modifierFlags(options?.modifiers ?? []);
-		const targetWindow = await this.requireSessionWindow("keyboard");
-		const keyboardPid = this.keyboardPid();
+		const targetWindow = await this.requireSessionWindow(call, "keyboard");
+		const keyboardPid = this.keyboardPid(call);
 		this.pingOverlay();
+		this.checkpoint(call);
+		this.assertDeliverable(keyboardPid);
 		postKeyboardEvent({
 			keyCode,
 			keyDown: true,
@@ -594,18 +707,30 @@ export class MacOSInputController {
 			targetPid: keyboardPid,
 			targetWindow,
 		});
-		if (options?.holdMilliseconds !== undefined) {
-			await delayMilliseconds(options.holdMilliseconds);
+		try {
+			if (options?.holdMilliseconds !== undefined) {
+				await this.holdKey(call, options.holdMilliseconds);
+			}
+		} finally {
+			// The release goes out even when a stop cuts the hold short: a key left down keeps repeating.
+			postKeyboardEvent({
+				keyCode,
+				keyDown: false,
+				flags,
+				text: undefined,
+				targetPid: keyboardPid,
+				targetWindow,
+			});
+			this.noteKeyboardInput(call);
 		}
-		postKeyboardEvent({
-			keyCode,
-			keyDown: false,
-			flags,
-			text: undefined,
-			targetPid: keyboardPid,
-			targetWindow,
-		});
-		this.noteKeyboardInput();
+	}
+
+	/** Wait out a key hold in short slices, ending it early (InputInterrupted) once the call is stopped. */
+	private async holdKey(call: InputCall, milliseconds: number): Promise<void> {
+		for (let left = milliseconds; left > 0; left -= HOLD_CHECK_MILLISECONDS) {
+			await delayMilliseconds(Math.min(left, HOLD_CHECK_MILLISECONDS));
+			this.checkpoint(call);
+		}
 	}
 
 	/**
@@ -614,13 +739,17 @@ export class MacOSInputController {
 	 * not on whichever window of the app happened to be focused.
 	 */
 	async prepareKeyboardTarget(): Promise<void> {
+		const call = this.beginCall("press keys");
 		this.beforeInput();
-		await this.requireSessionWindow("keyboard");
+		await this.requireSessionWindow(call, "keyboard");
 	}
 
-	/** The app keyboard and pointer input is currently aimed at, if any. */
+	/**
+	 * The app keyboard and pointer input of the calling async flow is aimed at, if any: its input scope's target, else
+	 * the default target.
+	 */
 	get currentTargetPid(): number | undefined {
-		return this.targetPid;
+		return currentInputScope()?.target?.pid ?? this.defaultTargetPid;
 	}
 
 	/** When keys were last posted to an app, so an accessibility write can wait until they were handled. */
@@ -628,16 +757,17 @@ export class MacOSInputController {
 		return this.keyboardInputAt.get(pid);
 	}
 
-	private noteKeyboardInput(): void {
-		if (this.targetPid !== undefined) {
-			this.keyboardInputAt.set(this.targetPid, performance.now());
+	private noteKeyboardInput(call: InputCall): void {
+		if (call.pid !== undefined) {
+			this.keyboardInputAt.set(call.pid, performance.now());
 		}
 	}
 
 	async scroll(options: ScrollOptions): Promise<void> {
+		const call = this.beginCall("scroll");
 		this.beforeInput();
 		const amount = Math.max(0, Math.trunc(Math.abs(options.amount)));
-		const targetWindow = await this.requireSessionWindow("scroll");
+		const targetWindow = await this.requireSessionWindow(call, "scroll");
 		this.overlay.setMode("scroll");
 		this.pingOverlay();
 		const unit: Record<ScrollOptions["direction"], [number, number]> = {
@@ -651,13 +781,15 @@ export class MacOSInputController {
 		const perStep = 4;
 		const steps = Math.max(1, Math.ceil(amount / perStep));
 		const delta = amount / steps;
-		await this.holdModifiers(options.modifiers, targetWindow, "wheel", async (flags) => {
+		await this.holdModifiers(call, options.modifiers, targetWindow, "wheel", async (flags) => {
 			for (let i = 0; i < steps; i++) {
+				this.checkpoint(call);
+				this.assertDeliverable(call.pid);
 				const d = Math.round(delta);
 				postScrollEvent({
 					deltaX: d * ux,
 					deltaY: d * uy,
-					targetPid: this.targetPid,
+					targetPid: call.pid,
 					targetWindow,
 					flags,
 					position: options.position,
@@ -670,25 +802,28 @@ export class MacOSInputController {
 	}
 
 	async drag(options: DragOptions): Promise<void> {
+		const call = this.beginCall("drag");
 		await this.serialize(async () => {
 			this.beforeInput();
-			this.requireBackgroundTarget("drag");
-			const targetWindow = await this.targetWindow(options.from);
-			this.requirePointerWindow(targetWindow);
-			this.lastTargetWindow = targetWindow;
-			await this.holdModifiers(options.modifiers, targetWindow, "pointer", async (flags) => {
-				if (this.targetPid === undefined) {
-					await this.move(options.from);
-					await postDragSequence(this.postMouse, options, targetWindow, flags);
+			const targetWindow = await this.pointerWindow(call, options.from);
+			this.requirePointerWindow(call, targetWindow);
+			this.checkpoint(call);
+			const post = this.mousePost(call);
+			// Read between drag steps; a stopped drag lets go of the button where it is and sends nothing more.
+			const checkpoint = (): void => this.checkpoint(call);
+			await this.holdModifiers(call, options.modifiers, targetWindow, "pointer", async (flags) => {
+				if (call.pid === undefined) {
+					await this.postMove(call, options.from);
+					await postDragSequence(post, options, targetWindow, flags, checkpoint);
 					this.markPointer(options.to);
 				} else if (targetWindow !== undefined) {
 					if (this.isBackground) {
 						this.showPointer(options.from, false);
-						await postDragSequence(this.postMouse, options, targetWindow, flags);
+						await postDragSequence(post, options, targetWindow, flags, checkpoint);
 						this.showPointer(options.to, false);
 						return;
 					}
-					await runFocusLeasedDrag(targetWindow, options, this.postMouse, flags);
+					await runFocusLeasedDrag(targetWindow, options, post, flags, checkpoint);
 					this.markPointer(options.to);
 				}
 			});
@@ -741,13 +876,62 @@ export class MacOSInputController {
 		this.overlay.set(this.pointer.position());
 	}
 
-	private async targetWindow(position: Point): Promise<SkyLightTargetWindow | undefined> {
-		if (this.targetPid === undefined) {
+	/** Mouse events of one call, addressed to its app; with no app they would take the HID tap (see assertDeliverable). */
+	private mousePost(call: InputCall): MousePost {
+		return async (kind, position, button, clickState, targetWindow, flags) => {
+			this.assertDeliverable(call.pid);
+			postMouseEvent({ kind, position, button, clickState, targetPid: call.pid, targetWindow, flags });
+		};
+	}
+
+	/**
+	 * The window a pointer event at `position` goes to. A call bound to an observed window addresses that window by its
+	 * id, also where another window of the same app covers the point, because the coordinates came from that window's
+	 * observation; only a sheet or popover of the observed window covering the point takes the event instead, since its
+	 * controls are part of what was observed. A bound window that is no longer on screen, or a point outside it, refuses
+	 * the input. An unbound call takes the app's window under the point.
+	 */
+	private async pointerWindow(call: InputCall, position: Point): Promise<SkyLightTargetWindow | undefined> {
+		const pid = call.pid;
+		if (pid === undefined) {
 			return undefined;
 		}
-		const targetWindow = await this.visibleWindowForPid(this.targetPid, position);
-		if (targetWindow !== undefined) {
-			this.targetWindowsByPid.set(this.targetPid, targetWindow);
+		if (call.windowId === undefined) {
+			const targetWindow = await this.visibleWindowForPid(pid, position);
+			if (targetWindow !== undefined) {
+				this.targetWindowsByPid.set(pid, targetWindow);
+			}
+			return targetWindow;
+		}
+		const windows = await openWindowsForTargeting();
+		const bound = await this.boundWindow(pid, call.windowId, "pointer", windows);
+		if (!containsPoint(bound, position)) {
+			throw new Error(
+				`pointer input refused: (${Math.round(position.x)}, ${Math.round(position.y)}) is outside the observed window ${bound.id}; observe the app again`,
+			);
+		}
+		const covering = frontmostWindowAt(windows, pid, position);
+		const hosted =
+			covering !== undefined &&
+			covering.id !== bound.id &&
+			isHostedBy(pointWindowIds(pid, position), covering.id, bound.id);
+		const targetWindow = hosted ? covering : bound;
+		this.targetWindowsByPid.set(pid, targetWindow);
+		return targetWindow;
+	}
+
+	/** The observed window a call is bound to, as the WindowServer shows it now; refused when it is not on screen. */
+	private async boundWindow(
+		pid: number,
+		windowId: number,
+		action: "pointer" | "keyboard" | "scroll",
+		windows?: readonly MacOSWindowInfo[],
+	): Promise<SkyLightTargetWindow> {
+		const targetWindow = await this.windowByIdForPid(pid, windowId, windows);
+		if (targetWindow === undefined) {
+			throw new Error(
+				`${action} input refused: the observed window ${windowId} is no longer on screen for this app; observe the app again`,
+			);
 		}
 		return targetWindow;
 	}
@@ -775,8 +959,8 @@ export class MacOSInputController {
 		return resolution.kind === "resolved" ? resolution.window : undefined;
 	}
 
-	private requirePointerWindow(targetWindow: SkyLightTargetWindow | undefined): void {
-		if (this.targetPid !== undefined && targetWindow === undefined) {
+	private requirePointerWindow(call: InputCall, targetWindow: SkyLightTargetWindow | undefined): void {
+		if (call.pid !== undefined && targetWindow === undefined) {
 			throw new Error("targeted pointer input requires get_app_state or a visible target window");
 		}
 	}
@@ -786,52 +970,90 @@ export class MacOSInputController {
 	 * nothing and Edit > Paste is disabled. Background delivery types the clipboard's plain text there
 	 * instead: the same text lands and the person's app keeps focus. Anything else is a real key press.
 	 */
-	private async pasteAsTyping(key: string, options?: KeyOptions): Promise<boolean> {
+	private async pasteAsTyping(call: InputCall, key: string, options?: KeyOptions): Promise<boolean> {
 		const modifiers = options?.modifiers ?? [];
 		const isPaste =
 			key.toLowerCase() === "v" && modifiers.length === 1 && ["cmd", "command"].includes(modifiers[0] ?? "");
-		if (!isPaste || !this.isBackground || this.targetPid === undefined) {
+		if (!isPaste || !this.isBackground || call.pid === undefined) {
 			return false;
 		}
-		const targetWindow = await this.requireSessionWindow("keyboard");
-		if (targetWindow === undefined || !backgroundPasteTarget(this.targetPid, targetWindow)) {
+		const targetWindow = await this.requireSessionWindow(call, "keyboard");
+		if (targetWindow === undefined || !backgroundPasteTarget(call.pid, targetWindow)) {
 			return false;
 		}
 		const text = clipboardText();
 		if (text === undefined || text.length === 0) {
 			return false;
 		}
-		await this.typeText(text);
+		await this.postText(call, text);
 		return true;
 	}
 
-	private keyboardPid(): number | undefined {
-		return this.targetPid === undefined ? undefined : keyboardPidResolver(this.targetPid);
+	private keyboardPid(call: InputCall): number | undefined {
+		return call.pid === undefined ? undefined : keyboardPidResolver(call.pid);
 	}
 
-	private async requireSessionWindow(action: "keyboard" | "scroll"): Promise<SkyLightTargetWindow | undefined> {
-		if (this.targetPid === undefined) {
+	/**
+	 * The window keyboard and wheel input of a call goes to: the observed window it is bound to (refused once that is
+	 * off screen), else the window the app's input last went to, else its front window.
+	 */
+	private async requireSessionWindow(
+		call: InputCall,
+		action: "keyboard" | "scroll",
+	): Promise<SkyLightTargetWindow | undefined> {
+		const pid = call.pid;
+		if (pid === undefined) {
 			return undefined;
 		}
-		let targetWindow = this.lastTargetWindow;
+		const targetWindow =
+			call.windowId === undefined
+				? (this.targetWindowsByPid.get(pid) ?? (await this.visibleWindowForPid(pid)))
+				: await this.boundWindow(pid, call.windowId, action);
 		if (targetWindow === undefined) {
-			targetWindow = await this.visibleWindowForPid(this.targetPid);
-			if (targetWindow === undefined) {
-				throw new Error(
-					`targeted ${action} input requires get_app_state, a visible target window, or a prior pointer action`,
-				);
-			}
-			this.targetWindowsByPid.set(this.targetPid, targetWindow);
-			this.lastTargetWindow = targetWindow;
+			throw new Error(
+				`targeted ${action} input requires get_app_state, a visible target window, or a prior pointer action`,
+			);
 		}
+		this.targetWindowsByPid.set(pid, targetWindow);
 		if (action === "keyboard") {
 			if (this.isBackground) {
 				focusStealWatcher(targetWindow);
 			}
-			await keyboardWindowFocuser(this.targetPid, targetWindow.id);
+			await keyboardWindowFocuser(pid, targetWindow.id);
 		}
 		return targetWindow;
 	}
+}
+
+function containsPoint(window: SkyLightTargetWindow, position: Point): boolean {
+	const { x, y, width, height } = window.bounds;
+	return position.x >= x && position.x <= x + width && position.y >= y && position.y <= y + height;
+}
+
+/** The app's frontmost on-screen window containing `position`, by the WindowServer's front-to-back order. */
+function frontmostWindowAt(
+	windows: readonly MacOSWindowInfo[],
+	pid: number,
+	position: Point,
+): SkyLightTargetWindow | undefined {
+	const order = currentOnscreenWindowIds();
+	if (order === undefined) {
+		return undefined;
+	}
+	const depth = new Map(order.map((id, index) => [id, index] as const));
+	const front = visibleWindowsForPid(windows, pid)
+		.map(toTargetWindow)
+		.filter((window) => depth.has(window.id) && containsPoint(window, position))
+		.sort((left, right) => (depth.get(left.id) ?? 0) - (depth.get(right.id) ?? 0))[0];
+	return front;
+}
+
+/**
+ * Whether the window covering a point is a sheet or popover of the observed window: the element the app shows there
+ * lies in the covering window (innermost) and, further out, in the observed one.
+ */
+function isHostedBy(windowIds: readonly number[] | undefined, coveringId: number, boundId: number): boolean {
+	return windowIds !== undefined && windowIds[0] === coveringId && windowIds.includes(boundId);
 }
 
 function delayMilliseconds(milliseconds: number): Promise<void> {

@@ -24,10 +24,17 @@ export interface RecognizeTextOptions {
 	readonly languages?: readonly string[];
 	/** Drop observations below this confidence. Vision reports 1.0 for clean print. */
 	readonly minimumConfidence?: number;
+	/**
+	 * Only this part of the image is recognised, in image pixels with a top-left origin; it is cut out with
+	 * CoreGraphics before Vision runs, so text outside it costs nothing. Returned boxes stay in whole-image
+	 * pixels, so callers map them exactly as for an uncropped image.
+	 */
+	readonly region?: OcrBox;
 }
 
 const VISION_FRAMEWORK = "/System/Library/Frameworks/Vision.framework/Vision";
 const IMAGE_IO_FRAMEWORK = "/System/Library/Frameworks/ImageIO.framework/ImageIO";
+const CORE_GRAPHICS_FRAMEWORK = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
 const CORE_FOUNDATION_FRAMEWORK = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
 const LIBOBJC = "/usr/lib/libobjc.A.dylib";
 
@@ -43,6 +50,7 @@ interface VisionBindings {
 	readonly imageSourceCreateImageAtIndex: KoffiFunc<(source: Pointer, index: number, options: null) => Pointer | null>;
 	readonly imageGetWidth: KoffiFunc<(image: Pointer) => number>;
 	readonly imageGetHeight: KoffiFunc<(image: Pointer) => number>;
+	readonly imageCreateWithImageInRect: KoffiFunc<(image: Pointer, rect: OcrBox) => Pointer | null>;
 	readonly classForName: (name: string) => Pointer;
 	readonly selector: (name: string) => Pointer;
 	readonly imageRequestHandlerClass: Pointer;
@@ -75,6 +83,28 @@ interface VisionBindings {
 	readonly utf8String: KoffiFunc<(receiver: Pointer, selector: Pointer) => string>;
 	readonly confidence: KoffiFunc<(receiver: Pointer, selector: Pointer) => number>;
 }
+
+type CallableOnly<T> = {
+	[K in keyof T]: T[K] extends (...args: infer Arguments) => infer Result ? (...args: Arguments) => Result : T[K];
+};
+
+/**
+ * The bindings text recognition itself calls, as plain callables so a fake can stand in for the
+ * Objective-C runtime; the full {@link VisionBindings} satisfies it.
+ */
+export type RecognizeBindings = CallableOnly<
+	Omit<
+		VisionBindings,
+		| "cfDataCreate"
+		| "cfRelease"
+		| "imageSourceCreateWithData"
+		| "imageSourceCreateImageAtIndex"
+		| "imageGetWidth"
+		| "imageGetHeight"
+		| "imageCreateWithImageInRect"
+		| "classForName"
+	>
+>;
 
 let cachedBindings: VisionBindings | null | undefined;
 
@@ -112,10 +142,30 @@ export function recognizeTextInImage(
 				throw new Error("cannot decode the image bytes; expected a PNG or JPEG image");
 			}
 			try {
-				return filterByMinimumConfidence(
-					recognize(bound, image, options, bound.imageGetWidth(image), bound.imageGetHeight(image)),
-					options.minimumConfidence,
-				);
+				const width = bound.imageGetWidth(image);
+				const height = bound.imageGetHeight(image);
+				const crop =
+					options.region === undefined ? undefined : clampRecognitionRegion(options.region, width, height);
+				if (options.region !== undefined && crop === undefined) {
+					throw new Error("the recognition region does not overlap the image");
+				}
+				const subject = crop === undefined ? image : bound.imageCreateWithImageInRect(image, crop);
+				if (subject === null) {
+					throw new Error("CoreGraphics could not cut the recognition region out of the image");
+				}
+				try {
+					return filterByMinimumConfidence(
+						offsetObservations(
+							recognizeWithBindings(bound, subject, options, crop?.width ?? width, crop?.height ?? height),
+							crop,
+						),
+						options.minimumConfidence,
+					);
+				} finally {
+					if (subject !== image) {
+						bound.cfRelease(subject);
+					}
+				}
 			} finally {
 				bound.cfRelease(image);
 			}
@@ -173,6 +223,32 @@ export function readImagePixelSize(imageBytes: Buffer): ImagePixelSize {
 	}
 }
 
+/**
+ * The whole-pixel part of an image a region names, clamped to the image; undefined when nothing of it is
+ * inside. Whole pixels because the cut is made on the pixel grid and boxes are mapped back by its origin.
+ */
+export function clampRecognitionRegion(region: OcrBox, imageWidth: number, imageHeight: number): OcrBox | undefined {
+	const left = Math.max(0, Math.floor(region.x));
+	const top = Math.max(0, Math.floor(region.y));
+	const right = Math.min(imageWidth, Math.ceil(region.x + region.width));
+	const bottom = Math.min(imageHeight, Math.ceil(region.y + region.height));
+	return right > left && bottom > top ? { x: left, y: top, width: right - left, height: bottom - top } : undefined;
+}
+
+/** Boxes read from a cut-out region, moved back into the pixel space of the whole image. */
+export function offsetObservations(
+	observations: readonly OcrTextObservation[],
+	region: OcrBox | undefined,
+): readonly OcrTextObservation[] {
+	if (region === undefined) {
+		return observations;
+	}
+	return observations.map((observation) => ({
+		...observation,
+		box: { ...observation.box, x: observation.box.x + region.x, y: observation.box.y + region.y },
+	}));
+}
+
 export function filterByMinimumConfidence(
 	observations: readonly OcrTextObservation[],
 	minimumConfidence: number | undefined,
@@ -182,8 +258,8 @@ export function filterByMinimumConfidence(
 		: observations.filter((observation) => observation.confidence >= minimumConfidence);
 }
 
-function recognize(
-	bound: VisionBindings,
+export function recognizeWithBindings(
+	bound: RecognizeBindings,
 	image: Pointer,
 	options: RecognizeTextOptions,
 	imageWidth: number,
@@ -203,6 +279,7 @@ function recognize(
 		bound.alloc(bound.recognizeTextRequestClass, bound.selector("alloc")),
 		bound.selector("init"),
 	);
+	let requests: Pointer | null = null;
 	try {
 		bound.setRecognitionLevel(
 			request,
@@ -222,7 +299,7 @@ function recognize(
 			);
 		}
 
-		const requests = bound.arrayWithCapacity(
+		requests = bound.arrayWithCapacity(
 			bound.alloc(bound.mutableArrayClass, bound.selector("alloc")),
 			bound.selector("initWithCapacity:"),
 			1,
@@ -236,16 +313,19 @@ function recognize(
 		if (!bound.performRequests(handler, bound.selector("performRequests:error:"), requests, errors)) {
 			throw new Error(`Vision text recognition failed: ${describeError(errors[0])}`);
 		}
-		bound.release(requests, bound.selector("release"));
 		return collectObservations(bound, request, imageWidth, imageHeight);
 	} finally {
+		// Released here, once, so the failing performRequests branch cannot leak the array.
+		if (requests !== null) {
+			bound.release(requests, bound.selector("release"));
+		}
 		bound.release(request, bound.selector("release"));
 		bound.release(handler, bound.selector("release"));
 	}
 }
 
 function collectObservations(
-	bound: VisionBindings,
+	bound: RecognizeBindings,
 	request: Pointer,
 	imageWidth: number,
 	imageHeight: number,
@@ -290,7 +370,7 @@ function collectObservations(
 	return observations;
 }
 
-function languageArray(bound: VisionBindings, languages: readonly string[]): Pointer | null {
+function languageArray(bound: RecognizeBindings, languages: readonly string[]): Pointer | null {
 	const array = bound.arrayWithCapacity(
 		bound.alloc(bound.mutableArrayClass, bound.selector("alloc")),
 		bound.selector("initWithCapacity:"),
@@ -346,6 +426,7 @@ function createBindings(): VisionBindings {
 	koffi.load(VISION_FRAMEWORK);
 	const imageIo = koffi.load(IMAGE_IO_FRAMEWORK);
 	const coreFoundation = koffi.load(CORE_FOUNDATION_FRAMEWORK);
+	const coreGraphics = koffi.load(CORE_GRAPHICS_FRAMEWORK);
 	const objc = koffi.load(LIBOBJC);
 
 	const objcGetClass = objc.func("objc_getClass", "void *", ["str"]) as KoffiFunc<(name: string) => Pointer | null>;
@@ -396,6 +477,11 @@ function createBindings(): VisionBindings {
 		]) as VisionBindings["imageSourceCreateImageAtIndex"],
 		imageGetWidth: imageIo.func("CGImageGetWidth", "ulong", ["void *"]) as VisionBindings["imageGetWidth"],
 		imageGetHeight: imageIo.func("CGImageGetHeight", "ulong", ["void *"]) as VisionBindings["imageGetHeight"],
+		// CGRect is four contiguous doubles, so the box struct passes by value exactly as a CGRect does.
+		imageCreateWithImageInRect: coreGraphics.func("CGImageCreateWithImageInRect", "void *", [
+			"void *",
+			boxStruct,
+		]) as VisionBindings["imageCreateWithImageInRect"],
 		classForName,
 		selector,
 		imageRequestHandlerClass: classForName("VNImageRequestHandler"),

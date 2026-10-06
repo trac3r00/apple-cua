@@ -3,7 +3,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
 	type OcrTextObservation,
+	clampRecognitionRegion,
 	filterByMinimumConfidence,
+	offsetObservations,
 	readImagePixelSize,
 	recognizeTextInFile,
 	recognizeTextInImage,
@@ -79,6 +81,84 @@ describe.runIf(process.platform === "darwin")(
 		});
 	},
 );
+
+describe.runIf(process.platform === "darwin")(
+	"#given a region of the image #when Vision OCR reads it #then only that region is read and boxes stay in whole-image pixels",
+	() => {
+		it("returns the text inside the region at the same pixels as an uncropped read, and nothing outside it", () => {
+			const bytes = readFileSync(twoByOne);
+			const whole = find(recognizeTextInImage(bytes), "ZQX-4471");
+			const region = {
+				x: whole.box.x - 10,
+				y: whole.box.y - 10,
+				width: whole.box.width + 20,
+				height: whole.box.height + 20,
+			};
+
+			const cropped = recognizeTextInImage(bytes, { region });
+
+			const hit = find(cropped, "ZQX-4471");
+			expect(Math.abs(hit.box.x - whole.box.x)).toBeLessThan(4);
+			expect(Math.abs(hit.box.y - whole.box.y)).toBeLessThan(4);
+			expect(Math.abs(hit.box.width - whole.box.width)).toBeLessThan(whole.box.width * 0.1);
+			expect(cropped.map((observation) => observation.text)).not.toContain("Wi-Fi");
+			for (const observation of cropped) {
+				expect(observation.box.y).toBeGreaterThanOrEqual(region.y - 2);
+				expect(observation.box.y + observation.box.height).toBeLessThanOrEqual(region.y + region.height + 2);
+			}
+		});
+
+		it("reads nothing from a region that holds no text", () => {
+			const blank = recognizeTextInImage(readFileSync(oneByOne), {
+				region: { x: 700, y: 300, width: 90, height: 90 },
+			});
+
+			expect(blank).toEqual([]);
+		});
+
+		it("refuses a region that does not overlap the image instead of reading the whole image", () => {
+			expect(() =>
+				recognizeTextInImage(readFileSync(oneByOne), { region: { x: 5000, y: 5000, width: 10, height: 10 } }),
+			).toThrow(/does not overlap/i);
+		});
+	},
+);
+
+describe("#given a recognition region #when it is clamped and boxes are moved back #then the pixel grid is exact", () => {
+	it("clamps to the image and rounds outward to whole pixels", () => {
+		expect(clampRecognitionRegion({ x: -5, y: 2.5, width: 20.2, height: 10 }, 100, 100)).toEqual({
+			x: 0,
+			y: 2,
+			width: 16,
+			height: 11,
+		});
+		expect(clampRecognitionRegion({ x: 90, y: 90, width: 50, height: 50 }, 100, 100)).toEqual({
+			x: 90,
+			y: 90,
+			width: 10,
+			height: 10,
+		});
+	});
+
+	it("is undefined when nothing of the region is inside the image", () => {
+		expect(clampRecognitionRegion({ x: 100, y: 0, width: 10, height: 10 }, 100, 100)).toBeUndefined();
+		expect(clampRecognitionRegion({ x: -20, y: 0, width: 20, height: 10 }, 100, 100)).toBeUndefined();
+	});
+
+	it("adds the region origin to every box and leaves an uncropped read untouched", () => {
+		const read: readonly OcrTextObservation[] = [
+			{ text: "a", confidence: 1, box: { x: 1, y: 2, width: 3, height: 4 } },
+		];
+
+		expect(offsetObservations(read, { x: 10, y: 20, width: 50, height: 50 })[0]?.box).toEqual({
+			x: 11,
+			y: 22,
+			width: 3,
+			height: 4,
+		});
+		expect(offsetObservations(read, undefined)).toBe(read);
+	});
+});
 
 describe("#given observations of mixed confidence #when the minimum-confidence filter runs #then only the confident ones survive", () => {
 	const observations: readonly OcrTextObservation[] = [

@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
 	AX_PRESS_ACTION,
+	InputInterrupted,
 	describeQuery,
 	describeUserStop,
 	matchElements,
 	openApplication,
 	parseElementIndex,
 	resolveAppPid,
+	runInInputScope,
 	suggestNearMisses,
 } from "@apple-cua/core";
 import type {
@@ -558,15 +560,35 @@ export class GuardedSession {
 				}
 				this.assertOpen();
 				const beforeAction = await this.captureWindowBaseline();
-				const dispatch = await dispatchTarget(targetPid, observation, {
-					elementIndex: target.id,
-					actions: target.actions,
-					frame: target.frame,
-					...(request.press === undefined ? {} : { press: request.press }),
-					...(request.hoverFirst === undefined ? {} : { hoverFirst: request.hoverFirst }),
-					...(request.clickCount === undefined ? {} : { clickCount: request.clickCount }),
-					...(request.mouseButton === undefined ? {} : { mouseButton: request.mouseButton }),
-				});
+				// Read again right before the input goes out: the preflight and the window baseline both awaited.
+				const halted = this.inputHalt(undefined);
+				if (halted !== undefined) {
+					return refusalResult(halted.reason, halted.message);
+				}
+				let dispatch: ActionDispatch;
+				try {
+					dispatch = await this.inInputScope(targetPid, observation, undefined, () =>
+						dispatchTarget(targetPid, observation, {
+							elementIndex: target.id,
+							actions: target.actions,
+							frame: target.frame,
+							...(request.press === undefined ? {} : { press: request.press }),
+							...(request.hoverFirst === undefined ? {} : { hoverFirst: request.hoverFirst }),
+							...(request.clickCount === undefined ? {} : { clickCount: request.clickCount }),
+							...(request.mouseButton === undefined ? {} : { mouseButton: request.mouseButton }),
+						}),
+					);
+				} catch (error: unknown) {
+					const interrupted = this.interruptedResult(targetPid, error, {
+						found: true,
+						query,
+						target: compactElementMatch(match),
+					});
+					if (interrupted !== undefined) {
+						return interrupted;
+					}
+					throw error;
+				}
 				try {
 					// Verify against a dedicated read (the same shape verify_state uses) instead of against the
 					// outcome diff, which carries no tree: the answer then keeps the proof and the diff without
@@ -697,7 +719,23 @@ export class GuardedSession {
 				throw error;
 			}
 			const beforeAction = await this.captureWindowBaseline();
-			const dispatch = await action(expected.pid, expected.observation);
+			// Read again right before the input goes out: the preflight and the window baseline both awaited.
+			const halted = this.inputHalt(undefined);
+			if (halted !== undefined) {
+				return refusalResult(halted.reason, halted.message);
+			}
+			let dispatch: Awaited<ReturnType<Mutation>>;
+			try {
+				dispatch = await this.inInputScope(expected.pid, expected.observation, undefined, () =>
+					action(expected.pid, expected.observation),
+				);
+			} catch (error: unknown) {
+				const interrupted = this.interruptedResult(expected.pid, error);
+				if (interrupted !== undefined) {
+					return interrupted;
+				}
+				throw error;
+			}
 			try {
 				const outcome = await this.readOutcome(expected.pid, expected.observation, options);
 				const windowEvents = await this.describeWindowSideEffects(beforeAction);
@@ -866,8 +904,9 @@ export class GuardedSession {
 				treeReads += 1;
 				return await this.readFieldBaseline(expected.pid);
 			};
-			// Fast pace keeps the chain's one read until a wait or a miss makes it stale, and runs the cheap
-			// guard that stands in for a read between steps once something has run.
+			// Fast pace keeps the chain's one read until a wait or a miss makes it stale. Either pace runs the window
+			// guard before every step once something has run: a verified read of the tree proves the element, not that
+			// the window, its bounds or the app's approval still hold.
 			const fast = control.pace === "fast";
 			const chain: ChainTree = {
 				keep: fast,
@@ -878,28 +917,27 @@ export class GuardedSession {
 				read: readBaseline,
 			};
 			let guardNeeded = false;
+			// The stop switch and the client's cancel end the batch at the step at `position`, with it and every later
+			// step reported skipped: checked before the step's reads and again right before its input goes out.
+			const halted = (position: number): boolean => {
+				const halt = this.inputHalt(control.signal);
+				if (halt === undefined) {
+					return false;
+				}
+				for (const [remaining, skipped] of steps.entries()) {
+					if (remaining >= position) {
+						reports.push(skippedRunStep(remaining, skipped.type, halt.message));
+					}
+				}
+				stoppedEarly = true;
+				if (halt.reason === "user-stopped") {
+					refused = halt.reason;
+				}
+				return true;
+			};
 
 			for (const [position, step] of steps.entries()) {
-				const stopped = this.userStopped();
-				if (stopped !== undefined) {
-					for (const [remaining, skipped] of steps.entries()) {
-						if (remaining >= position) {
-							reports.push(skippedRunStep(remaining, skipped.type, stopped.message));
-						}
-					}
-					stoppedEarly = true;
-					refused = stopped.reason;
-					break;
-				}
-				if (control.signal?.aborted === true) {
-					for (const [remaining, skipped] of steps.entries()) {
-						if (remaining >= position) {
-							reports.push(
-								skippedRunStep(remaining, skipped.type, "cancelled by the client before this step ran"),
-							);
-						}
-					}
-					stoppedEarly = true;
+				if (halted(position)) {
 					break;
 				}
 
@@ -1006,7 +1044,7 @@ export class GuardedSession {
 					}
 				}
 
-				if (fast && guardNeeded) {
+				if (guardNeeded) {
 					const blocked = await this.chainGuard(expected.pid, expected.observation, step);
 					if (blocked !== undefined) {
 						const reason = `the window guard refused this step (${blocked}); nothing further was dispatched`;
@@ -1021,11 +1059,17 @@ export class GuardedSession {
 					}
 				}
 
+				// Read again right before the input goes out: target reads and the window guard all awaited.
+				if (halted(position)) {
+					break;
+				}
 				canReuseRead = false;
 				guardNeeded = true;
 				try {
 					const dispatch = await timed("dispatch", () =>
-						driver.dispatch(runnable, expected.pid, expected.observation),
+						this.inInputScope(expected.pid, expected.observation, control.signal, () =>
+							driver.dispatch(runnable, expected.pid, expected.observation),
+						),
 					);
 					reports.push({
 						step: position,
@@ -1046,9 +1090,17 @@ export class GuardedSession {
 						type: step.type,
 						input_dispatched: false,
 						status: "failed",
-						reason: error instanceof Error ? error.message : String(error),
+						reason:
+							error instanceof InputInterrupted
+								? `stopped while this step was sending input; nothing more was sent. ${error.message}`
+								: error instanceof Error
+									? error.message
+									: String(error),
 					});
 					stoppedEarly = true;
+					if (error instanceof InputInterrupted) {
+						halted(position + 1);
+					}
 					break;
 				}
 			}
@@ -1370,9 +1422,9 @@ export class GuardedSession {
 	}
 
 	/**
-	 * The cheap check that stands in for a tree read between fast-paced steps: the window the chain was
-	 * observed on is still the same window (and, for steps that aim at screen points, the same bounds),
-	 * the app is still approved and running, and the observation was not replaced. A reason means refuse.
+	 * The check before every chain step after the first, in either pace: the window the chain was observed on is
+	 * still the same window (and, for steps that aim at screen points, the same bounds), the app is still approved
+	 * and running, and the observation was not replaced. A reason means refuse.
 	 */
 	private async chainGuard(pid: number, observed: InputObservation, step: RunStep): Promise<string | undefined> {
 		const pointer = POINTER_STEP_TYPES.has(step.type);
@@ -1396,6 +1448,52 @@ export class GuardedSession {
 			this.computer.preflightInput(current, { requireSameBounds: pointer }),
 		);
 		return result.ok ? undefined : result.reason;
+	}
+
+	/**
+	 * Why input must not go out now: the user's stop switch, or the client cancelling the request. Read right before
+	 * every dispatch and, through the dispatch's input scope, before every event of one that is not a release.
+	 */
+	private inputHalt(signal: AbortSignal | undefined): InputRefusal | undefined {
+		return (
+			this.userStopped() ??
+			(signal?.aborted === true
+				? new InputRefusal("cancelled", "cancelled by the client before this step ran")
+				: undefined)
+		);
+	}
+
+	/**
+	 * Send one validated action's input in an input scope naming the app and the observed window. Every event the
+	 * driver posts for it is addressed from that scope, never from state another app's dispatch running meanwhile
+	 * could change, and stops at the next event once {@link inputHalt} says so.
+	 */
+	private async inInputScope<T>(
+		pid: number,
+		observation: InputObservation,
+		signal: AbortSignal | undefined,
+		send: () => Promise<T>,
+	): Promise<T> {
+		return await runInInputScope(
+			{ target: { pid, windowId: observation.windowId }, interruption: () => this.inputHalt(signal)?.message },
+			send,
+		);
+	}
+
+	/**
+	 * The answer for input a stop or a cancel cut short: part of it may have gone out, so the app is in an unknown
+	 * state and is observed again before anything else; undefined for any other error.
+	 */
+	private interruptedResult(pid: number, error: unknown, partial?: Record<string, unknown>): ToolResult | undefined {
+		if (!(error instanceof InputInterrupted)) {
+			return undefined;
+		}
+		this.clearTokenFor(pid);
+		const halt = this.userStopped();
+		return {
+			...postActionErrorResult(error, { ...partial, refused: halt?.reason ?? "interrupted" }),
+			isError: true,
+		};
 	}
 
 	/** The refusal to raise while the user's stop switch is on, or nothing while computer use is allowed. */

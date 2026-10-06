@@ -1,8 +1,18 @@
-import { Script, createContext } from "node:vm";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 import type { ElementQuery, GuardedComputerInterface, TopLevelWindow } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import type { GuardedSession, RunPace, RunStepDriver, VerifyCheckRequest, VerifyRequest } from "./guarded-session.js";
+import type {
+	CallError,
+	HostMessage,
+	ScriptOutcome,
+	WindowSelector,
+	WorkerMessage,
+	WorkerTarget,
+} from "./script-protocol.js";
 import { createRunStepDriver } from "./step-actions.js";
 import type { ToolContent, ToolResult } from "./tool-result.js";
 import { MAX_RUN_STEPS, elementQuerySchema, runStepSchema } from "./tool-schemas.js";
@@ -11,9 +21,7 @@ import type { RunStep } from "./tool-schemas.js";
 const MAX_CODE_LENGTH = 20_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
-const MAX_SLEEP_MS = 10_000;
 const MAX_EXPECT_TIMEOUT_MS = 10_000;
-const MAX_VALUE_CHARS = 20_000;
 const MAX_LOG_ENTRIES = 200;
 const MAX_LOG_CHARS = 2_000;
 const MAX_FIND_RESULTS = 25;
@@ -36,9 +44,9 @@ app.click(target,{clickCount?,mouseButton?,modifiers?}); app.setValue(target,val
 app.waitFor(target|{window_title},{gone?,timeoutMs?}); app.step({type:"click",...}) // any run_steps step
 app.verify([{element_index,exists?,value?,label?}],{windowTitle?,timeoutMs?})
 app.batch([apple.steps.click({label:"1"}),apple.steps.press("Return")],{pace?,expect?:{checks?,window_title?,timeout_ms?}}); app.chain(steps) // steps in ONE guarded call, stops at the first failure; apple.steps.* take the app methods' arguments. chain = pace "fast": known targets resolve against ONE read, only cheap guards run between steps, a target created mid-chain or a waitFor reads for itself, intermediate states are not read; default "verified" reads before every element step.
-Scroll-until-found: click/setValue/selectText/secondaryAction with a query target accept {scrollWithin?,maxPages?,vision?,direction?} (or find:{scroll_within,...}): scrollWithin = element id or query (default largest scroll area), direction default down, maxPages 10 (max 50), vision "auto" (accessibility, then OCR; needs Screen Recording)|"off"|"only". Clipped targets are scrolled into view, else paged in the background. Answer: found:{found_by,pages_scrolled,scrolled_into_view?,vision}; OCR-found text can only be clicked.
+Scroll-until-found: click/setValue/selectText/secondaryAction with a query target accept {scrollWithin?,maxPages?,vision?,direction?} (or find:{scroll_within,...}): scrollWithin = element id or query (default largest scroll area), direction default down, maxPages 10 (max 50), vision "auto" (accessibility; OCR only where it exposes no text; needs Screen Recording)|"off"|"only". Clipped targets are scrolled into view, else paged in the background. Answer: found:{found_by,pages_scrolled,scrolled_into_view?,vision}; OCR-found text can only be clicked.
 log(...values); await sleep(ms); JSON, Math, Date available.
-Actions return the parsed result (status, changes, observation_token...); the latest token is reused. Acting by element id/coordinates needs an earlier observe()/find(); query targets, type, press, menu, waitFor observe themselves. A refusal or failed step throws ScriptActionError (message, kind, refused, payload), catchable; uncaught, the call errors with {error,kind,failedAction,payload,log,actions}. read_only=true makes every mutation throw before dispatch. timeout_ms (default 30000, max 120000) or cancelling stops further actions. Different apps overlap under background delivery (Promise.all); the same app runs in call order; attended delivery serializes all. Answers {ok,value,log,actions:[{n,app,kind,ms,status}],elapsedMs}; value must be JSON-serializable (cut at 20 KB). include_screenshot=true attaches the last window image.`;
+Actions return the parsed result (status, changes, observation_token...); the latest token is reused. Acting by element id/coordinates needs an earlier observe()/find(); query targets, type, press, menu, waitFor observe themselves. A refusal or failed step throws ScriptActionError (message, kind, refused, payload), catchable; uncaught, the call errors with {error,kind,failedAction,payload,log,actions}. read_only=true makes every mutation throw before dispatch. timeout_ms (default 30000, max 120000) or cancelling stops further actions and terminates a script that never yields. Different apps overlap under background delivery (Promise.all); the same app runs in call order; attended delivery serializes all. Answers {ok,value,log,actions:[{n,app,kind,ms,status}],elapsedMs}; value must be JSON-serializable (cut at 20 KB). include_screenshot=true attaches the last window image.`;
 
 export class ScriptActionError extends Error {
 	readonly kind: string;
@@ -189,55 +197,6 @@ function toElementQuery(fields: Record<string, string>): ElementQuery {
 	};
 }
 
-/** A target is an element id (number or string) or a query object with an optional match index. */
-function targetFields(target: unknown): Record<string, unknown> {
-	if (
-		(typeof target === "number" && Number.isInteger(target) && target >= 0) ||
-		(typeof target === "string" && target !== "")
-	) {
-		return { element_index: String(target) };
-	}
-	if (isRecord(target)) {
-		const fields = queryFields(target);
-		if (Object.keys(fields).length === 0) {
-			throw invalid("a target object needs at least one of role, label, label_contains, value_contains, or text");
-		}
-		const index = target["index"];
-		return { target: fields, ...(typeof index === "number" ? { target_index: index } : {}) };
-	}
-	throw invalid("a target is an element id (number or string) or a query object");
-}
-
-function defined(entries: Record<string, unknown>): Record<string, unknown> {
-	return Object.fromEntries(Object.entries(entries).filter(([, value]) => value !== undefined));
-}
-
-/** The scroll-until-found `find` field of a step, from the options an app method takes (camelCase or snake_case). */
-function findFields(options: unknown): Record<string, unknown> {
-	const nested = pick(options, "find");
-	const source = isRecord(nested) ? nested : options;
-	const within = pick(source, "scrollWithin") ?? pick(source, "scroll_within");
-	const fields = defined({
-		scroll_within: typeof within === "number" ? String(within) : isRecord(within) ? queryFields(within) : within,
-		direction: pick(source, "findDirection") ?? pick(source, "direction"),
-		max_pages: pick(source, "maxPages") ?? pick(source, "max_pages"),
-		vision: pick(source, "vision"),
-	});
-	return Object.keys(fields).length === 0 && !isRecord(nested) ? {} : { find: fields };
-}
-
-/** A step's target fields with its optional scroll-until-found search; the search needs a described target. */
-function targetWithFind(target: unknown, options: unknown): Record<string, unknown> {
-	const fields = targetFields(target);
-	const find = findFields(options);
-	if ("find" in find && !("target" in fields)) {
-		throw invalid(
-			"scroll-until-found options (scrollWithin, maxPages, vision) need a query target, not an element id",
-		);
-	}
-	return { ...fields, ...find };
-}
-
 function mutates(step: RunStep): boolean {
 	return step.type !== "wait_for";
 }
@@ -293,20 +252,6 @@ function verifyRequestFrom(checks: unknown, options: unknown): VerifyRequest {
 			: {}),
 	};
 }
-
-function formatLogValue(value: unknown): string {
-	if (typeof value === "string") {
-		return value;
-	}
-	try {
-		return JSON.stringify(value) ?? String(value);
-	} catch {
-		return String(value);
-	}
-}
-
-/** Which window of its app a handle acts on: a title (exact, else a unique part of one, any case) or a window id. */
-type WindowSelector = string | number;
 
 /** What one `apple.app(...)` handle acts on. */
 interface AppTarget {
@@ -377,32 +322,12 @@ class ScriptRun {
 		private readonly signal: AbortSignal,
 	) {}
 
-	log(values: readonly unknown[]): void {
+	log(text: string): void {
 		if (this.logLines.length >= MAX_LOG_ENTRIES) {
 			this.logDropped += 1;
 			return;
 		}
-		this.logLines.push(values.map(formatLogValue).join(" ").slice(0, MAX_LOG_CHARS));
-	}
-
-	sleep(milliseconds: unknown): Promise<void> {
-		const duration = typeof milliseconds === "number" && Number.isFinite(milliseconds) ? milliseconds : 0;
-		const bounded = Math.min(Math.max(0, duration), MAX_SLEEP_MS);
-		return new Promise<void>((resolve, reject) => {
-			if (this.signal.aborted) {
-				reject(this.stopped());
-				return;
-			}
-			const onAbort = (): void => {
-				clearTimeout(timer);
-				reject(this.stopped());
-			};
-			const timer = setTimeout(() => {
-				this.signal.removeEventListener("abort", onAbort);
-				resolve();
-			}, bounded);
-			this.signal.addEventListener("abort", onAbort, { once: true });
-		});
+		this.logLines.push(text.slice(0, MAX_LOG_CHARS));
 	}
 
 	private stopped(): ScriptActionError {
@@ -415,7 +340,12 @@ class ScriptRun {
 	/** One queue per app, so different apps overlap while one app's actions stay in order. */
 	private queue<T>(app: string, work: () => Promise<T>): Promise<T> {
 		const key = this.options.parallelApps ? app.toLowerCase() : "";
-		const next = (this.tails.get(key) ?? Promise.resolve()).then(work);
+		const next = (this.tails.get(key) ?? Promise.resolve()).then(() => {
+			if (this.signal.aborted) {
+				throw this.stopped();
+			}
+			return work();
+		});
 		this.tails.set(
 			key,
 			next.then(
@@ -714,176 +644,169 @@ class ScriptRun {
 
 type StepObject = Record<string, unknown>;
 
-/** Build run_steps step objects from the same arguments the app methods take, for `app.batch([...])`. */
-const stepBuilders = Object.freeze({
-	click: (target: unknown, options?: unknown): StepObject => ({
-		type: "click",
-		...targetWithFind(target, options),
-		...defined({
-			click_count: pick(options, "clickCount") ?? pick(options, "click_count"),
-			mouse_button: pick(options, "mouseButton") ?? pick(options, "mouse_button"),
-			modifiers: pick(options, "modifiers"),
-		}),
-	}),
-	setValue: (target: unknown, value: unknown, options?: unknown): StepObject => ({
-		type: "set_value",
-		...targetWithFind(target, options),
-		value,
-	}),
-	type: (text: unknown): StepObject => ({ type: "type_text", text }),
-	press: (keys: unknown, options?: unknown): StepObject => ({
-		type: "press_keys",
-		keys: typeof keys === "string" ? [keys] : keys,
-		...defined({
-			hold_seconds: pick(options, "holdSeconds") ?? pick(options, "hold_seconds"),
-			interval_seconds: pick(options, "intervalSeconds") ?? pick(options, "interval_seconds"),
-		}),
-	}),
-	scroll: (target: unknown, direction: unknown, pages?: unknown, options?: unknown): StepObject => ({
-		type: "scroll",
-		...targetFields(target),
-		direction,
-		...defined({ pages, modifiers: pick(options, "modifiers") }),
-	}),
-	selectText: (target: unknown, text?: unknown, options?: unknown): StepObject => ({
-		type: "select_text",
-		...targetWithFind(target, options),
-		...defined({
-			text,
-			prefix: pick(options, "prefix"),
-			suffix: pick(options, "suffix"),
-			selection: pick(options, "selection"),
-		}),
-	}),
-	menu: (path: unknown): StepObject => ({
-		type: "invoke_menu",
-		path: typeof path === "string" ? path.split(">").map((part) => part.trim()) : path,
-	}),
-	secondaryAction: (target: unknown, action: unknown, options?: unknown): StepObject => ({
-		type: "perform_secondary_action",
-		...targetWithFind(target, options),
-		action,
-	}),
-	waitFor: (target: unknown, options?: unknown): StepObject => {
-		if (!isRecord(target)) {
-			throw invalid("waitFor needs a query object and/or {window_title}");
-		}
-		const fields = queryFields(target);
-		return {
-			type: "wait_for",
-			...(Object.keys(fields).length === 0 ? {} : { target: fields }),
-			...defined({
-				window_title: pick(target, "window_title") ?? pick(target, "windowTitle"),
-				gone: pick(options, "gone"),
-				timeout_ms: pick(options, "timeoutMs") ?? pick(options, "timeout_ms"),
-			}),
-		};
-	},
-});
+/** The compiled worker next to this module, else (running from TypeScript source) the source file. */
+const WORKER_URL = ((): URL => {
+	const compiled = new URL("./script-worker.js", import.meta.url);
+	return existsSync(fileURLToPath(compiled)) ? compiled : new URL("./script-worker.ts", import.meta.url);
+})();
 
-function makeAppHandle(run: ScriptRun, target: AppTarget): Readonly<Record<string, unknown>> {
-	const act = (raw: StepObject, options?: unknown): Promise<unknown> => run.step(target, raw, options);
-	return Object.freeze({
-		name: target.app,
-		...(target.window === undefined ? {} : { window: target.window }),
-		observe: (options?: unknown) => run.observe(target, options),
-		find: (query: unknown, options?: unknown) => run.find(target, query, options),
-		click: (target: unknown, options?: unknown) => act(stepBuilders.click(target, options)),
-		setValue: (target: unknown, value: unknown, options?: unknown) =>
-			act(stepBuilders.setValue(target, value, options)),
-		type: (text: unknown) => act(stepBuilders.type(text)),
-		press: (keys: unknown, options?: unknown) => act(stepBuilders.press(keys, options)),
-		scroll: (target: unknown, direction: unknown, pages?: unknown, options?: unknown) =>
-			act(stepBuilders.scroll(target, direction, pages, options)),
-		selectText: (target: unknown, text?: unknown, options?: unknown) =>
-			act(stepBuilders.selectText(target, text, options)),
-		menu: (path: unknown) => act(stepBuilders.menu(path)),
-		secondaryAction: (target: unknown, action: unknown, options?: unknown) =>
-			act(stepBuilders.secondaryAction(target, action, options)),
-		waitFor: (target: unknown, options?: unknown) => act(stepBuilders.waitFor(target, options)),
-		step: (raw: unknown, options?: unknown) => {
-			if (!isRecord(raw)) {
+/** A runaway script exhausts its own heap, not the server's. */
+const WORKER_HEAP_MB = 256;
+
+function spawnWorker(): Worker {
+	const worker = new Worker(WORKER_URL, { stdout: true, resourceLimits: { maxOldGenerationSizeMb: WORKER_HEAP_MB } });
+	worker.unref();
+	return worker;
+}
+
+/** One idle worker kept ready, so a run does not wait for a thread and module load; every run gets a fresh one. */
+let spareWorker: Worker | undefined;
+
+function warmWorker(): void {
+	if (spareWorker !== undefined) {
+		return;
+	}
+	const worker = spawnWorker();
+	const discard = (): void => {
+		if (spareWorker === worker) {
+			spareWorker = undefined;
+		}
+	};
+	worker.on("error", discard);
+	worker.on("exit", discard);
+	spareWorker = worker;
+}
+
+function takeWorker(): Worker {
+	const worker = spareWorker ?? spawnWorker();
+	spareWorker = undefined;
+	return worker;
+}
+
+function callError(error: unknown): CallError {
+	if (error instanceof ScriptActionError) {
+		return {
+			kind: error.kind,
+			message: error.message,
+			name: error.name,
+			refused: error.refused,
+			payload: error.payload,
+		};
+	}
+	const name = isRecord(error) && typeof error["name"] === "string" ? error["name"] : "Error";
+	const message = isRecord(error) && typeof error["message"] === "string" ? error["message"] : String(error);
+	return { kind: "unexpected", message, name, refused: undefined, payload: undefined };
+}
+
+/** One worker call, performed through the guarded run exactly as an in-process script's call was. */
+async function perform(
+	run: ScriptRun,
+	targets: Map<number, AppTarget>,
+	call: Extract<WorkerMessage, { readonly type: "call" }>,
+): Promise<unknown> {
+	const handle = (spec: WorkerTarget | undefined): AppTarget => {
+		if (spec === undefined) {
+			throw invalid("this call needs an app handle");
+		}
+		const known = targets.get(spec.id);
+		if (known !== undefined) {
+			return known;
+		}
+		const created = appTarget(spec.app, spec.window === undefined ? undefined : { window: spec.window });
+		targets.set(spec.id, created);
+		return created;
+	};
+	const [first, second] = call.args;
+	switch (call.method) {
+		case "apps":
+			return await run.apps();
+		case "windows":
+			return await run.windows(first);
+		case "observe":
+			return await run.observe(handle(call.target), first);
+		case "find":
+			return await run.find(handle(call.target), first, second);
+		case "step":
+			if (!isRecord(first)) {
 				throw invalid("step needs a step object such as {type:'click', element_index:'9'}");
 			}
-			return act(raw, options);
-		},
-		batch: (raws: unknown, options?: unknown) => run.batch(target, raws, options),
-		chain: (raws: unknown, options?: unknown) => run.batch(target, raws, options, "fast"),
-		verify: (checks?: unknown, options?: unknown) => run.verify(target, checks, options),
-	});
-}
-
-type ScriptOutcome =
-	| { readonly ok: true; readonly value: unknown; readonly valueTruncated: boolean }
-	| { readonly ok: false; readonly kind: string; readonly error: string; readonly payload?: unknown };
-
-function serializeValue(value: unknown): { readonly value: unknown; readonly valueTruncated: boolean } {
-	const text = value === undefined ? undefined : JSON.stringify(value);
-	if (text === undefined) {
-		return { value: null, valueTruncated: false };
+			return await run.step(handle(call.target), first, second);
+		case "batch":
+			return await run.batch(handle(call.target), first, second);
+		case "chain":
+			return await run.batch(handle(call.target), first, second, "fast");
+		case "verify":
+			return await run.verify(handle(call.target), first, second);
 	}
-	return text.length <= MAX_VALUE_CHARS
-		? { value: JSON.parse(text), valueTruncated: false }
-		: { value: text.slice(0, MAX_VALUE_CHARS), valueTruncated: true };
 }
 
-function isVmTimeout(error: unknown): boolean {
-	return isRecord(error) && error["code"] === "ERR_SCRIPT_EXECUTION_TIMEOUT";
-}
-
-async function executeScript(
-	code: string,
-	run: ScriptRun,
-	controller: AbortController,
-	timeoutMs: number,
-	apple: Readonly<Record<string, unknown>>,
-): Promise<ScriptOutcome> {
-	const signal = controller.signal;
-	const timedOut = (): ScriptOutcome => ({
-		ok: false,
-		kind: "timeout",
-		error: `run_script timed out after ${timeoutMs} ms; no further actions were dispatched`,
-	});
-	let script: Script;
-	try {
-		script = new Script(`(async function () {\n${code}\n})()`, { filename: "run_script.js", lineOffset: -1 });
-	} catch (error: unknown) {
-		return { ok: false, kind: "syntax-error", error: errorMessage(error) };
-	}
-	const log = (...values: unknown[]): void => run.log(values);
-	const context = createContext(
-		{ apple, log, console: { log, info: log, warn: log, error: log }, sleep: (ms: unknown) => run.sleep(ms) },
-		{ codeGeneration: { strings: false, wasm: false } },
-	);
-	const aborted = new Promise<never>((_, reject) => {
-		signal.addEventListener(
-			"abort",
-			() => reject(new ScriptActionError("run_script was stopped", { kind: "aborted" })),
-			{
-				once: true,
-			},
+/**
+ * Runs the script in a worker thread and answers its action calls. The abort signal (timeout or cancellation)
+ * terminates the worker, so a script that never yields cannot stall this thread.
+ */
+function runInWorker(code: string, run: ScriptRun, signal: AbortSignal, timeoutMs: number): Promise<ScriptOutcome> {
+	const worker = takeWorker();
+	const targets = new Map<number, AppTarget>();
+	return new Promise<ScriptOutcome>((resolve) => {
+		let settled = false;
+		const finish = (outcome: ScriptOutcome): void => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			signal.removeEventListener("abort", onAbort);
+			void worker.terminate();
+			resolve(outcome);
+		};
+		const onAbort = (): void =>
+			finish(
+				signal.reason === "timeout"
+					? {
+							ok: false,
+							kind: "timeout",
+							error: `run_script timed out after ${timeoutMs} ms; no further actions were dispatched`,
+						}
+					: {
+							ok: false,
+							kind: "cancelled",
+							error: "run_script was cancelled; no further actions were dispatched",
+						},
+			);
+		const answer = async (call: Extract<WorkerMessage, { readonly type: "call" }>): Promise<void> => {
+			let reply: HostMessage;
+			try {
+				reply = { type: "reply", id: call.id, ok: true, value: await perform(run, targets, call) };
+			} catch (error: unknown) {
+				reply = { type: "reply", id: call.id, ok: false, error: callError(error) };
+			}
+			if (!settled) {
+				worker.postMessage(reply);
+			}
+		};
+		worker.on("message", (message: WorkerMessage) => {
+			if (settled) {
+				return;
+			}
+			if (message.type === "log") {
+				run.log(message.text);
+			} else if (message.type === "done") {
+				run.logDropped += message.logDropped;
+				finish(message.outcome);
+			} else {
+				void answer(message);
+			}
+		});
+		worker.on("error", (error: Error) => finish({ ok: false, kind: "script-error", error: errorMessage(error) }));
+		worker.on("exit", () =>
+			finish({ ok: false, kind: "script-error", error: "the run_script worker exited before the script finished" }),
 		);
-	});
-	aborted.catch(() => undefined);
-	try {
-		const pending: unknown = script.runInContext(context, { timeout: timeoutMs });
-		const value: unknown = await Promise.race([Promise.resolve(pending), aborted]);
-		return { ok: true, ...serializeValue(value) };
-	} catch (error: unknown) {
-		if (isVmTimeout(error)) {
-			controller.abort("timeout");
-			return timedOut();
-		}
 		if (signal.aborted) {
-			return signal.reason === "timeout"
-				? timedOut()
-				: { ok: false, kind: "cancelled", error: "run_script was cancelled; no further actions were dispatched" };
+			onAbort();
+			return;
 		}
-		if (error instanceof ScriptActionError) {
-			return { ok: false, kind: "action-failed", error: error.message, payload: error.payload };
-		}
-		return { ok: false, kind: "script-error", error: errorMessage(error) };
-	}
+		signal.addEventListener("abort", onAbort, { once: true });
+		worker.postMessage({ type: "run", code } satisfies HostMessage);
+	});
 }
 
 function jsonResult(body: Record<string, unknown>, isError: boolean, image: ToolContent | undefined): ToolResult {
@@ -899,6 +822,7 @@ export function registerScriptTools(
 	session: GuardedSession,
 	computer: GuardedComputerInterface,
 ): void {
+	warmWorker();
 	server.registerTool(
 		"run_script",
 		{
@@ -927,21 +851,10 @@ export function registerScriptTools(
 				},
 				controller.signal,
 			);
-			const apple = Object.freeze({
-				app: (name: unknown, options?: unknown) => {
-					if (typeof name !== "string" || name === "") {
-						throw invalid("apple.app needs an app name string");
-					}
-					return makeAppHandle(run, appTarget(name, options));
-				},
-				apps: () => run.apps(),
-				windows: (name?: unknown) => run.windows(name),
-				steps: stepBuilders,
-			});
 			try {
 				const outcome = controller.signal.aborted
 					? ({ ok: false, kind: "cancelled", error: "run_script was cancelled before it started" } as const)
-					: await executeScript(input.code, run, controller, timeoutMs, apple);
+					: await runInWorker(input.code, run, controller.signal, timeoutMs);
 				const common = {
 					log: run.logLines,
 					...(run.logDropped === 0 ? {} : { logDropped: run.logDropped }),
@@ -977,6 +890,7 @@ export function registerScriptTools(
 				clearTimeout(timer);
 				extra.signal.removeEventListener("abort", onRequestAbort);
 				controller.abort("finished");
+				warmWorker();
 			}
 		},
 	);

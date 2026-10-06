@@ -465,7 +465,8 @@ describe("run_script #given several steps #when the script batches them #then on
 		]);
 		// The first target resolves against the observe read; the second must see what the first made of the UI.
 		expect(preDispatchReads(harness)).toBe(1);
-		expect(harness.computer.preflightExpected).toHaveLength(1);
+		// One preflight for the batch, and the window guard before its second step.
+		expect(harness.computer.preflightExpected).toHaveLength(2);
 	});
 
 	it("stops the batch at the first step that cannot run and reports it", async () => {
@@ -560,6 +561,172 @@ describe("run_script #given a waitFor whose condition holds #when it stands alon
 		);
 
 		expect(payload).toMatchObject({ ok: true, value: { effect: "confirmed", status: "satisfied" } });
+		expect(inputEffects(harness.computer.effects)).toEqual([]);
+	});
+});
+
+describe("run_script #given a script that blocks its thread #when the deadline passes #then the worker is terminated and the server stays responsive", () => {
+	it("terminates a busy loop that starts after an await while other tools keep answering", async () => {
+		const harness = await start();
+		let release: () => void = () => undefined;
+		const observed = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		harness.computer.onStateCall = () => release();
+		let settled = false;
+		const script = harness.client
+			.callTool({
+				name: "run_script",
+				arguments: {
+					timeout_ms: 1500,
+					code: `
+						const finder = apple.app("Finder");
+						await finder.observe();
+						await Promise.resolve();
+						while (true) {}
+					`,
+				},
+			})
+			.finally(() => {
+				settled = true;
+			});
+
+		await observed;
+		for (let round = 0; round < 20; round++) {
+			const apps = await harness.client.callTool({ name: "list_apps", arguments: {} });
+			expect(apps.isError).not.toBe(true);
+		}
+		expect(settled).toBe(false);
+
+		const result = await script;
+		expect(result.isError).toBe(true);
+		expect(jsonPayload(result)).toMatchObject({ ok: false, kind: "timeout" });
+		const after = await harness.client.callTool({ name: "list_apps", arguments: {} });
+		expect(after.isError).not.toBe(true);
+		expect(inputEffects(harness.computer.effects)).toEqual([]);
+	});
+
+	it("terminates a busy loop before any await and answers the next run_script at once", async () => {
+		const harness = await start();
+
+		const stuck = await harness.client.callTool({
+			name: "run_script",
+			arguments: { timeout_ms: 100, code: "while (true) {}" },
+		});
+		const next = jsonPayload(
+			await harness.client.callTool({ name: "run_script", arguments: { code: "return 1 + 1;" } }),
+		);
+
+		expect(jsonPayload(stuck)).toMatchObject({ ok: false, kind: "timeout" });
+		expect(next).toMatchObject({ ok: true, value: 2 });
+	});
+
+	it("keeps no state between runs", async () => {
+		const harness = await start();
+
+		await harness.client.callTool({
+			name: "run_script",
+			arguments: { code: "globalThis.leak = 1; Array.prototype.leak = 2;" },
+		});
+		const payload = jsonPayload(
+			await harness.client.callTool({
+				name: "run_script",
+				arguments: { code: "return [typeof leak, typeof [].leak];" },
+			}),
+		);
+
+		expect(payload).toMatchObject({ ok: true, value: ["undefined", "undefined"] });
+	});
+});
+
+describe("run_script #given a cancelled call #when an action is in flight #then no further action is dispatched", () => {
+	it("stops the script at the cancelled action", async () => {
+		const harness = await start();
+		let enter: () => void = () => undefined;
+		const entered = new Promise<void>((resolve) => {
+			enter = resolve;
+		});
+		let open: () => void = () => undefined;
+		const gate = new Promise<void>((resolve) => {
+			open = resolve;
+		});
+		const preflight = harness.computer.preflightInput.bind(harness.computer);
+		harness.computer.preflightInput = async (expected, options) => {
+			enter();
+			await gate;
+			return await preflight(expected, options);
+		};
+		const controller = new AbortController();
+		const pending = harness.client.callTool(
+			{
+				name: "run_script",
+				arguments: {
+					code: `
+						const finder = apple.app("Finder");
+						await finder.observe();
+						await finder.setValue(20, "first");
+						await finder.setValue(21, "second");
+					`,
+				},
+			},
+			undefined,
+			{ signal: controller.signal },
+		);
+
+		await entered;
+		controller.abort();
+		await expect(pending).rejects.toThrow();
+		open();
+		const barrier = jsonPayload(
+			await harness.client.callTool({ name: "run_script", arguments: { code: "return 1;" } }),
+		);
+
+		expect(barrier).toMatchObject({ ok: true });
+		expect(inputEffects(harness.computer.effects)).toEqual([]);
+	});
+});
+
+describe("run_script #given errors raised across the worker boundary #when the script catches them #then they keep their shape", () => {
+	it("catches argument errors raised in the script and non-cloneable arguments", async () => {
+		const harness = await start();
+
+		const payload = jsonPayload(
+			await harness.client.callTool({
+				name: "run_script",
+				arguments: {
+					code: `
+						const finder = apple.app("Finder");
+						await finder.observe();
+						const caught = [];
+						const attempts = [
+							() => apple.app(""),
+							() => apple.steps.click(-1),
+							() => finder.step({ type: "click", element_index: "9", callback: () => 1 }),
+							() => finder.step("click"),
+						];
+						for (const attempt of attempts) {
+							try {
+								await attempt();
+								caught.push("no error");
+							} catch (error) {
+								caught.push([error.name, error.kind, error.refused]);
+							}
+						}
+						return caught;
+					`,
+				},
+			}),
+		);
+
+		expect(payload).toMatchObject({
+			ok: true,
+			value: [
+				["ScriptActionError", "invalid-argument", "invalid-argument"],
+				["ScriptActionError", "invalid-argument", "invalid-argument"],
+				["ScriptActionError", "invalid-argument", "invalid-argument"],
+				["ScriptActionError", "invalid-argument", "invalid-argument"],
+			],
+		});
 		expect(inputEffects(harness.computer.effects)).toEqual([]);
 	});
 });

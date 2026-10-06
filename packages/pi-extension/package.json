@@ -6,7 +6,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/bob01933/bob-cua.git",
+		"url": "https://github.com/trac3r00/apple-cua.git",
 		"directory": "packages/pi-extension"
 	},
 	"keywords": ["pi-extension", "pi-mono", "macos", "computer-use"],

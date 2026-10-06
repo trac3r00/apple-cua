@@ -1,49 +1,79 @@
 # Installation and local permissions
 
-apple-cua runs on the Mac being controlled, in its logged-in graphical session. Autonomous
-harnesses should use the guarded MCP server. See [harness configuration](harnesses.md) for
-OpenClaw/Hermes examples and the required local app allowlist.
+apple-cua runs on the Mac being controlled, in its logged-in graphical session: macOS 14 (Sonoma)
+or later, on Apple Silicon or Intel. Autonomous harnesses should use the guarded MCP server. See
+[harness configuration](harnesses.md) for OpenClaw/Hermes examples and the required local app
+allowlist.
 
-## Build from the checkout
-
-Prerequisites: Node.js 20+, pnpm, and Apple's Command Line Tools for the bundled native
-capture/cursor components. The host also needs normal macOS desktop permissions.
+## Install with one command
 
 ```bash
-pnpm install
-pnpm --filter @apple-cua/core --filter @apple-cua/cli --filter @apple-cua/mcp build
-node packages/cli/dist/cli.js --help
+git clone https://github.com/trac3r00/apple-cua.git && cd apple-cua && ./scripts/setup.sh
 ```
+
+`setup.sh` is safe to re-run and stops with an actionable message when something is missing. It
+checks macOS and the Xcode Command Line Tools (`xcode-select --install` when they are absent), uses
+Node.js 20+ from PATH or downloads the official LTS into `~/.apple-cua/node` (verified against
+`SHASUMS256.txt`), installs with the pnpm version `package.json` pins, builds every package, keeps
+the committed universal (arm64 + x86_64) native binaries unless their sources changed, builds the
+signed helper app "apple-cua MCP" only when it is missing or broken, and ends with
+`apple-cua doctor`. Flags: `--register omo|claude|codex|json` (repeatable), `--allow <bundle ids>`,
+`--delivery background|attended`, `--toolset lean|full`, `--rebuild-native`, `--rebuild-helper`,
+`--yes`.
 
 The built entry points are:
 
 - CLI: `packages/cli/dist/cli.js`
-- Stdio MCP: `packages/mcp/dist/server.js`
+- Stdio MCP: `packages/mcp/dist/server.js`, launched through the helper as
+  `packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp <absolute path to server.js>`
 
-Use absolute paths in harness configuration. The optional Pi extension is not required for
-Hermes, OpenClaw or another MCP client. Do not assume workspace-local bin aliases are on
-PATH in a background gateway process.
+Use absolute paths in harness configuration; `./scripts/setup.sh --register json` prints a ready
+block. The optional Pi extension is not required for Hermes, OpenClaw or another MCP client. Do not
+assume workspace-local bin aliases are on PATH in a background gateway process.
+
+## Register with an MCP client
+
+`./scripts/setup.sh --register <client>` (or `node scripts/register-mcp.mjs <client>` once setup
+has run) writes the helper and this checkout's absolute paths into the client:
+
+| Client | Where |
+|---|---|
+| `omo` | `~/.omo/agent/mcp.json`, `mcpServers["apple-cua"]` |
+| `claude` | `claude mcp add --scope user apple-cua ...`; prints the JSON block when the CLI is missing |
+| `codex` | `~/.codex/config.toml`, `[mcp_servers.apple-cua]` |
+| `json` | prints a block to paste into any other client |
+
+A file is copied to `<file>.bak-<timestamp>` before it changes, and merged: other servers and
+settings, and unknown keys of an existing `apple-cua` entry, are kept, and an option left out keeps
+the entry's current value. Repeating a registration changes nothing. Without `--register`, setup
+neither reads nor writes any client configuration.
 
 ## Grant permissions through the user
 
-The actual process chain launching the server needs:
+The process macOS identifies needs:
 
 - **Screen Recording** for screenshot capture.
 - **Accessibility** for AX queries/actions and native input.
 - **Automation / Apple Events** where System Events or browser scripting is used.
 
-Grant these manually in **System Settings → Privacy & Security**, for the terminal, app,
-Node executable or launcher macOS identifies. Permission state belongs to the real process
-chain and user account, not to a project directory. A working terminal test does not prove
-a separately launched gateway has the same grants.
+Through the helper that process is **apple-cua MCP**: grant it Screen Recording and Accessibility
+in **System Settings → Privacy & Security** once, then restart the MCP client. It is listed there
+after the server first asks, and can also be added with + from
+`packages/mcp/dist/apple-cua-mcp.app`. Re-running setup keeps the helper and so the grants;
+`--rebuild-helper` creates a new code identity that macOS asks about again. The CLI, and a server
+started with plain `node`, use the identity of the terminal, app or launcher that starts them
+instead. Permission state belongs to the real process chain and user account, not to a project
+directory. A working terminal test does not prove a separately launched gateway has the same grants.
 
 Do not automate clicks to approve permissions. If a request is denied or the captured image
 is unusable, stop input and resolve the permission issue with the human. Restart the relevant
 launcher if macOS requires it after a grant.
 
-Read-only checks from the checkout:
+Read-only checks from the checkout; none of them raises a permission prompt:
 
 ```bash
+node packages/cli/dist/cli.js doctor          # binaries, Node, helper, the helper's grants, stop switch; exit 0 = ready
+node packages/cli/dist/cli.js --json doctor   # the same report as JSON
 node packages/cli/dist/cli.js permissions check screen
 node packages/cli/dist/cli.js permissions check accessibility
 node packages/cli/dist/cli.js permissions check apple-events

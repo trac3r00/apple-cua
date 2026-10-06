@@ -414,6 +414,21 @@ its next step, and reads keep working so the agent can tell you what it was doin
 read from the keyboard's hardware state and needs no extra permission. The direct CLI input commands (`click`,
 `type`, `key`, `drag`, `scroll`, the `apps` writes and the `ios` input commands) refuse too, with exit code 1.
 
+A background click, double click or drag lands because the app behind yours is first told it is active for the
+target window (the front app does not change and nothing is raised), which also enables window commands such as
+Save and New Folder there. The first click after that is spent on the activation, so a primer click goes to the
+target window at a point inside no display and no window; when the display and window layout cannot be read the
+primer is skipped, the server logs that on stderr, and the click may be spent instead. The app is told otherwise
+2 s after the last background action, or when the server exits. That release is the deactivation AppKit gets
+whenever you switch away from an app, and apps whose documents autosave in place (TextEdit, Preview, Pages) answer
+it the same way: every document of the app with unsaved changes is written to its file (TextEdit, measured: within
+about 120 ms of the release). AppKit does this on every deactivation, so documents you edited in the app yourself
+were already autosaved when you last left it; what the release writes is an edit made in the background and left
+unsaved, for example by the agent. No release avoids it. Set `APPLE_CUA_BACKGROUND_ACTIVATION=off` to never tell a
+background app it is active: apple-cua then autosaves nothing, but a first-mouse app such as Finder may spend a
+background click on activating its window, and window commands that need the app active are refused with nothing
+sent.
+
 Some apps bring themselves forward when background input reaches them (Finder on Go to Folder, Safari on a
 web field). A watcher on its own thread checks every 10 ms and hands the front straight back to your app, and
 stops for good if you switch apps yourself. Measured on a background Finder Go to Folder, the target held the

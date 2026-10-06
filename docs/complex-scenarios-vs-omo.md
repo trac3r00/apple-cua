@@ -71,8 +71,9 @@ retries (it was restored to Terminal afterwards).
 
 What changed in apple-cua:
 - Background pointer clicks, double clicks and drags first tell the target app it is active for that window (without
-  changing the front process) and send a primer click outside all windows, so first-mouse-refusing apps such as
-  Finder act on the click. The hold is per app, extended by later input, and released after 2 s idle or when the
+  changing the front process) and send that window a primer click at a point inside no display and no on-screen
+  window ((-1, -1) unless a display arranged above or left of the main one, or a window, covers it; skipped and
+  logged when the layout cannot be read), so first-mouse-refusing apps such as Finder act on the click. The hold is per app, extended by later input, and released after 2 s idle or when the
   server exits.
 - Window commands (Save, New Folder) for an app behind the person's go through one route for `invoke_menu`,
   `run_steps`, `run_script` `app.menu` and Command shortcuts: raise the observed window inside its app, activate the
@@ -86,6 +87,27 @@ What changed in apple-cua:
 
 Known side effect: when the activation hold is released, TextEdit autosaves any other unsaved document of the same
 app. An agent that edits two documents and saves one will see the other autosaved about 2 s later.
+
+Why it stays (probed 2026-10-05, background only, TextEdit with `a.txt` edited through accessibility and left
+unsaved, `b.txt` the activated window, `a.txt` on disk sampled every 100 ms):
+
+| Probe | `a.txt` on disk | TextEdit AXFrontmost |
+|---|---|---|
+| no activation, 8 s | untouched, still modified | false |
+| activated for `b.txt` and held with no release (8 s; in another run 25 s) | untouched while held | true the whole time |
+| released after 1.5 s, 8 s or 25 s | written within ~120 ms of the release, no longer modified | false after release |
+| released naming `a.txt`'s window instead | written within ~110 ms | false |
+| deactivation sent with no activation before it | written within ~110 ms | false |
+
+So the trigger is the deactivation event itself, not the 2 s idle, the activation or the window it names. AppKit
+explains it: `-[NSApplication _handleDeactivateEvent:]` posts `NSApplicationWillResignActiveNotification` before
+anything else, with no check that the app was active, and `-[NSDocumentController _appWillBecomeInactive:]` then calls
+`autosaveWithImplicitCancellability:completionHandler:` on every document whose class autosaves in place. That is the
+same event a person's switch away from TextEdit delivers. Every way to end the hold is that event, and without it the
+app keeps reporting itself frontmost behind the person's app (NSRunningApplication `isActive` stays false throughout,
+since the front process never changes), so the release is kept as it is, and `APPLE_CUA_BACKGROUND_ACTIVATION=off`
+turns background activation off: no hold, no primer, no release and no autosave, at the price of background clicks
+that first-mouse apps spend on activating a window and window commands refused while the app is inactive.
 
 Cursor moves seen in two early worker runs (1 and 17 samples) were traced to the person's own mouse: every sample
 fell after the script returned, none lay inside a target window, and s3 sends no pointer events (accessibility

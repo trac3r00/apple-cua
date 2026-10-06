@@ -76,3 +76,32 @@ one action as the next action's pre-dispatch read (only when it is under 300 ms 
 since). The focus guard runs on its own thread because the input thread is busy inside native calls while the
 target steals the front. Lazy-loading modules was measured and dropped: startup cost is spread across the MCP SDK,
 zod and core with no single heavy module (the best candidate saved about 9 ms).
+
+## Review fixes (2026-10-06)
+
+After all of these, the six complex background scenarios (docs/complex-scenarios-vs-omo.md) still pass 18/18 with
+0 real-cursor moves and 0 front-app changes, and are faster: Finder multi-select 2.9 -> 2.55 s, TextEdit save 0.84 ->
+0.65 s, cross-app save 1.3 -> 1.06 s, two-window save 0.87 -> 0.66 s, New Folder 1.27 -> 1.15 s (medians, n=3).
+
+Two independent code reviews (performance, and correctness/safety) produced findings that were each confirmed in code
+before they were fixed.
+
+| Finding | Before | After |
+|---|---|---|
+| Two apps driven at once (`run_parallel`, `run_script` with `Promise.all`) | both actions shared one mutable input target: one app's keys could reach the other, and a cleared target sent keys to the person's front app | every action carries its own immutable `{pid, window}` scope; background input with no target is refused for all seven input kinds. Live: typing into TextEdit while clicking Calculator landed only where intended, 0 cursor moves, 0 front changes |
+| Stop switch pressed during preflight, a target read or a long typing action | input still went out after the stop | stop and cancellation are rechecked right before dispatch and before every character, key, drag step and scroll step; held keys and buttons are always released |
+| Two overlapping windows of one app | a coordinate click, modified click or OCR-hit click could land in the covering window | pointer input is addressed to the observed window by id (its own sheets excepted); a point outside it, or a closed window, is refused |
+| Default-pace chains | window identity and app approval were re-checked only in fast pace | checked before every step in both paces |
+| `hover_first` in background delivery | moved the person's real cursor | targeted at the app's window like every other pointer event |
+| Right or middle click on an element id | performed AXPress (a right-click on a Delete button pressed it) | clicks the element's centre with the requested button; never AXPress |
+| `run_script` busy loop after an `await` | blocked the server forever (no timeout, no stop chord) | script runs in a terminable worker thread; killed at `timeout_ms`, server keeps answering; about +2 ms per call with a warm worker |
+| Cursor overlay spawn failure (ENOENT/EACCES) | unhandled `error` event crashed the server | reported once on stderr, overlay disabled, input continues |
+| Resolving an app name (every observe/find by name) | spawned `mdls` for every running app, 25.5 ms median | identity-only lookup, 2.5 ms median |
+| `diff_only` observation of a large change (152 rows added, 30 changed) | 34.8 KB full JSON, `element_format` ignored | capped at 25 per bucket with exact omission counts: 12.8 KB JSON, 5.8 KB table; `element_format: "json"` keeps the full diff |
+| Vision OCR failure | leaked the request array each time | released on success and failure |
+| Activation primer click | always at (-1,-1), which a window on an upper-left display could contain | a point proven inside no display and no window (CGGetOnlineDisplayList + window list); skipped and reported when the layout cannot be read |
+| TextEdit autosaving other unsaved documents after a background Save | unexplained side effect | root cause proven: any deactivation event makes AppKit autosave every in-place document (`_handleDeactivateEvent:` -> `_appWillBecomeInactive:`), so no narrower release can avoid it. `APPLE_CUA_BACKGROUND_ACTIVATION=off` turns background activation off; then background Save, New Folder and first-mouse clicks are refused instead |
+| Focus guard vs a deliberate switch to the target app | Command-Tab or a click into the target during the ~0.8 s watch was undone | a physical mouse press or a held Command since the watch began (read from the HID state, our per-app events never appear there) marks the switch as deliberate; the guard steps aside for good. Plain typing does not count, so typing in your own app is still protected |
+| Scroll-find page re-read (150-row Finder list) | walked the whole list every page: 700 ms, 1,544 elements | reads only the rows the list shows (`AXVisibleRows`): 19 ms, 205 elements. Vision-only search 10.3 s -> 4.5 s; accessibility search in a 500-row list 39.5 s -> 12.9 s |
+| `vision: "auto"` on a list accessibility can read | ran OCR (~220 ms) on every page anyway | reads pixels only when the list area exposes no text to accessibility; end of content is told by the accessibility signature |
+| OCR in scroll-find | recognised the whole window, then filtered to the list | recognises only the list area (CoreGraphics crop, 8 pt padding): Vision about 240 -> 210 ms per page; the 7-page vision-only search stayed about 9.4 s because each page's accessibility re-read (~730 ms walking ~1,500 elements) dominates |

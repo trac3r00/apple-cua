@@ -123,8 +123,9 @@ merely to understand the "whole situation." Do not begin by clicking to discover
    one produced and the chain cannot name it up front. When the control may be off screen, give the
    step a `find` block (`find: { scroll_within, direction, max_pages, vision }`, or in run_script
    `app.click({ text: "test1" }, { scrollWithin, maxPages, vision })`): it scrolls the area page by
-   page in the background, re-checks the accessibility tree (and on-screen text when Screen
-   Recording is granted and `vision` allows) after each page, and clicks as soon as the target
+   page in the background, re-checks the rows the list shows (and, in `auto`, on-screen text only
+   when accessibility exposes none and Screen Recording is granted; `only` always reads pixels)
+   after each page, and clicks as soon as the target
    shows, all inside the same step. The step reports `found.found_by` (`accessibility` or `vision`)
    and `pages_scrolled`; a vision-only hit can only be clicked, not written to. Modifier keys work
    on clicks and drags (`modifiers: ["command"]` for Cmd-click); a scroll with modifiers is

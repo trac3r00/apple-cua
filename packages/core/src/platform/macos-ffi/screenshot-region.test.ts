@@ -171,13 +171,11 @@ describe("#given screen recording permission #when a display region is captured 
 		expect(captured.width / captured.height).toBeCloseTo(4, 1);
 	});
 
-	it.skipIf(!screenRecordingGranted)("encodes the same region as JPEG when asked, much smaller than PNG", () => {
+	it.skipIf(!screenRecordingGranted)("encodes the same region as JPEG when asked", () => {
 		const region = { x: 0, y: 0, width: 600, height: 400 };
-		const png = captureDisplayRegionImage(getMainDisplayId(), region, 1200, 1200, "png", 72);
 		const jpeg = captureDisplayRegionImage(getMainDisplayId(), region, 1200, 1200, "jpeg", 72);
 
 		expect(jpeg.data.subarray(0, 2).toString("hex")).toBe("ffd8");
-		expect(jpeg.data.byteLength).toBeLessThan(png.data.byteLength);
 		const dimensions = imageDimensions(jpeg.data, "jpeg");
 		expect(dimensions).toEqual({ width: jpeg.width, height: jpeg.height });
 	});

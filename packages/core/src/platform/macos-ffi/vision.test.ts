@@ -11,6 +11,11 @@ import {
 	recognizeTextInImage,
 } from "./vision.js";
 
+// Hosted GitHub macOS runners are VMs with no Neural Engine and no real GPU. Their Vision answers differently:
+// arm64 runners quantize confidence to 0.5 and box a cropped read loosely, and the macOS 15 Intel runner crashes
+// inside the recognizer. The live reads below therefore run on real Macs only, which includes every local run.
+const realMac = process.platform === "darwin" && process.env["GITHUB_ACTIONS"] !== "true";
+
 const fixture = (name: string): string => fileURLToPath(new URL(`../../../test/fixtures/${name}`, import.meta.url));
 
 const oneByOne = fixture("ocr-sample-1x.png");
@@ -28,7 +33,7 @@ function center(box: OcrTextObservation["box"]): { readonly x: number; readonly 
 	return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-describe.runIf(process.platform === "darwin")(
+describe.runIf(realMac)(
 	"#given a fixture rendered with known text at known anchors #when Vision OCR reads it #then the strings come back with tap-ready pixel boxes",
 	() => {
 		it("recognises every line the generator drew, in image pixel space with a top-left origin", () => {
@@ -82,7 +87,7 @@ describe.runIf(process.platform === "darwin")(
 	},
 );
 
-describe.runIf(process.platform === "darwin")(
+describe.runIf(realMac)(
 	"#given a region of the image #when Vision OCR reads it #then only that region is read and boxes stay in whole-image pixels",
 	() => {
 		it("returns the text inside the region at the same pixels as an uncropped read, and nothing outside it", () => {

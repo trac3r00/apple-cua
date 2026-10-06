@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execa } from "execa";
@@ -63,6 +64,9 @@ describe("apple-cua CLI", () => {
 			"windows",
 			"ios",
 			"doctor",
+			"config",
+			"update",
+			"uninstall",
 		];
 
 		// when
@@ -102,6 +106,47 @@ describe("apple-cua CLI", () => {
 		);
 		expect(report.ready).toBe(report.checks.every((item) => item.status !== "fail"));
 		expect(result.exitCode).toBe(report.ready ? 0 : 1);
+	}, 60_000);
+
+	it("#given an empty home #when config registers omo and approves an app #then config.json and the omo entry are written and --show reports them", async () => {
+		const home = mkdtempSync(join(tmpdir(), "apple-cua-cli-config-"));
+		try {
+			const env = { ...process.env, HOME: home, APPLE_CUA_HOME: join(home, ".apple-cua"), FORCE_COLOR: "0" };
+			const run = (args: string[]) =>
+				execa(process.execPath, ["--experimental-strip-types", cliPath, ...args], { cwd: workspaceRoot, env });
+
+			const registered = await run([
+				"config",
+				"--register",
+				"omo",
+				"--allow",
+				"com.apple.TextEdit",
+				"--toolset",
+				"lean",
+			]);
+			const shown = await run(["--json", "config", "--show"]);
+
+			const report = JSON.parse(shown.stdout) as {
+				saved: boolean;
+				settings: { allowedApps: string[]; toolset: string; clients: string[] };
+				registrations: { client: string; state: string }[];
+			};
+			const omo = JSON.parse(readFileSync(join(home, ".omo/agent/mcp.json"), "utf8")) as {
+				mcpServers: Record<string, { env: Record<string, string> }>;
+			};
+			expect(registered.stdout).toContain("added apple-cua");
+			expect(report).toMatchObject({
+				saved: true,
+				settings: { allowedApps: ["com.apple.TextEdit"], toolset: "lean", clients: ["omo"] },
+				registrations: [{ client: "omo", state: "current" }],
+			});
+			expect(omo.mcpServers["apple-cua"]?.env).toMatchObject({
+				APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit",
+				APPLE_CUA_TOOLSET: "lean",
+			});
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
 	}, 60_000);
 });
 

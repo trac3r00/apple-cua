@@ -21,8 +21,8 @@ import type {
 	ScrollOptions,
 } from "@apple-cua/core";
 import { Command } from "commander";
-import { evaluateDoctor, formatDoctorReport, gatherDoctorFacts } from "./doctor.js";
 import { registerIosCommands } from "./ios.js";
+import { registerLifecycleCommands } from "./lifecycle-commands.js";
 import { commandPathOf, stopRefusalFor } from "./stop-gate.js";
 
 type PackageJson = {
@@ -526,18 +526,8 @@ program
 		);
 	});
 
-program
-	.command("doctor")
-	.description(
-		'Check this Mac, the native binaries, the signed helper and the permissions of "apple-cua MCP" without raising a permission prompt; exits 0 when ready, 1 otherwise',
-	)
-	.action(() => {
-		const report = evaluateDoctor(gatherDoctorFacts());
-		writeOutput(report, formatDoctorReport(report));
-		process.exitCode = report.ready ? 0 : 1;
-	});
-
 registerIosCommands(program, { isJsonOutput });
+registerLifecycleCommands(program, { isJsonOutput });
 
 // Refuse input commands while the stop switch is on, before any command code can send input.
 program.hook("preAction", (_program, actionCommand) => {

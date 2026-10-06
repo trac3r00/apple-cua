@@ -2,7 +2,15 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { type DoctorFacts, evaluateDoctor, machOArchitectures, parseSelfCheckOutput } from "./doctor.js";
+import {
+	type DoctorFacts,
+	detectArchitecture,
+	evaluateDoctor,
+	machOArchitectures,
+	macosSupported,
+	parseSelfCheckOutput,
+	readNativeInputs,
+} from "./doctor.js";
 
 const nativeDir = join(dirname(fileURLToPath(import.meta.url)), "../../core/native");
 
@@ -28,18 +36,20 @@ const X86_64 = 0x01000007;
 
 function readyFacts(): DoctorFacts {
 	return {
-		macos: { version: "26.7", hardwareArch: "arm64", translated: false },
-		node: { version: "v22.23.2", execPath: "/usr/local/bin/node", arch: "arm64" },
+		macos: { version: "26.7", hardwareArch: "arm64" },
+		node: { version: "v22.23.2", execPath: "/usr/local/bin/node", arch: "arm64", translated: false },
 		natives: [
 			{ name: "libsckit.dylib", path: "/repo/libsckit.dylib", architectures: ["x86_64", "arm64"] },
 			{ name: "cursor-overlay", path: "/repo/cursor-overlay", architectures: ["x86_64", "arm64"] },
 		],
+		nativeInputs: { matches: true, detail: "build-inputs.sha256 matches" },
 		server: { path: "/repo/server.js", present: true },
 		helper: {
 			app: "/repo/apple-cua-mcp.app",
 			present: true,
 			signature: { valid: true, detail: "valid" },
 			bundledNode: { version: "v22.23.2" },
+			inputs: { built: "abc", current: "abc" },
 		},
 		selfCheck: {
 			ok: true,
@@ -52,6 +62,13 @@ function readyFacts(): DoctorFacts {
 			},
 		},
 		stop: { stopped: false },
+		config: {
+			path: "/home/.apple-cua/config.json",
+			saved: true,
+			clients: [
+				{ client: "omo", state: "current", path: "/home/.omo/agent/mcp.json", detail: "registered, up to date" },
+			],
+		},
 	};
 }
 
@@ -71,11 +88,59 @@ describe("#given Mach-O headers #when their architectures are read #then every s
 		expect(machOArchitectures(Buffer.alloc(4))).toBeUndefined();
 	});
 
-	it("finds both an Apple Silicon and an Intel slice in the committed native binaries", () => {
+	it("finds both an Apple Silicon and an Intel slice in the committed native binaries, built from the sources beside them", () => {
 		for (const name of ["libsckit.dylib", "cursor-overlay"]) {
 			const architectures = machOArchitectures(readFileSync(join(nativeDir, name)).subarray(0, 4096));
 			expect(architectures).toEqual(expect.arrayContaining(["arm64", "x86_64"]));
 		}
+		expect(readNativeInputs(nativeDir)).toEqual({ matches: true, detail: "build-inputs.sha256 matches" });
+	});
+});
+
+describe("#given the CPU and this Node #when the architecture is detected #then Rosetta is told apart from Intel", () => {
+	it("calls an Intel Node on Apple Silicon translated, and native builds on either CPU not", () => {
+		expect(detectArchitecture({ hwOptionalArm64: "1", procTranslated: "0", processArch: "arm64" })).toEqual({
+			hardwareArch: "arm64",
+			nodeArch: "arm64",
+			nodeTranslated: false,
+		});
+		expect(detectArchitecture({ hwOptionalArm64: "1", procTranslated: undefined, processArch: "x64" })).toEqual({
+			hardwareArch: "arm64",
+			nodeArch: "x86_64",
+			nodeTranslated: true,
+		});
+		expect(detectArchitecture({ hwOptionalArm64: undefined, procTranslated: undefined, processArch: "x64" })).toEqual(
+			{
+				hardwareArch: "x86_64",
+				nodeArch: "x86_64",
+				nodeTranslated: false,
+			},
+		);
+		expect(detectArchitecture({ hwOptionalArm64: "1", procTranslated: "1", processArch: "x64" }).nodeTranslated).toBe(
+			true,
+		);
+	});
+
+	it("warns about a translated Node and a translated helper without blocking readiness", () => {
+		const facts = readyFacts();
+		const report = evaluateDoctor({
+			...facts,
+			node: { ...facts.node, arch: "x86_64", translated: true },
+			selfCheck:
+				facts.selfCheck?.ok === true
+					? { ok: true, report: { ...facts.selfCheck.report, processArch: "x86_64" } }
+					: facts.selfCheck,
+		});
+
+		expect(report.ready).toBe(true);
+		expect(report.checks.find((item) => item.id === "node")).toMatchObject({
+			status: "warn",
+			fix: expect.stringContaining("native arm64 Node.js"),
+		});
+		expect(report.checks.find((item) => item.id === "helper-arch")).toMatchObject({
+			status: "warn",
+			fix: expect.stringContaining("--rebuild-helper"),
+		});
 	});
 });
 
@@ -91,7 +156,7 @@ describe("#given a fully installed and permitted Mac #when the doctor evaluates 
 });
 
 describe("#given a fresh helper identity without grants #when the doctor evaluates it #then the grants are the one manual step left", () => {
-	it("fails only the two manual permission checks, each with a fix", () => {
+	it("fails only the two manual permission checks, each with a fix that names the System Settings pane", () => {
 		const facts = readyFacts();
 		const report = evaluateDoctor({
 			...facts,
@@ -112,6 +177,7 @@ describe("#given a fresh helper identity without grants #when the doctor evaluat
 		expect(report.onlyManualStepsRemain).toBe(true);
 		expect(failures.map((item) => item.id)).toEqual(["permission:accessibility", "permission:screen-recording"]);
 		expect(failures.every((item) => item.manual === true && item.fix !== undefined)).toBe(true);
+		expect(failures[1]?.fix).toContain("Screen & System Audio Recording");
 		expect(report.nextSteps).toHaveLength(2);
 	});
 });
@@ -144,26 +210,81 @@ describe("#given broken or missing pieces #when the doctor evaluates them #then 
 			selfCheck: undefined,
 		});
 
-		expect(statusOf({ ...facts, helper: { ...facts.helper, present: false }, selfCheck: undefined }, "helper")).toBe(
-			"fail",
-		);
+		expect(report.checks.find((item) => item.id === "helper")?.status).toBe("fail");
 		expect(report.checks.find((item) => item.id === "self-check")?.status).toBe("fail");
 		expect(report.checks.some((item) => item.id.startsWith("permission:"))).toBe(false);
 		expect(report.onlyManualStepsRemain).toBe(false);
 	});
 
-	it("fails a macOS older than the floor and a Node older than 20", () => {
+	it("refuses every macOS older than 15 and accepts Sequoia and Tahoe", () => {
 		const facts = readyFacts();
 
-		expect(statusOf({ ...facts, macos: { ...facts.macos, version: "13.6.9" } }, "macos")).toBe("fail");
-		expect(statusOf({ ...facts, macos: { ...facts.macos, version: "14.0" } }, "macos")).toBe("ok");
-		expect(statusOf({ ...facts, node: { ...facts.node, version: "v18.20.4" } }, "node")).toBe("fail");
+		for (const version of ["14.7.1", "13.6.9", "unknown"]) {
+			expect(macosSupported(version)).toBe(false);
+			expect(statusOf({ ...facts, macos: { ...facts.macos, version } }, "macos")).toBe("fail");
+		}
+		for (const version of ["15.0", "15.7.2", "26.0", "26.7"]) {
+			expect(macosSupported(version)).toBe(true);
+			expect(statusOf({ ...facts, macos: { ...facts.macos, version } }, "macos")).toBe("ok");
+		}
+		expect(evaluateDoctor({ ...facts, macos: { ...facts.macos, version: "14.7.1" } }).checks[0]?.summary).toMatch(
+			/needs macOS 15\.0 \(Sequoia\) or later/,
+		);
 	});
 
-	it("fails when the server does not answer through the helper", () => {
+	it("fails a Node older than 20 and a server that does not answer through the helper", () => {
 		const facts = readyFacts();
 
+		expect(statusOf({ ...facts, node: { ...facts.node, version: "v18.20.4" } }, "node")).toBe("fail");
 		expect(statusOf({ ...facts, selfCheck: { ok: false, error: "exit 1" } }, "self-check")).toBe("fail");
+	});
+});
+
+describe("#given binaries or a helper built from other inputs than this checkout's #when the doctor evaluates them #then it warns", () => {
+	it("warns about stale native inputs and a helper built from another launcher, and not about a helper without a stamp", () => {
+		const facts = readyFacts();
+
+		expect(
+			statusOf({ ...facts, nativeInputs: { matches: false, detail: "changed: sckit.m" } }, "native-inputs"),
+		).toBe("warn");
+		expect(
+			statusOf({ ...facts, helper: { ...facts.helper, inputs: { built: "old", current: "new" } } }, "helper-inputs"),
+		).toBe("warn");
+		expect(statusOf({ ...facts, helper: { ...facts.helper, inputs: undefined } }, "helper-inputs")).toBeUndefined();
+	});
+});
+
+describe("#given MCP client registrations #when the doctor evaluates them #then stale ones fail with the --fix repair", () => {
+	it("fails a stale or missing registration, accepts a printed block, and only warns when none is registered", () => {
+		const facts = readyFacts();
+		const withClient = (state: "stale" | "missing" | "manual" | "unreadable") =>
+			evaluateDoctor({
+				...facts,
+				config: {
+					...facts.config,
+					clients: [{ client: "omo", state, path: "/home/.omo/agent/mcp.json", detail: "x" }],
+				},
+			}).checks.find((item) => item.id === "client:omo");
+
+		expect(withClient("stale")).toMatchObject({
+			status: "fail",
+			fix: expect.stringContaining("apple-cua doctor --fix"),
+		});
+		expect(withClient("missing")?.status).toBe("fail");
+		expect(withClient("unreadable")).toMatchObject({ status: "fail", fix: expect.stringContaining("by hand") });
+		expect(withClient("manual")?.status).toBe("ok");
+		const none = evaluateDoctor({ ...facts, config: { ...facts.config, clients: [] } });
+		expect(none.ready).toBe(true);
+		expect(none.checks.find((item) => item.id === "clients")).toMatchObject({
+			status: "warn",
+			fix: expect.stringContaining("apple-cua config --register"),
+		});
+		expect(
+			statusOf(
+				{ ...facts, config: { path: "/c.json", saved: true, error: "not valid JSON", clients: [] } },
+				"config",
+			),
+		).toBe("fail");
 	});
 });
 

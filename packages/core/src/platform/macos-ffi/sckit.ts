@@ -36,12 +36,8 @@ const SCK_ERR_CAPTURE_FAILED = -3;
 const SCK_ERR_ENCODE_FAILED = -4;
 const SCK_ERR_INVALID_ARGS = -5;
 const SCK_ERR_TIMEOUT = -6;
-const SCK_ERR_UNAVAILABLE = -7;
 const SCK_WINDOW_FORMAT_PNG = 0;
 const SCK_WINDOW_FORMAT_JPEG = 1;
-
-const SCKIT_UNSUPPORTED_MESSAGE =
-	"this macOS has no ScreenCaptureKit screenshot API (it arrived in macOS 14.0), so screenshots use the CoreGraphics and screencapture fallbacks";
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const sckitDylibCandidatePaths: readonly string[] = [
@@ -55,10 +51,9 @@ let bindingsLoadAttempted = false;
 let loadErrorMessage = "";
 
 /**
- * The native capture library, loaded once. Null when it cannot be used on this host: the file is missing,
- * dlopen refuses it (for example a binary without this machine's architecture slice), or this macOS lacks the
- * screenshot API it calls. Every caller then takes its CoreGraphics or screencapture fallback, and
- * getSckitLoadError() says why.
+ * The native capture library, loaded once. Null when it cannot be used on this host: the file is missing, or
+ * dlopen refuses it (for example a binary without this machine's architecture slice). Every caller then takes its
+ * CoreGraphics or screencapture fallback, and getSckitLoadError() says why.
  */
 function tryLoadSckitBindings(): SckBindings | null {
 	if (bindingsLoadAttempted) {
@@ -74,11 +69,6 @@ function tryLoadSckitBindings(): SckBindings | null {
 	for (const candidatePath of existingPaths) {
 		try {
 			const library = koffi.load(candidatePath);
-			const supported = library.func("sck_capture_supported", "int", []) as KoffiFunc<() => number>;
-			if (supported() !== 1) {
-				loadErrorMessage = SCKIT_UNSUPPORTED_MESSAGE;
-				return null;
-			}
 			const capture = library.func("sck_capture_main_display_png", "int", [
 				"int",
 				"int",
@@ -217,8 +207,6 @@ function describeSckError(code: number): string {
 			return "invalid arguments";
 		case SCK_ERR_TIMEOUT:
 			return "ScreenCaptureKit timed out";
-		case SCK_ERR_UNAVAILABLE:
-			return "ScreenCaptureKit screenshots need macOS 14.0 or later";
 		default:
 			return "unknown SCK error";
 	}

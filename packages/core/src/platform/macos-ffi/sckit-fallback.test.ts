@@ -2,15 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
-type SckitMode = "load-fails" | "unsupported" | "supported";
+type SckitMode = "load-fails" | "supported";
 
 const koffiMock = vi.hoisted(() => {
-	const state: { mode: "load-fails" | "unsupported" | "supported" } = { mode: "load-fails" };
+	const state: { mode: "load-fails" | "supported" } = { mode: "load-fails" };
 	const pngBytes = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 	const nativeBytes = { type: "native-bytes" };
 
 	const sckitFunctions = {
-		sck_capture_supported: vi.fn(() => (state.mode === "supported" ? 1 : 0)),
 		sck_capture_main_display_png: vi.fn(
 			(
 				width: number,
@@ -129,22 +128,6 @@ describe("#given libsckit.dylib cannot be loaded (no slice for this CPU) #when t
 		expect(() => screenshot.captureWindowImage(42, 800, 600, "png", 100)).toThrow(
 			/window capture is unavailable: .*incompatible architecture/,
 		);
-	});
-});
-
-describe("#given the library loads on a macOS without the ScreenCaptureKit screenshot API #when the screen is captured #then no native capture is attempted", () => {
-	it("names the missing API and uses CoreGraphics for the display and the fallback for windows", async () => {
-		const { sckit, screenshot } = await loadCaptureModules("unsupported");
-
-		const shot = screenshot.captureDisplayImage(1, 1440, 900, "png", 100);
-
-		expect(sckit.isSckitAvailable()).toBe(false);
-		expect(sckit.getSckitLoadError()).toMatch(/macOS 14\.0/);
-		expect([...shot.data.subarray(0, 8)]).toEqual(PNG_SIGNATURE);
-		expect(koffiMock.coreGraphicsFunctions.CGDisplayCreateImage).toHaveBeenCalledWith(1);
-		expect(() => screenshot.captureWindowImage(42, 800, 600, "png", 100)).toThrow(/window capture is unavailable/);
-		expect(koffiMock.sckitFunctions.sck_capture_main_display_png).not.toHaveBeenCalled();
-		expect(koffiMock.sckitFunctions.sckit_capture_window).not.toHaveBeenCalled();
 	});
 });
 

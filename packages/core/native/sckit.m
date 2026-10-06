@@ -3,15 +3,12 @@
 // Build: see build.sh in the same directory.
 //
 // Public entry points:
-//   sck_capture_supported() -> int   (1 when this macOS has the screenshot API below, else 0)
 //   sck_capture_main_display_png(w, h, **outBytes, *outLen, *outW, *outH) -> int
 //   sckit_capture_window(windowId, maxW, maxH, format, quality, *outLen) -> *bytes
 //   sck_free(*bytes) -> void
 //   sck_invalidate_cache() -> void   (call after display config change)
 //
-// Availability: the library loads on macOS 12.3 (ScreenCaptureKit itself), but SCScreenshotManager and
-// SCContentFilter's geometry arrived in macOS 14.0. Below that the capture calls return SCK_ERR_UNAVAILABLE
-// (or NULL) without touching those APIs, and the caller uses its CoreGraphics or screencapture fallback.
+// Deployment target: macOS 15.0, so SCScreenshotManager and SCContentFilter's geometry are always present.
 //
 // Memory: returned bytes are malloc'd; caller MUST call sck_free.
 
@@ -34,7 +31,6 @@
 #define SCK_ERR_ENCODE_FAILED -4
 #define SCK_ERR_INVALID_ARGS -5
 #define SCK_ERR_TIMEOUT -6
-#define SCK_ERR_UNAVAILABLE -7
 
 #define SCK_WINDOW_FORMAT_PNG 0
 #define SCK_WINDOW_FORMAT_JPEG 1
@@ -137,20 +133,13 @@ static NSData *encodeCGImageAsPNG(CGImageRef image, int maxPixelSize) {
 	return data;
 }
 
-int sck_capture_supported(void) {
-	if (@available(macOS 14.0, *)) {
-		return 1;
-	}
-	return 0;
-}
-
 static int captureMainDisplayPng(
 	int targetPixelWidth,
 	int targetPixelHeight,
 	uint8_t **outBytes,
 	size_t *outLen,
 	int *outWidth,
-	int *outHeight) API_AVAILABLE(macos(14.0));
+	int *outHeight);
 
 int sck_capture_main_display_png(
 	int targetPixelWidth,
@@ -170,11 +159,8 @@ int sck_capture_main_display_png(
 	*outWidth = 0;
 	*outHeight = 0;
 
-	if (@available(macOS 14.0, *)) {
-		return captureMainDisplayPng(
-			targetPixelWidth, targetPixelHeight, outBytes, outLen, outWidth, outHeight);
-	}
-	return SCK_ERR_UNAVAILABLE;
+	return captureMainDisplayPng(
+		targetPixelWidth, targetPixelHeight, outBytes, outLen, outWidth, outHeight);
 }
 
 static int captureMainDisplayPng(
@@ -429,14 +415,6 @@ static SCKWindowCapturePlan *buildWindowPlan(
 	int32_t maxHeight,
 	SCKWindowIdentity *expectedIdentity,
 	NSTimeInterval startedAt,
-	SCKWindowOperationState *operationState) API_AVAILABLE(macos(14.0));
-
-static SCKWindowCapturePlan *buildWindowPlan(
-	uint32_t windowID,
-	int32_t maxWidth,
-	int32_t maxHeight,
-	SCKWindowIdentity *expectedIdentity,
-	NSTimeInterval startedAt,
 	SCKWindowOperationState *operationState) {
 	__block SCShareableContent *shareableContent = nil;
 	dispatch_semaphore_t done = dispatch_semaphore_create(0);
@@ -537,15 +515,6 @@ static NSData *captureWindowData(
 	int32_t format,
 	int32_t quality,
 	NSTimeInterval startedAt,
-	SCKWindowOperationState *operationState) API_AVAILABLE(macos(14.0));
-
-static NSData *captureWindowData(
-	uint32_t windowID,
-	int32_t maxWidth,
-	int32_t maxHeight,
-	int32_t format,
-	int32_t quality,
-	NSTimeInterval startedAt,
 	SCKWindowOperationState *operationState) {
 	SCKWindowIdentity *identity = currentWindowIdentity(windowID);
 	if (identity == nil) {
@@ -597,7 +566,7 @@ static uint8_t *captureWindow(
 	int32_t maxHeight,
 	int32_t format,
 	int32_t quality,
-	int32_t *outLen) API_AVAILABLE(macos(14.0));
+	int32_t *outLen);
 
 uint8_t *sckit_capture_window(
 	uint32_t windowId,
@@ -615,10 +584,7 @@ uint8_t *sckit_capture_window(
 		quality < 1 || quality > 100) {
 		return NULL;
 	}
-	if (@available(macOS 14.0, *)) {
-		return captureWindow(windowId, maxWidth, maxHeight, format, quality, outLen);
-	}
-	return NULL;
+	return captureWindow(windowId, maxWidth, maxHeight, format, quality, outLen);
 }
 
 static uint8_t *captureWindow(

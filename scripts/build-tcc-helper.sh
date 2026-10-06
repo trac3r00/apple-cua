@@ -4,12 +4,14 @@
 #   scripts/build-tcc-helper.sh [<output dir>]    build <output dir>/apple-cua-mcp.app (default: packages/mcp/dist)
 #   scripts/build-tcc-helper.sh --inputs-digest   print the digest of the inputs a build would use, and exit
 #
-# macOS attributes Screen Recording and Accessibility to the process that asks, and an
-# identity-less process is attributed to whatever launched it. This bundle gives the server its
-# own identity: a small launcher is the bundle's executable, and it spawns the bundled Node with
-# responsibility disclaimed, so the server's asks name the bundle (dev.applecua.mcp by default)
-# instead of the host. APPLE_CUA_BUNDLE_ID sets another bundle id; without it a rebuild keeps the
-# id of the helper it replaces.
+# macOS charges Accessibility, Screen Recording and Automation to a process's responsible process,
+# which for a server started by an MCP client is the client. This bundle gives the server its own
+# identity: a small launcher is the bundle's executable, it re-spawns itself with responsibility
+# disclaimed and that copy runs the bundled Node, so the server's asks name this app
+# ("apple-cua-mcp", dev.applecua.mcp by default) instead of the host or a bare "node". The build
+# registers the app with LaunchServices, without which System Settings does not list it and
+# tccutil cannot find it. APPLE_CUA_BUNDLE_ID sets another bundle id; without it a rebuild keeps
+# the id of the helper it replaces.
 #
 # Note for rebuilds: with ad-hoc signing (the default) the code identity changes on every build,
 # so macOS treats a rebuilt bundle as a new app and asks for Screen Recording and Accessibility
@@ -36,6 +38,7 @@ node_bin="${APPLE_CUA_NODE:-}"
 sign_identity="${APPLE_CUA_SIGN_IDENTITY:--}"
 minimum_macos="15.0"
 stamp="Contents/Resources/helper-inputs.sha256"
+lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 if [[ -n "${APPLE_CUA_BUNDLE_ID:-}" ]]; then
 	bundle_id="$APPLE_CUA_BUNDLE_ID"
@@ -63,7 +66,7 @@ info_plist() {
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>apple-cua MCP</string>
+	<string>apple-cua-mcp</string>
 	<key>CFBundleExecutable</key>
 	<string>$executable</string>
 	<key>CFBundleIdentifier</key>
@@ -73,7 +76,7 @@ info_plist() {
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>apple-cua MCP</string>
+	<string>apple-cua-mcp</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -197,6 +200,8 @@ codesign --force --sign "$sign_identity" --identifier "$bundle_id" "$app/Content
 # Hardened runtime stays off: the executable is Node and needs its JIT pages.
 codesign --force --sign "$sign_identity" "$app"
 codesign --verify --deep --strict "$app"
+"$lsregister" -f "$app" ||
+	echo "warning: LaunchServices did not register $app, so System Settings may not list it" >&2
 
 echo "built $app ($bundle_id) with node $("$node_bin" --version) for $host_arch from $node_bin"
 if [[ "$sign_identity" == "-" ]]; then

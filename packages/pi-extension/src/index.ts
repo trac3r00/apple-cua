@@ -1,20 +1,21 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { MacOSHostComputer } from "@apple-cua/core";
 import { Type } from "typebox";
 
 import {
 	ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
 	type ComputerToolInput,
 	addAnthropicComputerUseToPayload,
-	buildCodexComputerUseSection,
 	buildComputerUseSection,
 	computerToolSchema,
 	executeNativeComputerAction,
 	supportsAnthropicNativeComputerUse,
 } from "./anthropic-computer-use.js";
-import { type DisplayConfig, resolveDisplayConfig } from "./computer-use/coords.js";
+import { McpComputer, ObservedTarget } from "./computer-use/mcp-computer.js";
+import { type Environment, resolveServerLaunch } from "./launcher.js";
+import { type ConnectServer, McpBridge, connectStdio } from "./mcp-bridge.js";
+import { mcpToolDefinitions } from "./mcp-tools.js";
 import {
 	type OpenAIComputerAction,
 	type OpenAIComputerActionBatch,
@@ -25,11 +26,18 @@ import {
 	sanitizeOpenAIComputerUsePayload,
 } from "./openai-computer-use.js";
 import { type AgentToolResult, type ExtensionAPI, defineTool } from "./pi/index.js";
-import { registerAllTools } from "./tools/index.js";
 
-interface ExtensionState {
-	readonly computer: MacOSHostComputer;
-	readonly display: DisplayConfig;
+export interface ExtensionOptions {
+	/** Opens one connection to apple-cua-mcp; defaults to the resolved launcher over stdio. */
+	readonly connect?: ConnectServer;
+	/** Where APPLE_CUA_* settings and launcher overrides are read; defaults to process.env. */
+	readonly env?: Environment;
+}
+
+interface Session {
+	readonly bridge: McpBridge;
+	readonly computer: McpComputer;
+	readonly instructions: string | undefined;
 	readonly enabled: boolean;
 }
 
@@ -54,21 +62,43 @@ const computerFallbackToolSchema = Type.Union([
 	openaiComputerActionBatchSchema,
 ]);
 
-let state: ExtensionState | undefined;
 let openAINativeTransportWarningEmitted = false;
 
 export default function macosCuaExtension(pi: ExtensionAPI): void {
+	installExtension(pi, {});
+}
+
+/** The extension with its server connection and environment supplied, for embedding and tests. */
+export function createMacosCuaExtension(options: ExtensionOptions): (pi: ExtensionAPI) => void {
+	return (pi) => installExtension(pi, options);
+}
+
+function installExtension(pi: ExtensionAPI, options: ExtensionOptions): void {
+	const env = options.env ?? process.env;
+	// Resolved on every connect, so the bundle is read at session start and a settings change reaches the next session.
+	const connect = options.connect ?? (() => connectStdio(resolveServerLaunch(env, packageRoot)));
+	let session: Session | undefined;
+
 	pi.on("resources_discover", async () => {
 		return { skillPaths: [skillPath] };
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
-		const computer = new MacOSHostComputer();
-		const display = resolveDisplayConfig(await computer.getScreenSize());
-		const enabled = !isOptedOut(process.env[DISABLE_COMPUTER_USE_BETA_ENV]);
-		state = { computer, display, enabled };
-		registerAllTools(pi, { computer });
+		const previous = session;
+		session = undefined;
+		await previous?.bridge.close();
 
+		const target = new ObservedTarget();
+		const bridge = new McpBridge(connect);
+		bridge.onToolResult((_name, args, result) => target.record(args, result));
+		bridge.onServerExit(() => target.forgetToken());
+		const { tools, instructions } = await bridge.start();
+		for (const tool of mcpToolDefinitions(tools, bridge)) {
+			pi.registerTool(tool);
+		}
+		const computer = new McpComputer((name, args) => bridge.callTool(name, args), target);
+		const enabled = !isTruthyFlag(env[DISABLE_COMPUTER_USE_BETA_ENV]);
+		session = { bridge, computer, instructions, enabled };
 		if (!enabled) {
 			return;
 		}
@@ -78,32 +108,35 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 				name: ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
 				label: "Computer Use",
 				description:
-					"Native computer-use actions for Anthropic and OpenAI Responses: screenshots, pointer, keyboard, scroll, drag, type, and wait.",
+					"Native computer-use actions for Anthropic and OpenAI Responses on the app window last observed with get_app_state: screenshot, click, drag, type, key and wait, each sent to apple-cua-mcp as a guarded call.",
 				parameters: computerFallbackToolSchema,
+				executionMode: "sequential",
 				async execute(_toolCallId, params) {
-					return executeComputerFallback(params, computer, display);
+					return executeComputerFallback(params, computer);
 				},
 			}),
 		);
-		syncComputerToolActivation(pi, ctx.model);
+		syncComputerToolActivation(pi, ctx.model, env);
 	});
 
 	pi.on("model_select", (event) => {
-		syncComputerToolActivation(pi, event.model);
+		if (session?.enabled === true) {
+			syncComputerToolActivation(pi, event.model, env);
+		}
 	});
 
 	pi.on("before_provider_request", (event, ctx) => {
-		if (state === undefined || !state.enabled) {
+		if (session === undefined || !session.enabled) {
 			return event.payload;
 		}
 		const api = ctx.model?.api;
 		if (api === "anthropic-messages") {
-			return addAnthropicComputerUseToPayload(api, event.payload, state.display, ctx.model?.id);
+			return addAnthropicComputerUseToPayload(api, event.payload, session.computer.display(), ctx.model?.id);
 		}
 		if (api === "openai-responses") {
 			const payload = sanitizeOpenAIComputerUsePayload(api, event.payload);
-			if (shouldInjectOpenAINativeComputerUse(ctx.model)) {
-				return addOpenAIComputerUseToPayload(api, payload, state.display);
+			if (shouldInjectOpenAINativeComputerUse(ctx.model, env)) {
+				return addOpenAIComputerUseToPayload(api, payload, session.computer.display());
 			}
 			return payload;
 		}
@@ -111,30 +144,29 @@ export default function macosCuaExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
-		if (state === undefined || !state.enabled) {
+		if (session === undefined) {
 			return undefined;
 		}
-		if (ctx.model?.api !== "anthropic-messages") {
-			return undefined;
+		// An MCP client hands the server's instructions to the model; pi has no MCP client, so the bridge does.
+		const sections =
+			session.instructions === undefined || session.instructions.trim() === ""
+				? []
+				: [`## apple-cua\n${session.instructions.trim()}\n`];
+		if (
+			session.enabled &&
+			ctx.model?.api === "anthropic-messages" &&
+			supportsAnthropicNativeComputerUse(ctx.model.id)
+		) {
+			sections.push(buildComputerUseSection());
 		}
-		const computerPrompt = supportsAnthropicNativeComputerUse(ctx.model.id)
-			? buildComputerUseSection(state.display.modelWidth, state.display.modelHeight)
-			: buildCodexComputerUseSection();
-		return {
-			systemPrompt: `${event.systemPrompt}\n${computerPrompt}`,
-		};
+		return sections.length === 0 ? undefined : { systemPrompt: `${event.systemPrompt}\n${sections.join("\n")}` };
 	});
 
 	pi.on("session_shutdown", async () => {
-		if (state === undefined) return;
-		const { computer } = state;
-		state = undefined;
-		await computer.close();
+		const ending = session;
+		session = undefined;
+		await ending?.bridge.close();
 	});
-}
-
-function isOptedOut(value: string | undefined): boolean {
-	return isTruthyFlag(value);
 }
 
 function isTruthyFlag(value: string | undefined): boolean {
@@ -145,14 +177,11 @@ function isTruthyFlag(value: string | undefined): boolean {
 	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
-function syncComputerToolActivation(pi: ExtensionAPI, model: ComputerUseModel | undefined): void {
-	if (state === undefined || !state.enabled) {
-		return;
-	}
+function syncComputerToolActivation(pi: ExtensionAPI, model: ComputerUseModel | undefined, env: Environment): void {
 	const activeTools = pi.getActiveTools();
 	const shouldActivate =
 		(model?.api === "anthropic-messages" && supportsAnthropicNativeComputerUse(model.id)) ||
-		(model?.api === "openai-responses" && shouldInjectOpenAINativeComputerUse(model));
+		(model?.api === "openai-responses" && shouldInjectOpenAINativeComputerUse(model, env));
 	if (shouldActivate) {
 		if (!activeTools.includes(ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME)) {
 			pi.setActiveTools([...activeTools, ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME]);
@@ -172,14 +201,14 @@ function syncComputerToolActivation(pi: ExtensionAPI, model: ComputerUseModel | 
  * produced an unrunnable loop, so the native path stays off until the transport carries
  * those items and an operator opts in.
  */
-function shouldInjectOpenAINativeComputerUse(model: ComputerUseModel | undefined): boolean {
+function shouldInjectOpenAINativeComputerUse(model: ComputerUseModel | undefined, env: Environment): boolean {
 	if (model?.provider !== "openai") {
 		return false;
 	}
 	if (!isDirectOpenAIEndpoint(model.baseUrl)) {
 		return false;
 	}
-	if (isTruthyFlag(process.env[OPENAI_NATIVE_TRANSPORT_ENV])) {
+	if (isTruthyFlag(env[OPENAI_NATIVE_TRANSPORT_ENV])) {
 		return true;
 	}
 	warnOpenAINativeTransportUnavailable(model.id);
@@ -208,13 +237,12 @@ function warnOpenAINativeTransportUnavailable(modelId: string | undefined): void
 
 async function executeComputerFallback(
 	params: ComputerFallbackInput,
-	computer: MacOSHostComputer,
-	display: DisplayConfig,
+	computer: McpComputer,
 ): Promise<AgentToolResult<undefined>> {
 	if (isOpenAIComputerActionBatch(params)) {
 		let result: AgentToolResult<undefined> | undefined;
 		for (const action of params.actions) {
-			result = await executeOpenAIComputerAction(action, computer, display);
+			result = await executeOpenAIComputerAction(action, computer);
 		}
 		if (result === undefined) {
 			throw new Error("OpenAI computer action batch must include at least one action");
@@ -222,9 +250,9 @@ async function executeComputerFallback(
 		return result;
 	}
 	if (isOpenAIComputerAction(params)) {
-		return executeOpenAIComputerAction(params, computer, display);
+		return executeOpenAIComputerAction(params, computer);
 	}
-	return executeNativeComputerAction(params, computer, display);
+	return executeNativeComputerAction(params, computer);
 }
 
 function isOpenAIComputerActionBatch(params: ComputerFallbackInput): params is OpenAIComputerActionBatch {

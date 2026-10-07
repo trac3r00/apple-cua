@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
+import { RecordingComputer } from "../test/support/recording-computer.js";
 import {
 	ANTHROPIC_COMPUTER_USE_BETA,
 	ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
 	ANTHROPIC_NATIVE_COMPUTER_TOOL_TYPE,
-	type ComputerActionDriver,
 	ComputerUseError,
 	addAnthropicComputerUseToPayload,
 	executeNativeComputerAction,
@@ -12,80 +12,25 @@ import {
 } from "./anthropic-computer-use.js";
 import type { DisplayConfig } from "./computer-use/coords.js";
 
-const DEFAULT_DOWNSCALE = {
-	logicalWidth: 2560,
-	logicalHeight: 1440,
+const WINDOW_DISPLAY = {
+	logicalWidth: 1280,
+	logicalHeight: 720,
 	modelWidth: 1280,
 	modelHeight: 720,
 } satisfies DisplayConfig;
 
-const ONE_TO_ONE_DOWNSCALE = {
+const SMALL_DISPLAY = {
 	logicalWidth: 100,
 	logicalHeight: 80,
 	modelWidth: 100,
 	modelHeight: 80,
 } satisfies DisplayConfig;
 
-function createComputer(): ComputerActionDriver {
-	return {
-		capabilities: {
-			supportsScreenshot: true,
-			supportsInput: true,
-			supportsAccessibility: true,
-			supportsClipboard: true,
-		},
-		screenshot: vi.fn<ComputerActionDriver["screenshot"]>().mockResolvedValue({
-			data: Buffer.from("png"),
-			mimeType: "image/png",
-			width: 100,
-			height: 80,
-		}),
-		setTarget: vi.fn<ComputerActionDriver["setTarget"]>(),
-		move: vi.fn<ComputerActionDriver["move"]>().mockResolvedValue(undefined),
-		click: vi.fn<ComputerActionDriver["click"]>().mockResolvedValue(undefined),
-		rightClick: vi.fn<ComputerActionDriver["rightClick"]>().mockResolvedValue(undefined),
-		middleClick: vi.fn<ComputerActionDriver["middleClick"]>().mockResolvedValue(undefined),
-		doubleClick: vi.fn<ComputerActionDriver["doubleClick"]>().mockResolvedValue(undefined),
-		type: vi.fn<ComputerActionDriver["type"]>().mockResolvedValue(undefined),
-		key: vi.fn<ComputerActionDriver["key"]>().mockResolvedValue(undefined),
-		scroll: vi.fn<ComputerActionDriver["scroll"]>().mockResolvedValue(undefined),
-		drag: vi.fn<ComputerActionDriver["drag"]>().mockResolvedValue(undefined),
-		getCursorPosition: vi.fn<ComputerActionDriver["getCursorPosition"]>().mockResolvedValue({ x: 7, y: 9 }),
-		getScreenSize: vi.fn<ComputerActionDriver["getScreenSize"]>().mockResolvedValue({ width: 100, height: 80 }),
-		getScreenshotViewport: vi.fn<ComputerActionDriver["getScreenshotViewport"]>().mockResolvedValue(undefined),
-		getAppState: vi.fn<ComputerActionDriver["getAppState"]>().mockResolvedValue({
-			app: "TestApp",
-			bundleId: "com.test.app",
-			pid: 1234,
-			frontmost: true,
-			axAvailable: true,
-			elements: [],
-			screenshotBase64: "",
-			screenshotWidth: 100,
-			screenshotHeight: 80,
-			display: { width: 100, height: 80, scaleFactor: 1 },
-		}),
-		listApps: vi.fn<ComputerActionDriver["listApps"]>().mockResolvedValue([]),
-		setValue: vi.fn<ComputerActionDriver["setValue"]>().mockResolvedValue(undefined),
-		selectText: vi.fn<ComputerActionDriver["selectText"]>().mockResolvedValue(undefined),
-		performAction: vi.fn<ComputerActionDriver["performAction"]>().mockResolvedValue(undefined),
-		pressAtPosition: vi.fn<ComputerActionDriver["pressAtPosition"]>().mockResolvedValue(false),
-		typeIntoFocused: vi.fn<ComputerActionDriver["typeIntoFocused"]>().mockResolvedValue(false),
-		assertObservationCurrent: vi.fn<ComputerActionDriver["assertObservationCurrent"]>(),
-		close: vi.fn<ComputerActionDriver["close"]>().mockResolvedValue(undefined),
-	};
-}
-
-afterEach(() => {
-	vi.useRealTimers();
-	vi.restoreAllMocks();
-});
-
 describe("#given a non-Anthropic provider #when adding computer use #then payload is untouched", () => {
 	it("returns the original payload reference", () => {
 		const payload = { messages: [] };
 
-		const result = addAnthropicComputerUseToPayload("openai-responses", payload, DEFAULT_DOWNSCALE);
+		const result = addAnthropicComputerUseToPayload("openai-responses", payload, WINDOW_DISPLAY);
 
 		expect(result).toBe(payload);
 	});
@@ -95,7 +40,7 @@ describe("#given a non-record payload #when adding computer use #then payload is
 	it("returns the original payload value", () => {
 		const payload = "not-a-record";
 
-		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, DEFAULT_DOWNSCALE);
+		const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, WINDOW_DISPLAY);
 
 		expect(result).toBe(payload);
 	});
@@ -107,7 +52,7 @@ describe("#given unknown or unsupported model #when adding computer use #then pa
 		(modelId) => {
 			const payload = { messages: [] };
 
-			const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, DEFAULT_DOWNSCALE, modelId);
+			const result = addAnthropicComputerUseToPayload("anthropic-messages", payload, WINDOW_DISPLAY, modelId);
 
 			expect(result).toBe(payload);
 			expect(supportsAnthropicNativeComputerUse(modelId)).toBe(false);
@@ -130,13 +75,11 @@ describe("#given a documented computer-use model #when checking support #then re
 });
 
 describe("#given a fresh Anthropic payload #when adding computer use #then beta and native tool are injected", () => {
-	it("adds headers, extra_body betas, and downscaled computer tool dimensions", () => {
-		const payload = { messages: [] };
-
+	it("adds headers, extra_body betas, and the declared display dimensions", () => {
 		const result = addAnthropicComputerUseToPayload(
 			"anthropic-messages",
-			payload,
-			DEFAULT_DOWNSCALE,
+			{ messages: [] },
+			WINDOW_DISPLAY,
 			"claude-sonnet-4-5",
 		);
 
@@ -163,13 +106,11 @@ describe("#given an existing Anthropic beta header #when adding computer use #th
 		const result = addAnthropicComputerUseToPayload(
 			"anthropic-messages",
 			payload,
-			DEFAULT_DOWNSCALE,
+			WINDOW_DISPLAY,
 			"claude-sonnet-4-5",
 		);
 
-		expect(result).toMatchObject({
-			headers: { "anthropic-beta": `foo,${ANTHROPIC_COMPUTER_USE_BETA}` },
-		});
+		expect(result).toMatchObject({ headers: { "anthropic-beta": `foo,${ANTHROPIC_COMPUTER_USE_BETA}` } });
 	});
 });
 
@@ -180,7 +121,7 @@ describe("#given an existing extra_body beta #when adding computer use #then bet
 		const result = addAnthropicComputerUseToPayload(
 			"anthropic-messages",
 			payload,
-			DEFAULT_DOWNSCALE,
+			WINDOW_DISPLAY,
 			"claude-sonnet-4-5",
 		);
 
@@ -189,38 +130,10 @@ describe("#given an existing extra_body beta #when adding computer use #then bet
 });
 
 describe("#given a function-shaped computer tool #when adding computer use #then native variant replaces it", () => {
-	it("strips the function-shaped duplicate before injection", () => {
-		const unrelatedTool = { name: "other", input_schema: {} };
-		const payload = {
-			tools: [{ name: "computer", input_schema: {} }, unrelatedTool],
-		};
-
-		const result = addAnthropicComputerUseToPayload(
-			"anthropic-messages",
-			payload,
-			DEFAULT_DOWNSCALE,
-			"claude-sonnet-4-5",
-		);
-
-		expect(result).toMatchObject({
-			tools: [
-				unrelatedTool,
-				{
-					type: ANTHROPIC_NATIVE_COMPUTER_TOOL_TYPE,
-					name: ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
-					display_width_px: 1280,
-					display_height_px: 720,
-				},
-			],
-		});
-	});
-});
-
-describe("#given unrelated payload fields #when adding computer use #then existing values are preserved", () => {
-	it("keeps unrelated tools, headers, and extra_body keys", () => {
+	it("strips the function-shaped duplicate before injection and keeps unrelated tools and fields", () => {
 		const unrelatedTool = { name: "shell", input_schema: { type: "object" } };
 		const payload = {
-			tools: [unrelatedTool],
+			tools: [{ name: "computer", input_schema: {} }, unrelatedTool],
 			headers: { "x-custom": "kept" },
 			extra_body: { temperature: 0.2, betas: ["other-beta"] },
 		};
@@ -228,7 +141,7 @@ describe("#given unrelated payload fields #when adding computer use #then existi
 		const result = addAnthropicComputerUseToPayload(
 			"anthropic-messages",
 			payload,
-			ONE_TO_ONE_DOWNSCALE,
+			SMALL_DISPLAY,
 			"claude-sonnet-4-5",
 		);
 
@@ -248,110 +161,122 @@ describe("#given unrelated payload fields #when adding computer use #then existi
 	});
 });
 
-describe("#given screenshot action #when executed #then image content is returned", () => {
-	it("returns PNG mime content", async () => {
-		const computer = createComputer();
+describe("#given Anthropic pointer actions #when executed #then each becomes one guarded click or drag", () => {
+	it.each([
+		["left_click", { button: "left", count: 1 }],
+		["right_click", { button: "right", count: 1 }],
+		["middle_click", { button: "middle", count: 1 }],
+		["double_click", { button: "left", count: 2 }],
+		["triple_click", { button: "left", count: 3 }],
+	] as const)("maps %s", async (action, click) => {
+		const computer = new RecordingComputer();
 
-		const result = await executeNativeComputerAction({ action: "screenshot" }, computer, ONE_TO_ONE_DOWNSCALE);
+		await executeNativeComputerAction({ action, coordinate: [10, 20] }, computer);
 
-		expect(result.content).toEqual([
-			{ type: "image", data: Buffer.from("png").toString("base64"), mimeType: "image/png" },
+		expect(computer.calls).toEqual([
+			{ method: "click", point: { x: 10, y: 20 }, options: { ...click, modifiers: [] } },
 		]);
 	});
-});
 
-describe("#given left_click action #when executed #then click runs once and lightweight result is returned", () => {
-	it("dispatches click to the computer", async () => {
-		const computer = createComputer();
+	it("maps left_click_drag from start_coordinate to coordinate", async () => {
+		const computer = new RecordingComputer();
 
-		const result = await executeNativeComputerAction(
-			{ action: "left_click", coordinate: [10, 20] },
+		await executeNativeComputerAction(
+			{ action: "left_click_drag", start_coordinate: [1, 2], coordinate: [3, 4] },
 			computer,
-			ONE_TO_ONE_DOWNSCALE,
 		);
 
-		expect(computer.click).toHaveBeenCalledTimes(1);
-		expect(computer.click).toHaveBeenCalledWith({ x: 10, y: 20 });
-		expect(result.content).toEqual([{ type: "text", text: JSON.stringify({ ok: true, action: "left_click" }) }]);
+		expect(computer.calls).toEqual([{ method: "drag", from: { x: 1, y: 2 }, to: { x: 3, y: 4 } }]);
 	});
-});
 
-describe("#given key combo action #when executed #then combo is split into key and modifiers", () => {
-	it("splits cmd+shift+t", async () => {
-		const computer = createComputer();
+	it("refuses a click without a coordinate before anything is sent", async () => {
+		const computer = new RecordingComputer();
 
-		await executeNativeComputerAction({ action: "key", text: "cmd+shift+t" }, computer, ONE_TO_ONE_DOWNSCALE);
-
-		expect(computer.key).toHaveBeenCalledWith("t", { modifiers: ["cmd", "shift"] });
-	});
-});
-
-describe("#given triple_click action #when executed #then click runs three times", () => {
-	it("dispatches three clicks", async () => {
-		const computer = createComputer();
-
-		await executeNativeComputerAction({ action: "triple_click", coordinate: [3, 4] }, computer, ONE_TO_ONE_DOWNSCALE);
-
-		expect(computer.click).toHaveBeenCalledTimes(3);
-		expect(computer.click).toHaveBeenNthCalledWith(1, { x: 3, y: 4 });
-		expect(computer.click).toHaveBeenNthCalledWith(2, { x: 3, y: 4 });
-		expect(computer.click).toHaveBeenNthCalledWith(3, { x: 3, y: 4 });
-	});
-});
-
-describe("#given wait action #when executed #then it resolves after duration", () => {
-	it("uses the provided seconds duration", async () => {
-		vi.useFakeTimers();
-		const computer = createComputer();
-
-		const resultPromise = executeNativeComputerAction(
-			{ action: "wait", duration: 0.25 },
-			computer,
-			ONE_TO_ONE_DOWNSCALE,
-		);
-		await vi.advanceTimersByTimeAsync(250);
-
-		await expect(resultPromise).resolves.toEqual({
-			content: [{ type: "text", text: "wait complete" }],
-			details: undefined,
+		await expect(executeNativeComputerAction({ action: "left_click" }, computer)).rejects.toMatchObject({
+			kind: "invalid_arguments",
 		});
-		expect(computer.screenshot).not.toHaveBeenCalled();
+		expect(computer.calls).toEqual([]);
 	});
 });
 
-describe("#given unsupported mouse phase action #when executed #then tagged error is thrown", () => {
-	it("throws ComputerUseError with unsupported_action kind", async () => {
-		const computer = createComputer();
+describe("#given Anthropic keyboard actions #when executed #then they become press_keys and type_text entries", () => {
+	it("passes a chord through and splits an xdotool key sequence", async () => {
+		const computer = new RecordingComputer();
 
-		await expect(
-			executeNativeComputerAction({ action: "left_mouse_down" }, computer, ONE_TO_ONE_DOWNSCALE),
-		).rejects.toBeInstanceOf(ComputerUseError);
-		await expect(
-			executeNativeComputerAction({ action: "left_mouse_down" }, computer, ONE_TO_ONE_DOWNSCALE),
-		).rejects.toMatchObject({
-			action: "left_mouse_down",
-			kind: "unsupported_action",
-			message: "Use click or drag tools for fine-grained mouse phases",
+		await executeNativeComputerAction({ action: "key", text: "cmd+shift+t" }, computer);
+		await executeNativeComputerAction({ action: "key", text: "ctrl+a BackSpace" }, computer);
+
+		expect(computer.calls).toEqual([
+			{ method: "pressKeys", keys: ["cmd+shift+t"] },
+			{ method: "pressKeys", keys: ["ctrl+a", "BackSpace"] },
+		]);
+	});
+
+	it("holds a key for the requested seconds", async () => {
+		const computer = new RecordingComputer();
+
+		await executeNativeComputerAction({ action: "hold_key", text: "shift", duration: 2 }, computer);
+
+		expect(computer.calls).toEqual([{ method: "pressKeys", keys: [{ key: "shift", hold_seconds: 2 }] }]);
+	});
+
+	it("types literal text, including IME text", async () => {
+		const computer = new RecordingComputer();
+
+		await executeNativeComputerAction({ action: "type", text: "안녕하세요" }, computer);
+
+		expect(computer.calls).toEqual([{ method: "typeText", text: "안녕하세요" }]);
+	});
+});
+
+describe("#given screenshot and wait #when executed #then the window is observed or the delay is local", () => {
+	it("observes through the computer and waits a capped duration", async () => {
+		const computer = new RecordingComputer();
+
+		await executeNativeComputerAction({ action: "screenshot" }, computer);
+		const waited = await executeNativeComputerAction({ action: "wait", duration: 0.25 }, computer);
+		await executeNativeComputerAction({ action: "wait", duration: 60 }, computer);
+
+		expect(computer.calls).toEqual([
+			{ method: "screenshot" },
+			{ method: "wait", milliseconds: 250 },
+			{ method: "wait", milliseconds: 10_000 },
+		]);
+		expect(waited.content).toEqual([{ type: "text", text: "wait complete" }]);
+	});
+});
+
+describe("#given an action apple-cua-mcp cannot perform #when executed #then it is refused by name, not faked", () => {
+	it.each(["scroll", "mouse_move", "cursor_position", "left_mouse_down", "left_mouse_up"] as const)(
+		"refuses %s without sending anything",
+		async (action) => {
+			const computer = new RecordingComputer();
+
+			await expect(
+				executeNativeComputerAction(
+					{ action, coordinate: [1, 2], scroll_direction: "down", scroll_amount: 3 },
+					computer,
+				),
+			).rejects.toMatchObject({ kind: "unsupported_action", action });
+			expect(computer.calls).toEqual([]);
+		},
+	);
+});
+
+describe("#given the server refuses an action #when executed #then the refusal surfaces as a tagged error", () => {
+	it("wraps the bridge error with its message", async () => {
+		const computer = new RecordingComputer();
+		computer.click = async () => {
+			throw new Error('{"reason":"app-not-approved"}');
+		};
+
+		const failure = executeNativeComputerAction({ action: "left_click", coordinate: [1, 1] }, computer);
+
+		await expect(failure).rejects.toBeInstanceOf(ComputerUseError);
+		await expect(failure).rejects.toMatchObject({
+			kind: "execution_failed",
+			action: "left_click",
+			message: '{"reason":"app-not-approved"}',
 		});
-	});
-});
-
-describe("#given scaled Anthropic coordinates #when left click executes #then logical screen points are clicked", () => {
-	it("unscales model-space coordinates before dispatch", async () => {
-		const computer = createComputer();
-
-		await executeNativeComputerAction({ action: "left_click", coordinate: [640, 360] }, computer, DEFAULT_DOWNSCALE);
-
-		expect(computer.click).toHaveBeenCalledWith({ x: 1280, y: 720 });
-	});
-});
-
-describe("#given a screenshot action #when screenshot action executes #then requested model dimensions are captured", () => {
-	it("passes target dimensions into the screenshot call", async () => {
-		const computer = createComputer();
-
-		await executeNativeComputerAction({ action: "screenshot" }, computer, DEFAULT_DOWNSCALE);
-
-		expect(computer.screenshot).toHaveBeenCalledWith({ targetSize: { width: 1280, height: 720 } });
 	});
 });

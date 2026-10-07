@@ -2,14 +2,14 @@
 	"name": "@apple-cua/pi-extension",
 	"version": "0.1.0",
 	"type": "module",
-	"description": "Pi coding agent extension for macOS computer control",
+	"description": "Pi coding agent extension bridging to the guarded apple-cua MCP server for macOS computer control",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/trac3r00/apple-cua.git",
 		"directory": "packages/pi-extension"
 	},
-	"keywords": ["pi-extension", "pi-mono", "macos", "computer-use"],
+	"keywords": ["pi-extension", "pi-mono", "macos", "computer-use", "mcp"],
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
 	"pi": {
@@ -27,8 +27,7 @@
 		"test": "vitest --run"
 	},
 	"dependencies": {
-		"@apple-cua/core": "workspace:*",
-		"pngjs": "7.0.0",
+		"@modelcontextprotocol/sdk": "^1.0.0",
 		"typebox": "1.1.38"
 	},
 	"devDependencies": {

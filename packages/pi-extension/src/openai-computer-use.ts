@@ -1,8 +1,14 @@
-import type { ComputerInterface, Point, ScrollOptions } from "@apple-cua/core";
-
-import { ComputerUseError, type ComputerUseResult } from "./anthropic-computer-use.js";
-import { type DisplayConfig, unscaleCoord } from "./computer-use/coords.js";
-import { screenshotResultWithCursor } from "./computer-use/screenshot-result.js";
+import {
+	ComputerUseError,
+	type ComputerUseResult,
+	MCP_GAPS,
+	type MouseButton,
+	type NativeComputer,
+	type Point,
+	errorMessage,
+	textResult,
+	unsupportedAction,
+} from "./computer-use/native-computer.js";
 import type { OpenAIComputerAction, OpenAIComputerToolInput } from "./openai-payload.js";
 export {
 	addOpenAIComputerUseToPayload,
@@ -13,109 +19,86 @@ export {
 export type { OpenAIComputerAction, OpenAIComputerActionBatch } from "./openai-payload.js";
 
 type KeyModifier = "command" | "option" | "control" | "shift";
-type ScrollDirection = ScrollOptions["direction"];
 
+const MAX_WAIT_SECONDS = 10;
+const DEFAULT_WAIT_SECONDS = 1;
+
+/** One OpenAI computer action as apple-cua-mcp calls; actions the server cannot do are refused by name. */
 export async function executeOpenAIComputerAction(
 	input: OpenAIComputerAction,
-	computer: ComputerInterface,
-	display: DisplayConfig,
+	computer: NativeComputer,
 ): Promise<ComputerUseResult> {
 	try {
 		switch (input.type) {
 			case "click":
-				await click(input, computer, display);
-				return okResult(input.type);
+				return await computer.click(parsePosition(input.x, input.y, "click"), {
+					button: parseButton(input.button),
+					count: 1,
+					modifiers: parseModifierKeys(input.keys ?? []),
+				});
 			case "double_click":
-				await computer.doubleClick(parsePosition(input.x, input.y, "double_click", display));
-				return okResult(input.type);
-			case "drag":
-				await computer.drag(parseDrag(input.path, display));
-				return okResult(input.type);
+				return await computer.click(parsePosition(input.x, input.y, "double_click"), {
+					button: "left",
+					count: 2,
+					modifiers: [],
+				});
+			case "drag": {
+				const [from, to] = parseDragPath(input.path);
+				return await computer.drag(from, to);
+			}
 			case "keypress": {
 				const keypress = normalizeOpenAIKeys(input.keys ?? []);
-				await computer.key(
-					keypress.key,
-					keypress.modifiers.length === 0 ? undefined : { modifiers: keypress.modifiers },
-				);
-				return okResult(input.type);
+				return await computer.pressKeys([[...keypress.modifiers, keypress.key].join("+")]);
 			}
 			case "move":
-				await computer.move(parsePosition(input.x, input.y, "move", display));
-				return okResult(input.type);
+				throw unsupportedAction(input.type, MCP_GAPS.pointerMove);
 			case "screenshot":
-				return await screenshotResultWithCursor(computer, display);
+				return await computer.screenshot();
 			case "scroll":
-				await computer.move(parsePosition(input.x, input.y, "scroll", display));
-				await computer.scroll(parseScroll(input.scroll_x, input.scroll_y));
-				return okResult(input.type);
+				throw unsupportedAction(input.type, MCP_GAPS.scroll);
 			case "type":
-				await computer.type(parseText(input.text, "type"));
-				return okResult(input.type);
+				return await computer.typeText(parseText(input.text, "type"));
 			case "wait":
-				await sleep(parseWaitDurationMilliseconds(input.duration));
+				await computer.wait(parseWaitDurationMilliseconds(input.duration));
 				return textResult("wait complete");
 		}
 	} catch (error) {
 		if (error instanceof ComputerUseError) {
 			throw error;
 		}
-		throw new ComputerUseError("execution_failed", errorMessage(error), { cause: error });
+		throw new ComputerUseError("execution_failed", errorMessage(error), { action: input.type, cause: error });
 	}
 }
 
-async function click(
-	input: OpenAIComputerToolInput,
-	computer: ComputerInterface,
-	display: DisplayConfig,
-): Promise<void> {
-	const position = parsePosition(input.x, input.y, "click", display);
-	for (const modifier of parseModifierKeys(input.keys ?? [])) {
-		await computer.key(modifier);
-	}
-	switch (input.button ?? "left") {
+function parseButton(button: OpenAIComputerToolInput["button"]): MouseButton {
+	switch (button ?? "left") {
 		case "left":
-			await computer.click(position);
-			return;
+			return "left";
 		case "right":
-			await computer.rightClick(position);
-			return;
+			return "right";
 		case "wheel":
-			await computer.middleClick(position);
-			return;
-		case "back":
-		case "forward":
-			throw new ComputerUseError("unsupported_action", "browser nav buttons not supported on macOS native", {
-				action: "click",
-			});
+			return "middle";
+		default:
+			throw unsupportedAction("click", MCP_GAPS.navigationButton);
 	}
 }
 
-function parsePosition(x: number | undefined, y: number | undefined, action: string, display: DisplayConfig): Point {
+function parsePosition(x: number | undefined, y: number | undefined, action: string): Point {
 	if (x === undefined || y === undefined || !Number.isFinite(x) || !Number.isFinite(y)) {
 		throw new ComputerUseError("invalid_arguments", `${action} requires finite x and y`);
 	}
-	return unscaleCoord({ x, y }, display);
+	return { x, y };
 }
 
-function parseDrag(
-	path: readonly Point[] | undefined,
-	display: DisplayConfig,
-): { readonly from: Point; readonly to: Point } {
-	if (path === undefined || path.length < 1) {
-		throw new ComputerUseError("invalid_arguments", "drag requires at least one path point");
+function parseDragPath(path: readonly Point[] | undefined): readonly [Point, Point] {
+	if (path === undefined || path.length < 2) {
+		throw new ComputerUseError("invalid_arguments", "drag requires a path with a start and an end point");
 	}
-	const from = path[0];
-	const to = path.at(-1);
-	if (from === undefined || to === undefined) {
-		throw new ComputerUseError("invalid_arguments", "drag requires at least one path point");
+	const [from, to] = path;
+	if (path.length > 2 || from === undefined || to === undefined) {
+		throw unsupportedAction("drag", MCP_GAPS.dragPath);
 	}
-	if (path.length > 2) {
-		process.stderr.write("apple-cua: collapsed OpenAI drag path to endpoints\n");
-	}
-	return {
-		from: parsePosition(from.x, from.y, "drag.path[0]", display),
-		to: parsePosition(to.x, to.y, "drag.path[last]", display),
-	};
+	return [parsePosition(from.x, from.y, "drag.path[0]"), parsePosition(to.x, to.y, "drag.path[1]")];
 }
 
 export function normalizeOpenAIKeys(keys: string[]): { readonly key: string; readonly modifiers: KeyModifier[] } {
@@ -173,24 +156,6 @@ function normalizeOpenAIKey(key: string): string {
 	}
 }
 
-function parseScroll(
-	scrollX: number | undefined,
-	scrollY: number | undefined,
-): {
-	readonly direction: ScrollDirection;
-	readonly amount: number;
-} {
-	const deltaX = scrollX ?? 0;
-	const deltaY = scrollY ?? 0;
-	if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY) || (deltaX === 0 && deltaY === 0)) {
-		throw new ComputerUseError("invalid_arguments", "scroll requires finite non-zero scroll_x or scroll_y");
-	}
-	if (Math.abs(deltaY) >= Math.abs(deltaX) && deltaY !== 0) {
-		return { direction: deltaY > 0 ? "down" : "up", amount: Math.abs(deltaY) };
-	}
-	return { direction: deltaX > 0 ? "right" : "left", amount: Math.abs(deltaX) };
-}
-
 function parseText(text: string | undefined, action: string): string {
 	if (text === undefined || text.length === 0) {
 		throw new ComputerUseError("invalid_arguments", `${action} requires text`);
@@ -199,28 +164,9 @@ function parseText(text: string | undefined, action: string): string {
 }
 
 function parseWaitDurationMilliseconds(duration: number | undefined): number {
-	const seconds = duration ?? 1;
+	const seconds = duration ?? DEFAULT_WAIT_SECONDS;
 	if (!Number.isFinite(seconds)) {
 		throw new ComputerUseError("invalid_arguments", "wait requires finite duration");
 	}
-	return Math.min(10, Math.max(0, seconds)) * 1000;
-}
-
-function okResult(type: string): ComputerUseResult {
-	return textResult(JSON.stringify({ ok: true, type }));
-}
-
-function textResult(text: string): ComputerUseResult {
-	return {
-		content: [{ type: "text", text }],
-		details: undefined,
-	};
-}
-
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
-
-async function sleep(milliseconds: number): Promise<void> {
-	await new Promise((resolve) => setTimeout(resolve, milliseconds));
+	return Math.min(MAX_WAIT_SECONDS, Math.max(0, seconds)) * 1000;
 }

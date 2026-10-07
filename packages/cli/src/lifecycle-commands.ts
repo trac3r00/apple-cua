@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { ReadStream, WriteStream } from "node:tty";
-import { StopSwitch, isBrowserBundle } from "@apple-cua/core";
+import { StopSwitch, isBrowserBundle, probeHostCapabilities } from "@apple-cua/core";
 import type { AutomationStatus } from "@apple-cua/core";
 import type { Command } from "commander";
 import { syncSkillLinks } from "./client-skills.js";
@@ -36,6 +36,7 @@ import {
 import { type Layout, displayPath, readInstallMarker, resolveLayout } from "./layout.js";
 import {
 	type GrantDependencies,
+	type GrantMode,
 	type GrantOutcome,
 	type PermissionRequestAnswer,
 	grantPermissions,
@@ -559,12 +560,61 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 const GRANT_WAIT_MS = 10 * 60_000;
 const GRANT_POLL_MS = 1_500;
 
-/** Re-checks until `granted` holds, the person presses Enter, or ten minutes pass. */
+/**
+ * True when what was typed during a permission wait asks to skip it: a line that is just "s" or "skip". A bare Enter
+ * does not, because one is often already waiting in the terminal (an extra Enter after setup's questions, or a Return
+ * meant for macOS's dialog) and would skip the permission the moment its pane opens.
+ */
+export function asksToSkip(typed: string): boolean {
+	return typed.split(/\r\n|\r|\n/).some((line) => /^\s*s(?:kip)?\s*$/i.test(line));
+}
+
+const WATCH_WAIT_MS = 5 * 60_000;
+const WATCH_NOTE_MS = 30_000;
+
+/**
+ * Re-checks until `granted` holds or five minutes pass, with no terminal to read from (an agent running setup or
+ * doctor --fix). A line every 30 seconds keeps the agent's log moving.
+ */
+async function watchUntilGranted(granted: () => boolean, say: Say): Promise<boolean> {
+	const started = Date.now();
+	for (let note = started + WATCH_NOTE_MS; Date.now() - started < WATCH_WAIT_MS; ) {
+		if (granted()) {
+			return true;
+		}
+		if (Date.now() >= note) {
+			const left = Math.max(0, Math.round((WATCH_WAIT_MS - (Date.now() - started)) / 1000));
+			say(`  still watching (${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")} left)...`);
+			note += WATCH_NOTE_MS;
+		}
+		await sleep(GRANT_POLL_MS);
+	}
+	return granted();
+}
+
+/**
+ * Who the permission guide can reach: a person at the terminal, a person at the Mac with no terminal (an agent ran the
+ * command), or nobody (CI, a locked screen, or --no-wait).
+ */
+function grantMode(wait: boolean, terminalAllowed: boolean): GrantMode {
+	if (terminalAllowed && isInteractive()) {
+		return "terminal";
+	}
+	const ci = process.env["CI"];
+	if (!wait || (ci !== undefined && ci !== "" && ci !== "false")) {
+		return "report";
+	}
+	return probeHostCapabilities().session.screenLocked ? "report" : "watch";
+}
+
+/** Re-checks until `granted` holds, the person types s and Enter, or ten minutes pass. */
 async function waitUntilGranted(granted: () => boolean): Promise<boolean> {
 	const terminal = openTerminal();
 	let skipped = false;
-	const skip = () => {
-		skipped = true;
+	let typed = "";
+	const skip = (chunk: Buffer | string) => {
+		typed += String(chunk);
+		skipped = asksToSkip(typed);
 	};
 	terminal?.input.on("data", skip);
 	// A stream paused by an earlier wait stays paused when a listener is added, so Enter would never arrive.
@@ -604,7 +654,7 @@ function automationAnswer(value: unknown): Record<string, AutomationStatus> | un
 	);
 }
 
-function grantDependencies(layout: Layout, say: Say, open: boolean): GrantDependencies {
+function grantDependencies(layout: Layout, say: Say, open: boolean, mode: GrantMode): GrantDependencies {
 	return {
 		read: () => {
 			const result = runSelfCheck(layout);
@@ -625,7 +675,7 @@ function grantDependencies(layout: Layout, say: Say, open: boolean): GrantDepend
 			};
 		},
 		openUrl: async (url) => open && (await openPrivacyPane(url)),
-		waitFor: waitUntilGranted,
+		waitFor: mode === "terminal" ? waitUntilGranted : (granted) => watchUntilGranted(granted, say),
 		print: say,
 	};
 }
@@ -664,16 +714,19 @@ function approvedBrowsers(layout: Layout): string[] {
 	}
 }
 
-function runGrant(layout: Layout, say: Say, open: boolean): Promise<GrantOutcome> {
+function runGrant(layout: Layout, say: Say, open: boolean, mode: GrantMode): Promise<GrantOutcome> {
 	return grantPermissions(
-		{ interactive: isInteractive(), openPanes: open, extraAutomationTargets: approvedBrowsers(layout) },
-		grantDependencies(layout, say, open),
+		{ mode, openPanes: open, extraAutomationTargets: approvedBrowsers(layout) },
+		grantDependencies(layout, say, open, mode),
 	);
 }
 
-async function runPermissionsGrantCommand(options: { readonly open: boolean }, json: boolean): Promise<number> {
+async function runPermissionsGrantCommand(
+	options: { readonly open: boolean; readonly wait: boolean },
+	json: boolean,
+): Promise<number> {
 	const layout = resolveLayout();
-	const outcome = await runGrant(layout, json ? quiet : print, options.open);
+	const outcome = await runGrant(layout, json ? quiet : print, options.open, grantMode(options.wait, !json));
 	if (json) {
 		print(JSON.stringify(outcome));
 	} else if (outcome.missing.length === 0) {
@@ -723,6 +776,7 @@ interface DoctorCommandOptions {
 	readonly fix?: boolean;
 	readonly rebuildHelper?: boolean;
 	readonly open: boolean;
+	readonly wait: boolean;
 }
 
 async function runDoctorCommand(options: DoctorCommandOptions, json: boolean): Promise<number> {
@@ -734,8 +788,14 @@ async function runDoctorCommand(options: DoctorCommandOptions, json: boolean): P
 	}
 	const say = json ? quiet : print;
 	const stdio = json ? "ignore" : "inherit";
+	const mode = grantMode(options.wait, !json);
 	const outcome = await runDoctorFix(
-		{ rebuildHelper: options.rebuildHelper === true, openPanes: options.open, interactive: !json && isInteractive() },
+		{
+			rebuildHelper: options.rebuildHelper === true,
+			openPanes: options.open,
+			interactive: !json && isInteractive(),
+			guidePermissions: mode !== "report",
+		},
 		{
 			gather: () => gatherDoctorFacts(layout),
 			rebuildNative: () => spawnSync("/bin/bash", [join(layout.nativeDir, "build.sh")], { stdio }).status === 0,
@@ -747,7 +807,7 @@ async function runDoctorCommand(options: DoctorCommandOptions, json: boolean): P
 				new StopSwitch().resume();
 			},
 			openUrl: (url) => spawnSync("/usr/bin/open", [url], { stdio: "ignore" }).status === 0,
-			grantPermissions: () => runGrant(layout, say, options.open),
+			grantPermissions: () => runGrant(layout, say, options.open, mode),
 			ask: confirm,
 			print: say,
 		},
@@ -886,10 +946,14 @@ export function registerLifecycleCommands(program: Command, options: LifecycleCo
 	permissions
 		.command("grant")
 		.description(
-			'Walk through granting "apple-cua-mcp" Accessibility, Screen Recording and Automation: shows macOS\'s dialogs, opens System Settings and waits until each is on; exits 0 when everything is granted',
+			'Walk through granting "apple-cua-mcp" Accessibility, Screen Recording and Automation: shows macOS\'s dialogs, opens System Settings and moves on as soon as each is on (also without a terminal, as when an agent runs it); exits 0 when everything is granted',
 		)
 		.option("--no-open", "print how to open System Settings instead of opening it")
-		.action(async (commandOptions: { readonly open: boolean }) => {
+		.option(
+			"--no-wait",
+			"without a terminal: only list what is missing instead of opening each pane and watching for the switch",
+		)
+		.action(async (commandOptions: { readonly open: boolean; readonly wait: boolean }) => {
 			process.exitCode = await runPermissionsGrantCommand(commandOptions, options.isJsonOutput());
 		});
 
@@ -906,6 +970,10 @@ export function registerLifecycleCommands(program: Command, options: LifecycleCo
 		.option(
 			"--no-open",
 			"with --fix: print how to open System Settings for a missing permission instead of opening it",
+		)
+		.option(
+			"--no-wait",
+			"with --fix and no terminal: open a missing permission's pane without watching for the switch",
 		)
 		.action(async (commandOptions: DoctorCommandOptions) => {
 			process.exitCode = await runDoctorCommand(commandOptions, options.isJsonOutput());

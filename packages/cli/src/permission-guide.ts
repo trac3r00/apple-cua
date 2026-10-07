@@ -25,8 +25,16 @@ export interface GrantDependencies {
 	readonly print: (text: string) => void;
 }
 
+/**
+ * How the guide reaches a person. `terminal`: someone at the terminal, who can type s to skip a permission. `watch`:
+ * no terminal, as when an agent runs setup or doctor --fix, but someone at the Mac: the guide opens each pane and moves
+ * on by itself once the switch is on. `report`: nobody can switch anything on (CI, a locked screen, --no-wait), so it
+ * only lists what is missing.
+ */
+export type GrantMode = "terminal" | "watch" | "report";
+
 export interface GrantOptions {
-	readonly interactive: boolean;
+	readonly mode: GrantMode;
 	readonly openPanes: boolean;
 	/** Apps beyond the helper's own Automation targets to ask about, e.g. approved browsers. */
 	readonly extraAutomationTargets: readonly string[];
@@ -42,8 +50,8 @@ const NAME = `"${HELPER_DISPLAY_NAME}"`;
 
 /**
  * Walks a person through every permission the helper needs: shows macOS's own dialog (which also lists the helper in
- * System Settings), opens the pane where the switch is, and waits until it is on. Without a person it only reports
- * what is missing and how to grant it.
+ * System Settings), opens the pane where the switch is, and moves on as soon as it is on. In `report` mode it only
+ * lists what is missing and how to grant it.
  */
 export async function grantPermissions(options: GrantOptions, deps: GrantDependencies): Promise<GrantOutcome> {
 	const state = deps.read();
@@ -57,6 +65,12 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 	const targets = [
 		...new Set([...Object.keys(state.automation), ...options.extraAutomationTargets.map((id) => id.toLowerCase())]),
 	];
+	const waiting =
+		options.mode === "terminal"
+			? "  Waiting until it is on (type s and press Enter to skip)..."
+			: "  Watching for the switch; this moves on by itself as soon as it is on...";
+	const notInTime =
+		options.mode === "terminal" ? "  skipped" : "  not switched on in time (the guide gives up after five minutes)";
 	const open = async (url: string, pane: string) => {
 		if (options.openPanes && (await deps.openUrl(url))) {
 			deps.print(`  Opened System Settings > Privacy & Security > ${pane}.`);
@@ -89,8 +103,8 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 			deps.print(`ok  ${grant.label} is granted to ${NAME}.`);
 			continue;
 		}
-		if (!options.interactive) {
-			deps.print(`missing  ${grant.label} for ${NAME}: run ${GRANT_COMMAND} in a terminal.`);
+		if (options.mode === "report") {
+			deps.print(`missing  ${grant.label} for ${NAME}: run ${GRANT_COMMAND} while you are at this Mac.`);
 			missing.push(grant.label);
 			continue;
 		}
@@ -98,12 +112,12 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 		deps.print(`  macOS shows a dialog for ${NAME}: choose Open System Settings, then switch on ${NAME}.`);
 		deps.request([grant.kind]);
 		await open(grant.url, grant.pane);
-		deps.print("  Waiting until it is on (press Enter to skip)...");
+		deps.print(waiting);
 		if (await deps.waitFor(() => grant.has(deps.read()))) {
 			deps.print(`  ok  ${grant.label} is granted.`);
 			granted.push(grant.label);
 		} else {
-			deps.print(`  skipped: grant it later with ${GRANT_COMMAND}`);
+			deps.print(`${notInTime}: grant it later with ${GRANT_COMMAND}`);
 			missing.push(grant.label);
 		}
 	}
@@ -117,8 +131,8 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 			deps.print(`ok  ${NAME} may control ${app}.`);
 			continue;
 		}
-		if (!options.interactive) {
-			deps.print(`missing  ${label} for ${NAME}: run ${GRANT_COMMAND} in a terminal.`);
+		if (options.mode === "report") {
+			deps.print(`missing  ${label} for ${NAME}: run ${GRANT_COMMAND} while you are at this Mac.`);
 			missing.push(label);
 			continue;
 		}
@@ -137,12 +151,12 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 		} else {
 			deps.print(`  ${NAME} is not allowed to control ${app}; switch ${app} on under ${NAME}.`);
 			await open(PRIVACY_PANES.automation, "Automation");
-			deps.print("  Waiting until it is on (press Enter to skip)...");
+			deps.print(waiting);
 			if (await deps.waitFor(() => statusOf(false) === "granted")) {
 				deps.print(`  ok  ${NAME} may control ${app}.`);
 				granted.push(label);
 			} else {
-				deps.print("  skipped: switch it on later in System Settings > Privacy & Security > Automation");
+				deps.print(`${notInTime}: switch it on later in System Settings > Privacy & Security > Automation`);
 				missing.push(label);
 			}
 		}

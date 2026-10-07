@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { askForChanges, parseClients } from "./lifecycle-commands.js";
+import { askForChanges, asksToSkip, parseClients } from "./lifecycle-commands.js";
 import { DEFAULT_SETTINGS } from "./settings.js";
 
 function scripted(answers: readonly string[]) {
@@ -65,5 +65,15 @@ describe("#given client names #when they are parsed #then unknown names are refu
 	it("accepts the four clients and names the one it does not know", () => {
 		expect(parseClients(" omo, codex ,json,claude")).toEqual(["omo", "codex", "json", "claude"]);
 		expect(() => parseClients("omo,windsurf")).toThrow(/unknown MCP client windsurf/);
+	});
+});
+
+describe("#given a permission wait #when text arrives on the terminal #then only an explicit s skips it", () => {
+	it("ignores bare Enters already waiting in the terminal and skips on s or skip", () => {
+		expect(asksToSkip("\n")).toBe(false);
+		expect(asksToSkip("\r\n\n\n")).toBe(false);
+		expect(asksToSkip("y\n")).toBe(false);
+		expect(asksToSkip("\ns\n")).toBe(true);
+		expect(asksToSkip(" Skip \r")).toBe(true);
 	});
 });

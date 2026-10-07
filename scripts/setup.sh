@@ -690,16 +690,19 @@ fi
 # --- 11. Permissions -----------------------------------------------------------------------------------------------
 
 step "permissions of \"apple-cua-mcp\" (Accessibility, Screen Recording, Automation)"
-if can_ask; then
-	# Shows macOS's dialogs, opens System Settings and waits for each switch; Enter skips one.
+if ((assume_yes)); then
+	ok "skipped: --yes was given"
+	info "grant them with: $cua permissions grant"
+else
+	# Shows macOS's dialogs, opens System Settings and moves on as soon as each switch is on. In a terminal, typing s
+	# skips one; without one (an agent running setup) it watches each switch for up to five minutes, and on CI or a
+	# locked screen it only lists what is missing.
+	can_ask || info "no terminal: switch each permission on in System Settings as it opens; setup moves on by itself"
 	if node "$cli_js" permissions grant; then
 		ok "every permission is granted"
 	else
 		warn "some permissions are still missing; finish them any time with: $cua permissions grant"
 	fi
-else
-	ok "skipped: --yes was given, or there is no terminal to answer macOS's dialogs on"
-	info "grant them in a terminal with: $cua permissions grant"
 fi
 
 # --- 12. Doctor --------------------------------------------------------------------------------------------------

@@ -173,9 +173,10 @@ Installed. One manual step remains, granting permissions to "apple-cua-mcp":
 
 `apple-cua doctor --fix` rebuilds missing or outdated native binaries and re-registers clients whose entry went stale.
 It asks before rebuilding a broken helper, because a rebuild is a new code identity that needs both permissions again
-(`--rebuild-helper` consents up front), and before lifting a stop. In a terminal it runs the permission walk-through
-for anything missing; without one it prints where each permission is granted (`--no-open` never opens System
-Settings). It ends with what it fixed and what is left.
+(`--rebuild-helper` consents up front), and before lifting a stop. It runs the permission walk-through for anything
+missing, also without a terminal (an agent running it): each pane opens and the walk moves on by itself as soon as the
+switch is on. On CI, on a locked screen or with `--no-wait` it only opens the first pane and lists the rest
+(`--no-open` never opens System Settings). It ends with what it fixed and what is left.
 
 ### Update and uninstall
 

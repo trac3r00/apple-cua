@@ -110,7 +110,7 @@ function fakeMac(answers: readonly boolean[] = []) {
 	return { deps, calls, printed: () => printed.join("\n") };
 }
 
-const UNATTENDED: FixOptions = { rebuildHelper: false, openPanes: true, interactive: false };
+const UNATTENDED: FixOptions = { rebuildHelper: false, openPanes: true, interactive: false, guidePermissions: false };
 
 describe("#given a doctor report #when --fix plans its repairs #then each failure maps to one repair of the right kind", () => {
 	it("plans native, helper, registrations, stop and permissions in that order", () => {
@@ -160,7 +160,10 @@ describe("#given a person at the terminal #when --fix needs consent #then it ask
 	it("asks before rebuilding the helper and before lifting the stop, and does only what was agreed", async () => {
 		const mac = fakeMac([false, true]);
 
-		const outcome = await runDoctorFix({ ...UNATTENDED, interactive: true, openPanes: false }, mac.deps);
+		const outcome = await runDoctorFix(
+			{ ...UNATTENDED, interactive: true, guidePermissions: true, openPanes: false },
+			mac.deps,
+		);
 
 		const asked = mac.calls.filter((call) => call.startsWith("ask "));
 		expect(asked).toHaveLength(2);
@@ -172,6 +175,18 @@ describe("#given a person at the terminal #when --fix needs consent #then it ask
 		expect(mac.calls).toContain("resume");
 		expect(outcome.fixed).toContain("lift the stop switch");
 		expect(mac.calls.at(-1)).toBe("grant permissions");
+		expect(outcome.fixed).toContain(`grant the missing permissions to "${HELPER_DISPLAY_NAME}"`);
+	});
+});
+
+describe("#given an agent running --fix with no terminal #when a person is at the Mac #then the permission guide runs", () => {
+	it("hands the missing permissions to the guide instead of only opening a pane", async () => {
+		const mac = fakeMac();
+
+		const outcome = await runDoctorFix({ ...UNATTENDED, guidePermissions: true }, mac.deps);
+
+		expect(mac.calls).toEqual(["rebuild native", "reapply registrations", "grant permissions"]);
+		expect(mac.calls.some((call) => call.startsWith("ask "))).toBe(false);
 		expect(outcome.fixed).toContain(`grant the missing permissions to "${HELPER_DISPLAY_NAME}"`);
 	});
 });

@@ -91,9 +91,12 @@ The process macOS identifies needs:
 - **Automation / Apple Events** where System Events or browser scripting is used.
 
 Through the helper that process is **apple-cua-mcp**, the name macOS shows in its dialogs and in
-**System Settings → Privacy & Security**. `apple-cua permissions grant` (run by setup, and by
-`apple-cua doctor --fix` in a terminal) shows each dialog, opens the pane with the entry listed and
-waits until it is on; Automation of System Events, Finder and approved running browsers is asked up
+**System Settings → Privacy & Security**. `apple-cua permissions grant` (run by setup and by
+`apple-cua doctor --fix`) shows each dialog, opens the pane with the entry listed and moves on by
+itself as soon as the switch is on. In a terminal, typing `s` skips one. Without a terminal, as when
+an agent such as OmO or OpenClaw runs setup, it does the same and gives up on a switch after five
+minutes (re-running it keeps what is already on); on CI, on a locked screen or with `--no-wait` it
+only lists what is missing. Automation of System Events, Finder and approved running browsers is asked up
 front so no dialog interrupts a task. Restart the MCP client afterwards. Older helpers appear as
 **node** in those lists; that entry is no longer used. Setup and
 `apple-cua update` keep the helper, and so the grants, unless its launcher or Info.plist changed;
@@ -123,8 +126,9 @@ apple-cua --json apps list
 
 - `apple-cua doctor --fix` rebuilds missing or outdated native binaries and re-registers clients
   whose entry, plugin or skill link went stale or was switched off. It asks before rebuilding a broken helper (`--rebuild-helper` consents up
-  front) and before lifting a stop, opens System Settings at a missing permission (`--no-open`
-  prints the command instead), and reports what it fixed and what is left.
+  front) and before lifting a stop, walks through a missing permission as `permissions grant`
+  does, with or without a terminal (`--no-wait` only opens the pane, `--no-open` prints the
+  command instead), and reports what it fixed and what is left.
 - `apple-cua update` refuses a checkout with local changes or commits its upstream lacks, then
   fast-forwards it, reruns setup, re-applies the registrations, runs the doctor, and prints the old
   and new version and commit. It warns first when the helper must be rebuilt, since the rebuilt

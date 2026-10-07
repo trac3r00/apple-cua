@@ -83,7 +83,7 @@ describe("#given a fresh helper with nothing granted #when a person runs the gui
 		const { deps, calls, printed } = fake(mac);
 
 		const outcome = await grantPermissions(
-			{ interactive: true, openPanes: true, extraAutomationTargets: ["com.apple.Safari"] },
+			{ mode: "terminal", openPanes: true, extraAutomationTargets: ["com.apple.Safari"] },
 			deps,
 		);
 
@@ -117,7 +117,7 @@ describe("#given a fresh helper with nothing granted #when a person runs the gui
 		};
 		const { deps, printed } = fake(mac);
 
-		const outcome = await grantPermissions({ interactive: true, openPanes: false, extraAutomationTargets: [] }, deps);
+		const outcome = await grantPermissions({ mode: "terminal", openPanes: false, extraAutomationTargets: [] }, deps);
 
 		expect(outcome.missing).toEqual(["Screen Recording"]);
 		expect(printed()).toContain(`open "${PRIVACY_PANES.screenRecording}"`);
@@ -138,7 +138,7 @@ describe("#given an Automation dialog closed without an answer #when the guide a
 		};
 		const { deps, calls, printed } = fake(mac);
 
-		const outcome = await grantPermissions({ interactive: true, openPanes: true, extraAutomationTargets: [] }, deps);
+		const outcome = await grantPermissions({ mode: "terminal", openPanes: true, extraAutomationTargets: [] }, deps);
 
 		expect(calls).toEqual(["request automation:com.apple.systemevents"]);
 		expect(outcome.missing).toEqual(["Automation of System Events"]);
@@ -146,7 +146,7 @@ describe("#given an Automation dialog closed without an answer #when the guide a
 	});
 });
 
-describe("#given nobody at the terminal #when the guide runs #then it shows no dialog and lists what is missing", () => {
+describe("#given nobody who can switch anything on #when the guide reports #then it shows no dialog and lists what is missing", () => {
 	it("never asks macOS and reports every missing grant", async () => {
 		const mac: FakeMac = {
 			state: {
@@ -159,9 +159,49 @@ describe("#given nobody at the terminal #when the guide runs #then it shows no d
 		};
 		const { deps, calls } = fake(mac);
 
-		const outcome = await grantPermissions({ interactive: false, openPanes: true, extraAutomationTargets: [] }, deps);
+		const outcome = await grantPermissions({ mode: "report", openPanes: true, extraAutomationTargets: [] }, deps);
 
 		expect(calls).toEqual([]);
 		expect(outcome.missing).toEqual(["Accessibility", "Automation of System Events"]);
+	});
+});
+
+describe("#given an agent running the guide with no terminal #when a person is at the Mac #then it watches each switch and moves on", () => {
+	it("shows each dialog, opens each pane and watches, and names a switch left off as not switched on in time", async () => {
+		let pending: "accessibility" | "screenRecording" | undefined;
+		const mac: FakeMac = {
+			state: { accessibility: false, screenRecording: false, automation: {} },
+			onRequest: {
+				accessibility: () => {
+					pending = "accessibility";
+				},
+				"screen-recording": () => {
+					pending = "screenRecording";
+				},
+				"switch-on": () => {
+					if (pending !== undefined) {
+						mac.state[pending] = true;
+					}
+				},
+			},
+			switchesOn: [true, false],
+		};
+		const { deps, calls, printed } = fake(mac);
+
+		const outcome = await grantPermissions({ mode: "watch", openPanes: true, extraAutomationTargets: [] }, deps);
+
+		expect(calls).toEqual([
+			"request accessibility",
+			`open ${PRIVACY_PANES.accessibility}`,
+			"wait",
+			"request screen-recording",
+			`open ${PRIVACY_PANES.screenRecording}`,
+			"wait",
+		]);
+		expect(outcome.granted).toEqual(["Accessibility"]);
+		expect(outcome.missing).toEqual(["Screen Recording"]);
+		expect(printed()).toContain("moves on by itself");
+		expect(printed()).toContain("not switched on in time");
+		expect(printed()).not.toContain("type s");
 	});
 });

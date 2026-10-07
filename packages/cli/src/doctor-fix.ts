@@ -58,6 +58,11 @@ export interface FixOptions {
 	readonly openPanes: boolean;
 	/** A person is at the terminal to answer questions. */
 	readonly interactive: boolean;
+	/**
+	 * Someone is at the Mac to switch permissions on, with or without a terminal: the permission guide runs and moves on
+	 * by itself as each switch turns on. False on CI, on a locked screen and with --no-wait: the pane is only opened.
+	 */
+	readonly guidePermissions: boolean;
 }
 
 export interface FixDependencies {
@@ -67,7 +72,7 @@ export interface FixDependencies {
 	readonly reapplyRegistrations: () => boolean;
 	readonly resume: () => void;
 	readonly openUrl: (url: string) => boolean;
-	/** Walks a person through macOS's permission dialogs (apple-cua permissions grant); called only when interactive. */
+	/** Walks a person through macOS's permission dialogs (apple-cua permissions grant); called when guidePermissions. */
 	readonly grantPermissions: () => Promise<{ readonly missing: readonly string[] }>;
 	/** Asks a yes/no question; called only when interactive. Defaults to no. */
 	readonly ask: (question: string) => Promise<boolean>;
@@ -152,7 +157,7 @@ export async function runDoctorFix(options: FixOptions, deps: FixDependencies): 
 				break;
 			}
 			case "permissions": {
-				if (options.interactive) {
+				if (options.guidePermissions) {
 					const outcome = await deps.grantPermissions();
 					if (outcome.missing.length === 0) {
 						fixed.push(repair.title);

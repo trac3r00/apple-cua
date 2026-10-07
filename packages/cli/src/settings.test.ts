@@ -63,7 +63,7 @@ describe("#given config.json #when settings are saved and loaded #then they roun
 	it("names the file and the key when a value has the wrong type", () => {
 		expect(() => parseSettings("{ nope", "/c.json")).toThrow(/\/c\.json is not valid JSON/);
 		expect(() => parseSettings('{ "delivery": "loud" }', "/c.json")).toThrow(/"delivery" must be/);
-		expect(() => parseSettings('{ "clients": ["cursor"] }', "/c.json")).toThrow(/"clients" must be/);
+		expect(() => parseSettings('{ "clients": ["windsurf"] }', "/c.json")).toThrow(/"clients" must be/);
 		expect(() => parseSettings('{ "allowedApps": "com.apple.TextEdit" }', "/c.json")).toThrow(/"allowedApps"/);
 		expect(parseSettings('{ "clients": ["codex", "omo", "codex"] }', "/c.json").clients).toEqual(["omo", "codex"]);
 	});

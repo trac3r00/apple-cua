@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, rmSync, rmdirSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { StopSwitch } from "@apple-cua/core";
+import { syncSkillLinks } from "./client-skills.js";
 import {
 	type ClientContext,
 	type ClientName,
@@ -27,6 +28,7 @@ import { loadSettings } from "./settings.js";
 export const LAUNCHER_MARKER = "# apple-cua-launcher checkout=";
 /** Ends the one line `setup.sh --add-to-path` appends to a shell startup file. */
 export const PATH_LINE_MARKER = "# added by apple-cua";
+const ADAPTER_CLIENTS: readonly ClientName[] = ["claude", "codex", "gemini", "hermes", "openclaw", "pi"];
 const TCC_SERVICES = ["Accessibility", "ScreenCapture", "AppleEvents"] as const;
 const HELPER_EXECUTABLE = "/Contents/MacOS/apple-cua-mcp";
 const LSREGISTER =
@@ -138,6 +140,14 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 		}
 	}
 
+	// A plugin, extension or agent integration is removed through the client's own CLI, and its adapter leaves another
+	// installation's entry alone by itself, so every tracked one is unregistered.
+	for (const client of facts.trackedClients) {
+		if (ADAPTER_CLIENTS.includes(client) && !unregister.includes(client)) {
+			unregister.push(client);
+		}
+	}
+
 	const installed = facts.helperPresent || facts.trackedClients.length > 0 || facts.stateEntries.length > 0;
 	let keepPermissions: string | undefined;
 	if (facts.helperBundleId === undefined) {
@@ -213,7 +223,10 @@ export function formatPlan(plan: UninstallPlan): string {
 		lines.push(`  ${verb.padEnd(11)}${text}`);
 	};
 	for (const client of plan.unregister) {
-		row("unregister", `${client} (its config file is backed up first)`);
+		row(
+			"unregister",
+			`${client} ${ADAPTER_CLIENTS.includes(client) ? "(through its own command line)" : "(its config file is backed up first)"}`,
+		);
 	}
 	for (const item of plan.stopProcesses) {
 		row("stop", `pid ${item.pid}: ${item.command}`);
@@ -286,7 +299,7 @@ export async function executeUninstall(plan: UninstallPlan, deps: UninstallDepen
 	const backups: string[] = [];
 	const failures: string[] = [];
 	const done = (verb: string, text: string) => {
-		deps.print(`  ${verb.padEnd(13)}${text}`);
+		deps.print(`  ${verb.padEnd(13)}${text.replaceAll("\n", `\n${" ".repeat(15)}`)}`);
 	};
 	const attempt = (what: string, action: () => void) => {
 		try {
@@ -300,13 +313,18 @@ export async function executeUninstall(plan: UninstallPlan, deps: UninstallDepen
 
 	for (const client of plan.unregister) {
 		attempt(`unregister ${client}`, () => {
-			const change = unregisterClient(client, deps.context);
+			const change = unregisterClient(client, deps.context, plan.layout.checkout);
 			if (change.backup !== undefined) {
 				backups.push(change.backup);
 			}
 			done("unregistered", describeChange(change, show));
 		});
 	}
+	attempt("remove the skill links", () => {
+		for (const link of syncSkillLinks([], layout.bundleDir, deps.context)) {
+			done("removed", `the apple-cua skill link in ${show(link.directory)}`);
+		}
+	});
 
 	if (plan.stopProcesses.length > 0) {
 		for (const item of plan.stopProcesses) {
@@ -475,21 +493,23 @@ export function gatherUninstallFacts(layout: Layout, env: Environment): Uninstal
 		trackedClients = [];
 	}
 	const context = { home: layout.home, env, now: new Date() };
-	const clientEntries = (["omo", "codex", "claude"] as const).map((client): ClientEntryFacts => {
-		const { entry } = readClientEntry(client, context);
-		const runsThisCheckout = entry !== undefined && entryRunsCheckout(entry, layout.checkout);
-		const command = entry?.command;
-		return {
-			client,
-			entry,
-			runsThisCheckout,
-			alive: entry !== undefined && entryAlive(entry),
-			otherHelperBundleId:
-				!runsThisCheckout && command?.endsWith(HELPER_EXECUTABLE) === true
-					? bundleIdOf(command.slice(0, -HELPER_EXECUTABLE.length))
-					: undefined,
-		};
-	});
+	const clientEntries = (["omo", "codex", "claude", "cursor", "gemini", "hermes", "openclaw"] as const).map(
+		(client): ClientEntryFacts => {
+			const { entry } = readClientEntry(client, context);
+			const runsThisCheckout = entry !== undefined && entryRunsCheckout(entry, layout.checkout);
+			const command = entry?.command;
+			return {
+				client,
+				entry,
+				runsThisCheckout,
+				alive: entry !== undefined && entryAlive(entry),
+				otherHelperBundleId:
+					!runsThisCheckout && command?.endsWith(HELPER_EXECUTABLE) === true
+						? bundleIdOf(command.slice(0, -HELPER_EXECUTABLE.length))
+						: undefined,
+			};
+		},
+	);
 	const stopFile = new StopSwitch().path;
 	const helperPresent = existsSync(layout.helperApp);
 	return {
@@ -514,9 +534,13 @@ export function gatherUninstallFacts(layout: Layout, env: Environment): Uninstal
 				return [];
 			}
 		}),
-		stateEntries: [layout.configPath, layout.installMarkerPath, stopFile, join(layout.appleCuaHome, "node")].filter(
-			(path) => existsSync(path),
-		),
+		stateEntries: [
+			layout.configPath,
+			layout.installMarkerPath,
+			stopFile,
+			join(layout.appleCuaHome, "node"),
+			layout.bundleDir,
+		].filter((path) => existsSync(path)),
 		stateDirectories: [...new Set([layout.appleCuaHome, dirname(stopFile)])],
 		stopPath: stopFile,
 	};

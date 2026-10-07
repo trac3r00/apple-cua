@@ -120,8 +120,9 @@ that queue. Avoid multiple desktop controllers.
   not reasons to fall back to shell-driven clicking.
 - `get_app_state` keeps optional `diff_only`; it is a payload-size option, not a bypass of
   observation or approval. The first snapshot still includes the full tree.
-- Direct CLI/core and the Pi extension do not automatically gain this MCP policy. Use guarded
-  MCP for this workflow; custom low-level integrations must enforce their own policy.
+- Direct CLI/core use does not gain this MCP policy. The pi extension is a bridge to the MCP
+  server, so it does. Use guarded MCP for this workflow; custom low-level integrations must
+  enforce their own policy.
 - The phone tools (`ios_*`) follow the same rule: `ios_observe` returns the token, every
   `ios_*` mutation needs it, and a mutation answers with a fresh observation and a new token.
 

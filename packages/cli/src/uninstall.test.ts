@@ -126,6 +126,16 @@ describe("#given registrations of several installations #when uninstall is plann
 		expect(plan.resetPermissions).toBeUndefined();
 		expect(plan.keepPermissions).toMatch(/remove it there/);
 	});
+
+	it("unregisters every tracked plugin, extension and agent client through its adapter, but no untracked one", () => {
+		const plan = planUninstall(
+			facts({ trackedClients: ["omo", "claude", "codex", "gemini", "hermes", "openclaw", "pi", "json"] }),
+			{ purge: false },
+		);
+
+		expect(plan.unregister).toEqual(["claude", "codex", "gemini", "hermes", "openclaw", "pi"]);
+		expect(plan.pastedJson).toBe(true);
+	});
 });
 
 describe("#given the shared stop switch #when uninstall is planned #then it stays while another installation does", () => {

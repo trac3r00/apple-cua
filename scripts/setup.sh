@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-command setup for apple-cua on a Mac with Apple Silicon or Intel and macOS 15 (Sequoia) or later.
 #
-#   ./scripts/setup.sh [--add-to-path] [--register omo|claude|codex|json]... [--allow <apps>]
+#   ./scripts/setup.sh [--add-to-path] [--register <client>]... [--allow <apps>]
 #                      [--delivery background|attended] [--toolset lean|full] [--rebuild-native] [--rebuild-helper]
 #                      [--yes] [--no-doctor]
 #
@@ -78,7 +78,8 @@ Installs, builds and checks apple-cua in this checkout, and puts the apple-cua c
 (APPLE_CUA_BIN_DIR). Safe to re-run.
 
   --add-to-path           append the line that puts ~/.local/bin on PATH to your shell startup file (backed up first)
-  --register <client>     register the MCP server with omo, claude, codex or json (prints a block); repeatable or
+  --register <client>     add apple-cua to codex, claude, omo, gemini, cursor, hermes, openclaw, pi, or json (prints
+                          a block for any other client); repeatable or
                           comma-separated; shortcut for: apple-cua config --register <client>
   --allow <apps>          the apps the server may observe and drive, by name or bundle id (e.g. TextEdit); replaces
                           the saved list
@@ -110,8 +111,8 @@ add_registers() {
 	IFS=, read -r -a clients <<<"$1"
 	for client in ${clients[@]+"${clients[@]}"}; do
 		case "$client" in
-			omo | claude | codex | json) registers+=("$client") ;;
-			*) usage_error "unknown --register client '$client' (expected omo, claude, codex or json)" ;;
+			omo | claude | codex | gemini | cursor | hermes | openclaw | pi | json) registers+=("$client") ;;
+			*) usage_error "unknown --register client '$client' (expected omo, claude, codex, gemini, cursor, hermes, openclaw, pi or json)" ;;
 		esac
 	done
 }
@@ -673,6 +674,11 @@ if ((${#config_arguments[@]} == 0)) && [[ ! -e "$apple_cua_home/config.json" ]] 
 		fail "apple-cua config did not complete" "read the messages above, then run: $cua config"
 	ok "apple-cua config (answered above)"
 else
+	if ((${#config_arguments[@]} == 0)) && can_ask; then
+		# A client installed since the last setup is offered here; the question reaches the terminal, so no sed pipe.
+		node "$cli_js" config --detect ||
+			warn "could not check for newly installed agent clients; run: $cua config --detect"
+	fi
 	if ((${#config_arguments[@]} == 0)); then config_arguments=(--apply); fi
 	if ! node "$cli_js" config "${config_arguments[@]}" 2>&1 | sed 's/^/          /'; then
 		fail "the MCP client registration did not complete" \

@@ -4,9 +4,10 @@ import { closeSync, existsSync, openSync, readFileSync, readSync } from "node:fs
 import { join } from "node:path";
 import { StopSwitch } from "@apple-cua/core";
 import type { AutomationStatus, StopStatus } from "@apple-cua/core";
-import { type ClientInspection, inspectClient } from "./clients.js";
+import { missingSkillLink } from "./client-skills.js";
+import { CLIENT_NAMES, type ClientInspection, inspectClient } from "./clients.js";
 import { type Environment, type Layout, displayPath, homeDirectory, resolveLayout } from "./layout.js";
-import { desiredRegistration, loadSettings } from "./settings.js";
+import { loadSettings, plannedRegistration } from "./settings.js";
 
 /** The oldest macOS apple-cua supports: the latest major release and the one before it (Tahoe and Sequoia). */
 const MINIMUM_MACOS = "15.0";
@@ -530,7 +531,7 @@ function clientChecks(facts: DoctorFacts): DoctorCheck[] {
 				"clients",
 				"warn",
 				"no MCP client is registered, so no agent can use apple-cua yet",
-				"Register it and allow an app: apple-cua config --register omo|claude|codex|json --allow TextEdit",
+				`Register it and allow an app: apple-cua config --register ${CLIENT_NAMES.join("|")} --allow TextEdit`,
 			),
 		];
 	}
@@ -539,7 +540,20 @@ function clientChecks(facts: DoctorFacts): DoctorCheck[] {
 		const where = inspection.path === undefined ? "" : show(inspection.path);
 		switch (inspection.state) {
 			case "current":
-				return check(id, "ok", `${inspection.client}: registered in ${where}`);
+				return check(
+					id,
+					"ok",
+					`${inspection.client}: ${where === "" ? inspection.detail : `registered in ${where}`}`,
+				);
+			case "disabled":
+				return check(
+					id,
+					"warn",
+					`${inspection.client}: ${inspection.detail}`,
+					`Switch it back on: apple-cua config --register ${inspection.client} (or in the client's plugin settings).`,
+				);
+			case "conflict":
+				return check(id, "fail", `${inspection.client}: conflicting registration`, inspection.detail);
 			case "manual":
 				return check(
 					id,
@@ -554,9 +568,19 @@ function clientChecks(facts: DoctorFacts): DoctorCheck[] {
 					`Fix ${where} by hand; apple-cua never rewrites a file it cannot parse.`,
 				);
 			case "missing":
-				return check(id, "fail", `${inspection.client}: ${where} has no apple-cua entry`, REAPPLY);
+				return check(
+					id,
+					"fail",
+					`${inspection.client}: ${where === "" ? inspection.detail : `${where} has no apple-cua entry`}`,
+					REAPPLY,
+				);
 			case "stale":
-				return check(id, "fail", `${inspection.client}: the entry in ${where} ${inspection.detail}`, REAPPLY);
+				return check(
+					id,
+					"fail",
+					`${inspection.client}: ${where === "" ? inspection.detail : `the entry in ${where} ${inspection.detail}`}`,
+					REAPPLY,
+				);
 		}
 	});
 }
@@ -766,12 +790,19 @@ function readHelperInputs(layout: Pick<Layout, "helperApp" | "helperBuildScript"
 function readConfigFacts(layout: Layout, env: Environment): ConfigFacts {
 	try {
 		const { settings, saved } = loadSettings(layout.configPath);
-		const desired = desiredRegistration(layout, settings);
+		const desired = plannedRegistration(layout, settings);
 		const context = { home: layout.home, env, now: new Date() };
 		return {
 			path: layout.configPath,
 			saved,
-			clients: settings.clients.map((client) => inspectClient(client, desired, context)),
+			clients: settings.clients.map((client) => {
+				const inspection = inspectClient(client, desired, context);
+				const folder =
+					inspection.state === "current" ? missingSkillLink(client, layout.bundleDir, context) : undefined;
+				return folder === undefined
+					? inspection
+					: { client, state: "stale", detail: `the apple-cua skill is not linked in ${folder}` };
+			}),
 		};
 	} catch (error) {
 		return {

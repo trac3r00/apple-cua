@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, openSync } from "node:fs";
+import { closeSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -7,13 +7,17 @@ import { ReadStream, WriteStream } from "node:tty";
 import { StopSwitch, isBrowserBundle } from "@apple-cua/core";
 import type { AutomationStatus } from "@apple-cua/core";
 import type { Command } from "commander";
+import { syncSkillLinks } from "./client-skills.js";
 import {
+	CLIENT_LABELS,
 	CLIENT_NAMES,
 	type ClientChange,
 	type ClientContext,
 	type ClientInspection,
 	type ClientName,
+	type DesiredRegistration,
 	describeChange,
+	detectClients,
 	entryAlive,
 	entryRunsCheckout,
 	inspectClient,
@@ -44,9 +48,10 @@ import {
 	adoptRegistrations,
 	applyToClients,
 	changeSettings,
-	desiredRegistration,
 	findAppBundleId,
 	loadSettings,
+	plannedRegistration,
+	prepareRegistration,
 	sameSettings,
 	saveSettings,
 } from "./settings.js";
@@ -149,25 +154,6 @@ function confirm(question: string): Promise<boolean> {
 	return withPrompt(async (ask) => /^y(?:es)?$/i.test((await ask(`${question}? [y/N] `)).trim()));
 }
 
-function onPath(command: string): boolean {
-	return spawnSync("/bin/sh", ["-c", `command -v ${command}`], { stdio: "ignore" }).status === 0;
-}
-
-/** The MCP clients this Mac has: their CLI is on PATH or their configuration folder exists. */
-function installedClients(layout: Layout): ClientName[] {
-	const found: ClientName[] = [];
-	if (existsSync(join(layout.home, ".omo")) || onPath("omo")) {
-		found.push("omo");
-	}
-	if (existsSync(join(layout.home, ".claude.json")) || onPath("claude")) {
-		found.push("claude");
-	}
-	if (existsSync(join(layout.home, ".codex")) || onPath("codex")) {
-		found.push("codex");
-	}
-	return found;
-}
-
 function clientContext(layout: Layout): ClientContext {
 	return { home: layout.home, env: process.env, now: new Date() };
 }
@@ -224,6 +210,7 @@ interface ConfigCommandOptions {
 	readonly unregister?: ClientName[];
 	readonly apply?: boolean;
 	readonly show?: boolean;
+	readonly detect?: boolean;
 }
 
 function requestedChange(options: ConfigCommandOptions): SettingsChange | undefined {
@@ -350,7 +337,7 @@ function formatSettings(
 		`Registrations of ${show(layout.checkout)}:`,
 	];
 	if (registrations.length === 0) {
-		lines.push("  none yet: apple-cua config --register omo|claude|codex|json");
+		lines.push(`  none yet: apple-cua config --register ${CLIENT_NAMES.join("|")}`);
 	}
 	for (const inspection of registrations) {
 		const where = inspection.path === undefined ? "" : `${show(inspection.path)}: `;
@@ -359,7 +346,59 @@ function formatSettings(
 	return lines.join("\n");
 }
 
+async function runDetect(json: boolean): Promise<number> {
+	const layout = resolveLayout();
+	const context = clientContext(layout);
+	let registered: readonly ClientName[];
+	try {
+		registered = loadSettings(layout.configPath).settings.clients;
+	} catch (error) {
+		print(`${errorMessage(error)}\nFix or delete it, then run apple-cua config again.`);
+		return 1;
+	}
+	const detected = detectClients(context);
+	const fresh = detected.filter((found) => !registered.includes(found.client));
+	if (json) {
+		print(JSON.stringify({ detected, registered, unregistered: fresh.map((found) => found.client) }));
+		return 0;
+	}
+	if (detected.length === 0) {
+		print(
+			"No agent client found on this Mac (Codex, Claude Code, OmO, Gemini CLI, Cursor, Hermes Agent, OpenClaw, pi). Register one by hand: apple-cua config --register json",
+		);
+		return 0;
+	}
+	for (const found of detected) {
+		const state = registered.includes(found.client) ? "registered" : "not registered";
+		print(`${CLIENT_LABELS[found.client].padEnd(12)} ${state.padEnd(15)} found by ${found.how}`);
+	}
+	if (fresh.length === 0) {
+		print("Every agent client found here already has apple-cua.");
+		return 0;
+	}
+	const names = fresh.map((found) => CLIENT_LABELS[found.client]).join(", ");
+	if (!isInteractive()) {
+		print(
+			`Not registered yet: ${names}. Register with: apple-cua config --register ${fresh.map((found) => found.client).join(",")}`,
+		);
+		return 0;
+	}
+	const yes = await withPrompt(
+		async (ask) => !/^n(?:o)?$/i.test((await ask(`Add apple-cua to ${names}? [Y/n] `)).trim()),
+	);
+	if (!yes) {
+		print(
+			`Left them out. Add them later with: apple-cua config --register ${fresh.map((found) => found.client).join(",")}`,
+		);
+		return 0;
+	}
+	return runConfig({ register: fresh.map((found) => found.client) }, false);
+}
+
 async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<number> {
+	if (options.detect === true) {
+		return runDetect(json);
+	}
 	const layout = resolveLayout();
 	const context = clientContext(layout);
 	const show = (path: string) => displayPath(path, layout.home);
@@ -384,7 +423,7 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 	let change = requestedChange(options);
 	const apply = options.apply === true;
 	if (options.show === true || (change === undefined && !apply && (json || !isInteractive()))) {
-		const desired = desiredRegistration(layout, current);
+		const desired = plannedRegistration(layout, current);
 		const registrations = current.clients.map((client) => inspectClient(client, desired, context));
 		print(
 			json
@@ -404,11 +443,16 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 			tell(
 				`Settings live in ${show(layout.configPath)} and apply to every MCP client apple-cua is registered with. Enter keeps a value.\n`,
 			);
-			return askForChanges(current, ask, tell, installedClients(layout));
+			return askForChanges(
+				current,
+				ask,
+				tell,
+				detectClients(context).map((found) => found.client),
+			);
 		});
 	}
 	if (change === undefined && !loaded.saved && !adopted) {
-		say("No MCP client is registered yet. Register one with: apple-cua config --register omo|claude|codex|json");
+		say(`No MCP client is registered yet. Register one with: apple-cua config --register ${CLIENT_NAMES.join("|")}`);
 		if (json) {
 			print(JSON.stringify({ ok: true, settings: current, changes: [], failures: [] }));
 		}
@@ -440,7 +484,7 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 			continue;
 		}
 		try {
-			changes.push(unregisterClient(client, context));
+			changes.push(unregisterClient(client, context, layout.checkout));
 		} catch (error) {
 			failures.push({ client, error: errorMessage(error) });
 		}
@@ -450,9 +494,28 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 	const targets = next.clients.filter(
 		(client) => client !== "json" || settingsChanged || (requested.register ?? []).includes("json"),
 	);
-	const outcome = applyToClients(targets, desiredRegistration(layout, next), context);
-	changes.push(...outcome.changes);
-	failures.push(...outcome.failures);
+	let prepared: ReturnType<typeof prepareRegistration>;
+	try {
+		prepared = prepareRegistration(layout, next, false);
+	} catch (error) {
+		print(json ? JSON.stringify({ ok: false, error: errorMessage(error) }) : errorMessage(error));
+		return 1;
+	}
+	if (prepared.previousCheckout !== undefined) {
+		say(
+			`The bundle in ${show(layout.bundleDir)} now comes from this checkout (it came from ${show(prepared.previousCheckout)}).`,
+		);
+	}
+	const named = requested.register ?? [];
+	for (const [clients, explicit] of [
+		[targets.filter((client) => named.includes(client)), true],
+		[targets.filter((client) => !named.includes(client)), false],
+	] as const) {
+		const outcome = applyToClients(clients, { ...prepared.desired, explicit }, context);
+		changes.push(...outcome.changes);
+		failures.push(...outcome.failures);
+	}
+	const skillLinks = syncSkillLinks(next.clients, layout.bundleDir, context);
 	if (json) {
 		print(
 			JSON.stringify({
@@ -471,8 +534,15 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 	for (const failure of failures) {
 		print(`${failure.client.padEnd(7)}failed: ${failure.error}`);
 	}
+	for (const link of skillLinks) {
+		if (link.action !== "unchanged") {
+			print(`skill  ${show(link.directory)}: ${link.detail}`);
+		}
+	}
 	if (next.clients.length === 0) {
-		print("No MCP client is registered yet. Register one with: apple-cua config --register omo|claude|codex|json");
+		print(
+			`No MCP client is registered yet. Register one with: apple-cua config --register ${CLIENT_NAMES.join("|")}`,
+		);
 	} else if (next.allowedApps.length === 0) {
 		print(
 			"note: no app is approved yet, so agents can list apps but not observe or drive them; approve one with: apple-cua config --allow TextEdit",
@@ -623,9 +693,16 @@ function reapplyRegistrations(layout: Layout, say: Say): boolean {
 		return false;
 	}
 	const show = (path: string) => displayPath(path, layout.home);
+	let desired: DesiredRegistration;
+	try {
+		desired = prepareRegistration(layout, settings, false).desired;
+	} catch (error) {
+		say(indent(errorMessage(error)));
+		return false;
+	}
 	const outcome = applyToClients(
 		settings.clients.filter((client) => client !== "json"),
-		desiredRegistration(layout, settings),
+		desired,
 		clientContext(layout),
 	);
 	for (const change of outcome.changes) {
@@ -633,6 +710,11 @@ function reapplyRegistrations(layout: Layout, say: Say): boolean {
 	}
 	for (const failure of outcome.failures) {
 		say(indent(`${failure.client.padEnd(7)}failed: ${failure.error}`));
+	}
+	for (const link of syncSkillLinks(settings.clients, layout.bundleDir, clientContext(layout))) {
+		if (link.action !== "unchanged") {
+			say(indent(`skill  ${show(link.directory)}: ${link.detail}`));
+		}
 	}
 	return outcome.failures.length === 0;
 }
@@ -790,6 +872,10 @@ export function registerLifecycleCommands(program: Command, options: LifecycleCo
 		.option("--unregister <clients>", "remove the apple-cua registration from these clients", collectClients)
 		.option("--apply", "write the saved settings into every registered client again")
 		.option("--show", "print the settings and where each client is registered")
+		.option(
+			"--detect",
+			"list the agent clients installed on this Mac; in a terminal, offer to register the ones that are not yet",
+		)
 		.action(async (commandOptions: ConfigCommandOptions) => {
 			process.exitCode = await runConfig(commandOptions, options.isJsonOutput());
 		});

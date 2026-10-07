@@ -27,6 +27,12 @@ export interface Layout {
 	/** APPLE_CUA_BIN_DIR (default ~/.local/bin): where setup puts the `apple-cua` launcher. */
 	readonly binDir: string;
 	readonly launcherPath: string;
+	/** The per-Mac integration bundle every agent client is wired to (see bundle.ts). */
+	readonly bundleDir: string;
+	/** The skill in the checkout, which the bundle copies. */
+	readonly skillSource: string;
+	/** packages/mcp/package.json, whose version the bundle's version starts with. */
+	readonly serverPackage: string;
 }
 
 /** What install.sh records about the checkout it cloned. */
@@ -92,6 +98,9 @@ export function resolveLayout(env: Environment = process.env, checkout: string =
 		installMarkerPath: join(appleCuaHome, "install.json"),
 		binDir,
 		launcherPath: join(binDir, "apple-cua"),
+		bundleDir: join(appleCuaHome, "bundle"),
+		skillSource: join(checkout, "skills/apple-cua"),
+		serverPackage: join(checkout, "packages/mcp/package.json"),
 	};
 }
 

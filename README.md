@@ -79,7 +79,8 @@ Client config files are merged, never replaced: other servers stay as they are, 
 ```bash
 apple-cua config                                       # in a terminal: asks, and Enter keeps a value
 apple-cua config --allow TextEdit,com.apple.finder     # approve apps by name or bundle id
-apple-cua config --register omo,codex --toolset lean   # omo, claude, codex, or json (prints a block to paste)
+apple-cua config --register omo,codex --toolset lean   # any client below; json prints a block to paste
+apple-cua config --detect                              # which agent clients are installed, offers the missing ones
 apple-cua config --unregister codex --disallow all
 apple-cua config --show                                # the settings, and where each client is registered
 ```
@@ -87,9 +88,44 @@ apple-cua config --show                                # the settings, and where
 | Option | Effect |
 |---|---|
 | `--allow <apps>`, `--disallow <apps>` | Approve or withdraw apps (`APPLE_CUA_ALLOWED_BUNDLE_IDS`); `--disallow all` empties the list. With no app approved, agents can list apps but not observe or drive them. |
-| `--register`, `--unregister omo\|claude\|codex\|json` | Omo (`~/.omo/agent/mcp.json`), Claude Code (`claude mcp add --scope user`), Codex (`~/.codex/config.toml`), or a printed JSON block for any other client. |
+| `--register`, `--unregister <clients>` | `omo`, `claude`, `codex`, `gemini`, `cursor`, `hermes`, `openclaw`, `pi`, or `json`; see [Agent clients](#agent-clients). |
+| `--detect` | List the installed agent clients and whether apple-cua is set up in each; in a terminal, offer the missing ones (`--json` for a machine-readable answer). |
 | `--delivery background\|attended`, `--toolset full\|lean`, `--iphone`, `--no-iphone` | `APPLE_CUA_DELIVERY`, `APPLE_CUA_TOOLSET` and `APPLE_CUA_IPHONE` in every registration. |
 | `--apply` | Write the saved settings into every registered client again; setup and `apple-cua update` do this. |
+
+#### Agent clients
+
+Every client gets the same thing from one per-Mac bundle, `~/.apple-cua/bundle`: the skill, an `.mcp.json` that
+launches the signed helper with the saved settings, and the Claude Code, Codex and Gemini plugin manifests with a local
+marketplace. `apple-cua config`, setup and `apple-cua update` regenerate it, and its version (`0.1.0+codex.<hash>`)
+changes only when its content does, so re-running setup changes nothing. Each client is then set up the way that
+client expects, through its own command line wherever it has one:
+
+| Client | `--register` name | How apple-cua is added | Skill |
+|---|---|---|---|
+| OmO / senpi | `omo` | `~/.omo/agent/mcp.json`, `mcpServers["apple-cua"]` | linked into `~/.agents/skills` |
+| Claude Code | `claude` | the `apple-cua` plugin from the local `apple-cua-local` marketplace (`claude plugin install`, user scope); `claude mcp add --scope user` on a Claude Code without plugins. Honors `CLAUDE_CONFIG_DIR` | inside the plugin |
+| Codex | `codex` | the `apple-cua` plugin from the local `apple-cua-local` marketplace (`codex plugin add`); `[mcp_servers.apple-cua]` in `config.toml` on a Codex without plugins. Honors `CODEX_HOME` | inside the plugin |
+| Gemini CLI | `gemini` | `gemini extensions link` of the bundle, so it follows settings changes by itself | inside the extension |
+| Cursor | `cursor` | `~/.cursor/mcp.json`, then `cursor-agent mcp enable apple-cua` approves it | linked into `~/.cursor/skills` |
+| Hermes Agent | `hermes` | `hermes mcp add` (`HERMES_HOME`) | linked into `<hermes home>/skills` |
+| OpenClaw | `openclaw` | `openclaw mcp set` then `openclaw mcp reload` (`OPENCLAW_STATE_DIR`, `OPENCLAW_CONFIG_PATH`) | linked into `<state dir>/skills` |
+| pi (the original coding agent) | `pi` | `pi install packages/pi-extension`, a bridge to the same MCP server (`PI_CODING_AGENT_DIR`) | — |
+| anything else | `json` | prints a block to paste | — |
+
+Setup detects the installed clients and, in a terminal, asks before adding apple-cua to each; without a terminal it
+only re-applies the clients you chose before. Changing a setting refreshes every client (plugins are updated, entries
+rewritten). An old `apple-cua` MCP entry of this installation (for example a pre-plugin Codex `[mcp_servers.apple-cua]`,
+which would shadow the plugin) is migrated; another installation's entry is left alone and named with the command
+that removes it; a config file apple-cua cannot parse is never rewritten. Restart a client, or start a new session,
+after a change. Caveats the doctor repeats:
+
+- Gemini CLI turns MCP servers off in folders you have not trusted: trust the folder, or set
+  `GEMINI_CLI_TRUST_WORKSPACE=true`.
+- A Hermes or OpenClaw gateway running as a background service still needs a logged-in Mac session to reach the screen.
+- OpenClaw refuses to write `openclaw.json` when it would shrink below half its size; when apple-cua is most of that
+  file, unregistering names the manual edit instead of failing.
+- Gemini keeps its own signed `extension_integrity.json` record after the extension is removed.
 
 ### Permissions
 
@@ -276,8 +312,8 @@ Merge configuration rather than replacing unrelated settings.
 For a grant that survives updates, run the server through the signed helper app instead of
 `node` directly: the bundle carries its own TCC identity (`dev.applecua.mcp`, or `APPLE_CUA_BUNDLE_ID`), so Screen
 Recording and Accessibility attach to it rather than to whatever launched the server. Setup builds it, and
-`apple-cua config --register` writes it into Omo, Claude Code or Codex (`--register json` prints the block for any
-other client). By hand:
+`apple-cua config --register` sets it up in every [agent client](#agent-clients) (`--register json` prints the block
+for any other client). By hand:
 
 ```bash
 scripts/build-tcc-helper.sh
@@ -393,31 +429,18 @@ the three-call loop**, both verified 5/5 and resolving the same element every ru
 
 ### pi-extension
 
-Install into a [pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) session:
+The original [pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) has no MCP
+client, so `apple-cua config --register pi` installs `packages/pi-extension` (`pi install <path>`), a thin bridge to
+the same signed MCP server every other client runs. It starts one server per pi session, resolved from
+`APPLE_CUA_MCP_COMMAND`/`APPLE_CUA_MCP_ARGS`, then the bundle's `.mcp.json`, then this checkout's helper; registers
+one pi tool per MCP tool with the server's own schema; and adds the server's instructions to the system prompt. Every
+call goes through the server's guards (observation tokens, app approval, the stop switch), exactly as over MCP.
 
-```bash
-pi install file://./packages/pi-extension
-```
-
-Loading the extension auto-enables native computer-use for Anthropic Messages and OpenAI Responses models. Anthropic requests receive the `computer-use-2025-01-24` native `computer` tool plus the required beta header/body fields and a short system prompt. OpenAI Responses requests receive only `{ "type": "computer" }` in `payload.tools` — no headers, no `extra_body`, and no extra system prompt. No configuration is required; advanced users can opt out of both providers with `APPLE_CUA_DISABLE_COMPUTER_USE_BETA=1` (`true`, `yes`, and `on` also work).
-
-The extension resolves the host display in logical macOS points, captures model-facing screenshots at a 2560px long edge (2560x1440 on large 16:9 displays), declares those dimensions to Anthropic, and unscales returned model coordinates back to logical points before dispatching clicks, moves, and drags. OpenAI Responses uses the same screenshot invariant: model coordinates are always in the image space the model received, while `MacOSHostComputer` still receives logical points.
-
-The extension also registers Codex-compatible Computer Use tools:
-
-| Tool | Purpose |
-|---|---|
-| `list_apps` | List running apps |
-| `get_app_state` | Capture screenshot + accessibility tree for an app |
-| `click` | Click by element index or screenshot coordinate |
-| `perform_secondary_action` | Invoke an accessibility action by element index |
-| `set_value` | Set a settable accessibility element value |
-| `drag` | Drag between screenshot coordinates |
-| `scroll` | Scroll an app by pages |
-| `type_text` | Type literal text |
-| `press_keys` | Press keys or key chords, with optional hold and interval timing |
-
-The extension default-exports a pi extension factory and keeps these tools available even when native computer-use auto-activation is disabled.
+For Anthropic Messages and OpenAI Responses models it also offers the native `computer` tool, mapped onto MCP calls
+against the window of the latest `get_app_state` (screenshot, clicks, drags, typing and key presses). Native actions
+with no faithful MCP equivalent (`scroll`, `mouse_move`, `cursor_position`, raw mouse down/up, OpenAI `back`/`forward`,
+multi-point drags) fail with an `unsupported_action` error rather than being approximated. Opt out of the native tool
+with `APPLE_CUA_DISABLE_COMPUTER_USE_BETA=1`. Details: [packages/pi-extension/README.md](./packages/pi-extension/README.md).
 
 ### Programmatic API
 
@@ -653,7 +676,7 @@ Full walkthrough: [`skills/apple-cua/references/installation.md`](./skills/apple
 | `@apple-cua/core` | [`packages/core`](./packages/core) | `ComputerInterface` + platform abstractions (`HostComputer`, `VMComputer`, `CloudComputer`) + `MacOSHostComputer` implementation |
 | `@apple-cua/cli` | [`packages/cli`](./packages/cli) | `commander.js` binary (`apple-cua`) |
 | `@apple-cua/mcp` | [`packages/mcp`](./packages/mcp) | MCP stdio server (`apple-cua-mcp`) exposing Codex Computer Use tools |
-| `@apple-cua/pi-extension` | [`packages/pi-extension`](./packages/pi-extension) | Pi coding-agent extension with Codex-compatible Computer Use tools |
+| `@apple-cua/pi-extension` | [`packages/pi-extension`](./packages/pi-extension) | Pi coding-agent bridge to the MCP server, with native Anthropic/OpenAI computer-use shapes |
 | `skills/apple-cua` | [`skills/apple-cua`](./skills/apple-cua) | OpenCode-style skill definition + installation reference |
 
 ## Repository layout
@@ -663,7 +686,7 @@ Full walkthrough: [`skills/apple-cua/references/installation.md`](./skills/apple
 | [`packages/core`](./packages/core) | Platform-abstracted interfaces, the native macOS computer, the guarded token layer, and targeting (`matchElements`, `openApplication`) |
 | [`packages/mcp`](./packages/mcp) | The stdio MCP server (33 tools) and `assets/appicon.png` for the signed helper bundle |
 | [`packages/cli`](./packages/cli) | The `apple-cua` command line |
-| [`packages/pi-extension`](./packages/pi-extension) | Pi coding-agent tools, including native Anthropic/OpenAI computer-use shapes |
+| [`packages/pi-extension`](./packages/pi-extension) | Pi coding-agent bridge to the MCP server, including native Anthropic/OpenAI computer-use shapes |
 | [`skills/apple-cua`](./skills/apple-cua) | The portable agent skill: workflow, usage, permissions, harness setup |
 | [`docs`](./docs) | Design notes: what apple-cua took from Codex computer use, Cua Driver and OmO ([unified-cua.md](./docs/unified-cua.md)) |
 | [`scripts`](./scripts) | `setup.sh` (sets up a checkout; [`install.sh`](./install.sh) at the root clones one and runs it), the signed helper build, the task benchmark ([`bench-v2`](./scripts/bench-v2/README.md)), and fixture generators |

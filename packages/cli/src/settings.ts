@@ -5,6 +5,7 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { type BundleInputs, type BundlePlan, planBundle, readSkillFiles, writeBundle } from "./bundle.js";
 import {
 	CLIENT_NAMES,
 	type ClientChange,
@@ -366,5 +367,85 @@ export function changeSettings(
 			clients,
 		},
 		unknown: [...added.unknown, ...removed.unknown],
+	};
+}
+
+// --- The integration bundle ------------------------------------------------------------------------------------------
+
+type BundleLayout = Pick<
+	Layout,
+	"checkout" | "helperExecutable" | "server" | "skillSource" | "serverPackage" | "bundleDir"
+>;
+
+function serverVersion(path: string): string {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+		const version =
+			typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>)["version"] : undefined;
+		return typeof version === "string" && version !== "" ? version : "0.0.0";
+	} catch {
+		return "0.0.0";
+	}
+}
+
+/** What the bundle is generated from: this checkout's helper, server, skill and version, and the saved settings. */
+export function bundleInputs(layout: BundleLayout, settings: Settings): BundleInputs {
+	let skill: BundleInputs["skill"];
+	try {
+		skill = readSkillFiles(layout.skillSource);
+	} catch (error) {
+		throw new Error(
+			`cannot read the apple-cua skill at ${layout.skillSource} (${error instanceof Error ? error.message : String(error)}); re-run ./scripts/setup.sh in the checkout`,
+		);
+	}
+	const env = Object.fromEntries(
+		Object.entries(envForSettings(settings)).filter((pair): pair is [string, string] => pair[1] !== undefined),
+	);
+	return {
+		checkout: layout.checkout,
+		baseVersion: serverVersion(layout.serverPackage),
+		launch: { command: layout.helperExecutable, args: [layout.server] },
+		env,
+		skill,
+	};
+}
+
+/** The bundle these settings call for, planned but not written (the doctor compares against it). */
+export function planSettingsBundle(layout: BundleLayout, settings: Settings): BundlePlan {
+	return planBundle(bundleInputs(layout, settings));
+}
+
+/**
+ * Writes the bundle for `settings` and returns the registration every client should get, carrying the bundle the
+ * plugin clients install from. `explicit` marks a person's own --register, which may switch a disabled plugin back on.
+ */
+export function prepareRegistration(
+	layout: BundleLayout,
+	settings: Settings,
+	explicit: boolean,
+): { desired: DesiredRegistration; plan: BundlePlan; changed: boolean; previousCheckout: string | undefined } {
+	const plan = planSettingsBundle(layout, settings);
+	const written = writeBundle(layout.bundleDir, plan);
+	return {
+		desired: {
+			...desiredRegistration(layout, settings),
+			bundle: { bundleDir: layout.bundleDir, version: plan.version, checkout: layout.checkout },
+			explicit,
+		},
+		plan,
+		changed: written.changed,
+		previousCheckout:
+			written.previous !== undefined && written.previous.checkout !== layout.checkout
+				? written.previous.checkout
+				: undefined,
+	};
+}
+
+/** The registration with the bundle these settings call for, without writing anything (for inspection). */
+export function plannedRegistration(layout: BundleLayout, settings: Settings): DesiredRegistration {
+	const plan = planSettingsBundle(layout, settings);
+	return {
+		...desiredRegistration(layout, settings),
+		bundle: { bundleDir: layout.bundleDir, version: plan.version, checkout: layout.checkout },
 	};
 }

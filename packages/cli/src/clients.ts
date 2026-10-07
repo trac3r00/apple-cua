@@ -16,17 +16,108 @@ import {
 	existsSync,
 	mkdirSync,
 	readFileSync,
+	readdirSync,
 	realpathSync,
 	renameSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
+import {
+	hermesHomeOf,
+	isOriginalPi,
+	openClawConfigPathOf,
+	planGeminiInstall,
+	planGeminiRemove,
+	planHermesInstall,
+	planHermesRemove,
+	planOpenClawInstall,
+	planOpenClawRemove,
+	planPiInstall,
+	planPiRemove,
+	readGeminiState,
+	readHermesEntry,
+	readHermesState,
+	readOpenClawState,
+	readPiState,
+} from "./agent-clients.js";
 import { canonicalPath, isInside } from "./layout.js";
+import {
+	type CliRunner,
+	type PluginPlan,
+	type PluginTarget,
+	planClaudeInstall,
+	planClaudeRemove,
+	planCodexInstall,
+	planCodexRemove,
+	readClaudeState,
+	readCodexState,
+	runCli,
+	runSteps,
+	supportsPlugins,
+} from "./plugin-clients.js";
 
 const SERVER_NAME = "apple-cua";
-export const CLIENT_NAMES = ["omo", "claude", "codex", "json"] as const;
+export const CLIENT_NAMES = ["omo", "claude", "codex", "gemini", "cursor", "hermes", "openclaw", "pi", "json"] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
+
+/** How each client is named to a person. */
+export const CLIENT_LABELS: Readonly<Record<ClientName, string>> = {
+	omo: "OmO",
+	claude: "Claude Code",
+	codex: "Codex",
+	gemini: "Gemini CLI",
+	cursor: "Cursor",
+	hermes: "Hermes Agent",
+	openclaw: "OpenClaw",
+	pi: "pi",
+	json: "any other MCP client (a printed JSON block)",
+};
+
+export interface DetectedClient {
+	readonly client: ClientName;
+	/** Why it counts as installed: its CLI on PATH, or its configuration folder. */
+	readonly how: string;
+}
+
+/** The agent clients this Mac has: the CLI on PATH, or the configuration folder (honoring CODEX_HOME and CLAUDE_CONFIG_DIR). */
+export function detectClients(context: ClientContext): DetectedClient[] {
+	const found: DetectedClient[] = [];
+	const probe = (client: ClientName, cli: string, folders: readonly string[]) => {
+		const binary = findExecutable(cli, context.env["PATH"]);
+		const folder = folders.find((path) => existsSync(path));
+		if (binary !== undefined) {
+			found.push({ client, how: `${cli} on PATH (${binary})` });
+		} else if (folder !== undefined) {
+			found.push({ client, how: `its settings in ${folder}` });
+		}
+	};
+	probe("codex", "codex", [nonEmpty(context.env["CODEX_HOME"]) ?? join(context.home, ".codex")]);
+	probe("claude", "claude", [
+		nonEmpty(context.env["CLAUDE_CONFIG_DIR"]) ?? join(context.home, ".claude"),
+		join(context.home, ".claude.json"),
+	]);
+	probe("omo", "omo", [join(context.home, ".omo")]);
+	probe("gemini", "gemini", [join(context.home, ".gemini")]);
+	probe("cursor", "cursor-agent", [join(context.home, ".cursor")]);
+	const hermes = agentCli("hermes", context);
+	if (hermes !== undefined) {
+		found.push({ client: "hermes", how: `hermes CLI (${hermes})` });
+	} else if (existsSync(join(hermesHomeOf(context.home, context.env), "config.yaml"))) {
+		found.push({ client: "hermes", how: "its settings (its CLI is not installed yet)" });
+	}
+	const openclaw = agentCli("openclaw", context);
+	if (openclaw !== undefined) {
+		found.push({ client: "openclaw", how: `openclaw CLI (${openclaw})` });
+	} else if (existsSync(openClawConfigPathOf(context.home, context.env))) {
+		found.push({ client: "openclaw", how: "its settings (its CLI is not installed yet)" });
+	}
+	const pi = agentCli("pi", context);
+	if (pi !== undefined) {
+		found.push({ client: "pi", how: `pi on PATH (${pi})` });
+	}
+	return found;
+}
 
 export function isClientName(value: string): value is ClientName {
 	return CLIENT_NAMES.some((name) => name === value);
@@ -48,12 +139,18 @@ export interface DesiredRegistration {
 	readonly env: EnvUpdate;
 	/** True when an entry's env already means what `env` says, so the entry needs no rewrite. */
 	readonly envSatisfied: (env: EnvMap) => boolean;
+	/** The bundle plugin clients (Codex, Claude Code) install from; without it they get a plain MCP entry. */
+	readonly bundle?: PluginTarget | undefined;
+	/** A person asked for this client now (config --register), as opposed to a settings refresh. */
+	readonly explicit?: boolean | undefined;
 }
 
 export interface ClientContext {
 	readonly home: string;
 	readonly env: Readonly<Record<string, string | undefined>>;
 	readonly now: Date;
+	/** Runs a client's CLI; tests replace it. */
+	readonly run?: CliRunner | undefined;
 }
 
 /** An apple-cua entry as a client configuration holds it. */
@@ -76,9 +173,13 @@ export interface ClientChange {
 	readonly after?: JsonObject | undefined;
 	readonly printed?: JsonObject | undefined;
 	readonly note?: string | undefined;
+	/** What a plugin install or removal did, in order. */
+	readonly steps?: readonly string[] | undefined;
+	/** What the person has to do for a running client to pick the change up. */
+	readonly restart?: string | undefined;
 }
 
-export type RegistrationState = "current" | "stale" | "missing" | "unreadable" | "manual";
+export type RegistrationState = "current" | "stale" | "missing" | "unreadable" | "manual" | "disabled" | "conflict";
 
 export interface ClientInspection {
 	readonly client: ClientName;
@@ -114,7 +215,7 @@ function toRegisteredEntry(value: unknown): RegisteredEntry | undefined {
 	};
 }
 
-function entryIsCurrent(entry: RegisteredEntry, desired: DesiredRegistration): boolean {
+export function entryIsCurrent(entry: RegisteredEntry, desired: DesiredRegistration): boolean {
 	return (
 		entry.command === desired.launch.command &&
 		entry.args.length === desired.launch.args.length &&
@@ -552,7 +653,7 @@ function readText(path: string): string | undefined {
 	return existsSync(path) ? readFileSync(path, "utf8") : undefined;
 }
 
-function findExecutable(name: string, pathVariable: string | undefined): string | undefined {
+export function findExecutable(name: string, pathVariable: string | undefined): string | undefined {
 	for (const directory of (pathVariable ?? "").split(delimiter)) {
 		if (directory === "") {
 			continue;
@@ -580,6 +681,15 @@ function clientConfigPath(client: ClientName, context: ClientContext): string | 
 			return join(nonEmpty(context.env["CLAUDE_CONFIG_DIR"]) ?? context.home, ".claude.json");
 		case "codex":
 			return join(nonEmpty(context.env["CODEX_HOME"]) ?? join(context.home, ".codex"), "config.toml");
+		case "cursor":
+			return join(context.home, ".cursor/mcp.json");
+		case "gemini":
+			return join(context.home, ".gemini/settings.json");
+		case "hermes":
+			return join(hermesHomeOf(context.home, context.env), "config.yaml");
+		case "openclaw":
+			return openClawConfigPathOf(context.home, context.env);
+		case "pi":
 		case "json":
 			return undefined;
 	}
@@ -601,6 +711,15 @@ export function readClientEntry(
 	try {
 		if (client === "codex") {
 			return { path, entry: readCodexTable(text, path).before };
+		}
+		if (client === "hermes") {
+			return { path, entry: readHermesEntry(text) };
+		}
+		if (client === "openclaw") {
+			const parsed: unknown = JSON.parse(text);
+			const mcp = isPlainObject(parsed) ? parsed["mcp"] : undefined;
+			const servers = isPlainObject(mcp) ? mcp["servers"] : undefined;
+			return { path, entry: toRegisteredEntry(isPlainObject(servers) ? servers[SERVER_NAME] : undefined) };
 		}
 		return { path, entry: toRegisteredEntry(parseJsonConfig(text).servers[SERVER_NAME]) };
 	} catch (error) {
@@ -627,6 +746,15 @@ export function inspectClient(
 	if (client === "json") {
 		return { client, state: "manual", detail: "a printed block you pasted by hand; apple-cua cannot check it" };
 	}
+	if ((client === "codex" || client === "claude") && desired.bundle !== undefined) {
+		const cli = pluginCli(client, context);
+		if (cli !== undefined) {
+			return inspectPlugin(client, desired.bundle, context);
+		}
+	}
+	if (isAgentClient(client)) {
+		return inspectAgent(client, desired, context);
+	}
 	const { path, entry, error } = readClientEntry(client, context);
 	if (error !== undefined) {
 		return { client, state: "unreadable", path, detail: error };
@@ -648,7 +776,11 @@ export function inspectClient(
 	return { client, state: "stale", path, entry, detail: staleDetail(entry, desired) };
 }
 
-function registerJsonFile(client: "omo", desired: DesiredRegistration, context: ClientContext): ClientChange {
+function registerJsonFile(
+	client: "omo" | "cursor",
+	desired: DesiredRegistration,
+	context: ClientContext,
+): ClientChange {
 	const path = clientConfigPath(client, context) ?? "";
 	const text = readText(path);
 	let merged: FileEdit;
@@ -737,15 +869,343 @@ function registerClaude(desired: DesiredRegistration, context: ClientContext): C
 	return { client: "claude", action: before === undefined ? "added" : "updated", path, backup, before, after };
 }
 
+// --- Plugin clients (Codex, Claude Code) ------------------------------------------------------------------------
+
+const RESTART: Readonly<Record<"codex" | "claude", string>> = {
+	codex: "start a new Codex thread to pick it up",
+	claude: "restart Claude Code to pick it up",
+};
+
+const pluginSupport = new Map<string, boolean>();
+
+/** The client's CLI when it has the plugin commands; undefined means the plain MCP entry is used instead. */
+function pluginCli(client: "codex" | "claude", context: ClientContext): string | undefined {
+	const cli = findExecutable(client, context.env["PATH"]);
+	if (cli === undefined) {
+		return undefined;
+	}
+	const key = `${cli}\0${context.run === undefined ? "real" : "injected"}`;
+	let supported = pluginSupport.get(key);
+	if (supported === undefined) {
+		supported = supportsPlugins(cli, context.env, context.run ?? runCli);
+		if (context.run === undefined) {
+			pluginSupport.set(key, supported);
+		}
+	}
+	return supported ? cli : undefined;
+}
+
+/** Whether a client gets apple-cua as a plugin here: its CLI is installed and has the plugin commands. */
+export function usesPlugin(client: "codex" | "claude", context: ClientContext): boolean {
+	return pluginCli(client, context) !== undefined;
+}
+
+function removeLegacyEntry(client: "codex" | "claude", cli: string, context: ClientContext): void {
+	if (client === "claude") {
+		const result = (context.run ?? runCli)(cli, ["mcp", "remove", SERVER_NAME, "--scope", "user"], context.env);
+		if (result.status !== 0) {
+			throw new Error(
+				`claude mcp remove failed: ${(result.stderr || result.stdout).trim() || `exit ${result.status}`}`,
+			);
+		}
+		return;
+	}
+	const path = clientConfigPath("codex", context) ?? "";
+	const edit = removeFromCodexToml(readText(path), path);
+	if (edit.changed) {
+		writeConfigFile(path, edit.text, context.now);
+	}
+}
+
+function pluginState(client: "codex" | "claude", context: ClientContext) {
+	const legacy = readClientEntry(client, context).entry;
+	return client === "codex"
+		? { client, state: readCodexState(context.home, context.env, legacy) }
+		: { client, state: readClaudeState(context.home, context.env, legacy) };
+}
+
+function planPluginInstall(
+	client: "codex" | "claude",
+	target: PluginTarget,
+	explicit: boolean,
+	context: ClientContext,
+): PluginPlan {
+	const read = pluginState(client, context);
+	return read.client === "codex"
+		? planCodexInstall(read.state, target)
+		: planClaudeInstall(read.state, target, explicit);
+}
+
+function registerPlugin(
+	client: "codex" | "claude",
+	cli: string,
+	desired: DesiredRegistration & { readonly bundle: PluginTarget },
+	context: ClientContext,
+): ClientChange {
+	const plan = planPluginInstall(client, desired.bundle, desired.explicit === true, context);
+	if (plan.blocked !== undefined) {
+		return { client, action: "manual", note: plan.blocked };
+	}
+	if (plan.outcome === "unchanged") {
+		return { client, action: "unchanged", note: `plugin ${desired.bundle.version}` };
+	}
+	const steps = runSteps(plan, {
+		cli,
+		env: context.env,
+		run: context.run ?? runCli,
+		removeLegacy: () => removeLegacyEntry(client, cli, context),
+	});
+	return {
+		client,
+		action: plan.outcome === "added" ? "added" : "updated",
+		note: `plugin ${desired.bundle.version}`,
+		steps,
+		restart: RESTART[client],
+	};
+}
+
+function unregisterPlugin(
+	client: "codex" | "claude",
+	cli: string,
+	checkout: string,
+	context: ClientContext,
+): ClientChange {
+	const read = pluginState(client, context);
+	const plan =
+		read.client === "codex" ? planCodexRemove(read.state, checkout) : planClaudeRemove(read.state, checkout);
+	if (plan.outcome === "absent") {
+		return { client, action: "absent" };
+	}
+	const steps = runSteps(plan, {
+		cli,
+		env: context.env,
+		run: context.run ?? runCli,
+		removeLegacy: () => removeLegacyEntry(client, cli, context),
+	});
+	return { client, action: "removed", steps, restart: RESTART[client] };
+}
+
+function inspectPlugin(client: "codex" | "claude", target: PluginTarget, context: ClientContext): ClientInspection {
+	const read = pluginState(client, context);
+	const disabled = read.client === "codex" ? read.state.plugin?.enabled === false : read.state.enabled === false;
+	const plan =
+		read.client === "codex" ? planCodexInstall(read.state, target) : planClaudeInstall(read.state, target, false);
+	if (plan.blocked !== undefined) {
+		return { client, state: "conflict", detail: plan.blocked };
+	}
+	if (disabled) {
+		return {
+			client,
+			state: "disabled",
+			detail: `the apple-cua plugin is installed but switched off in ${client === "codex" ? "Codex" : "Claude Code"}`,
+		};
+	}
+	if (plan.outcome === "added") {
+		return { client, state: "missing", detail: "the apple-cua plugin is not installed" };
+	}
+	if (plan.outcome === "updated") {
+		return { client, state: "stale", detail: `needs: ${plan.steps.map((step) => step.describe).join("; ")}` };
+	}
+	return { client, state: "current", detail: `plugin ${target.version}, up to date` };
+}
+
+// --- Agent CLI clients (Gemini CLI, Hermes Agent, OpenClaw, pi) -----------------------------------------------------
+
+type AgentClient = "gemini" | "hermes" | "openclaw" | "pi";
+
+function isAgentClient(client: ClientName): client is AgentClient {
+	return client === "gemini" || client === "hermes" || client === "openclaw" || client === "pi";
+}
+
+const AGENT_RESTART: Readonly<Record<AgentClient, string>> = {
+	gemini: "start a new Gemini CLI session to pick it up",
+	hermes: "start a new Hermes session or run /reload-mcp (a running gateway picks it up within a minute)",
+	openclaw: "running OpenClaw agents use it from their next turn; restart the gateway if one does not",
+	pi: "start a new pi session to pick it up",
+};
+
+const AGENT_INSTALL_HINT: Readonly<Record<AgentClient, string>> = {
+	gemini:
+		"the gemini CLI is not on PATH; install Gemini CLI (npm install -g @google/gemini-cli), then run: apple-cua config --register gemini",
+	hermes:
+		"the hermes CLI is not installed (the Hermes app only sets it up); finish Hermes' setup (curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash), then run: apple-cua config --register hermes",
+	openclaw:
+		"the openclaw CLI is not installed; install it from the OpenClaw app (its command-line tool installer), then run: apple-cua config --register openclaw",
+	pi: "the original pi (npm install -g @mariozechner/pi-coding-agent) is not on PATH; a `pi` that is senpi or OmO is registered as the omo client instead",
+};
+
+function existingFile(path: string): string | undefined {
+	return existsSync(path) ? path : undefined;
+}
+
+/** The client's own CLI, found the way its installer puts it; undefined when it is not installed. */
+export function agentCli(client: AgentClient, context: ClientContext): string | undefined {
+	const path = context.env["PATH"];
+	switch (client) {
+		case "gemini":
+			return findExecutable("gemini", path);
+		case "hermes":
+			return findExecutable("hermes", path) ?? existingFile(join(context.home, ".local/bin/hermes"));
+		case "openclaw":
+			return (
+				findExecutable("openclaw", path) ??
+				existingFile(
+					join(nonEmpty(context.env["OPENCLAW_PREFIX"]) ?? join(context.home, ".openclaw"), "bin/openclaw"),
+				)
+			);
+		case "pi": {
+			const pi = findExecutable("pi", path);
+			return pi !== undefined && isOriginalPi(pi) ? pi : undefined;
+		}
+	}
+}
+
+function planAgent(
+	client: AgentClient,
+	desired: DesiredRegistration,
+	context: ClientContext,
+	checkout: string,
+): PluginPlan | undefined {
+	switch (client) {
+		case "gemini":
+			return desired.bundle === undefined
+				? undefined
+				: planGeminiInstall(readGeminiState(context.home), desired.bundle.bundleDir, checkout);
+		case "hermes":
+			return planHermesInstall(readHermesState(context.home, context.env), desired, checkout);
+		case "openclaw":
+			return planOpenClawInstall(readOpenClawState(context.home, context.env), desired, checkout);
+		case "pi":
+			return planPiInstall(readPiState(context.home, context.env), checkout);
+	}
+}
+
+function planAgentRemove(client: AgentClient, context: ClientContext, checkout: string): PluginPlan {
+	switch (client) {
+		case "gemini":
+			return planGeminiRemove(readGeminiState(context.home), checkout);
+		case "hermes":
+			return planHermesRemove(readHermesState(context.home, context.env), checkout);
+		case "openclaw":
+			return planOpenClawRemove(readOpenClawState(context.home, context.env), checkout);
+		case "pi":
+			return planPiRemove(readPiState(context.home, context.env), checkout);
+	}
+}
+
+function registerAgent(client: AgentClient, desired: DesiredRegistration, context: ClientContext): ClientChange {
+	const cli = agentCli(client, context);
+	if (cli === undefined) {
+		return { client, action: "manual", note: AGENT_INSTALL_HINT[client] };
+	}
+	const checkout = desired.bundle?.checkout;
+	const plan = checkout === undefined ? undefined : planAgent(client, desired, context, checkout);
+	if (plan === undefined) {
+		return { client, action: "manual", note: "run apple-cua config from the checkout's own apple-cua command" };
+	}
+	if (plan.blocked !== undefined) {
+		return { client, action: "manual", note: plan.blocked };
+	}
+	if (plan.outcome === "unchanged") {
+		return client === "gemini"
+			? { client, action: "unchanged", note: "linked to the bundle, so it follows settings changes by itself" }
+			: { client, action: "unchanged" };
+	}
+	const steps = runSteps(plan, { cli, env: context.env, run: context.run ?? runCli, removeLegacy: () => {} });
+	return {
+		client,
+		action: plan.outcome === "added" ? "added" : "updated",
+		note: "integration",
+		steps,
+		restart: AGENT_RESTART[client],
+	};
+}
+
+function unregisterAgent(client: AgentClient, checkout: string | undefined, context: ClientContext): ClientChange {
+	const cli = agentCli(client, context);
+	if (cli === undefined || checkout === undefined) {
+		return {
+			client,
+			action: "manual",
+			note:
+				cli === undefined
+					? `the ${client} CLI is not installed, so apple-cua cannot remove its ${SERVER_NAME} entry; remove it by hand if one is left`
+					: "run apple-cua uninstall from the checkout's own apple-cua command",
+		};
+	}
+	const plan = planAgentRemove(client, context, checkout);
+	if (plan.blocked !== undefined) {
+		return { client, action: "manual", note: plan.blocked };
+	}
+	if (plan.outcome === "absent") {
+		return { client, action: "absent" };
+	}
+	const steps = runSteps(plan, { cli, env: context.env, run: context.run ?? runCli, removeLegacy: () => {} });
+	return { client, action: "removed", steps, restart: AGENT_RESTART[client] };
+}
+
+function inspectAgent(client: AgentClient, desired: DesiredRegistration, context: ClientContext): ClientInspection {
+	if (agentCli(client, context) === undefined) {
+		return { client, state: "manual", detail: AGENT_INSTALL_HINT[client] };
+	}
+	const checkout = desired.bundle?.checkout;
+	const plan = checkout === undefined ? undefined : planAgent(client, desired, context, checkout);
+	if (plan === undefined) {
+		return { client, state: "manual", detail: "cannot be checked without the bundle" };
+	}
+	if (plan.blocked !== undefined) {
+		return { client, state: "conflict", detail: plan.blocked };
+	}
+	if (plan.outcome === "added") {
+		return { client, state: "missing", detail: `apple-cua is not set up in ${CLIENT_LABELS[client]}` };
+	}
+	if (plan.outcome === "updated") {
+		return { client, state: "stale", detail: `needs: ${plan.steps.map((step) => step.describe).join("; ")}` };
+	}
+	const caveat =
+		client === "gemini"
+			? " (Gemini turns MCP servers off in folders you have not trusted: trust the folder, or set GEMINI_CLI_TRUST_WORKSPACE=true)"
+			: client === "hermes" || client === "openclaw"
+				? " (a gateway that runs as a background service still needs a logged-in Mac session to reach the screen)"
+				: "";
+	return { client, state: "current", detail: `set up, up to date${caveat}` };
+}
+
 /** Writes `desired` into one client's configuration (or prints it, for json). */
 export function registerClient(client: ClientName, desired: DesiredRegistration, context: ClientContext): ClientChange {
 	switch (client) {
 		case "omo":
-			return registerJsonFile("omo", desired, context);
+			return registerJsonFile(client, desired, context);
+		case "cursor": {
+			const change = registerJsonFile(client, desired, context);
+			const cli = findExecutable("cursor-agent", context.env["PATH"]);
+			if (cli === undefined || (change.action !== "added" && change.action !== "updated")) {
+				return change;
+			}
+			// A new or changed server is not loaded until approved; one approval is enough for every project.
+			const approved = (context.run ?? runCli)(cli, ["mcp", "enable", SERVER_NAME], context.env);
+			return {
+				...change,
+				note:
+					approved.status === 0
+						? "approved in Cursor (cursor-agent mcp enable)"
+						: `not approved yet: run cursor-agent mcp enable ${SERVER_NAME}`,
+				restart: "start a new Cursor agent session to pick it up",
+			};
+		}
+		case "gemini":
+		case "hermes":
+		case "openclaw":
+		case "pi":
+			return registerAgent(client, desired, context);
 		case "claude":
-			return registerClaude(desired, context);
-		case "codex":
-			return registerCodex(desired, context);
+		case "codex": {
+			const cli = desired.bundle === undefined ? undefined : pluginCli(client, context);
+			if (cli !== undefined && desired.bundle !== undefined) {
+				return registerPlugin(client, cli, { ...desired, bundle: desired.bundle }, context);
+			}
+			return client === "claude" ? registerClaude(desired, context) : registerCodex(desired, context);
+		}
 		case "json":
 			return {
 				client,
@@ -756,8 +1216,57 @@ export function registerClient(client: ClientName, desired: DesiredRegistration,
 	}
 }
 
+/**
+ * Cursor records each approved server in ~/.cursor/projects/<project>/mcp-approvals.json as "<name>-<hash>". After the
+ * server is gone those records are stale, so this installation's own are dropped; any other entry and any file that is
+ * not the expected JSON list stays as it is.
+ */
+function dropCursorApprovals(home: string): number {
+	const projects = join(home, ".cursor/projects");
+	let dropped = 0;
+	let entries: string[];
+	try {
+		entries = readdirSync(projects);
+	} catch {
+		return 0;
+	}
+	for (const project of entries) {
+		const path = join(projects, project, "mcp-approvals.json");
+		const text = readText(path);
+		if (text === undefined) {
+			continue;
+		}
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(text);
+		} catch {
+			continue;
+		}
+		if (!Array.isArray(parsed)) {
+			continue;
+		}
+		const kept = parsed.filter((item) => !(typeof item === "string" && item.startsWith(`${SERVER_NAME}-`)));
+		if (kept.length !== parsed.length) {
+			dropped += parsed.length - kept.length;
+			const temporary = `${path}.tmp-${process.pid}`;
+			writeFileSync(temporary, `${JSON.stringify(kept, null, 2)}\n`, { mode: statSync(path).mode & 0o7777 });
+			renameSync(temporary, path);
+		}
+	}
+	return dropped;
+}
+
 /** Removes the apple-cua entry from one client's configuration; other servers and settings stay. */
-export function unregisterClient(client: ClientName, context: ClientContext): ClientChange {
+export function unregisterClient(client: ClientName, context: ClientContext, checkout?: string): ClientChange {
+	if ((client === "codex" || client === "claude") && checkout !== undefined) {
+		const cli = pluginCli(client, context);
+		if (cli !== undefined) {
+			return unregisterPlugin(client, cli, checkout, context);
+		}
+	}
+	if (isAgentClient(client)) {
+		return unregisterAgent(client, checkout, context);
+	}
 	const path = clientConfigPath(client, context);
 	if (client === "json" || path === undefined) {
 		return {
@@ -803,7 +1312,15 @@ export function unregisterClient(client: ClientName, context: ClientContext): Cl
 		return { client, action: "absent", path };
 	}
 	const written = writeConfigFile(path, edit.text, context.now);
-	return { client, action: "removed", path: written.path, backup: written.backup, before: edit.before };
+	const approvals = client === "cursor" ? dropCursorApprovals(context.home) : 0;
+	return {
+		client,
+		action: "removed",
+		path: written.path,
+		backup: written.backup,
+		before: edit.before,
+		...(approvals === 0 ? {} : { note: `dropped ${approvals} stale approval record(s) Cursor kept for it` }),
+	};
 }
 
 function flatten(value: unknown, prefix = "", into: Record<string, string> = {}): Record<string, string> {
@@ -819,7 +1336,7 @@ function flatten(value: unknown, prefix = "", into: Record<string, string> = {})
 
 /** One client's change as lines for a person: what happened, the backup, and each value that changed. */
 export function describeChange(change: ClientChange, showPath: (path: string) => string = (path) => path): string {
-	const label = change.client.padEnd(7);
+	const label = change.client.padEnd(9);
 	const where = change.path === undefined ? "" : `${showPath(change.path)}: `;
 	const backup = change.backup === undefined ? "" : ` (backup: ${showPath(change.backup)})`;
 	switch (change.action) {
@@ -828,14 +1345,26 @@ export function describeChange(change: ClientChange, showPath: (path: string) =>
 		case "manual":
 			return `${label}${change.note ?? ""}`;
 		case "unchanged":
-			return `${label}${where}already registered, unchanged`;
+			return `${label}${where}already registered${change.note === undefined ? "" : ` (${change.note})`}, unchanged`;
 		case "absent":
 			return `${label}${where}not registered, nothing to remove`;
 		case "removed":
+			if (change.steps !== undefined) {
+				return [`${label}removed apple-cua`, ...change.steps.map((step) => `           ${step}`)].join("\n");
+			}
 			return `${label}${where}removed ${SERVER_NAME}${backup}`;
 		case "added":
 		case "updated": {
-			const lines = [`${label}${where}${change.action} ${SERVER_NAME}${backup}`];
+			if (change.steps !== undefined) {
+				return [
+					`${label}${change.action === "added" ? "installed" : "updated"} the apple-cua ${change.note ?? "plugin"}`,
+					...change.steps.map((step) => `           ${step}`),
+					...(change.restart === undefined ? [] : [`           -> ${change.restart}`]),
+				].join("\n");
+			}
+			const lines = [
+				`${label}${where}${change.action} ${SERVER_NAME}${backup}${change.note === undefined ? "" : `; ${change.note}`}`,
+			];
 			const before = flatten(change.before === undefined ? {} : { ...change.before, env: { ...change.before.env } });
 			const after = flatten(change.after ?? {});
 			// command, then args, then the environment, then anything else, whatever order the file had them in.
@@ -845,7 +1374,7 @@ export function describeChange(change: ClientChange, showPath: (path: string) =>
 			);
 			for (const key of keys) {
 				if (before[key] !== after[key] && !(key === "args" && before[key] === "[]" && after[key] === undefined)) {
-					lines.push(`         ${key}: ${before[key] ?? "(none)"} -> ${after[key] ?? "(removed)"}`);
+					lines.push(`           ${key}: ${before[key] ?? "(none)"} -> ${after[key] ?? "(removed)"}`);
 				}
 			}
 			return lines.join("\n");

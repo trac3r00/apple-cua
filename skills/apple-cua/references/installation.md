@@ -39,8 +39,7 @@ The built entry points are:
   `packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp <absolute path to server.js>`
 
 Use absolute paths in harness configuration; `apple-cua config --register json` prints a ready
-block. The optional Pi extension is not required for Hermes, OpenClaw or another MCP client. Do not
-assume workspace-local bin aliases are on PATH in a background gateway process.
+block. Do not assume workspace-local bin aliases are on PATH in a background gateway process.
 
 ## Configure apps and MCP clients
 
@@ -50,21 +49,38 @@ asks nothing:
 
 ```bash
 apple-cua config --allow TextEdit,com.apple.finder --register omo,codex
+apple-cua config --detect          # installed agent clients; in a terminal, offers the missing ones
 apple-cua config --show
 ```
 
-| Client | Where |
-|---|---|
-| `omo` | `~/.omo/agent/mcp.json`, `mcpServers["apple-cua"]` |
-| `claude` | `claude mcp add --scope user apple-cua ...`; prints the JSON block when the CLI is missing |
-| `codex` | `~/.codex/config.toml`, `[mcp_servers.apple-cua]` |
-| `json` | prints a block to paste into any other client |
+Every client is fed from one per-Mac bundle, `~/.apple-cua/bundle` (the skill, an `.mcp.json` for the
+signed helper with the saved settings, plugin manifests and a local `apple-cua-local` marketplace),
+which `config`, setup and `update` regenerate. Each client is set up through its own command line:
+
+| Client | `--register` name | How apple-cua is added | Skill |
+|---|---|---|---|
+| OmO / senpi | `omo` | `~/.omo/agent/mcp.json`, `mcpServers["apple-cua"]` | linked into `~/.agents/skills` |
+| Claude Code | `claude` | the `apple-cua` plugin from the local `apple-cua-local` marketplace (`claude plugin install`, user scope); `claude mcp add --scope user` on a Claude Code without plugins. Honors `CLAUDE_CONFIG_DIR` | inside the plugin |
+| Codex | `codex` | the `apple-cua` plugin from the local `apple-cua-local` marketplace (`codex plugin add`); `[mcp_servers.apple-cua]` in `config.toml` on a Codex without plugins. Honors `CODEX_HOME` | inside the plugin |
+| Gemini CLI | `gemini` | `gemini extensions link` of the bundle, so it follows settings changes by itself | inside the extension |
+| Cursor | `cursor` | `~/.cursor/mcp.json`, then `cursor-agent mcp enable apple-cua` approves it | linked into `~/.cursor/skills` |
+| Hermes Agent | `hermes` | `hermes mcp add` (`HERMES_HOME`) | linked into `<hermes home>/skills` |
+| OpenClaw | `openclaw` | `openclaw mcp set` then `openclaw mcp reload` (`OPENCLAW_STATE_DIR`, `OPENCLAW_CONFIG_PATH`) | linked into `<state dir>/skills` |
+| pi (the original coding agent) | `pi` | `pi install packages/pi-extension`, a bridge to the same MCP server (`PI_CODING_AGENT_DIR`) | — |
+| anything else | `json` | prints a block to paste | — |
+
+Setup asks before adding apple-cua to each detected client in a terminal and only re-applies earlier
+choices without one. A setting change refreshes every client; restart it or start a new session.
 
 Apps are given by name (resolved to their bundle id) or by bundle id. A client config file is copied
 to `<file>.bak-<timestamp>` before it changes, and merged: other servers and settings, and unknown
 keys of an existing `apple-cua` entry, are kept. Repeating a registration that already matches changes
-nothing. `--unregister <client>` removes only the `apple-cua` entry. A client you never registered
-is never read or written.
+nothing. `--unregister <client>` removes only the `apple-cua` entry (plugin, extension, package or
+skill link). An old entry of this installation is migrated; another installation's is left alone and
+reported with the command that removes it; a file apple-cua cannot parse is never rewritten. A client
+you never registered is never read or written. Gemini disables MCP servers in untrusted folders
+(`GEMINI_CLI_TRUST_WORKSPACE=true`), and a Hermes or OpenClaw gateway running as a background service
+still needs a logged-in Mac session.
 
 ## Grant permissions through the user
 
@@ -106,7 +122,7 @@ apple-cua --json apps list
 ## Repair, update and uninstall
 
 - `apple-cua doctor --fix` rebuilds missing or outdated native binaries and re-registers clients
-  whose entry went stale. It asks before rebuilding a broken helper (`--rebuild-helper` consents up
+  whose entry, plugin or skill link went stale or was switched off. It asks before rebuilding a broken helper (`--rebuild-helper` consents up
   front) and before lifting a stop, opens System Settings at a missing permission (`--no-open`
   prints the command instead), and reports what it fixed and what is left.
 - `apple-cua update` refuses a checkout with local changes or commits its upstream lacks, then
@@ -114,7 +130,8 @@ apple-cua --json apps list
   and new version and commit. It warns first when the helper must be rebuilt, since the rebuilt
   helper needs both permissions again.
 - `apple-cua uninstall` lists what it will remove and asks first (`--yes` skips the question,
-  `--dry-run` only lists): this installation's client registrations (each file backed up first),
+  `--dry-run` only lists): this installation's client registrations (plugins, marketplaces and their caches, extensions,
+  packages and skill links through each client's command line; edited files backed up first),
   running apple-cua servers and the cursor overlay, the helper app and its Accessibility and Screen
   Recording entries, the `apple-cua` command and its PATH line, `~/.apple-cua`, and the checkout if
   the installer created it. A developer checkout stays unless `--purge` is given. Registrations,

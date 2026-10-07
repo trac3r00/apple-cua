@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	type ClientContext,
 	type DesiredRegistration,
+	detectClients,
 	entryAlive,
 	entryRunsCheckout,
 	inspectClient,
@@ -478,5 +479,23 @@ describe("#given registered entries #when their installation is asked #then the 
 		expect(entryAlive({ command: helper, args: [server], env: {} })).toBe(true);
 		expect(entryAlive({ command: "/gone/apple-cua-mcp", args: ["/gone/server.js"], env: {} })).toBe(false);
 		expect(entryAlive({ command: "npx", args: ["some-package"], env: {} })).toBe(true);
+	});
+});
+
+describe("#given agent clients on this Mac #when they are detected #then each is found by its CLI or its settings folder", () => {
+	it("finds a CLI on PATH, a custom CODEX_HOME and a Claude config folder, and nothing for an absent client", () => {
+		const bin = join(home, "bin");
+		mkdirSync(bin, { recursive: true });
+		writeFileSync(join(bin, "omo"), "#!/bin/sh\n", { mode: 0o755 });
+		const codexHome = join(home, "profiles/codex-work");
+		mkdirSync(codexHome, { recursive: true });
+		mkdirSync(join(home, ".claude"), { recursive: true });
+
+		const found = detectClients({ home, env: { PATH: bin, CODEX_HOME: codexHome }, now: new Date() });
+
+		expect(found.map((entry) => entry.client)).toEqual(["codex", "claude", "omo"]);
+		expect(found[0]?.how).toBe(`its settings in ${codexHome}`);
+		expect(found[2]?.how).toContain("omo on PATH");
+		expect(detectClients({ home: join(home, "empty"), env: { PATH: "" }, now: new Date() })).toEqual([]);
 	});
 });

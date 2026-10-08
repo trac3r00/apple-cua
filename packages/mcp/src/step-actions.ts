@@ -75,7 +75,11 @@ function stepTarget(step: RunStep): StepTarget | undefined {
 	return {
 		query: toElementQuery(step.target),
 		index: step.target_index ?? 0,
-		...(step.find === undefined ? {} : { find: toStepFind(step.find) }),
+		...(step.find === undefined
+			? step.type === "reveal"
+				? { find: toStepFind({}) }
+				: {}
+			: { find: toStepFind(step.find) }),
 	};
 }
 
@@ -92,7 +96,7 @@ function stepWait(step: RunStep): StepWait | undefined {
 }
 
 function resolveStepElement(step: RunStep, elementIndex: number): RunStep {
-	return "target" in step && step.type !== "wait_for"
+	return "target" in step && step.type !== "wait_for" && step.type !== "reveal"
 		? { ...step, element_index: String(elementIndex), target: undefined, find: undefined }
 		: step;
 }
@@ -102,6 +106,10 @@ function resolveStepElement(step: RunStep, elementIndex: number): RunStep {
  * a point: every other step needs the element behind it.
  */
 function resolveStepAtPoint(step: RunStep, observation: InputObservation, point: Point): RunStep {
+	if (step.type === "reveal") {
+		// Revealing OCR text sends no input, so the point is not needed.
+		return step;
+	}
 	if (step.type !== "click") {
 		throw new Error(
 			`${step.type} cannot act on text found only in the window's pixels (no accessibility element matched); use find.vision "off" or a target accessibility can match`,
@@ -132,7 +140,7 @@ function validateStep(step: RunStep, observation: InputObservation): void {
 	}
 	if ("target" in step && step.target !== undefined) {
 		const clickPoint = step.type === "click" && (step.x !== undefined || step.y !== undefined);
-		if (step.element_index !== undefined || clickPoint) {
+		if (("element_index" in step && step.element_index !== undefined) || clickPoint) {
 			throw new Error(`${step.type} names its element with target, so it must not also give element_index or x/y`);
 		}
 		const within = step.find?.scroll_within;
@@ -199,6 +207,9 @@ async function dispatchStep(
 			return await drag(computer, targetPid, observation, step);
 		case "scroll":
 			return await scroll(computer, targetPid, requiredElementIndex(step), step);
+		case "reveal":
+			// The guarded find already scrolled the target into view; revealing never acts on it.
+			return { route: "accessibility", delivery: "background" };
 		case "type_text":
 			return await typeText(computer, targetPid, step.text);
 		case "press_keys":

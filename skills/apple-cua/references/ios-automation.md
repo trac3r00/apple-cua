@@ -19,7 +19,9 @@ process, which is what lets the phone be driven without bringing the window forw
 
    `open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"` and
    `x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture` open the panes.
-3. Keep the phone unlocked while work is running. Locking it pauses mirroring.
+3. Keep the iPhone **locked** and nearby, and the Mac unlocked, while work is running. Unlocking
+   the phone pauses mirroring (see https://support.apple.com/en-us/120421). Connection and
+   permission dialogs are the user's to answer; never automate them.
 
 ## Session states
 
@@ -50,7 +52,7 @@ Cannot do, by absence rather than by guessing:
 - No app inventory. Spotlight (`open_app`) is how an app gets launched.
 - OCR reads text, not icons. An unlabelled control needs a screenshot and a tap point measured
   in it.
-- Unlocking the phone pauses mirroring; DRM video renders black; multi-touch, camera and Face ID
+- Unlocking the phone pauses mirroring (the user has to relock it and reconnect); DRM video renders black; multi-touch, camera and Face ID
   are out of reach.
 - Connecting the phone is always the user's job.
 
@@ -74,9 +76,17 @@ On macOS 26 a vertical touch-drag is dropped, so lists move with `scroll` (the w
    a tap-ready centre. `screenshot` costs more but shows what OCR cannot.
 3. **Batch only what has been proven.** A whole sub-task per call is much faster than one call
    per step, but only for sequences already watched to work.
-4. **Isolate a failure** instead of re-running the batch. `tap_text` fails loudly with the text
+4. **Search before you scroll blind.** For text that is off screen, `ios_find_text` is a bounded search
+   that never taps: `max_scrolls` defaults to 8 (max 30), `timeout_ms` to 10000 (max 30000), and
+   `max_scrolls: 0` reads the visible screen only. It answers `search.matches`, `search.scrolls`,
+   `search.reason` (`matched`, `max_scrolls`, `no_progress`, `timeout`, `interrupted`), `verification`
+   and a fresh `observation_token`. It scrolls through the same wheel path, so background delivery
+   still needs an explicit `borrow_pointer: true`. Two unchanged screens stop it as `no_progress`;
+   treat that as a stall, not a cue to raise the limits. After a partial failure (`interrupted`,
+   `actionDispatched: true`) re-observe before deciding; do not replay the search blindly.
+5. **Isolate a failure** instead of re-running the batch. `tap_text` fails loudly with the text
    that IS visible, so the next step is informed.
-5. Prefer `waitForSettle` (or a bounded re-observe) over a fixed sleep: a screen that settles
+6. Prefer `waitForSettle` (or a bounded re-observe) over a fixed sleep: a screen that settles
    costs one extra read.
 
 ## Trust boundaries
@@ -89,7 +99,7 @@ invitation to clear it for them.
 
 ## Surfaces
 
-- MCP: `ios_observe`, `ios_screenshot`, `ios_tap`, `ios_tap_text`, `ios_long_press`,
+- MCP: `ios_observe`, `ios_find_text`, `ios_screenshot`, `ios_tap`, `ios_tap_text`, `ios_long_press`,
   `ios_swipe`, `ios_scroll`, `ios_type_text`, `ios_press_keys`, `ios_home`, `ios_app_switcher`,
   `ios_open_app`. Every mutation requires an `observation_token` from the newest `ios_observe`,
   the token is single-use, and the answer carries a fresh observation so a follow-up decision

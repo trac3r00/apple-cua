@@ -13,3 +13,4 @@ packages/cua-helper/.build/
 packages/cua-helper/.swiftpm/
 .build/
 Package.resolved
+.gstack/

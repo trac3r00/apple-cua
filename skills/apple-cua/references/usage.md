@@ -76,16 +76,24 @@ Mutation tools all require `observation_token` from the latest applicable state,
   value back from the app; the answer reports per-field `verified`/`unverified`/`skipped`
   status plus `requested`/`inputDispatched`/`verified` counts so dispatched input is never
   mistaken for a confirmed outcome. It stops at the first field it cannot verify.
-- `run_steps`: up to 10 actions in order in one call — `click`, `perform_secondary_action`,
-  `set_value`, `select_text`, `drag`, `scroll`, `type_text`, `press_keys`, `invoke_menu`,
+- `run_steps`: up to 20 actions (`MAX_RUN_STEPS`) in order in one call — `click`, `perform_secondary_action`,
+  `set_value`, `select_text`, `drag`, `scroll`, `reveal`, `wait_for`, `type_text`, `press_keys`, `invoke_menu`,
   `set_window_frame` or `clipboard_write` steps — for sequences like fill-then-submit that
   would otherwise need one round trip per action. Every step is validated against the token
   observation up front, element steps are re-checked against a fresh observation right before
   they dispatch, and the batch stops at the first step that fails or whose element no longer
   matches, reporting per-step `dispatched`/`skipped`/`failed` status with a reason. Element
-  ids always refer to the token observation, so a batch cannot name elements that only appear
-  after an earlier step ran; anything that must react to new UI needs the returned
-  continuation token. The optional `expect` block verifies the outcome in the same call with
+  steps may instead name a `target` query (role/label/text, with `target_index`), resolved against a
+  fresh read right before the step runs, so a batch can open a sheet and then fill it; a `wait_for`
+  step (`target`, `gone`, `window_title`, `timeout_ms` up to 10000) waits for the UI to show or
+  stop showing something. Element ids still refer to the token observation; anything else that must
+  react to new UI needs a query target or the returned continuation token.
+  A `reveal` step (`target` query required, `target_index`, `find`) scrolls the target into view
+  with the bounded find (default 10 pages, max 50) and never clicks or edits it, so it is the way to
+  navigate to off-screen content without acting; follow it with `get_app_state`/`find_elements`
+  and `verify_state`. A `find` block (`scroll_within`, `direction`, `max_pages`, `vision`) on an action
+  step is for deliberately acting on the target once it shows. `run_script` offers the same as
+  `app.reveal(query, { scrollWithin, maxPages, vision, direction })`, which `read_only` rejects. The optional `expect` block verifies the outcome in the same call with
   the same checks as `verify_state` (`element_index` with `exists`/`value`/`label`,
   `window_title`, `timeout_ms`).
 - `select_text`: exact text selection or caret placement in an observed text element.
@@ -175,11 +183,25 @@ checked before every action and reported as `ready`, `blocked`, `no-window` or
 A `blocked` session (Unlock iPhone, iPhone in Use, paused, ended, Mac login) is the user's to
 clear: never tap Connect, never type a password, never retry in a loop.
 
-MCP tools: `ios_observe`, `ios_screenshot`, `ios_tap`, `ios_tap_text`,
+MCP tools: `ios_observe`, `ios_find_text`, `ios_screenshot`, `ios_tap`, `ios_tap_text`,
 `ios_long_press`, `ios_swipe`, `ios_scroll`, `ios_type_text`, `ios_press_keys`,
 `ios_home`, `ios_app_switcher`, `ios_open_app`. Every mutation needs an
 `observation_token` from the newest `ios_observe`; the token is single-use and the answer
 carries a fresh observation with a new token, so a decided follow-up does not need another read.
+
+`ios_find_text` is the phone's bounded, non-tapping search for off-screen text. It takes the
+`observation_token`, `query`, `exact` (default false), `direction` (default `down`), `max_scrolls`
+(default 8, max 30; `0` searches the visible screen only), `timeout_ms` (default 10000, max 30000;
+it bounds starting further scrolls), and optional `amount`, `borrow_pointer` and `at`. The answer
+carries `search.matches` (OCR text with tap-ready `center`), `search.scrolls`, `search.reason`
+(`matched`, `max_scrolls`, `no_progress`, `timeout`, `interrupted`), `verification`
+(`{ verified, query }`) and a fresh `observation_token`. Scrolling still follows the
+`ios_scroll` pointer policy: under background delivery it is refused unless `borrow_pointer: true`
+is passed explicitly. Two unchanged screens end the search as `no_progress` (`suspected_noop`), so
+do not widen `max_scrolls` to push past it. An `interrupted` search answers `isError` with no
+token; if `actionDispatched` is true some scrolling happened (`effect: partial`), so re-observe
+with `ios_observe` and decide again rather than blindly retrying. Tap a match only afterwards, with
+`ios_tap` or `ios_tap_text` and the new token.
 
 CLI:
 

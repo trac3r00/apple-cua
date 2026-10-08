@@ -69,6 +69,97 @@ describe("#given config.json #when settings are saved and loaded #then they roun
 	});
 });
 
+describe("#given cursor motion #when settings are saved, changed and mapped to env #then it is optional and canonical", () => {
+	const motion = { style: "spring_settle", timing: "fitts", spring: 0.5 } as const;
+	const reordered = { spring: 0.5, timing: "fitts", style: "spring_settle" } as const;
+
+	it("loads older config without it, and round-trips enabled and disabled", () => {
+		const path = join(home, ".apple-cua/config.json");
+		writeConfig(path, '{ "delivery": "attended" }');
+		expect(loadSettings(path).settings.cursorMotion).toBeUndefined();
+
+		saveSettings(path, { ...DEFAULT_SETTINGS, cursorMotion: reordered });
+		expect(loadSettings(path).settings.cursorMotion).toEqual(motion);
+		expect(JSON.parse(readFileSync(path, "utf8")).cursorMotion).toEqual(motion);
+
+		saveSettings(path, DEFAULT_SETTINGS);
+		expect("cursorMotion" in JSON.parse(readFileSync(path, "utf8"))).toBe(false);
+		expect(parseSettings('{ "cursorMotion": "magnetic" }', "/c.json").cursorMotion).toEqual({ style: "magnetic" });
+		expect(parseSettings('{ "cursorMotion": "off" }', "/c.json").cursorMotion).toBeUndefined();
+	});
+
+	it("rejects invalid saved values naming the file and key", () => {
+		expect(() => parseSettings('{ "cursorMotion": "zigzag" }', "/c.json")).toThrow(/\/c\.json: "cursorMotion"/);
+		expect(() => parseSettings('{ "cursorMotion": { "style": "magnetic", "spring": 9 } }', "/c.json")).toThrow(
+			/spring/,
+		);
+	});
+
+	it("changes, keeps and disables it explicitly", () => {
+		const enabled = changeSettings(DEFAULT_SETTINGS, { cursorMotion: motion }, resolver).settings;
+		const kept = changeSettings(enabled, { delivery: "attended" }, resolver).settings;
+		const disabled = changeSettings(enabled, { cursorMotion: null }, resolver).settings;
+
+		expect(enabled.cursorMotion).toEqual(motion);
+		expect(kept.cursorMotion).toEqual(motion);
+		expect("cursorMotion" in disabled).toBe(false);
+		expect(() => changeSettings(enabled, { cursorMotion: { style: "magnetic", arcSize: 2 } }, resolver)).toThrow(
+			/arcSize/,
+		);
+	});
+
+	it("serializes to the env, compares canonically, and treats empty or off as disabled", () => {
+		const settings = { ...DEFAULT_SETTINGS, cursorMotion: reordered };
+		const env = envForSettings(settings);
+
+		expect(env["APPLE_CUA_CURSOR_MOTION"]).toBe('{"style":"spring_settle","timing":"fitts","spring":0.5}');
+		expect(envForSettings(DEFAULT_SETTINGS)["APPLE_CUA_CURSOR_MOTION"]).toBeUndefined();
+		expect(envMatchesSettings({ APPLE_CUA_CURSOR_MOTION: JSON.stringify(reordered) }, settings)).toBe(true);
+		expect(envMatchesSettings({}, settings)).toBe(false);
+		expect(envMatchesSettings({ APPLE_CUA_CURSOR_MOTION: "magnetic" }, DEFAULT_SETTINGS)).toBe(false);
+		expect(envMatchesSettings({ APPLE_CUA_CURSOR_MOTION: " " }, DEFAULT_SETTINGS)).toBe(true);
+		expect(envMatchesSettings({ APPLE_CUA_CURSOR_MOTION: "off" }, DEFAULT_SETTINGS)).toBe(true);
+		expect(envMatchesSettings({ APPLE_CUA_CURSOR_MOTION: "{ nope" }, DEFAULT_SETTINGS)).toBe(false);
+		expect(envMatchesSettings({ APPLE_CUA_CURSOR_MOTION: '{"style":"nope"}' }, DEFAULT_SETTINGS)).toBe(false);
+	});
+
+	it("adopts it from a registration that runs this checkout", () => {
+		const checkout = join(home, "checkout");
+		const layout = {
+			checkout,
+			helperExecutable: join(checkout, "packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp"),
+			server: join(checkout, "packages/mcp/dist/server.js"),
+		};
+		mkdirSync(dirname(layout.helperExecutable), { recursive: true });
+		writeFileSync(layout.helperExecutable, "");
+		writeConfig(
+			join(home, ".omo/agent/mcp.json"),
+			JSON.stringify({
+				mcpServers: {
+					"apple-cua": {
+						command: layout.helperExecutable,
+						args: [layout.server],
+						env: { APPLE_CUA_CURSOR_MOTION: JSON.stringify(reordered) },
+					},
+				},
+			}),
+		);
+
+		expect(adoptRegistrations(layout, { home, env: {}, now: new Date() })?.cursorMotion).toEqual(motion);
+	});
+
+	it("reapplies to a registration whose env carries the old motion", () => {
+		const desired = desiredRegistration(
+			{ helperExecutable: "/c/helper", server: "/c/server.js" },
+			{ ...DEFAULT_SETTINGS, cursorMotion: motion },
+		);
+
+		expect(desired.env["APPLE_CUA_CURSOR_MOTION"]).toBe(JSON.stringify(motion));
+		expect(desired.envSatisfied?.({ APPLE_CUA_CURSOR_MOTION: "classic" })).toBe(false);
+		expect(desired.envSatisfied?.({ APPLE_CUA_CURSOR_MOTION: JSON.stringify(reordered) })).toBe(true);
+	});
+});
+
 describe("#given settings #when a change is applied #then apps resolve by name and lists merge", () => {
 	it("adds apps by name or bundle id without duplicates, and reports a name that matches no app", () => {
 		const first = changeSettings(DEFAULT_SETTINGS, { allow: ["TextEdit,com.apple.finder", "textedit"] }, resolver);

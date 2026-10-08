@@ -49,6 +49,7 @@ import {
 } from "./macos-ffi/accessibility.js";
 import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
 import { createAxEventWaiter, waitForAxQuiet } from "./macos-ffi/ax-observer.js";
+import type { CursorMotionConfig } from "./macos-ffi/cursor-motion-config.js";
 import { NOOP_POINTER_OVERLAY, type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";
 import { readClipboard, writeClipboard } from "./macos-ffi/pasteboard.js";
@@ -119,6 +120,8 @@ const SETTLE_SIGNATURE_MAX_ELEMENTS = 250;
 export interface MacOSHostComputerOptions extends HostComputerOptions {
 	defaultTargetPid?: number;
 	overlay?: PointerOverlay;
+	/** Omit to use APPLE_CUA_CURSOR_MOTION; null keeps the original native glide. */
+	readonly cursorMotion?: CursorMotionConfig | null | undefined;
 	appApproval?: AppApprovalStore;
 	urlBlocklist?: readonly string[];
 	/**
@@ -162,7 +165,9 @@ export class MacOSHostComputer extends HostComputer {
 		this.appApproval = options.appApproval;
 		this.delivery = options.delivery ?? "attended";
 		this.urlBlocklist = options.urlBlocklist ?? [];
-		this.overlay = options.overlay ?? (agentCursorEnabled() ? createCursorOverlay() : NOOP_POINTER_OVERLAY);
+		this.overlay =
+			options.overlay ??
+			(agentCursorEnabled() ? createCursorOverlay(undefined, options.cursorMotion) : NOOP_POINTER_OVERLAY);
 		this.isLocked = options.isLocked ?? isScreenLocked;
 		this.input = new MacOSInputController(
 			options.defaultTargetPid,
@@ -335,21 +340,21 @@ export class MacOSHostComputer extends HostComputer {
 			window === undefined
 				? "not-held"
 				: await this.input.withWindowCommand(
-						pid,
-						window,
-						() => true,
-						async (held): Promise<"pressed" | "not-held" | "still-disabled"> => {
-							if (!held) {
-								return "not-held";
-							}
-							const enabled = await waitForKeyEquivalentEnabled(pid, chord.key, chord.modifiers);
-							if (enabled === undefined) {
-								return "still-disabled";
-							}
-							pressMenuItem(pid, enabled.path);
-							return "pressed";
-						},
-					);
+					pid,
+					window,
+					() => true,
+					async (held): Promise<"pressed" | "not-held" | "still-disabled"> => {
+						if (!held) {
+							return "not-held";
+						}
+						const enabled = await waitForKeyEquivalentEnabled(pid, chord.key, chord.modifiers);
+						if (enabled === undefined) {
+							return "still-disabled";
+						}
+						pressMenuItem(pid, enabled.path);
+						return "pressed";
+					},
+				);
 		if (outcome === "not-held") {
 			// The app was not told it is active: an item that read enabled is pressed as before, one that read
 			// disabled is refused.
@@ -586,10 +591,10 @@ export class MacOSHostComputer extends HostComputer {
 		const windowCandidates =
 			windowInventory.length > 1
 				? windowInventory.map((window) =>
-						window.id === targetWindow?.id && targetWindowTitle !== undefined
-							? { ...window, title: targetWindowTitle }
-							: window,
-					)
+					window.id === targetWindow?.id && targetWindowTitle !== undefined
+						? { ...window, title: targetWindowTitle }
+						: window,
+				)
 				: undefined;
 		const ocrText =
 			tree?.windowContentUnavailable === true && targetWindow !== undefined

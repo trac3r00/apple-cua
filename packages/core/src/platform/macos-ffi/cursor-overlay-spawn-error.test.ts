@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:fs", () => ({ existsSync: () => true }));
 // Nobody listens on the socket: every connection fails, so each command asks for a daemon.
@@ -17,7 +17,13 @@ vi.mock("node:net", () => ({
 
 import { defaultSocketTransport } from "./cursor-overlay.js";
 
+beforeEach(() => {
+	vi.useFakeTimers();
+});
+
 afterEach(() => {
+	vi.clearAllTimers();
+	vi.useRealTimers();
 	vi.restoreAllMocks();
 });
 
@@ -33,8 +39,6 @@ function failingSpawn() {
 	return { calls, spawnProcess };
 }
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
-
 describe("#given the overlay binary cannot be spawned #when a command is sent #then the process survives", () => {
 	it("handles the async spawn error instead of leaving it unhandled, and reports it once on stderr", async () => {
 		const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
@@ -45,8 +49,7 @@ describe("#given the overlay binary cannot be spawned #when a command is sent #t
 		process.on("uncaughtException", onUncaught);
 		try {
 			transport.send("set 10 10\n");
-			await settle();
-			await settle();
+			await vi.runAllTimersAsync();
 		} finally {
 			process.off("uncaughtException", onUncaught);
 		}
@@ -65,12 +68,10 @@ describe("#given the overlay binary cannot be spawned #when a command is sent #t
 		const transport = defaultSocketTransport(() => time, spawnProcess);
 
 		transport.send("set 10 10\n");
-		await settle();
-		await settle();
+		await vi.runAllTimersAsync();
 		time = 60_000;
 		transport.send("set 20 20\n");
-		await settle();
-		await settle();
+		await vi.runAllTimersAsync();
 
 		expect(calls).toHaveLength(1);
 		expect(stderr.mock.calls.filter((call) => String(call[0]).includes("cursor overlay unavailable"))).toHaveLength(

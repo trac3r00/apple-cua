@@ -4,8 +4,15 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { ReadStream, WriteStream } from "node:tty";
-import { StopSwitch, isBrowserBundle, probeHostCapabilities } from "@apple-cua/core";
-import type { AutomationStatus } from "@apple-cua/core";
+import {
+	CURSOR_MOTION_ENV,
+	StopSwitch,
+	cursorMotionFromEnvironment,
+	isBrowserBundle,
+	parseCursorMotion,
+	probeHostCapabilities,
+} from "@apple-cua/core";
+import type { AutomationStatus, CursorMotionConfig } from "@apple-cua/core";
 import type { Command } from "commander";
 import { syncSkillLinks } from "./client-skills.js";
 import {
@@ -77,7 +84,7 @@ const print: Say = (text) => {
 	process.stdout.write(`${text}\n`);
 };
 
-const quiet: Say = () => {};
+const quiet: Say = () => { };
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -102,7 +109,7 @@ interface Terminal {
  */
 function openTerminal(): Terminal | undefined {
 	if (process.stdin.isTTY === true && process.stdout.isTTY === true) {
-		return { input: process.stdin, output: process.stdout, close: () => {} };
+		return { input: process.stdin, output: process.stdout, close: () => { } };
 	}
 	let inputFd: number | undefined;
 	try {
@@ -199,14 +206,60 @@ function parseToolset(value: string): Toolset {
 	throw new Error("--toolset must be full or lean");
 }
 
+function parseCursorMotionFlag(value: string): CursorMotionConfig | "off" {
+	const text = value.trim();
+	let parsed: unknown = text;
+	if (text.startsWith("{")) {
+		try {
+			parsed = JSON.parse(text);
+		} catch (error) {
+			throw new Error(`--cursor-motion: invalid JSON (${errorMessage(error)})`);
+		}
+	}
+	// Commander coerces null from a required option parser to an empty string.
+	return parseCursorMotion(parsed, "--cursor-motion") ?? "off";
+}
+
+function parseCursorMotionTimingFlag(value: string): NonNullable<CursorMotionConfig["timing"]> {
+	if (value === "native" || value === "fitts" || value === "fixed") {
+		return value;
+	}
+	throw new Error("--cursor-motion-timing must be native, fitts or fixed");
+}
+
+function parseCursorMotionDurationFlag(value: string): number {
+	const milliseconds = value.trim() === "" ? Number.NaN : Number(value);
+	if (!Number.isFinite(milliseconds) || milliseconds < 0 || milliseconds > 5000) {
+		throw new Error("--cursor-motion-duration must be a number of milliseconds from 0 to 5000");
+	}
+	return milliseconds;
+}
+
+/**
+ * The motion the low-level commands use: APPLE_CUA_CURSOR_MOTION when it is set (including "off"), else the saved
+ * setting. null means disabled.
+ */
+export function resolveCursorMotion(
+	configPath: string,
+	env: Readonly<Record<string, string | undefined>> = process.env,
+): CursorMotionConfig | null {
+	if (env[CURSOR_MOTION_ENV] !== undefined) {
+		return cursorMotionFromEnvironment(env) ?? null;
+	}
+	return loadSettings(configPath).settings.cursorMotion ?? null;
+}
+
 // --- config --------------------------------------------------------------------------------------------------------
 
-interface ConfigCommandOptions {
+export interface ConfigCommandOptions {
 	readonly allow?: string[];
 	readonly disallow?: string[];
 	readonly delivery?: Delivery;
 	readonly toolset?: Toolset;
 	readonly iphone?: boolean;
+	readonly cursorMotion?: CursorMotionConfig | "off" | null;
+	readonly cursorMotionTiming?: NonNullable<CursorMotionConfig["timing"]>;
+	readonly cursorMotionDuration?: number;
 	readonly register?: ClientName[];
 	readonly unregister?: ClientName[];
 	readonly apply?: boolean;
@@ -214,13 +267,39 @@ interface ConfigCommandOptions {
 	readonly detect?: boolean;
 }
 
-function requestedChange(options: ConfigCommandOptions): SettingsChange | undefined {
+/** The motion a config run asks for: a config enables or replaces it, null disables it, undefined leaves it. */
+function requestedMotion(options: ConfigCommandOptions, current: Settings): CursorMotionConfig | null | undefined {
+	const { cursorMotion: selection, cursorMotionTiming: timing, cursorMotionDuration: duration } = options;
+	const cursorMotion = selection === "off" ? null : selection;
+	if (timing === undefined && duration === undefined) {
+		return cursorMotion;
+	}
+	const base = cursorMotion === undefined ? current.cursorMotion : cursorMotion;
+	if (base === undefined || base === null) {
+		throw new Error(
+			"--cursor-motion-timing and --cursor-motion-duration need an enabled cursor motion: pass --cursor-motion <style> too, or save one first",
+		);
+	}
+	return (
+		parseCursorMotion(
+			{
+				...base,
+				...(timing === undefined ? {} : { timing }),
+				...(duration === undefined ? {} : { glideDurationMs: duration }),
+			},
+			"cursor motion",
+		) ?? null
+	);
+}
+
+export function requestedChange(options: ConfigCommandOptions, current: Settings): SettingsChange | undefined {
 	const change: SettingsChange = {
 		allow: options.allow ?? [],
 		disallow: options.disallow ?? [],
 		delivery: options.delivery,
 		toolset: options.toolset,
 		iphone: options.iphone,
+		cursorMotion: requestedMotion(options, current),
 		register: options.register ?? [],
 		unregister: options.unregister ?? [],
 	};
@@ -230,6 +309,7 @@ function requestedChange(options: ConfigCommandOptions): SettingsChange | undefi
 		change.delivery !== undefined ||
 		change.toolset !== undefined ||
 		change.iphone !== undefined ||
+		change.cursorMotion !== undefined ||
 		(change.register ?? []).length > 0 ||
 		(change.unregister ?? []).length > 0;
 	return given ? change : undefined;
@@ -242,7 +322,7 @@ async function askChoice<T extends string>(
 	choices: readonly T[],
 	current: T,
 ): Promise<T> {
-	for (;;) {
+	for (; ;) {
 		const answer = (await ask(`${label}, ${choices.join(" or ")} [${current}]: `)).trim().toLowerCase();
 		if (answer === "") {
 			return current;
@@ -261,7 +341,7 @@ async function askClients(
 	question: string,
 	onEnter: readonly ClientName[] = [],
 ): Promise<ClientName[]> {
-	for (;;) {
+	for (; ;) {
 		try {
 			const answer = (await ask(question)).trim();
 			if (answer === "") {
@@ -334,6 +414,7 @@ function formatSettings(
 		`  delivery   ${settings.delivery}`,
 		`  toolset    ${settings.toolset}`,
 		`  iphone     ${settings.iphone ? "on" : "off"}`,
+		`  motion     ${settings.cursorMotion === undefined ? "off" : JSON.stringify(settings.cursorMotion)}`,
 		`  clients    ${settings.clients.join(", ") || "none"}`,
 		`Registrations of ${show(layout.checkout)}:`,
 	];
@@ -421,7 +502,14 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 		}
 	}
 
-	let change = requestedChange(options);
+	let change: SettingsChange | undefined;
+	try {
+		change = requestedChange(options, current);
+	} catch (error) {
+		const message = errorMessage(error);
+		print(json ? JSON.stringify({ ok: false, error: message }) : message);
+		return 1;
+	}
 	const apply = options.apply === true;
 	if (options.show === true || (change === undefined && !apply && (json || !isInteractive()))) {
 		const desired = plannedRegistration(layout, current);
@@ -429,12 +517,12 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 		print(
 			json
 				? JSON.stringify({
-						configPath: layout.configPath,
-						saved: loaded.saved,
-						checkout: layout.checkout,
-						settings: current,
-						registrations,
-					})
+					configPath: layout.configPath,
+					saved: loaded.saved,
+					checkout: layout.checkout,
+					settings: current,
+					registrations,
+				})
 				: formatSettings(current, { saved: loaded.saved, adopted }, layout, registrations),
 		);
 		return 0;
@@ -578,7 +666,7 @@ const WATCH_NOTE_MS = 30_000;
  */
 async function watchUntilGranted(granted: () => boolean, say: Say): Promise<boolean> {
 	const started = Date.now();
-	for (let note = started + WATCH_NOTE_MS; Date.now() - started < WATCH_WAIT_MS; ) {
+	for (let note = started + WATCH_NOTE_MS; Date.now() - started < WATCH_WAIT_MS;) {
 		if (granted()) {
 			return true;
 		}
@@ -620,7 +708,7 @@ async function waitUntilGranted(granted: () => boolean): Promise<boolean> {
 	// A stream paused by an earlier wait stays paused when a listener is added, so Enter would never arrive.
 	terminal?.input.resume();
 	try {
-		for (const deadline = Date.now() + GRANT_WAIT_MS; Date.now() < deadline && !skipped; ) {
+		for (const deadline = Date.now() + GRANT_WAIT_MS; Date.now() < deadline && !skipped;) {
 			if (granted()) {
 				return true;
 			}
@@ -691,7 +779,7 @@ async function openPrivacyPane(url: string): Promise<boolean> {
 	const running = () => spawnSync("/usr/bin/pgrep", ["-x", "System Settings"], { stdio: "ignore" }).status === 0;
 	if (running()) {
 		spawnSync("/usr/bin/osascript", ["-e", 'quit app "System Settings"'], { stdio: "ignore" });
-		for (const deadline = Date.now() + SETTINGS_QUIT_WAIT_MS; running() && Date.now() < deadline; ) {
+		for (const deadline = Date.now() + SETTINGS_QUIT_WAIT_MS; running() && Date.now() < deadline;) {
 			await sleep(200);
 		}
 	}
@@ -924,6 +1012,21 @@ export function registerLifecycleCommands(program: Command, options: LifecycleCo
 		.option("--toolset <profile>", "full (default) or lean", parseToolset)
 		.option("--iphone", "register the iPhone Mirroring tools")
 		.option("--no-iphone", "do not register the iPhone Mirroring tools")
+		.option(
+			"--cursor-motion <style|off|json>",
+			"Cua Cursor Motion style, off, or a JSON object",
+			parseCursorMotionFlag,
+		)
+		.option(
+			"--cursor-motion-timing <timing>",
+			"native, fitts or fixed (needs an enabled motion)",
+			parseCursorMotionTimingFlag,
+		)
+		.option(
+			"--cursor-motion-duration <ms>",
+			"glide duration, 0 to 5000 (needs an enabled motion)",
+			parseCursorMotionDurationFlag,
+		)
 		.option(
 			"--register <clients>",
 			`register with ${CLIENT_NAMES.join(", ")} (comma-separated, repeatable)`,

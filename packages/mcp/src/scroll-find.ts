@@ -136,7 +136,7 @@ function areaSignature(elements: ReadonlyMap<number, AXTreeElement>, rootId: num
 			continue;
 		}
 		parts.push(
-			`${element.role}|${element.label ?? ""}|${Math.round(element.frame.x)}|${Math.round(element.frame.y)}`,
+			`${element.role}|${element.label ?? ""}|${normalizeText(element.value)}|${Math.round(element.frame.x)}|${Math.round(element.frame.y)}`,
 		);
 		pending.push(...element.children);
 	}

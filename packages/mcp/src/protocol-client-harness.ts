@@ -8,6 +8,7 @@ import type {
 	ElicitResult,
 	JSONRPCMessage,
 } from "@modelcontextprotocol/sdk/types.js";
+import type { PhoneToolSource } from "./phone-session.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 import { type McpServerOptions, createMcpServer } from "./server.js";
 
@@ -41,6 +42,7 @@ export async function createHarness(
 		readonly onElicit?: (request: ElicitRequest) => ElicitResult | Promise<ElicitResult>;
 		readonly systemPromptProbe?: () => readonly SystemPrompt[];
 		readonly stopSwitch?: StopStatusSource;
+		readonly phoneSource?: PhoneToolSource;
 		/** Toolset profile and iPhone opt-in; omitted fields come from the environment. */
 		readonly serverOptions?: McpServerOptions;
 	},
@@ -48,7 +50,7 @@ export async function createHarness(
 	const server = createMcpServer(
 		computer,
 		windowProbe,
-		undefined,
+		clientOptions?.phoneSource,
 		appLauncher,
 		clientOptions?.systemPromptProbe,
 		clientOptions?.stopSwitch,

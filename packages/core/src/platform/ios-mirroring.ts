@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
+import { InputInterrupted, assertInputMayContinue, currentInputScope } from "../computer/input-scope.js";
 import { resolveWindowScreenshotSize } from "../computer/viewport.js";
 import type { Point } from "../types/index.js";
 import {
@@ -26,12 +27,14 @@ import {
 	elementFrame,
 	performAction,
 	releaseAXElement,
+	windowTitlesForPid,
 } from "./macos-ffi/accessibility.js";
 import {
 	type CFTypeRef,
 	cfArrayLength,
 	cfArrayValueAt,
 	cfRelease,
+	cfRetain,
 	fromCFBoolean,
 	fromCFString,
 	isCFArray,
@@ -289,25 +292,33 @@ export async function findMirroringWindow(): Promise<MirroringWindow | undefined
 	if (process === undefined) {
 		return undefined;
 	}
+	const appWindows = windowTitlesForPid(process.pid);
 	const choice = chooseMirroringWindow(
-		toTopLevelWindows(listWindows({ onScreenOnly: true })),
-		toTopLevelWindows(listWindows({ onScreenOnly: false })),
+		toTopLevelWindows(listWindows({ onScreenOnly: true }), appWindows),
+		toTopLevelWindows(listWindows({ onScreenOnly: false }), appWindows),
 		process.pid,
 	);
 	return choice === undefined ? undefined : toMirroringWindow(choice.window);
 }
 
-function toTopLevelWindows(listed: readonly ListedWindow[] | undefined): readonly TopLevelWindow[] {
+function toTopLevelWindows(
+	listed: readonly ListedWindow[] | undefined,
+	appWindows: ReadonlyMap<number, string>,
+): readonly TopLevelWindow[] {
 	if (listed === undefined) {
 		return [];
 	}
-	return listed.map((window) => ({
-		id: window.id,
-		ownerPid: window.ownerPid,
-		ownerName: window.ownerName,
-		title: window.title,
-		bounds: window.bounds,
-	}));
+	// The all-Spaces list also contains hidden welcome and auxiliary menu windows.
+	// Prefer the app's AX window identities without depending on titles or minimum size.
+	return listed
+		.filter((window) => appWindows.size === 0 || appWindows.has(window.id))
+		.map((window) => ({
+			id: window.id,
+			ownerPid: window.ownerPid,
+			ownerName: window.ownerName,
+			title: window.title,
+			bounds: window.bounds,
+		}));
 }
 
 /**
@@ -497,7 +508,8 @@ export async function activateMirroring(timeoutMs = ACTIVATE_TIMEOUT_MILLISECOND
 	}
 	const window = await findMirroringWindow();
 	const deadline = Date.now() + timeoutMs;
-	for (;;) {
+	while (true) {
+		assertInputMayContinue(currentInputScope());
 		activateApplication(process.pid);
 		if (window !== undefined) {
 			raiseAxWindow(process.pid, window);
@@ -531,6 +543,8 @@ function raiseAxWindow(pid: number, window: MirroringWindow): void {
 		performAction(element, "AXRaise");
 	} catch {
 		// Raising is best-effort: the activation above is the primary mechanism.
+	} finally {
+		releaseAXElement(element);
 	}
 }
 
@@ -554,6 +568,7 @@ function axWindowElement(pid: number, window: MirroringWindow): AXUIElementRef |
 				}
 				const frame = elementFrame(candidate as AXUIElementRef);
 				if (frame !== undefined && framesMatch(frame, window)) {
+					cfRetain(candidate);
 					return candidate as AXUIElementRef;
 				}
 			}
@@ -642,6 +657,16 @@ export function captureMirroringWindow(window: MirroringWindow): Buffer {
 export async function observeMirroring(
 	options: { readonly minimumConfidence?: number } = {},
 ): Promise<MirroringObservation> {
+	return (await observeMirroringWithDetail(options.minimumConfidence)).observation;
+}
+
+/**
+ * One capture, one OCR pass. The session is classified from every recognised text, so a blocked
+ * marker read at low confidence still refuses; the confidence floor only trims the returned texts.
+ */
+async function observeMirroringWithDetail(
+	minimumConfidence: number | undefined,
+): Promise<{ readonly observation: MirroringObservation; readonly detail: string }> {
 	const process = mirroringProcess();
 	if (process === undefined) {
 		throw new Error(describeMirroringState("not-running"));
@@ -653,18 +678,24 @@ export async function observeMirroring(
 	const axContent = mirroringWindowAxContent(process.pid, window);
 	const image = captureMirroringWindow(window);
 	const size = readImagePixelSize(image);
-	const observations = recognizeTextInImage(
-		image,
-		options.minimumConfidence === undefined ? {} : { minimumConfidence: options.minimumConfidence },
-	);
-	const texts = ocrTextsToScreenPoints(observations, window, size.width, size.height);
+	const allTexts = ocrTextsToScreenPoints(recognizeTextInImage(image), window, size.width, size.height);
 	const state = classifyMirroringSession({
 		running: true,
 		hasWindow: true,
 		axContent,
-		screenTexts: texts.map((text) => text.text),
+		screenTexts: allTexts.map((text) => text.text),
 	});
-	return { state, window, imageWidth: size.width, imageHeight: size.height, texts };
+	const texts =
+		minimumConfidence === undefined ? allTexts : allTexts.filter((text) => text.confidence >= minimumConfidence);
+	const axDetail = axContent
+		.filter((entry) => entry.role === "AXStaticText" && entry.text.length > 0)
+		.map((entry) => entry.text)
+		.join(" ");
+	const detail = axDetail.length > 0 ? axDetail : allTexts.map((text) => text.text).join(" ");
+	return {
+		observation: { state, window, imageWidth: size.width, imageHeight: size.height, texts },
+		detail,
+	};
 }
 
 /**
@@ -676,7 +707,9 @@ export async function requireMirroringWindowAt(pid: number, point: Point): Promi
 	if (windowOwnsPoint(await listTopLevelWindows(), pid, point.x, point.y)) {
 		return;
 	}
-	await activateMirroring().catch(() => undefined);
+	await activateMirroring().catch((error: unknown) => {
+		if (error instanceof InputInterrupted) throw error;
+	});
 	await sleep(OCCLUSION_RECHECK_MILLISECONDS);
 	if (!windowOwnsPoint(await listTopLevelWindows(), pid, point.x, point.y)) {
 		throw new Error(
@@ -708,6 +741,7 @@ export class IPhoneMirroring {
 
 	private async target(): Promise<{ readonly target: IOSInputTarget; readonly window: MirroringWindow }> {
 		const session = await requireMirroringSession();
+		assertInputMayContinue(currentInputScope());
 		if (this.delivery === "attended") {
 			await activateMirroring();
 		}
@@ -732,10 +766,11 @@ export class IPhoneMirroring {
 	}
 
 	async observe(): Promise<MirroringObservation> {
-		await requireMirroringSession();
-		return await observeMirroring(
-			this.minimumConfidence === undefined ? {} : { minimumConfidence: this.minimumConfidence },
-		);
+		const { observation, detail } = await observeMirroringWithDetail(this.minimumConfidence);
+		if (observation.state !== "ready") {
+			throw new Error(describeMirroringState(observation.state, detail));
+		}
+		return observation;
 	}
 
 	async screenshot(): Promise<Buffer> {
@@ -836,8 +871,8 @@ export class IPhoneMirroring {
 		const amount = options.amount ?? 0.3;
 		const at = options.at ?? { x: window.x + window.width / 2, y: window.y + window.height / 2 };
 		const focusBefore = frontmostApplicationPid();
-		await requireMirroringWindowAt(target.pid, at);
 		try {
+			await requireMirroringWindowAt(target.pid, at);
 			await scrollMirroring(target, {
 				at,
 				borrowPointer: options.borrowPointer === true,
@@ -845,7 +880,7 @@ export class IPhoneMirroring {
 				deltaX: direction === "right" ? window.width * amount : direction === "left" ? -window.width * amount : 0,
 			});
 		} finally {
-			if (this.delivery === "background" && focusBefore !== undefined) {
+			if (this.delivery === "background" && focusBefore !== undefined && frontmostApplicationPid() === target.pid) {
 				activateApplication(focusBefore);
 			}
 		}

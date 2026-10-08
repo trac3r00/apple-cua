@@ -95,7 +95,7 @@ export type { PermissionInterface, PermissionKind, PermissionStatus } from "./pe
 export { MacOSPermissions } from "./permission/macos.js";
 export { CloudComputer, type CloudComputerOptions } from "./platform/cloud.js";
 export { HostComputer, type HostComputerOptions } from "./platform/host.js";
-export { MacOSHostComputer, type MacOSHostComputerOptions } from "./platform/macos.js";
+export { MacOSHostComputer, type MacOSHostComputerOptions, agentCursorEnabled } from "./platform/macos.js";
 export type { InputDelivery } from "./platform/macos-input.js";
 export { invokeMenu, type InvokeMenuResult } from "./platform/macos-menu.js";
 export {
@@ -198,6 +198,15 @@ export {
 	NOOP_POINTER_OVERLAY,
 	createCursorOverlay,
 } from "./platform/macos-ffi/cursor-overlay.js";
+export {
+	type CursorMotionConfig,
+	type CursorMotionStyle,
+	type CursorMotionTiming,
+	CURSOR_MOTION_ENV,
+	CURSOR_MOTION_STYLES,
+	cursorMotionFromEnvironment,
+	parseCursorMotion,
+} from "./platform/macos-ffi/cursor-motion-config.js";
 export { VMComputer, type VMComputerOptions } from "./platform/vm.js";
 export {
 	DEFAULT_AX_MESSAGING_TIMEOUT_SECONDS,

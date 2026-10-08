@@ -372,6 +372,15 @@ export const runStepSchema = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("select_text"), ...selectTextFields, ...optionalElementIndex, ...stepTargetFields }),
 	z.object({ type: z.literal("drag"), ...dragFields }),
 	z.object({ type: z.literal("scroll"), ...scrollFields, ...optionalElementIndex, ...stepTargetFields }),
+	/** Scroll the described target into view (default bounded find) and stop: no click, edit, or other action on it. */
+	z
+		.object({
+			type: z.literal("reveal"),
+			target: elementQuerySchema,
+			target_index: stepTargetFields.target_index,
+			find: findSchema.optional(),
+		})
+		.strict(),
 	z.object({
 		type: z.literal("wait_for"),
 		target: elementQuerySchema.optional(),
@@ -444,6 +453,7 @@ const STEP_TYPES = [
 	"select_text",
 	"drag",
 	"scroll",
+	"reveal",
 	"wait_for",
 	"type_text",
 	"press_keys",
@@ -461,7 +471,7 @@ export const compactStepSchema = z.object({
 	type: z
 		.enum(STEP_TYPES)
 		.describe(
-			"click{element_index|target,x,y,click_count,mouse_button,modifiers} perform_secondary_action{element_index|target,action} set_value{element_index|target,value} select_text{element_index|target,text,prefix,suffix,selection} drag{from_x,from_y,to_x,to_y,modifiers} scroll{element_index|target,direction,pages} wait_for{target and/or window_title,gone,timeout_ms<=10000} type_text{text} press_keys{keys,hold_seconds,interval_seconds} invoke_menu{path} set_window_frame{x,y,width,height} clipboard_write{exactly one of text,image_path,file_path}. Name an element by element_index (observed id) or target (resolved just before the step), never both.",
+			"click{element_index|target,x,y,click_count,mouse_button,modifiers} perform_secondary_action{element_index|target,action} set_value{element_index|target,value} select_text{element_index|target,text,prefix,suffix,selection} drag{from_x,from_y,to_x,to_y,modifiers} scroll{element_index|target,direction,pages} reveal{target,target_index,find: scrolls the target into view, never acts on it} wait_for{target and/or window_title,gone,timeout_ms<=10000} type_text{text} press_keys{keys,hold_seconds,interval_seconds} invoke_menu{path} set_window_frame{x,y,width,height} clipboard_write{exactly one of text,image_path,file_path}. Name an element by element_index (observed id) or target (resolved just before the step), never both.",
 		),
 	element_index: elementIndexSchema.optional(),
 	target: compactQuerySchema.optional(),

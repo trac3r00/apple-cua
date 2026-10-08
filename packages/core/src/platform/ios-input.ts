@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
+import { assertInputMayContinue, currentInputScope } from "../computer/input-scope.js";
 import type { Point } from "../types/index.js";
 import {
 	K_CG_EVENT_FLAG_MASK_ALTERNATE,
@@ -29,9 +30,8 @@ import { virtualKeyCodeFor } from "./macos-keycodes.js";
  *
  * "background" (the default) delivers synthesized mouse records straight to the mirroring
  * window's process, so the phone is driven without bringing the window forward and without
- * touching the user's pointer. "attended" is the classic path — bring the window frontmost and
- * post global events — and exists as the fallback for when the private SkyLight symbols are
- * unavailable on a given macOS build.
+ * touching the user's pointer. "attended" is the explicit foreground path. If window-targeted
+ * delivery is unavailable, background input refuses rather than sending global mouse events.
  */
 export type IOSDelivery = "background" | "attended";
 
@@ -244,10 +244,16 @@ function skyLightWindow(target: IOSInputTarget): SkyLightTargetWindow {
 }
 
 function postRecord(target: IOSInputTarget, eventType: number, point: Point): boolean {
-	return postMouseEventRecordToWindow(skyLightWindow(target), eventType, point);
+	if (eventType !== CGS_EVENT_LEFT_MOUSE_UP) assertInputMayContinue(currentInputScope());
+	const posted = postMouseEventRecordToWindow(skyLightWindow(target), eventType, point);
+	if (!posted && eventType !== CGS_EVENT_LEFT_MOUSE_UP) {
+		throw new Error("Window-targeted iPhone input is unavailable; refusing global mouse fallback.");
+	}
+	return posted;
 }
 
 async function postAttendedMouse(kind: "move" | "down" | "up", point: Point): Promise<void> {
+	if (kind !== "up") assertInputMayContinue(currentInputScope());
 	postMouseEvent({ kind, position: point, button: "left", clickState: undefined, targetPid: undefined });
 }
 
@@ -296,28 +302,36 @@ export async function swipeMirroring(target: IOSInputTarget, options: SwipeOptio
 	const path = gesturePath(from, to, steps);
 	const delay = path.length <= 1 ? 0 : durationMs / path.length;
 	const background = deliveryFor(target) === "background" && postRecord(target, CGS_EVENT_LEFT_MOUSE_DOWN, from);
-
-	if (!background) {
-		await postAttendedMouse("move", from);
-		await sleep(TAP_HOLD_MILLISECONDS);
-		await postAttendedMouse("down", from);
-	}
-	for (const point of path.slice(1)) {
-		if (background) {
-			postRecord(target, CGS_EVENT_LEFT_MOUSE_DRAGGED, point);
-		} else {
-			await postAttendedMouse("move", point);
+	let pressed = background;
+	let lastPoint = from;
+	try {
+		if (!background) {
+			await postAttendedMouse("move", from);
+			await sleep(TAP_HOLD_MILLISECONDS);
+			await postAttendedMouse("down", from);
+			pressed = true;
 		}
-		if (delay > 0) {
-			await sleep(delay);
+		for (const point of path.slice(1)) {
+			if (background) {
+				postRecord(target, CGS_EVENT_LEFT_MOUSE_DRAGGED, point);
+			} else {
+				await postAttendedMouse("move", point);
+			}
+			lastPoint = point;
+			if (delay > 0) {
+				await sleep(delay);
+			}
+		}
+		return durationMs;
+	} finally {
+		if (pressed) {
+			if (background) {
+				postRecord(target, CGS_EVENT_LEFT_MOUSE_UP, lastPoint);
+			} else {
+				await postAttendedMouse("up", lastPoint);
+			}
 		}
 	}
-	if (background) {
-		postRecord(target, CGS_EVENT_LEFT_MOUSE_UP, to);
-	} else {
-		await postAttendedMouse("up", to);
-	}
-	return durationMs;
 }
 
 /**
@@ -332,19 +346,20 @@ export async function swipeMirroring(target: IOSInputTarget, options: SwipeOptio
  */
 export async function scrollMirroring(target: IOSInputTarget, options: IOSScrollOptions): Promise<void> {
 	assertScrollMayBorrowPointer(deliveryFor(target), options.borrowPointer);
+	assertInputMayContinue(currentInputScope());
 	const steps = options.steps ?? SCROLL_DEFAULT_STEPS;
 	const deltaY = options.deltaY;
 	const deltaX = options.deltaX ?? 0;
 	const home = getCurrentCursorPosition();
 	const previous = deliveryFor(target) === "background" ? undefined : home;
-	warpCursorPosition(options.at);
-	await sleep(WARP_SETTLE_MILLISECONDS);
-	// The warp moves the pointer but does not re-run the hit test that decides whose scroll this
-	// is; without this event the gesture is delivered to whatever was under the cursor before.
-	await postAttendedMouse("move", options.at);
-	await sleep(WARP_SETTLE_MILLISECONDS);
 	try {
+		warpCursorPosition(options.at);
+		await sleep(WARP_SETTLE_MILLISECONDS);
+		// Re-run the hit test after warping so the wheel reaches the phone rather than the old pointer target.
+		await postAttendedMouse("move", options.at);
+		await sleep(WARP_SETTLE_MILLISECONDS);
 		for (let step = 0; step < steps; step += 1) {
+			assertInputMayContinue(currentInputScope());
 			postScrollEvent({
 				deltaX: Math.round(deltaX / steps),
 				deltaY: Math.round(deltaY / steps),
@@ -367,8 +382,11 @@ export async function scrollMirroring(target: IOSInputTarget, options: IOSScroll
 export async function pressMirroringCombo(target: IOSInputTarget, combo: string): Promise<void> {
 	const { key, modifiers } = comboParts(combo);
 	const keyCode = virtualKeyCodeFor(key);
+	assertInputMayContinue(currentInputScope());
 	const token = beginFocusWithoutRaise(skyLightWindow(target));
 	let flags = 0;
+	let keyHeld = false;
+	const heldModifiers: { readonly code: number; readonly flag: number }[] = [];
 	try {
 		for (const modifier of modifiers) {
 			const code = MODIFIER_KEY_CODES[modifier];
@@ -376,21 +394,19 @@ export async function pressMirroringCombo(target: IOSInputTarget, combo: string)
 			if (code === undefined || flag === undefined) {
 				continue;
 			}
-			flags |= flag;
-			postTargetedKey(target, code, true, flags);
+			const nextFlags = flags | flag;
+			postTargetedKey(target, code, true, nextFlags);
+			flags = nextFlags;
+			heldModifiers.push({ code, flag });
 			await sleep(MODIFIER_SETTLE_MILLISECONDS);
 		}
 		postTargetedKey(target, keyCode, true, flags);
+		keyHeld = true;
 		await sleep(KEY_HOLD_MILLISECONDS);
-		postTargetedKey(target, keyCode, false, flags);
 	} finally {
-		// Releasing the modifiers unconditionally: one left latched corrupts every later keystroke.
-		for (const modifier of [...modifiers].reverse()) {
-			const code = MODIFIER_KEY_CODES[modifier];
-			const flag = MODIFIER_FLAGS[modifier];
-			if (code === undefined || flag === undefined) {
-				continue;
-			}
+		if (keyHeld) postTargetedKey(target, keyCode, false, flags);
+		// Release only modifiers that went down; one left latched corrupts every later keystroke.
+		for (const { code, flag } of [...heldModifiers].reverse()) {
 			// Clear the bit before the key-up: an up event still carrying its own flag reads as held.
 			flags &= ~flag;
 			postTargetedKey(target, code, false, flags);
@@ -425,6 +441,7 @@ export async function typeIntoMirroring(
 }
 
 async function pasteIntoMirroring(target: IOSInputTarget, text: string): Promise<void> {
+	assertInputMayContinue(currentInputScope());
 	writeClipboard({ type: "text", text });
 	const written = readClipboard().text;
 	if (written !== text) {
@@ -436,6 +453,7 @@ async function pasteIntoMirroring(target: IOSInputTarget, text: string): Promise
 
 async function typeKeystrokes(target: IOSInputTarget, text: string, delayMs: number): Promise<void> {
 	const plan = typingPlan(text);
+	assertInputMayContinue(currentInputScope());
 	const token = beginFocusWithoutRaise(skyLightWindow(target));
 	try {
 		for (const entry of plan) {
@@ -454,6 +472,7 @@ async function typeKeystrokes(target: IOSInputTarget, text: string, delayMs: num
 }
 
 function postTargetedKey(target: IOSInputTarget, keyCode: number, keyDown: boolean, flags: number): void {
+	if (keyDown) assertInputMayContinue(currentInputScope());
 	postKeyboardEvent({
 		keyCode,
 		keyDown,

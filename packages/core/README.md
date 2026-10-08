@@ -22,5 +22,43 @@ pnpm --filter @apple-cua/core build
 import { MacOSHostComputer, matchElements } from "@apple-cua/core";
 ```
 
+## Cursor motion
+
+The agent cursor glides natively by default. Pass a `CursorMotionConfig` to use the planner from
+[Cua Cursor Motion](https://github.com/trycua/cua/tree/a7524cfd1d3e959963b43954d43f27c4bd260f08/libs/typescript/cursor-motion)
+(MIT, 0.1.0, vendored at that commit in `vendor/`). It plans paths and timing only; apple-cua keeps its native pointer
+artwork and cues and does not import the upstream canvas themes or effects.
+
+```ts
+import {
+	CURSOR_MOTION_ENV, // "APPLE_CUA_CURSOR_MOTION"
+	CURSOR_MOTION_STYLES,
+	type CursorMotionConfig,
+	cursorMotionFromEnvironment,
+	MacOSHostComputer,
+	parseCursorMotion,
+} from "@apple-cua/core";
+
+const motion: CursorMotionConfig = { style: "spring_settle", timing: "fitts", arcSize: 0.35 };
+const computer = new MacOSHostComputer({ cursorMotion: motion }); // null keeps the native glide; omit to read the env
+
+parseCursorMotion("magnetic"); // { style: "magnetic" }
+parseCursorMotion("off"); // undefined (disabled); throws on unknown styles, fields or out-of-range numbers
+cursorMotionFromEnvironment({ [CURSOR_MOTION_ENV]: '{"style":"signature_arc","glideDurationMs":500}' });
+```
+
+- Styles (`CURSOR_MOTION_STYLES`): `signature_arc`, `spring_settle`, `magnetic`, `comet_swoop`, `adaptive`, `classic`.
+- `timing`: `native`, `fitts` or `fixed`.
+- Bounds: `glideDurationMs` 0..5000, `startHandle`/`endHandle`/`arcSize` 0..1, `arcFlow` -1..1, `spring` 0.3..1,
+  `turnRadius` 1..1000.
+- `APPLE_CUA_CURSOR_MOTION` takes a style name, `off` or a JSON object. `APPLE_CUA_CURSOR=off` disables the overlay entirely.
+
+### Menu bar item
+
+The shared overlay daemon shows one `apple-cua` menu bar item while it is active (mode and motion style in its menu). It
+appears on cursor activity, and disappears when the cursor is hidden, the daemon quits, or it has been idle for 15
+seconds. The daemon can outlive a short-lived process, so the item may linger briefly. A disabled caller never starts or
+updates the overlay; another active client can still keep the shared item visible.
+
 Docs: [root README](../../README.md) · [architecture](../../skills/apple-cua/references/architecture.md) ·
 [permissions](../../skills/apple-cua/references/installation.md). MIT licensed — see [LICENSE](../../LICENSE).

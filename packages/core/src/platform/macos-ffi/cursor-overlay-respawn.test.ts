@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const spawned = vi.hoisted(() => ({ count: 0 }));
 vi.mock("node:fs", () => ({ existsSync: () => true }));
@@ -26,6 +26,12 @@ import { defaultSocketTransport } from "./cursor-overlay.js";
 
 beforeEach(() => {
 	spawned.count = 0;
+	vi.useFakeTimers();
+});
+
+afterEach(() => {
+	vi.clearAllTimers();
+	vi.useRealTimers();
 });
 
 describe("#given the overlay daemon exited after its idle timeout #when the agent acts again later", () => {
@@ -34,12 +40,12 @@ describe("#given the overlay daemon exited after its idle timeout #when the agen
 		const transport = defaultSocketTransport(() => time);
 
 		transport.send("set 10 10\n");
-		await new Promise((resolve) => setTimeout(resolve, 0));
+		await vi.runAllTimersAsync();
 		expect(spawned.count).toBe(1);
 
 		time = 20_000;
 		transport.send("set 20 20\n");
-		await new Promise((resolve) => setTimeout(resolve, 0));
+		await vi.runAllTimersAsync();
 
 		expect(spawned.count).toBe(2);
 	});
@@ -51,7 +57,7 @@ describe("#given the overlay daemon exited after its idle timeout #when the agen
 		transport.send("set 10 10\n");
 		time = 150;
 		transport.send("set 11 11\n");
-		await new Promise((resolve) => setTimeout(resolve, 0));
+		await vi.runAllTimersAsync();
 
 		expect(spawned.count).toBe(1);
 	});

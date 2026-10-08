@@ -1,6 +1,7 @@
 import type { MirroringText } from "@apple-cua/core";
 import { findTexts } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { iosFindTextSchema } from "./phone-search.js";
 import type { PhoneGuardSession, PhoneToolSource } from "./phone-session.js";
 import {
 	iosAppSwitcherSchema,
@@ -31,6 +32,15 @@ export function registerPhoneTools(server: McpServer, guard: PhoneGuardSession, 
 			annotations: READ_ONLY_ANNOTATIONS,
 		},
 		async () => guard.observe(),
+	);
+	server.registerTool(
+		"ios_find_text",
+		{
+			description: `Find OCR text, scrolling autonomously within a bounded page/time budget; returns matches, scroll count, verification and fresh authority, never taps. Stops after two unchanged screens. max_scrolls defaults to 8 (max 30); timeout_ms bounds starting further scrolls. Background scrolling still requires borrow_pointer: true. Use max_scrolls: 0 for visible text only. ${TOKEN}`,
+			inputSchema: iosFindTextSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false },
+		},
+		async (input) => guard.findText(input),
 	);
 	server.registerTool(
 		"ios_screenshot",

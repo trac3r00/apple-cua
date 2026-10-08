@@ -9,6 +9,7 @@ import {
 	MacOSHostComputer,
 	NOOP_POINTER_OVERLAY,
 	StopSwitch,
+	agentCursorEnabled,
 	createCursorOverlay,
 	getAppStateForApp,
 } from "@apple-cua/core";
@@ -22,7 +23,8 @@ import type {
 } from "@apple-cua/core";
 import { Command } from "commander";
 import { registerIosCommands } from "./ios.js";
-import { registerLifecycleCommands } from "./lifecycle-commands.js";
+import { resolveLayout } from "./layout.js";
+import { registerLifecycleCommands, resolveCursorMotion } from "./lifecycle-commands.js";
 import { commandPathOf, stopRefusalFor } from "./stop-gate.js";
 
 type PackageJson = {
@@ -268,7 +270,11 @@ program
 		// setMode writes to the daemon socket asynchronously; await briefly so the
 		// command actually lands before this short-lived process exits (otherwise
 		// the mode change is dropped and the cursor stays the plain pointer).
-		createCursorOverlay().setMode(normalized);
+		const overlay =
+			program.opts<GlobalOptions>().cursor === false || !agentCursorEnabled()
+				? NOOP_POINTER_OVERLAY
+				: createCursorOverlay(undefined, resolveCursorMotion(resolveLayout().configPath));
+		overlay.setMode(normalized);
 		await sleep(200);
 		writeActionOutput("cursor-mode", { mode: normalized }, `Cursor mode: ${normalized}`);
 	});
@@ -579,10 +585,11 @@ async function withComputer(
 ): Promise<void> {
 	// Commander sets `cursor` to false only when `--no-cursor` is passed; the overlay
 	// is shown by default. When hidden, inject the no-op overlay so no helper spawns.
-	const showCursor = program.opts<GlobalOptions>().cursor !== false;
+	const showCursor = program.opts<GlobalOptions>().cursor !== false && agentCursorEnabled();
 	const background = program.opts<GlobalOptions>().background === true;
 	const computer = new MacOSHostComputer({
 		...(background ? { delivery: "background" as const } : {}),
+		...(showCursor ? { cursorMotion: resolveCursorMotion(resolveLayout().configPath) } : {}),
 		...hostOptions,
 		...(showCursor ? {} : { overlay: NOOP_POINTER_OVERLAY }),
 	});

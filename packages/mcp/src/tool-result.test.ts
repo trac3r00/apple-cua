@@ -1,6 +1,6 @@
 import type { AXTreeElement, AppState } from "@apple-cua/core";
 import { describe, expect, it } from "vitest";
-import { observedActionResult, observedSetFieldsResult } from "./tool-result.js";
+import { observedActionResult, observedRunStepsResult, observedSetFieldsResult } from "./tool-result.js";
 
 const state: AppState = {
 	app: "Fixture",
@@ -38,6 +38,55 @@ describe("#given observed action state #when formatted #then observation is not 
 });
 
 describe("#given a post-action state #when the tree was omitted #then the payload stays compact and honest", () => {
+	it("reports a new window without claiming an accessibility-tree change", () => {
+		const payload = payloadOf(
+			observedActionResult(
+				{ ...state, axChangeSummary: { added: 0, removed: 0, changed: 0 } },
+				true,
+				"token-window",
+				[{ id: 2, ownerPid: 1234, ownerName: "Fixture", title: "New Window" }],
+			),
+		);
+
+		expect(payload).toMatchObject({
+			observationStatus: "unchanged",
+			effect: "observed_change",
+			evidence: [{ kind: "window_change" }],
+			observation_token: "token-window",
+			paused: false,
+			needsExplicitObservation: false,
+		});
+		expect(payload["escalation"]).toBeUndefined();
+	});
+
+	it("reports a window-only change after a completed run_steps action", () => {
+		const payload = payloadOf(
+			observedRunStepsResult(
+				{ ...state, axChangeSummary: { added: 0, removed: 0, changed: 0 } },
+				{
+					requested: 1,
+					completed: 1,
+					stoppedEarly: false,
+					steps: [{ step: 1, type: "press_keys", input_dispatched: true, status: "dispatched" }],
+				},
+				undefined,
+				true,
+				"token-run-window",
+				[{ id: 2, ownerPid: 1234, ownerName: "Fixture", title: "New Window" }],
+			),
+		);
+
+		expect(payload).toMatchObject({
+			observationStatus: "unchanged",
+			effect: "observed_change",
+			evidence: [{ kind: "window_change" }],
+			observation_token: "token-run-window",
+			paused: false,
+			needsExplicitObservation: false,
+		});
+		expect(payload["escalation"]).toBeUndefined();
+	});
+
 	it("omits the tree, keeps what changed, and bounds each diff bucket", () => {
 		const result = observedActionResult(
 			{

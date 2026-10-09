@@ -44,6 +44,20 @@ Do not let a model silently expand its own allowlist.
 The allowlist is a coarse app boundary. Sending, deleting, purchasing and other irreversible
 operations still require the user's specific consent through the harness.
 
+## OmO
+
+`apple-cua config --register omo` sets `lifecycle: "keep-alive"` in
+`~/.omo/agent/mcp.json` when no lifecycle was explicitly chosen. OmO otherwise defaults
+to closing an idle connection after ten minutes, which discards the server's observation
+tokens without a tool call failing at that moment. Keep-alive preserves the session and
+enables the client's health pings and connection recovery.
+
+Registration also defaults `requestTimeoutMs` to 180000: a script can run for 120 seconds
+and still needs time for its final observation. Re-registering migrates older entries
+that omit these settings; explicitly configured lifecycle and timeout values are preserved.
+After any unexpected server restart, observe again before sending
+input. Never replay an action whose outcome is unknown.
+
 ## OpenClaw
 
 Merge into the existing OpenClaw configuration; do not replace unrelated settings:

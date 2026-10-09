@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Point, Rect } from "../../types/index.js";
+import { type CursorMotionConfig, cursorMotionFromEnvironment, parseCursorMotion } from "./cursor-motion-config.js";
+import { prepareCursorMotion } from "./cursor-motion.js";
 
 /** "click" is an event rather than a lasting mode: the overlay ripples where the dot lands. */
 export type PointerMode = "pointer" | "scroll" | "thinking" | "click";
@@ -57,15 +59,18 @@ const overlayIdleSeconds = "15";
 const DAEMON_RESPAWN_GUARD_MILLISECONDS = 1_000;
 
 export function createCursorOverlay(
-	transportFactory: OverlayTransportFactory = () => defaultSocketTransport(),
+	transportFactory?: OverlayTransportFactory,
+	motion?: CursorMotionConfig | null,
 ): PointerOverlay {
+	const configuration = motion === undefined ? cursorMotionFromEnvironment() : parseCursorMotion(motion);
+	const factory = transportFactory ?? (() => defaultSocketTransport(Date.now, spawn, configuration));
 	let transport: OverlayTransport | undefined;
 	let resolved = false;
 
 	function send(command: string): void {
 		if (!resolved) {
 			resolved = true;
-			transport = safeTransport(transportFactory);
+			transport = safeTransport(factory);
 		}
 		try {
 			transport?.send(command);
@@ -124,6 +129,7 @@ export type SpawnOverlayProcess = (
 export function defaultSocketTransport(
 	now: () => number = Date.now,
 	spawnProcess: SpawnOverlayProcess = spawn,
+	motion?: CursorMotionConfig,
 ): OverlayTransport {
 	let lastSpawnAt = Number.NEGATIVE_INFINITY;
 	// A binary that cannot be executed (ENOENT/EACCES) will not become executable by retrying every
@@ -160,15 +166,35 @@ export function defaultSocketTransport(
 		} catch {}
 	}
 
-	function deliver(command: string, attempt: number): void {
+	function deliver(command: string, attempt: number, finished?: () => void): void {
 		let socket: ReturnType<typeof connect>;
 		try {
 			socket = connect(overlaySocketPath);
 		} catch {
 			ensureDaemon();
+			finished?.();
 			return;
 		}
+		let retrying = false;
+		socket.on("close", () => {
+			if (!retrying) {
+				finished?.();
+			}
+		});
 		socket.on("connect", () => {
+			if (motion !== undefined && command.startsWith("set ")) {
+				socket.setTimeout(2_000, () => socket.destroy(new Error("Cursor overlay state request timed out")));
+				void prepareCursorMotion(socket, command, motion).then(
+					(prepared) => socket.end(prepared),
+					(error: unknown) => {
+						process.stderr.write(
+							`apple-cua: cursor motion unavailable: ${error instanceof Error ? error.message : String(error)}\n`,
+						);
+						socket.destroy();
+					},
+				);
+				return;
+			}
 			try {
 				socket.write(command);
 				socket.end();
@@ -182,14 +208,34 @@ export function defaultSocketTransport(
 			} catch {}
 			ensureDaemon();
 			if (attempt < 2) {
-				setTimeout(() => deliver(command, attempt + 1), 150);
+				retrying = true;
+				setTimeout(() => deliver(command, attempt + 1, finished), 150);
 			}
 		});
 	}
 
+	const pending: string[] = [];
+	let sending = false;
+	function sendNext(): void {
+		const command = pending.shift();
+		if (command === undefined) {
+			sending = false;
+			return;
+		}
+		deliver(command, 0, sendNext);
+	}
+
 	return {
 		send(command: string): void {
-			deliver(command, 0);
+			if (motion === undefined) {
+				deliver(command, 0);
+				return;
+			}
+			pending.push(command);
+			if (!sending) {
+				sending = true;
+				sendNext();
+			}
 		},
 		close(): void {},
 	};

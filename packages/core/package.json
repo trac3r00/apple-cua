@@ -27,6 +27,7 @@
 	},
 	"files": [
 		"dist",
+		"vendor",
 		"native/sckit.m",
 		"native/build.sh",
 		"native/build-inputs.sha256",

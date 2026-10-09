@@ -33,7 +33,8 @@ web page can do it, do it there. Before touching the phone, read
 [references/ios-automation.md](references/ios-automation.md): it holds the session states, the
 direction semantics, the decision loop, and the one rule that matters most, that a blocked
 session (Unlock iPhone, iPhone in Use, paused, ended) is the user's to clear and never something
-to tap through.
+to tap through. To find text that is off screen on the phone, use `ios_find_text`, a bounded
+search that scrolls and reads but never taps; it is detailed there.
 
 ## Understand the task first
 
@@ -127,7 +128,15 @@ merely to understand the "whole situation." Do not begin by clicking to discover
    when accessibility exposes none and Screen Recording is granted; `only` always reads pixels)
    after each page, and clicks as soon as the target
    shows, all inside the same step. The step reports `found.found_by` (`accessibility` or `vision`)
-   and `pages_scrolled`; a vision-only hit can only be clicked, not written to. Modifier keys work
+   and `pages_scrolled`; a vision-only hit can only be clicked, not written to.
+   To retrieve off-screen information yourself without acting on it, reveal instead of asking the
+   person to scroll: `app.reveal(query, { scrollWithin, maxPages, vision, direction })` in
+   `run_script`, or a `reveal` step (`target`, `target_index`, `find`) in `run_steps`. It scrolls the
+   described target into view with the same bounded find (default 10 pages) and never clicks or
+   edits it; `read_only` rejects it because scrolling is a mutation. Its target must be a query,
+   not an element id. Then read with `get_app_state`/`find_elements` and confirm with `verify_state`.
+   Keep a `find` block on an action step only when you deliberately mean to act on the target.
+   Modifier keys work
    on clicks and drags (`modifiers: ["command"]` for Cmd-click); a scroll with modifiers is
    refused because those wheel events do not land in background apps. Actions on different apps in one script
    (`Promise.all`) run concurrently; actions on one app stay in order.

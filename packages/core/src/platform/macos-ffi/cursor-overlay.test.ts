@@ -62,3 +62,12 @@ describe("#given no overlay transport #when driven #then every call is a safe no
 		}).not.toThrow();
 	});
 });
+
+describe("#given invalid core motion options #when creating the overlay #then validation precedes native startup", () => {
+	it("rejects out-of-range geometry without opening the transport", () => {
+		const factory = vi.fn(fakeTransport);
+
+		expect(() => createCursorOverlay(factory, { style: "signature_arc", arcSize: 2 })).toThrow(/arcSize/);
+		expect(factory).not.toHaveBeenCalled();
+	});
+});

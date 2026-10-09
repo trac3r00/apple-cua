@@ -16,6 +16,26 @@ class MutableStop implements StopStatusSource {
 	}
 }
 
+/**
+ * Every row reads "Cell" at one of the same few positions on every page; only its accessibility value tells the rows
+ * apart, so the area looks identical page to page unless the value is part of what is compared.
+ */
+class RepeatingLabelComputer extends FakeGuardedComputer {
+	constantValue: string | undefined;
+
+	override async getAppState(...args: Parameters<FakeGuardedComputer["getAppState"]>) {
+		const state = await super.getAppState(...args);
+		return {
+			...state,
+			elements: state.elements.map((element) =>
+				element.role === "AXStaticText" && element.label?.startsWith("row-") === true
+					? { ...element, label: "Cell", value: this.constantValue ?? element.label }
+					: element,
+			),
+		};
+	}
+}
+
 let closeHarness: (() => Promise<void>) | undefined;
 
 afterEach(async () => {
@@ -172,6 +192,64 @@ describe("scroll-until-found #given a list longer than its window #when a click 
 		expect(report.completed).toBe(0);
 		expect(pageScrolls(computer.effects)).toHaveLength(2);
 		expect(clicks(computer.effects)).toHaveLength(0);
+	});
+});
+
+describe("scroll-until-found #given rows whose labels and positions repeat #when only their values change #then the end is not declared early", () => {
+	function repeatingComputer(rowCount: number): RepeatingLabelComputer {
+		const computer = new RepeatingLabelComputer();
+		computer.scrollList = {
+			rows: Array.from({ length: rowCount }, (_, index) => `row-${String(index).padStart(2, "0")}`),
+			visibleRows: 5,
+			virtualized: true,
+		};
+		return computer;
+	}
+
+	it("keeps paging until the row whose value matches shows, then clicks it", async () => {
+		const setup = await start(repeatingComputer(40));
+
+		const report = await runFast(setup, [
+			{ type: "click", target: { text: "row-23" }, find: { vision: "off", max_pages: 10 } },
+		]);
+
+		expect(report.steps[0]).toMatchObject({
+			status: "dispatched",
+			found: { found_by: "accessibility", pages_scrolled: 4 },
+		});
+		expect(clicks(setup.harness.computer.effects)).toHaveLength(1);
+	});
+
+	it("still ends at the end of the content when the values stop changing, within the page budget", async () => {
+		const setup = await start(repeatingComputer(12));
+
+		const report = await runFast(setup, [
+			{ type: "click", target: { text: "row-99" }, find: { vision: "off", max_pages: 30 } },
+		]);
+
+		expect(report.steps[0]).toMatchObject({
+			status: "skipped",
+			reason: expect.stringContaining("reached the end of the content"),
+			found: { pages_scrolled: 3 },
+		});
+		expect(clicks(setup.harness.computer.effects)).toHaveLength(0);
+	});
+
+	it("stops after one page when neither labels, positions nor values ever change", async () => {
+		const computer = repeatingComputer(40);
+		computer.constantValue = "same";
+		const setup = await start(computer);
+
+		const report = await runFast(setup, [
+			{ type: "click", target: { text: "row-99" }, find: { vision: "off", max_pages: 30 } },
+		]);
+
+		expect(report.steps[0]).toMatchObject({
+			status: "skipped",
+			reason: expect.stringContaining("reached the end of the content"),
+			found: { pages_scrolled: 1 },
+		});
+		expect(pageScrolls(computer.effects)).toHaveLength(1);
 	});
 });
 

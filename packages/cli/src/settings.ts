@@ -5,6 +5,12 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+	CURSOR_MOTION_ENV,
+	type CursorMotionConfig,
+	cursorMotionFromEnvironment,
+	parseCursorMotion,
+} from "@apple-cua/core";
 import { type BundleInputs, type BundlePlan, planBundle, readSkillFiles, writeBundle } from "./bundle.js";
 import {
 	CLIENT_NAMES,
@@ -31,6 +37,8 @@ export interface Settings {
 	readonly toolset: Toolset;
 	/** Register the iPhone Mirroring tools. */
 	readonly iphone: boolean;
+	/** Cua Cursor Motion for the pointer overlay; omitted when disabled. */
+	readonly cursorMotion?: CursorMotionConfig | undefined;
 	/** The MCP clients apple-cua is registered with; settings changes are applied to each of them. */
 	readonly clients: readonly ClientName[];
 }
@@ -48,6 +56,40 @@ const DELIVERY_ENV = "APPLE_CUA_DELIVERY";
 const TOOLSET_ENV = "APPLE_CUA_TOOLSET";
 const IPHONE_ENV = "APPLE_CUA_IPHONE";
 
+const MOTION_KEYS = [
+	"style",
+	"timing",
+	"glideDurationMs",
+	"startHandle",
+	"endHandle",
+	"arcSize",
+	"arcFlow",
+	"spring",
+	"turnRadius",
+] as const;
+
+/** Validates a motion config and fixes its property order, so equal configs compare and serialize equally. */
+function normalizeMotion(config: CursorMotionConfig | undefined, source?: string): CursorMotionConfig | undefined {
+	if (config === undefined) {
+		return undefined;
+	}
+	return parseCursorMotion(
+		Object.fromEntries(MOTION_KEYS.flatMap((key) => (config[key] === undefined ? [] : [[key, config[key]]]))),
+		source,
+	);
+}
+
+function withMotion<T extends object>(
+	base: T,
+	cursorMotion: CursorMotionConfig | undefined,
+): T & Pick<Settings, "cursorMotion"> {
+	return cursorMotion === undefined ? base : { ...base, cursorMotion };
+}
+
+function sameMotion(left: CursorMotionConfig | undefined, right: CursorMotionConfig | undefined): boolean {
+	return JSON.stringify(normalizeMotion(left) ?? null) === JSON.stringify(normalizeMotion(right) ?? null);
+}
+
 function parseAllowList(value: string | undefined): string[] {
 	return (value ?? "")
 		.split(",")
@@ -57,12 +99,16 @@ function parseAllowList(value: string | undefined): string[] {
 
 /** What a server started with `env` would do, read with the server's own rules. */
 function settingsFromEnv(env: EnvMap): Omit<Settings, "clients"> {
-	return {
-		allowedApps: parseAllowList(env[ALLOW_ENV]),
-		delivery: env[DELIVERY_ENV]?.trim().toLowerCase() === "attended" ? "attended" : "background",
-		toolset: env[TOOLSET_ENV]?.trim().toLowerCase() === "lean" ? "lean" : "full",
-		iphone: env[IPHONE_ENV]?.trim() === "1",
-	};
+	const cursorMotion = normalizeMotion(cursorMotionFromEnvironment(env));
+	return withMotion(
+		{
+			allowedApps: parseAllowList(env[ALLOW_ENV]),
+			delivery: env[DELIVERY_ENV]?.trim().toLowerCase() === "attended" ? "attended" : "background",
+			toolset: env[TOOLSET_ENV]?.trim().toLowerCase() === "lean" ? "lean" : "full",
+			iphone: env[IPHONE_ENV]?.trim() === "1",
+		},
+		cursorMotion,
+	);
 }
 
 function sameSet(left: readonly string[], right: readonly string[]): boolean {
@@ -71,22 +117,33 @@ function sameSet(left: readonly string[], right: readonly string[]): boolean {
 
 /** Whether a registration's env already makes the server behave as `settings` say. */
 export function envMatchesSettings(env: EnvMap, settings: Settings): boolean {
-	const actual = settingsFromEnv(env);
+	let actual: Omit<Settings, "clients">;
+	try {
+		actual = settingsFromEnv(env);
+	} catch (error) {
+		if (error instanceof Error) {
+			return false;
+		}
+		throw error;
+	}
 	return (
 		sameSet(actual.allowedApps, settings.allowedApps) &&
 		actual.delivery === settings.delivery &&
 		actual.toolset === settings.toolset &&
-		actual.iphone === settings.iphone
+		actual.iphone === settings.iphone &&
+		sameMotion(actual.cursorMotion, settings.cursorMotion)
 	);
 }
 
 /** The env a registration carries for `settings`; undefined removes a key. */
 export function envForSettings(settings: Settings): EnvUpdate {
+	const motion = normalizeMotion(settings.cursorMotion);
 	return {
 		[ALLOW_ENV]: settings.allowedApps.length === 0 ? undefined : settings.allowedApps.join(","),
 		[DELIVERY_ENV]: settings.delivery,
 		[TOOLSET_ENV]: settings.toolset,
 		[IPHONE_ENV]: settings.iphone ? "1" : undefined,
+		[CURSOR_MOTION_ENV]: motion === undefined ? undefined : JSON.stringify(motion),
 	};
 }
 
@@ -151,13 +208,17 @@ export function parseSettings(text: string, path: string): Settings {
 	if (!isStringList(clients) || !clients.every(isClientName)) {
 		throw invalid("clients", `a list of ${CLIENT_NAMES.join(", ")}`);
 	}
-	return {
-		allowedApps: parseAllowList(allowedApps.join(",")),
-		delivery,
-		toolset,
-		iphone,
-		clients: CLIENT_NAMES.filter((name) => clients.includes(name)),
-	};
+	const cursorMotion = normalizeMotion(parseCursorMotion(parsed["cursorMotion"], `${path}: "cursorMotion"`));
+	return withMotion(
+		{
+			allowedApps: parseAllowList(allowedApps.join(",")),
+			delivery,
+			toolset,
+			iphone,
+			clients: CLIENT_NAMES.filter((name) => clients.includes(name)),
+		},
+		cursorMotion,
+	);
 }
 
 export interface LoadedSettings {
@@ -177,14 +238,17 @@ export function loadSettings(path: string): LoadedSettings {
 export function saveSettings(path: string, settings: Settings): void {
 	mkdirSync(dirname(path), { recursive: true });
 	const temporary = `${path}.tmp-${process.pid}`;
-	const body = {
-		allowedApps: [...settings.allowedApps],
-		delivery: settings.delivery,
-		toolset: settings.toolset,
-		iphone: settings.iphone,
-		clients: [...settings.clients],
-	};
-	writeFileSync(temporary, `${JSON.stringify(body, null, "\t")}\n`, { mode: 0o600 });
+	const body = withMotion(
+		{
+			allowedApps: [...settings.allowedApps],
+			delivery: settings.delivery,
+			toolset: settings.toolset,
+			iphone: settings.iphone,
+		},
+		normalizeMotion(settings.cursorMotion),
+	);
+	const saved = { ...body, clients: [...settings.clients] };
+	writeFileSync(temporary, `${JSON.stringify(saved, null, "\t")}\n`, { mode: 0o600 });
 	chmodSync(temporary, 0o600);
 	renameSync(temporary, path);
 }
@@ -195,6 +259,7 @@ export function sameSettings(left: Settings, right: Settings): boolean {
 		left.delivery === right.delivery &&
 		left.toolset === right.toolset &&
 		left.iphone === right.iphone &&
+		sameMotion(left.cursorMotion, right.cursorMotion) &&
 		left.clients.join(",") === right.clients.join(",")
 	);
 }
@@ -330,6 +395,8 @@ export interface SettingsChange {
 	readonly delivery?: Delivery | undefined;
 	readonly toolset?: Toolset | undefined;
 	readonly iphone?: boolean | undefined;
+	/** A config enables or replaces the motion; null disables it; undefined leaves it unchanged. */
+	readonly cursorMotion?: CursorMotionConfig | null | undefined;
 	readonly register?: readonly ClientName[] | undefined;
 	readonly unregister?: readonly ClientName[] | undefined;
 }
@@ -358,14 +425,19 @@ export function changeSettings(
 		(name) =>
 			!unregister.includes(name) && (settings.clients.includes(name) || (change.register ?? []).includes(name)),
 	);
+	const cursorMotion =
+		change.cursorMotion === undefined ? settings.cursorMotion : normalizeMotion(change.cursorMotion ?? undefined);
 	return {
-		settings: {
-			allowedApps,
-			delivery: change.delivery ?? settings.delivery,
-			toolset: change.toolset ?? settings.toolset,
-			iphone: change.iphone ?? settings.iphone,
-			clients,
-		},
+		settings: withMotion(
+			{
+				allowedApps,
+				delivery: change.delivery ?? settings.delivery,
+				toolset: change.toolset ?? settings.toolset,
+				iphone: change.iphone ?? settings.iphone,
+				clients,
+			},
+			cursorMotion,
+		),
 		unknown: [...added.unknown, ...removed.unknown],
 	};
 }

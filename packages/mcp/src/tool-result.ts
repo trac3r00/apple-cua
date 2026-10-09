@@ -349,16 +349,18 @@ function actionEnvelope(input: {
 	const effect: ActionEffect =
 		input.readbackConfirmed === true
 			? "confirmed"
-			: input.observationStatus === "unchanged"
-				? "suspected_noop"
-				: input.observationStatus === "changed"
-					? "observed_change"
-					: "unverifiable";
+			: input.windowEvents.length > 0
+				? "observed_change"
+				: input.observationStatus === "unchanged"
+					? "suspected_noop"
+					: input.observationStatus === "changed"
+						? "observed_change"
+						: "unverifiable";
 	const evidence: ActionEvidence[] = [];
 	if (input.readbackConfirmed === true) {
 		evidence.push({ kind: "value_readback" });
 	}
-	if (effect === "observed_change") {
+	if (effect === "observed_change" && input.observationStatus === "changed") {
 		evidence.push({ kind: "ax_change" });
 	}
 	if (input.windowEvents.length > 0) {
@@ -448,11 +450,13 @@ export function observedRunStepsResult(
 				? "partial"
 				: report.completed === 0
 					? "refused"
-					: observationStatus === "unchanged"
-						? "suspected_noop"
-						: observationStatus === "changed"
-							? "observed_change"
-							: "unverifiable";
+					: windowEvents.length > 0
+						? "observed_change"
+						: observationStatus === "unchanged"
+							? "suspected_noop"
+							: observationStatus === "changed"
+								? "observed_change"
+								: "unverifiable";
 	const routes = new Set<ActionRoute>(
 		report.steps.flatMap((step) => (step.input_dispatched && step.route !== undefined ? [step.route] : [])),
 	);
@@ -503,7 +507,7 @@ export function postActionErrorResult(error: unknown, partial?: Record<string, u
 }
 
 const TRUNCATED_ELEMENTS_NOTE =
-	"elements is capped at the driver's element budget, so controls further down the tree are missing; repeat get_app_state with a higher max_elements, or pass subtree_of with the id of a parent element to walk just that branch";
+	"elements is capped at the driver's element budget, so controls further down the tree are missing; reveal or find the control yourself instead of asking a person to scroll (run_steps reveal or app.reveal, find_elements, a higher max_elements, or subtree_of with a parent element id), then inspect and verify";
 
 const TREE_SKIPPED_NOTE =
 	"the accessibility tree was skipped for this capture-only observation (include_accessibility_tree=false), so no element ids were produced and no observation_token was issued; call get_app_state with the tree before any element action";

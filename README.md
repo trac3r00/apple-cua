@@ -91,6 +91,7 @@ apple-cua config --show                                # the settings, and where
 | `--register`, `--unregister <clients>` | `omo`, `claude`, `codex`, `gemini`, `cursor`, `hermes`, `openclaw`, `pi`, or `json`; see [Agent clients](#agent-clients). |
 | `--detect` | List the installed agent clients and whether apple-cua is set up in each; in a terminal, offer the missing ones (`--json` for a machine-readable answer). |
 | `--delivery background\|attended`, `--toolset full\|lean`, `--iphone`, `--no-iphone` | `APPLE_CUA_DELIVERY`, `APPLE_CUA_TOOLSET` and `APPLE_CUA_IPHONE` in every registration. |
+| `--cursor-motion <style\|off\|json>`, `--cursor-motion-timing <native\|fitts\|fixed>`, `--cursor-motion-duration <ms>` | Cua Cursor Motion for the agent cursor, saved and written as `APPLE_CUA_CURSOR_MOTION` into every registration; `off` removes it. The timing and duration flags (0 to 5000) adjust an enabled motion and fail without one. See [Cursor motion](#cursor-motion). |
 | `--apply` | Write the saved settings into every registered client again; setup and `apple-cua update` do this. |
 
 #### Agent clients
@@ -584,6 +585,50 @@ reads an observation. It is drawn, not your real cursor, so it works in backgrou
 without moving your pointer. Set `APPLE_CUA_CURSOR=off` to hide it. Verified on a live session against Cua Driver 0.28.2: a background
 click landed with the frontmost app and the real cursor untouched, and the action answer cost
 1.4 KB instead of 121 KB because the post-action image is now opt-in (`include_screenshot: true`).
+
+#### Cursor motion
+
+By default the cursor uses its original native glide. Opt in to the planner from
+[Cua Cursor Motion](https://github.com/trycua/cua/tree/a7524cfd1d3e959963b43954d43f27c4bd260f08/libs/typescript/cursor-motion)
+to change the path and timing of each glide:
+
+```bash
+apple-cua config --cursor-motion spring_settle         # a style name, saved and applied to every registration
+apple-cua config --cursor-motion '{"style":"signature_arc","timing":"fitts","arcSize":0.4,"arcFlow":-0.5}'
+apple-cua config --cursor-motion-timing fixed --cursor-motion-duration 600   # adjust the saved motion
+apple-cua config --cursor-motion off                   # back to the native glide
+export APPLE_CUA_CURSOR_MOTION=comet_swoop              # override for subsequently launched CLI/server processes
+```
+
+- **Styles:** `signature_arc`, `spring_settle`, `magnetic`, `comet_swoop`, `adaptive`, `classic`.
+- **Timing:** `native` (the chosen Cua style's timing), `fitts` or `fixed`.
+- **Fields** (JSON object; only `style` is required, unknown fields and non-finite numbers are rejected): `glideDurationMs`
+  0 to 5000, `startHandle` and `endHandle` 0 to 1, `arcSize` 0 to 1, `arcFlow` -1 to 1, `spring` 0.3 to 1,
+  `turnRadius` 1 to 1000.
+- **Precedence:** a set `APPLE_CUA_CURSOR_MOTION` (including `off` or an empty value to disable motion) wins; otherwise the low-level CLI uses the saved
+  setting. Registered MCP servers receive the saved setting as `APPLE_CUA_CURSOR_MOTION`. Invalid values are rejected
+  before anything is written. `apple-cua config --show` prints the saved motion. Restart running MCP clients after
+  changing their registration environment.
+- **Reduced motion** (the macOS accessibility setting) uses the upstream reduced-motion planner instead of an arc.
+
+The upstream planner (MIT, version 0.1.0, pinned to commit `a7524cf`) is vendored in `packages/core/vendor`. apple-cua
+uses it for paths and timing only: it keeps its own native pointer artwork and click, scroll and thinking cues
+and does not import the upstream canvas themes or effect rendering.
+
+#### Menu bar indicator
+
+While the cursor overlay is active, a single `apple-cua` item appears in the menu bar. Its menu shows `apple-cua running`,
+the current mode (`pointer`, `scroll` or `thinking`) and the last cursor motion style (`default` for the original glide). It means
+the overlay is active, not merely that motion is configured.
+
+- All CLI commands and MCP servers share one overlay daemon, so there is one item no matter how many clients are driving.
+- The item appears when the cursor is positioned or a target window is highlighted. Mode changes update an existing
+  item; they do not create one before the first visible activity. The item is removed when the
+  cursor is hidden, when the daemon quits, or after 15 seconds without commands, when the daemon exits on its own.
+- The daemon can outlive a short CLI command, so the item may stay for up to 15 seconds after it finishes; the next
+  action reuses it.
+- Opting out of the agent cursor (`APPLE_CUA_CURSOR=off`, or the CLI's `--no-cursor`) prevents that caller from starting
+  or updating the overlay. Other active clients can still keep the shared item visible.
 
 Observation is aimed at the app's focused window, resolved natively, so a multi-window app is
 not scoped by whatever order window enumeration returns; the chosen window id, its title and

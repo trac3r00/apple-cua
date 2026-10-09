@@ -34,6 +34,15 @@
 		}
 	},
 	"files": {
-		"ignore": ["dist", ".bench", ".omo", "node_modules", ".build", "Package.resolved"]
+		"ignore": [
+			"dist",
+			".bench",
+			".omo",
+			".gstack",
+			"node_modules",
+			".build",
+			"Package.resolved",
+			"packages/core/vendor/cua-cursor-motion.js"
+		]
 	}
 }

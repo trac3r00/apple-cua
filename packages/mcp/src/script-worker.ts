@@ -176,6 +176,13 @@ const stepBuilders = Object.freeze({
 			selection: pick(options, "selection"),
 		}),
 	}),
+	reveal: (target: unknown, options?: unknown): StepObject => {
+		const fields = targetWithFind(target, options);
+		if (!("target" in fields)) {
+			throw invalid("reveal needs a query target to look for, not an element id");
+		}
+		return { type: "reveal", ...fields };
+	},
 	menu: (path: unknown): StepObject => ({
 		type: "invoke_menu",
 		path: typeof path === "string" ? path.split(">").map((part) => part.trim()) : path,
@@ -305,6 +312,7 @@ function makeAppHandle(target: WorkerTarget): Readonly<Record<string, unknown>> 
 			act(stepBuilders.scroll(element, direction, pages, options)),
 		selectText: (element: unknown, text?: unknown, options?: unknown) =>
 			act(stepBuilders.selectText(element, text, options)),
+		reveal: (element: unknown, options?: unknown) => act(stepBuilders.reveal(element, options)),
 		menu: (path: unknown) => act(stepBuilders.menu(path)),
 		secondaryAction: (element: unknown, action: unknown, options?: unknown) =>
 			act(stepBuilders.secondaryAction(element, action, options)),

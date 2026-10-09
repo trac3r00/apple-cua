@@ -35,6 +35,7 @@ export const LEAN_TOOL_NAMES = [
 /** Opt-in iPhone Mirroring tools, registered only with `APPLE_CUA_IPHONE=1`. */
 export const IPHONE_TOOL_NAMES = [
 	"ios_observe",
+	"ios_find_text",
 	"ios_screenshot",
 	"ios_tap",
 	"ios_tap_text",

@@ -38,6 +38,7 @@
 			"dist",
 			".bench",
 			".omo",
+			".gstack",
 			"node_modules",
 			".build",
 			"Package.resolved",

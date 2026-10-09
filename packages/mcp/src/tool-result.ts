@@ -349,16 +349,18 @@ function actionEnvelope(input: {
 	const effect: ActionEffect =
 		input.readbackConfirmed === true
 			? "confirmed"
-			: input.observationStatus === "unchanged"
-				? "suspected_noop"
-				: input.observationStatus === "changed"
-					? "observed_change"
-					: "unverifiable";
+			: input.windowEvents.length > 0
+				? "observed_change"
+				: input.observationStatus === "unchanged"
+					? "suspected_noop"
+					: input.observationStatus === "changed"
+						? "observed_change"
+						: "unverifiable";
 	const evidence: ActionEvidence[] = [];
 	if (input.readbackConfirmed === true) {
 		evidence.push({ kind: "value_readback" });
 	}
-	if (effect === "observed_change") {
+	if (effect === "observed_change" && input.observationStatus === "changed") {
 		evidence.push({ kind: "ax_change" });
 	}
 	if (input.windowEvents.length > 0) {
@@ -448,11 +450,13 @@ export function observedRunStepsResult(
 				? "partial"
 				: report.completed === 0
 					? "refused"
-					: observationStatus === "unchanged"
-						? "suspected_noop"
-						: observationStatus === "changed"
-							? "observed_change"
-							: "unverifiable";
+					: windowEvents.length > 0
+						? "observed_change"
+						: observationStatus === "unchanged"
+							? "suspected_noop"
+							: observationStatus === "changed"
+								? "observed_change"
+								: "unverifiable";
 	const routes = new Set<ActionRoute>(
 		report.steps.flatMap((step) => (step.input_dispatched && step.route !== undefined ? [step.route] : [])),
 	);

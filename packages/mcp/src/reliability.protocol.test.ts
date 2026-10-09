@@ -37,6 +37,7 @@ describe("#given a mutation #when it is dispatched #then the answer states how t
 	it("reports the synthetic-event route and a pixel escalation when the accessibility tree did not move", async () => {
 		const computer = new FakeGuardedComputer();
 		computer.postActionSummary = { added: 0, removed: 0, changed: 0 };
+		computer.elementLabelOverrides.set(9, "Open");
 		const harness = await createHarness(computer);
 		closeHarness = harness.close;
 		const token = await observe(harness);
@@ -95,6 +96,33 @@ describe("#given an action #when a window appears while it runs #then the answer
 
 		expect(payload["windowEvents"]).toEqual([{ id: 2, ownerPid: 1234, ownerName: "Finder", title: "Save" }]);
 		expect(payload["evidence"]).toEqual([{ kind: "ax_change" }, { kind: "window_change" }]);
+	});
+
+	it("reports a window-only side effect without a no-op escalation", async () => {
+		const computer = new FakeGuardedComputer();
+		computer.postActionSummary = { added: 0, removed: 0, changed: 0 };
+		let probeCalls = 0;
+		const harness = await createHarness(computer, async () => {
+			probeCalls += 1;
+			return probeCalls === 1 ? [window(1, "Documents")] : [window(1, "Documents"), window(2, "New Window")];
+		});
+		closeHarness = harness.close;
+		const token = await observe(harness);
+
+		const payload = jsonPayload(
+			await harness.client.callTool({
+				name: "click",
+				arguments: { app: "Finder", observation_token: token, element_index: "9" },
+			}),
+		);
+
+		expect(payload).toMatchObject({
+			observationStatus: "unchanged",
+			effect: "observed_change",
+			evidence: [{ kind: "window_change" }],
+			windowEvents: [{ id: 2, ownerPid: 1234, ownerName: "Finder", title: "New Window" }],
+		});
+		expect(payload["escalation"]).toBeUndefined();
 	});
 
 	it("reports no window events when the window set did not change", async () => {

@@ -394,6 +394,21 @@ describe("#given a subtree request #when the index is not part of the observatio
 });
 
 describe("#given a settle poll #when it runs with a smaller budget #then the observation index space survives", () => {
+	it("releases every temporary tree reference without releasing the observation", async () => {
+		const { extractAccessibilityTree, releaseAccessibilitySnapshot } = await import("./accessibility.js");
+		const { CFRetain, CFRelease } = koffiMock.coreFoundationFunctions;
+		extractAccessibilityTree(process.pid, { windowId: 42 });
+
+		extractAccessibilityTree(process.pid, { windowId: 42, signatureOnly: true });
+		releaseAccessibilitySnapshot(process.pid);
+
+		for (const element of [koffiMock.windowElement, koffiMock.textField, koffiMock.targetButton]) {
+			const retained = CFRetain.mock.calls.filter(([reference]) => reference === element).length;
+			const released = CFRelease.mock.calls.filter(([reference]) => reference === element).length;
+			expect(retained - released).toBe(0);
+		}
+	});
+
 	it("keeps element ids and the subtree anchor resolvable", async () => {
 		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
 		const observed = extractAccessibilityTree(process.pid, { windowId: 42 });
@@ -528,6 +543,34 @@ describe("#given an AX element index from an accessibility snapshot", () => {
 });
 
 describe("#given retained accessibility snapshots", () => {
+	it.each(["refetch", "relocate"] as const)(
+		"#when a container is validated by %s #then its temporary child references are released",
+		async (operation) => {
+			const {
+				extractAccessibilityTree,
+				refetchElement,
+				releaseAXElement,
+				releaseAccessibilitySnapshot,
+				relocatedElementFrame,
+			} = await import("./accessibility.js");
+			const { CFRetain, CFRelease } = koffiMock.coreFoundationFunctions;
+			extractAccessibilityTree(process.pid, { windowId: 42 });
+
+			if (operation === "refetch") {
+				releaseAXElement(refetchElement(process.pid, 0));
+			} else {
+				relocatedElementFrame(process.pid, 0);
+			}
+			releaseAccessibilitySnapshot(process.pid);
+
+			for (const element of [koffiMock.textField, koffiMock.targetButton]) {
+				const retained = CFRetain.mock.calls.filter(([reference]) => reference === element).length;
+				const released = CFRelease.mock.calls.filter(([reference]) => reference === element).length;
+				expect(retained - released).toBe(0);
+			}
+		},
+	);
+
 	it("#when explicitly released #then every snapshot reference is released once and fresh-walk fallback resumes", async () => {
 		const { extractAccessibilityTree, performActionByIndex, releaseAccessibilitySnapshot } = await import(
 			"./accessibility.js"

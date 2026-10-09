@@ -609,14 +609,25 @@ function retainedRelocatableElement(pid: number, elementIndex: number): AXUIElem
 	if (observed === undefined || element === undefined) {
 		throw new Error(`element ${elementIndex} not found in snapshot`);
 	}
-	const facts = copyElementFacts(element, { useMultipleAttributes: true, skippedApplications: 0, visibleOnly: false });
-	if (facts.role !== observed.role || facts.label !== observed.label) {
+	try {
+		const facts = copyElementFacts(element, {
+			useMultipleAttributes: true,
+			skippedApplications: 0,
+			visibleOnly: false,
+		});
+		for (const child of facts.children) {
+			releaseAXElement(child);
+		}
+		if (facts.role !== observed.role || facts.label !== observed.label) {
+			throw new Error(
+				`element ${elementIndex} is now ${facts.role} "${facts.label ?? ""}", not the observed control; observe the app again before acting`,
+			);
+		}
+		return element;
+	} catch (error) {
 		releaseAXElement(element);
-		throw new Error(
-			`element ${elementIndex} is now ${facts.role} "${facts.label ?? ""}", not the observed control; observe the app again before acting`,
-		);
+		throw error;
 	}
-	return element;
 }
 
 /**
@@ -722,6 +733,7 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 	const root = createApplicationElement(pid);
 	const walkRoots: AXUIElementRef[] = [];
 	const snapshotElements: AXUIElementRef[] = [];
+	let snapshotInstalled = false;
 	try {
 		assertAppAnswersAccessibility(root, pid);
 		const scope =
@@ -782,6 +794,7 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 					y: Math.round(element.frame.y),
 				})),
 			});
+			snapshotInstalled = true;
 		}
 		return {
 			elements,
@@ -796,12 +809,12 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 				: {}),
 			...contentUnavailable,
 		};
-	} catch (error) {
-		for (const element of snapshotElements) {
-			releaseAXElement(element);
-		}
-		throw error;
 	} finally {
+		if (!snapshotInstalled) {
+			for (const element of snapshotElements) {
+				releaseAXElement(element);
+			}
+		}
 		for (const element of walkRoots) {
 			releaseAXElement(element);
 		}
@@ -1682,6 +1695,9 @@ function assertStillObservedControl(
 		return;
 	}
 	const facts = copyElementFacts(element, { useMultipleAttributes: true, skippedApplications: 0, visibleOnly: false });
+	for (const child of facts.children) {
+		releaseAXElement(child);
+	}
 	if (facts.role === observed.role && facts.label === observed.label && Math.round(facts.frame.y) === observed.y) {
 		return;
 	}

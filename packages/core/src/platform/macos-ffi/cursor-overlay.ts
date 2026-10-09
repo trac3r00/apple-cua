@@ -31,11 +31,11 @@ export interface OverlayTransport {
 export type OverlayTransportFactory = () => OverlayTransport | undefined;
 
 export const NOOP_POINTER_OVERLAY: PointerOverlay = {
-	set(): void { },
-	highlight(): void { },
-	setMode(): void { },
-	hide(): void { },
-	close(): void { },
+	set(): void {},
+	highlight(): void {},
+	setMode(): void {},
+	hide(): void {},
+	close(): void {},
 };
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
@@ -74,7 +74,7 @@ export function createCursorOverlay(
 		}
 		try {
 			transport?.send(command);
-		} catch { }
+		} catch {}
 	}
 
 	return {
@@ -98,7 +98,7 @@ export function createCursorOverlay(
 			// the moment a single verb's process exits (the original "never showed" bug).
 			try {
 				transport?.close();
-			} catch { }
+			} catch {}
 		},
 	};
 }
@@ -163,7 +163,7 @@ export function defaultSocketTransport(
 				}
 			});
 			child.unref();
-		} catch { }
+		} catch {}
 	}
 
 	function deliver(command: string, attempt: number, finished?: () => void): void {
@@ -198,14 +198,14 @@ export function defaultSocketTransport(
 			try {
 				socket.write(command);
 				socket.end();
-			} catch { }
+			} catch {}
 		});
 		socket.on("error", () => {
 			// No daemon listening yet — start one and retry briefly so the very first
 			// command still lands once the daemon has bound its socket.
 			try {
 				socket.destroy();
-			} catch { }
+			} catch {}
 			ensureDaemon();
 			if (attempt < 2) {
 				retrying = true;
@@ -237,6 +237,6 @@ export function defaultSocketTransport(
 				sendNext();
 			}
 		},
-		close(): void { },
+		close(): void {},
 	};
 }

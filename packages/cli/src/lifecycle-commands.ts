@@ -84,7 +84,7 @@ const print: Say = (text) => {
 	process.stdout.write(`${text}\n`);
 };
 
-const quiet: Say = () => { };
+const quiet: Say = () => {};
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -109,7 +109,7 @@ interface Terminal {
  */
 function openTerminal(): Terminal | undefined {
 	if (process.stdin.isTTY === true && process.stdout.isTTY === true) {
-		return { input: process.stdin, output: process.stdout, close: () => { } };
+		return { input: process.stdin, output: process.stdout, close: () => {} };
 	}
 	let inputFd: number | undefined;
 	try {
@@ -322,7 +322,7 @@ async function askChoice<T extends string>(
 	choices: readonly T[],
 	current: T,
 ): Promise<T> {
-	for (; ;) {
+	for (;;) {
 		const answer = (await ask(`${label}, ${choices.join(" or ")} [${current}]: `)).trim().toLowerCase();
 		if (answer === "") {
 			return current;
@@ -341,7 +341,7 @@ async function askClients(
 	question: string,
 	onEnter: readonly ClientName[] = [],
 ): Promise<ClientName[]> {
-	for (; ;) {
+	for (;;) {
 		try {
 			const answer = (await ask(question)).trim();
 			if (answer === "") {
@@ -517,12 +517,12 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 		print(
 			json
 				? JSON.stringify({
-					configPath: layout.configPath,
-					saved: loaded.saved,
-					checkout: layout.checkout,
-					settings: current,
-					registrations,
-				})
+						configPath: layout.configPath,
+						saved: loaded.saved,
+						checkout: layout.checkout,
+						settings: current,
+						registrations,
+					})
 				: formatSettings(current, { saved: loaded.saved, adopted }, layout, registrations),
 		);
 		return 0;
@@ -666,7 +666,7 @@ const WATCH_NOTE_MS = 30_000;
  */
 async function watchUntilGranted(granted: () => boolean, say: Say): Promise<boolean> {
 	const started = Date.now();
-	for (let note = started + WATCH_NOTE_MS; Date.now() - started < WATCH_WAIT_MS;) {
+	for (let note = started + WATCH_NOTE_MS; Date.now() - started < WATCH_WAIT_MS; ) {
 		if (granted()) {
 			return true;
 		}
@@ -708,7 +708,7 @@ async function waitUntilGranted(granted: () => boolean): Promise<boolean> {
 	// A stream paused by an earlier wait stays paused when a listener is added, so Enter would never arrive.
 	terminal?.input.resume();
 	try {
-		for (const deadline = Date.now() + GRANT_WAIT_MS; Date.now() < deadline && !skipped;) {
+		for (const deadline = Date.now() + GRANT_WAIT_MS; Date.now() < deadline && !skipped; ) {
 			if (granted()) {
 				return true;
 			}
@@ -779,7 +779,7 @@ async function openPrivacyPane(url: string): Promise<boolean> {
 	const running = () => spawnSync("/usr/bin/pgrep", ["-x", "System Settings"], { stdio: "ignore" }).status === 0;
 	if (running()) {
 		spawnSync("/usr/bin/osascript", ["-e", 'quit app "System Settings"'], { stdio: "ignore" });
-		for (const deadline = Date.now() + SETTINGS_QUIT_WAIT_MS; running() && Date.now() < deadline;) {
+		for (const deadline = Date.now() + SETTINGS_QUIT_WAIT_MS; running() && Date.now() < deadline; ) {
 			await sleep(200);
 		}
 	}

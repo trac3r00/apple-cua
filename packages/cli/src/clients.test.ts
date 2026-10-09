@@ -88,6 +88,8 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 			command: LAYOUT.helperExecutable,
 			args: [LAYOUT.server],
 			env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit,com.apple.finder", ...DEFAULT_ENV },
+			lifecycle: "keep-alive",
+			requestTimeoutMs: 180_000,
 		});
 		expect(change.action).toBe("added");
 		expect(JSON.parse(readFileSync(change.backup ?? "", "utf8"))).toEqual(original);
@@ -108,28 +110,59 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 		expect(backupsOf(path)).toHaveLength(1);
 	});
 
-	it("leaves an older entry alone when it already means the same settings", () => {
+	it.each([undefined, "keep-alive"])(
+		"migrates an older matching entry with lifecycle=%s to stable defaults",
+		(lifecycle) => {
+			const path = join(home, ".omo/agent/mcp.json");
+			const text = `${JSON.stringify(
+				{
+					mcpServers: {
+						"apple-cua": {
+							command: LAYOUT.helperExecutable,
+							args: [LAYOUT.server],
+							env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit" },
+							...(lifecycle === undefined ? {} : { lifecycle }),
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`;
+			writeConfig(path, text);
+			expect(inspectClient("omo", desired({ allowedApps: ["com.apple.TextEdit"] }), context()).state).toBe("stale");
+
+			const change = registerClient("omo", desired({ allowedApps: ["com.apple.TextEdit"] }), context());
+
+			expect(change.action).toBe("updated");
+			expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["apple-cua"].lifecycle).toBe("keep-alive");
+			expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["apple-cua"].requestTimeoutMs).toBe(180_000);
+			expect(inspectClient("omo", desired({ allowedApps: ["com.apple.TextEdit"] }), context()).state).toBe(
+				"current",
+			);
+			expect(backupsOf(path)).toHaveLength(1);
+		},
+	);
+
+	it("preserves explicitly chosen lifecycle and timeout when settings are updated", () => {
 		const path = join(home, ".omo/agent/mcp.json");
-		const text = `${JSON.stringify(
-			{
+		writeConfig(
+			path,
+			JSON.stringify({
 				mcpServers: {
 					"apple-cua": {
 						command: LAYOUT.helperExecutable,
 						args: [LAYOUT.server],
-						env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit" },
+						lifecycle: "eager",
+						requestTimeoutMs: 123_456,
 					},
 				},
-			},
-			null,
-			2,
-		)}\n`;
-		writeConfig(path, text);
+			}),
+		);
 
-		const change = registerClient("omo", desired({ allowedApps: ["com.apple.TextEdit"] }), context());
+		registerClient("omo", desired({ allowedApps: ["com.apple.TextEdit"] }), context());
 
-		expect(change.action).toBe("unchanged");
-		expect(readFileSync(path, "utf8")).toBe(text);
-		expect(backupsOf(path)).toEqual([]);
+		expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["apple-cua"].lifecycle).toBe("eager");
+		expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["apple-cua"].requestTimeoutMs).toBe(123_456);
 	});
 
 	it("rewrites the managed values of an outdated entry and keeps its other keys and variables", () => {
@@ -166,6 +199,8 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 				APPLE_CUA_IPHONE: "1",
 			},
 			enabled: true,
+			lifecycle: "keep-alive",
+			requestTimeoutMs: 180_000,
 		});
 	});
 

@@ -158,6 +158,8 @@ export interface RegisteredEntry {
 	readonly command: string | undefined;
 	readonly args: readonly string[];
 	readonly env: EnvMap;
+	readonly lifecycle?: string | undefined;
+	readonly requestTimeoutMs?: number | undefined;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -208,10 +210,14 @@ function toRegisteredEntry(value: unknown): RegisteredEntry | undefined {
 	}
 	const command = value["command"];
 	const args = value["args"];
+	const lifecycle = value["lifecycle"];
+	const requestTimeoutMs = value["requestTimeoutMs"];
 	return {
 		command: typeof command === "string" ? command : undefined,
 		args: Array.isArray(args) ? args.filter((argument): argument is string => typeof argument === "string") : [],
 		env: stringRecord(value["env"]),
+		...(typeof lifecycle === "string" ? { lifecycle } : {}),
+		...(typeof requestTimeoutMs === "number" ? { requestTimeoutMs } : {}),
 	};
 }
 
@@ -294,13 +300,30 @@ function parseJsonConfig(text: string | undefined): { config: JsonObject; server
 	return { config: parsed, servers };
 }
 
-function mergeJsonConfig(text: string | undefined, desired: DesiredRegistration): FileEdit {
+function mergeJsonConfig(text: string | undefined, desired: DesiredRegistration, client: "omo" | "cursor"): FileEdit {
 	const { config, servers } = parseJsonConfig(text);
 	const before = toRegisteredEntry(servers[SERVER_NAME]);
-	if (text !== undefined && before !== undefined && entryIsCurrent(before, desired)) {
+	const needsLifecycle = client === "omo" && before?.lifecycle === undefined;
+	const needsTimeout = client === "omo" && before?.requestTimeoutMs === undefined;
+	if (
+		text !== undefined &&
+		before !== undefined &&
+		entryIsCurrent(before, desired) &&
+		!needsLifecycle &&
+		!needsTimeout
+	) {
 		return { text, changed: false, before };
 	}
 	const after = mergeServerEntry(servers[SERVER_NAME], desired);
+	if (needsLifecycle) {
+		// OmO's implicit lazy lifecycle closes idle stdio servers after ten minutes,
+		// destroying the observation tokens that a later action still needs.
+		after["lifecycle"] = "keep-alive";
+	}
+	if (needsTimeout) {
+		// Scripts can run for 120 seconds; allow time for their final observation too.
+		after["requestTimeoutMs"] = 180_000;
+	}
 	const next = { ...config, mcpServers: { ...servers, [SERVER_NAME]: after } };
 	return { text: `${JSON.stringify(next, null, detectIndent(text))}\n`, changed: true, before, after };
 }
@@ -771,6 +794,24 @@ export function inspectClient(
 		return { client, state: "missing", path, detail: `no ${SERVER_NAME} entry` };
 	}
 	if (entryIsCurrent(entry, desired)) {
+		if (client === "omo" && entry.lifecycle === undefined) {
+			return {
+				client,
+				state: "stale",
+				path,
+				entry,
+				detail: "uses OmO's implicit idle shutdown instead of keeping the guarded session alive",
+			};
+		}
+		if (client === "omo" && entry.requestTimeoutMs === undefined) {
+			return {
+				client,
+				state: "stale",
+				path,
+				entry,
+				detail: "uses OmO's short default request timeout for operations that can run for two minutes",
+			};
+		}
 		return { client, state: "current", path, entry, detail: "registered, up to date" };
 	}
 	return { client, state: "stale", path, entry, detail: staleDetail(entry, desired) };
@@ -785,7 +826,7 @@ function registerJsonFile(
 	const text = readText(path);
 	let merged: FileEdit;
 	try {
-		merged = mergeJsonConfig(text, desired);
+		merged = mergeJsonConfig(text, desired, client);
 	} catch (error) {
 		throw new Error(
 			`${path} cannot be read as JSON (${error instanceof Error ? error.message : String(error)}); left it untouched`,

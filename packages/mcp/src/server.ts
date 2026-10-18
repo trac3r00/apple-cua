@@ -2,6 +2,7 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+	IPhoneMirroring,
 	StopSwitch,
 	currentSystemPrompts,
 	probeHostCapabilities,
@@ -16,11 +17,11 @@ import type {
 	SystemPrompt,
 	WindowProbe,
 } from "@apple-cua/core";
-import { IPhoneMirroring } from "@apple-cua/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerCapabilityTools, registerSkillResources } from "./capability-tools.js";
 import { elementQueryFromInput, registerDesktopMutationTools } from "./desktop-mutation-tools.js";
+import { DockGuardSession } from "./dock-session.js";
 import { GuardedSession } from "./guarded-session.js";
 import { registerHumanTools } from "./human-tools.js";
 import {
@@ -60,6 +61,7 @@ const MUTATION_ANNOTATIONS = { readOnlyHint: false, destructiveHint: true } as c
 class ComputerMcpServer extends McpServer {
 	constructor(
 		private readonly session: GuardedSession,
+		private readonly dockSession: DockGuardSession,
 		private readonly stopChord: { stop(): void } | undefined,
 		toolset: ToolsetProfile,
 	) {
@@ -70,12 +72,14 @@ class ComputerMcpServer extends McpServer {
 				const details = error instanceof Error ? error.message : String(error);
 				process.stderr.write(`Failed to close macOS computer session: ${details}\n`);
 			});
+			this.dockSession.close();
 		};
 	}
 
 	override async close(): Promise<void> {
 		this.stopChord?.stop();
 		this.session.invalidate();
+		this.dockSession.close();
 		await super.close();
 		await this.session.close();
 	}
@@ -107,7 +111,13 @@ export function createMcpServer(
 		systemPromptProbe ?? (computer === undefined ? currentSystemPrompts : undefined),
 		stopGate,
 	);
-	const server = new ComputerMcpServer(session, stopChord, toolset);
+	const dockSession = new DockGuardSession(options?.dockSource, {
+		allowedBundleIds: allowedBundleIdsFromProcessEnvironment(),
+		delivery: resolvedComputer.delivery ?? "background",
+		probeHost: options?.dockHostProbe ?? probeHostCapabilities,
+		...(stopGate === undefined ? {} : { stopSwitch: stopGate }),
+	});
+	const server = new ComputerMcpServer(session, dockSession, stopChord, toolset);
 
 	server.registerTool(
 		"verify_state",
@@ -223,7 +233,7 @@ export function createMcpServer(
 		registerParallelTools(server, session, resolvedComputer);
 	}
 	registerHumanTools(server, session);
-	registerScriptTools(server, session, resolvedComputer);
+	registerScriptTools(server, session, resolvedComputer, dockSession);
 	registerCapabilityTools(server, {
 		delivery: resolvedComputer.delivery,
 		probeHost: probeHostCapabilities,

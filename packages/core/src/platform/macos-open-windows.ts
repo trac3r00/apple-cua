@@ -1,6 +1,8 @@
 import { openWindows } from "get-windows";
+import { isSystemCallHost } from "./macos-call-helpers.js";
 import type { ListedWindow } from "./macos-ffi/window-list.js";
 import { listWindows } from "./macos-ffi/window-list.js";
+import { findRunningApplication } from "./macos-ffi/workspace.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
 
 const OPEN_WINDOWS_ATTEMPTS = 3;
@@ -18,14 +20,26 @@ export interface OpenWindowsSources {
 }
 
 /**
- * The app windows a caller can target, from a WindowServer listing: layer 0 only, because the
- * chrome above it is not something input should address.
+ * Normal app windows plus Apple's call-banner helpers at notification layer 21.
+ * Bundle identity and system path prove the helper, never its localized owner label.
+ * Approval and observation guards still apply to the helper's own pid and bundle ID.
  */
-export function targetableWindows(listed: readonly ListedWindow[]): readonly MacOSWindowInfo[] {
+export function targetableWindows(
+	listed: readonly ListedWindow[],
+	applicationForPid: (
+		pid: number,
+	) => { readonly bundleId: string; readonly path: string } | undefined = findRunningApplication,
+): readonly MacOSWindowInfo[] {
 	const windows: MacOSWindowInfo[] = [];
 	for (const window of listed) {
 		if (window.layer !== NORMAL_WINDOW_LAYER) {
-			continue;
+			if (window.layer !== 21) {
+				continue;
+			}
+			const application = applicationForPid(window.ownerPid);
+			if (application === undefined || !isSystemCallHost(application.bundleId, application.path)) {
+				continue;
+			}
 		}
 		windows.push({
 			id: window.id,

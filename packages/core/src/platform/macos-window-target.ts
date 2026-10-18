@@ -31,6 +31,7 @@ export function visibleWindowsForPid(windows: readonly MacOSWindowInfo[], pid: n
 export function toTargetWindow(window: MacOSWindowInfo): SkyLightTargetWindow {
 	return {
 		id: window.id,
+		...(window.layer === 21 ? { layer: window.layer } : {}),
 		bounds: {
 			x: window.bounds.x,
 			y: window.bounds.y,

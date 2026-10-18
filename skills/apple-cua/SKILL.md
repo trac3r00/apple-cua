@@ -140,6 +140,18 @@ merely to understand the "whole situation." Do not begin by clicking to discover
    on clicks and drags (`modifiers: ["command"]` for Cmd-click); a scroll with modifiers is
    refused because those wheel events do not land in background apps. Actions on different apps in one script
    (`Promise.all`) run concurrently; actions on one app stay in order.
+   Drag coordinates are in the observed screenshot: both endpoints must stay inside the target
+   window. The default drag follows a distance-paced, eased path, with the visible agent cursor
+   tracking each sample; a stopped drag releases at its last delivered point. Hover movement
+   also stays inside the target window rather than travelling through unrelated windows.
+   Scrolling shows the scroll cue at the target element or wheel position, not a click ripple.
+   Open a context menu with `app.click(target, { mouseButton: "right" })`: an advertised
+   `AXShowMenu` is used instead of `AXPress`. Popup menu items are included in fresh observations
+   even when the menu extends outside the document viewport; select them by query or id.
+   Wait for the chosen menu item to disappear before the next pointer gesture
+   (`app.waitFor({ role: "AXMenuItem", label: chosen }, { gone: true })`), because closing a
+   native menu is asynchronous. To dismiss without choosing, use an advertised `AXCancel`
+   action on a menu item, then verify that the menu is gone.
    Under the lean profile (`get_capabilities` reports `server.toolset: "lean"`) the only action
    tool is `run_script`; the individual action tools named above are not registered.
 5. **Inspect the result.** Post-action state is evidence to evaluate, not automatic proof
@@ -218,6 +230,37 @@ when the needed target cannot be established.
   independent apps can be observed and driven in parallel. The queue does not serialize other
   processes or human input.
 
+## Browser controls, Dock, and cursor identities
+
+Browser pages use their live macOS accessibility tree, not a complete DOM.
+The bounded walk reports `elementsTruncated` for element or depth cuts; use an
+observed parent with `app.observe({subtreeOf: id})` to explore deeper content.
+Script observations also accept `includeMenuBar`, `visibleOnly`, `maxElements`,
+`elementFormat: "table"` and `includeScreenshot: false`. A script must enable
+its top-level `include_screenshot` before requesting per-observation images.
+Subtree IDs restart locally, so use the new observation's IDs.
+
+Default background clicks on observed web controls use their live AX ancestry
+and current bounds to choose guarded pointer input before AXPress. Native
+controls retain semantic actions. This is a route choice, not a replay after
+an unchanged result; still verify the page's intended state. Tiny positive-size
+controls remain targetable when exposed; opaque canvas content remains a
+visual-inspection case.
+
+`const dock = apple.dock()` provides `observe()`, `click(target)`,
+`showMenu(target)` and `cancel(target)` inside the existing `run_script` tool.
+IDs need this script's current Dock observation; queries must resolve uniquely
+unless an explicit match index is given. Dock tokens are separate from app
+window tokens. The host must explicitly approve `com.apple.dock`; mutations
+require attended delivery on an unlocked console. Background Dock interaction
+is refused rather than taking focus, and agents must not widen approval.
+
+Cursor overlays are process-isolated by default. Distinct `APPLE_CUA_CURSOR_ID`
+values give separate visible overlays; reusing a value reconnects/shares that
+overlay. These are visual cursors, not independent OS mice. Shared app, menu,
+and Dock state still needs serialized control; separate cursor identities do
+not authorize parallel controllers or bypass the host's focus guard.
+
 ## Confirmation belongs to the user, not a token
 
 Before sending a message, submitting a form, purchasing, deleting, changing access/security
@@ -228,6 +271,48 @@ Prepare drafts and previews without submitting when that satisfies the request.
 An observation token proves server-side sequencing only. An app allowlist permits using the
 app, not every operation within it. A model-supplied `confirmed` flag or written plan is not
 human consent. The server cannot infer the user's intent or classify every UI consequence.
+
+## Phone and FaceTime call banners
+
+On macOS 26, the top-right "Click to Call" banner is composited by
+`com.apple.notificationcenterui`, with background FaceTime helpers behind it.
+Use `list_windows` and `list_apps` to identify the on-screen host, then observe
+its own bundle ID and window ID. Known system helpers are:
+
+- `com.apple.FaceTime.FaceTimeNotificationExtension`
+- `com.apple.facetime.NotificationViewBridgeService`
+- `com.apple.facetime.NotificationService`
+
+Notification Center and these helpers are discoverable despite their background
+activation policy. Their notification-layer windows are targetable only when
+AppKit identifies the expected bundle at its system path. Each host/helper requires
+its own explicit approval; approving `com.apple.FaceTime` or `com.apple.mobilephone`
+does not approve Notification Center or a helper. Ask the user to approve the host through setup/config and reload the server when
+needed. Never change the allowlist to approve yourself.
+
+Read the banner's recipient and obtain confirmation for that recipient before
+pressing Call through `run_script`. A hosted banner may expose only the
+`FACETIME_NOTIFICATION` group, not a Call button or recipient. In that case,
+identify the actual control from the host-window screenshot and click its
+observed coordinates through the same guarded script. Never press the whole
+group's center. Hidden helper windows can capture as blank; they are not a
+substitute for the visible host. Verify ringing/connected state afterward.
+A dispatched click alone is not proof of a call, and no real call is a test.
+This does not provide microphone routing to another application.
+
+Measured limitation on macOS 26.7: per-process and window-owner background
+clicks were dispatched without a visible call-state change. Window-owner delivery
+preserved the real pointer and frontmost app, but the recipient confirmed no call
+occurred. The ineffective mouse window-owner experiment was removed.
+If the result is `effect: "unverifiable"`, pause further dialing and obtain
+confirmation of the previous attempt's outcome from the recipient. Never replay
+an uncertain Call action or switch to foreground/global input to force delivery.
+
+Mac Phone/FaceTime and a mirrored iPhone are separate targets. iOS 26/27 meet
+Apple's iOS 18-or-later Mirroring requirement, but eligibility is not project
+validation. The helper layout was observed on macOS 26.7; macOS 27 and iOS 26/27
+end-to-end calling remain unverified. iPhone Mirroring cannot provide microphone
+access for calls; use the configured Mac Phone/FaceTime service for those.
 
 ## Entry points and setup
 

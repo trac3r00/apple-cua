@@ -185,6 +185,7 @@ async function dispatchStep(
 	step: RunStep,
 	targetPid: number,
 	observation: InputObservation,
+	actions?: readonly string[],
 ): Promise<StepDispatch> {
 	const power = await dispatchPowerStep(computer, step, targetPid, observation);
 	if (power !== undefined) {
@@ -192,7 +193,7 @@ async function dispatchStep(
 	}
 	switch (step.type) {
 		case "click":
-			return await click(computer, targetPid, observation, step);
+			return await click(computer, targetPid, observation, step, actions);
 		case "perform_secondary_action":
 			await computer.performAction(targetPid, requiredElementIndex(step), step.action);
 			return { route: "accessibility", delivery: "background" };
@@ -227,6 +228,7 @@ export function createRunStepDriver(computer: GuardedComputerInterface): RunStep
 		resolve: resolveStepElement,
 		resolveAtPoint: resolveStepAtPoint,
 		validate: validateStep,
-		dispatch: async (step, targetPid, observation) => await dispatchStep(computer, step, targetPid, observation),
+		dispatch: async (step, targetPid, observation, actions) =>
+			await dispatchStep(computer, step, targetPid, observation, actions),
 	};
 }

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { runInInputScope } from "../computer/input-scope.js";
 import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
 import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
 
@@ -133,5 +134,81 @@ describe("#given keys or a window command for b.txt while the app's focused wind
 
 		expect(accessibilityMock.raiseWindowInApp).not.toHaveBeenCalled();
 		controller.close();
+	});
+
+	it("#when an observed window is bound but an unrelated modal has focus #then no keyboard event is posted", async () => {
+		accessibilityMock.focusedWindowIdForPid.mockReturnValue(A_TXT.id);
+		accessibilityMock.focusedWindowIsModal.mockReturnValue(true);
+		const controller = await controllerOnB();
+		try {
+			await expect(
+				runInInputScope({ target: { pid: 1234, windowId: B_TXT.id } }, () => controller.pressKey("Return")),
+			).rejects.toThrow();
+			expect(coreGraphicsMock.postKeyboardEvent).not.toHaveBeenCalled();
+		} finally {
+			accessibilityMock.focusedWindowIsModal.mockReturnValue(false);
+			controller.close();
+		}
+	});
+
+	it("#when the observed window has verified focus #then bound keyboard input is delivered", async () => {
+		accessibilityMock.focusedWindowIdForPid.mockReturnValue(B_TXT.id);
+		const controller = await controllerOnB();
+		try {
+			await runInInputScope({ target: { pid: 1234, windowId: B_TXT.id } }, () => controller.pressKey("Return"));
+			expect(coreGraphicsMock.postKeyboardEvent).toHaveBeenCalledWith(
+				expect.objectContaining({ targetPid: 1234, targetWindow: B_TXT }),
+			);
+		} finally {
+			controller.close();
+		}
+	});
+
+	it("#when a bound window command faces an unrelated modal #then the command is never invoked", async () => {
+		accessibilityMock.focusedWindowIdForPid.mockReturnValue(A_TXT.id);
+		accessibilityMock.focusedWindowIsModal.mockReturnValue(true);
+		const controller = await controllerOnB();
+		const command = vi.fn(async () => undefined);
+		try {
+			await expect(
+				runInInputScope({ target: { pid: 1234, windowId: B_TXT.id } }, () =>
+					controller.withWindowCommand(1234, B_TXT, () => false, command),
+				),
+			).rejects.toThrow();
+			expect(command).not.toHaveBeenCalled();
+		} finally {
+			accessibilityMock.focusedWindowIsModal.mockReturnValue(false);
+			controller.close();
+		}
+	});
+
+	it.each([undefined, 75])(
+		"#when bound keyboard focus is unknown or an unverified helper (%s) #then no text reaches the process",
+		async (focusedId) => {
+			accessibilityMock.focusedWindowIdForPid.mockReturnValue(focusedId);
+			const controller = await controllerOnB();
+			try {
+				await expect(
+					runInInputScope({ target: { pid: 1234, windowId: B_TXT.id } }, () => controller.typeText("marker")),
+				).rejects.toThrow("observed keyboard target");
+				expect(coreGraphicsMock.postUnicodeText).not.toHaveBeenCalled();
+			} finally {
+				controller.close();
+			}
+		},
+	);
+
+	it("#when raising a bound document reports success but focus remains elsewhere #then no keys are sent", async () => {
+		accessibilityMock.focusedWindowIdForPid.mockReturnValue(A_TXT.id);
+		const controller = await controllerOnB();
+		try {
+			await expect(
+				runInInputScope({ target: { pid: 1234, windowId: B_TXT.id } }, () => controller.pressKey("a")),
+			).rejects.toThrow("observed keyboard target");
+			expect(accessibilityMock.raiseWindowInApp).toHaveBeenCalledWith(1234, B_TXT.id);
+			expect(coreGraphicsMock.postKeyboardEvent).not.toHaveBeenCalled();
+		} finally {
+			controller.close();
+		}
 	});
 });

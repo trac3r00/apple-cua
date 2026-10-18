@@ -11,6 +11,7 @@ const koffiMock = vi.hoisted(() => {
 		readonly actions?: readonly string[];
 		/** The rows a list shows (AXVisibleRows); absent for elements that do not name them. */
 		readonly visibleRows?: Reference[];
+		readonly parent?: Reference;
 	};
 
 	const observableState: {
@@ -137,6 +138,10 @@ const koffiMock = vi.hoisted(() => {
 		}),
 		AXUIElementCopyAttributeValue: vi.fn(
 			(element: Reference, attribute: Reference, outValue: Array<Reference | null>) => {
+				if (attribute.value === "AXParent") {
+					outValue[0] = element.parent ?? null;
+					return element.parent === undefined ? -25205 : 0;
+				}
 				if (attribute.value === "AXChildren") {
 					outValue[0] = { type: "array", children: element.children ?? [] };
 					return 0;
@@ -246,6 +251,35 @@ afterEach(async () => {
 });
 
 describe("#given a window-scoped accessibility walk", () => {
+	it.each([42, 999])(
+		"#when a popup menu is a top-level child and window id is %s #then its items remain observed without the menu bar",
+		async (windowId) => {
+			const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
+			const menuItem = {
+				type: "ax",
+				attributes: { AXRole: "AXMenuItem", AXTitle: "Choose" },
+				actions: ["AXPress"],
+				children: [],
+			};
+			const menu = {
+				type: "ax",
+				attributes: { AXRole: "AXMenu", AXTitle: "Context" },
+				children: [menuItem],
+			};
+			koffiMock.applicationElement.children = [koffiMock.windowElement, koffiMock.menuBarElement, menu];
+
+			const scoped = extractAccessibilityTree(process.pid, { windowId });
+			const item = scoped.elements.find((element) => element.label === "Choose");
+
+			expect(scoped.elements.map((element) => element.role)).toContain("AXMenu");
+			expect(scoped.elements.map((element) => element.role)).not.toContain("AXMenuBar");
+			expect(item).toMatchObject({ role: "AXMenuItem", actions: ["AXPress"] });
+			if (item === undefined) throw new Error("menu item was not observed");
+			performActionByIndex(process.pid, item.id, "AXPress");
+			expect(koffiMock.observableState.pressedTitles).toEqual(["Choose"]);
+		},
+	);
+
 	it("#when the requested window matches #then its observed title is returned with the tree", async () => {
 		const { extractAccessibilityTree } = await import("./accessibility.js");
 
@@ -331,6 +365,92 @@ describe("#given a window-scoped accessibility walk", () => {
 });
 
 describe("#given a subtree observation #when an element index from the previous walk is drilled into #then only that branch is returned", () => {
+	it("#given an observed web control #when its live ancestors are read #then it is distinguished from native chrome", async () => {
+		const { extractAccessibilityTree, isWebElementByIndex } = await import("./accessibility.js");
+		const webArea = {
+			type: "ax",
+			attributes: { AXRole: "AXWebArea", AXTitle: "Owned Page" },
+			children: [],
+		};
+		const webButton = {
+			type: "ax",
+			attributes: { AXRole: "AXButton", AXTitle: "Web Button" },
+			actions: ["AXPress"],
+			children: [],
+			parent: webArea,
+		};
+		koffiMock.windowElement.children = [webButton, koffiMock.targetButton];
+		const state = extractAccessibilityTree(process.pid, { windowId: 42 });
+		const web = state.elements.find((element) => element.label === "Web Button");
+		const native = state.elements.find((element) => element.label === "Target Button");
+		if (web === undefined || native === undefined) throw new Error("fixture controls were not observed");
+		expect(isWebElementByIndex(process.pid, web.id)).toBe(true);
+		expect(isWebElementByIndex(process.pid, native.id)).toBe(false);
+		expect(() => isWebElementByIndex(process.pid, 999)).toThrow();
+	});
+
+	it("#given browser layout wrappers #when observed at the default depth #then the nested toolbar remains actionable", async () => {
+		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
+		const button = {
+			type: "ax",
+			attributes: { AXRole: "AXButton", AXTitle: "Nested Toolbar Action" },
+			actions: ["AXPress"],
+			children: [],
+		};
+		let branch: typeof koffiMock.windowElement = button;
+		for (let level = 0; level < 14; level += 1) {
+			branch = {
+				type: "ax",
+				attributes: { AXRole: "AXGroup", AXTitle: `Layout ${level}` },
+				children: [branch],
+			};
+		}
+		koffiMock.windowElement.children = [branch];
+		const state = extractAccessibilityTree(process.pid, { windowId: 42 });
+		const target = state.elements.find((element) => element.label === "Nested Toolbar Action");
+		expect(state.truncated).toBe(false);
+		if (target === undefined) throw new Error("nested toolbar control was omitted");
+		performActionByIndex(process.pid, target.id, "AXPress");
+		expect(koffiMock.observableState.pressedTitles).toEqual(["Nested Toolbar Action"]);
+	});
+
+	it("marks omitted descendants as truncated and reveals deeper controls in a subtree", async () => {
+		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
+		const deepButton = {
+			type: "ax",
+			attributes: { AXRole: "AXButton", AXTitle: "Deep Button" },
+			actions: ["AXPress"],
+			children: [],
+		};
+		const middle = {
+			type: "ax",
+			attributes: { AXRole: "AXGroup", AXTitle: "Middle" },
+			children: [deepButton],
+		};
+		koffiMock.windowElement.children = [middle];
+
+		const capped = extractAccessibilityTree(process.pid, { windowId: 42, maxDepth: 1 });
+		expect(capped.truncated).toBe(true);
+		expect(capped.elements.map((element) => element.label)).toEqual(["Fixture", "Middle"]);
+
+		const subtree = extractAccessibilityTree(process.pid, { windowId: 42, subtreeOf: 1 });
+		expect(subtree.truncated).toBe(false);
+		expect(subtree.elements.map((element) => element.label)).toEqual(["Middle", "Deep Button"]);
+		const button = subtree.elements.find((element) => element.label === "Deep Button");
+		if (button === undefined) throw new Error("deep button was not observed");
+		performActionByIndex(process.pid, button.id, "AXPress");
+		expect(koffiMock.observableState.pressedTitles).toEqual(["Deep Button"]);
+	});
+
+	it("does not mark a boundary leaf truncated when it has no children", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+		koffiMock.windowElement.children = [koffiMock.targetButton];
+
+		const observed = extractAccessibilityTree(process.pid, { windowId: 42, maxDepth: 1 });
+
+		expect(observed.truncated).toBe(false);
+	});
+
 	it("returns the subtree with ids restarting at zero", async () => {
 		const { extractAccessibilityTree } = await import("./accessibility.js");
 		const scoped = extractAccessibilityTree(process.pid, { windowId: 42 });

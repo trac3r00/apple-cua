@@ -33,6 +33,7 @@ import {
 } from "./macos-ffi/skylight.js";
 import { listOnscreenWindows, listWindows } from "./macos-ffi/window-list.js";
 import { startFocusStealWatch } from "./macos-focus-watch.js";
+import { dragSteps, interpolatePointEased, pointerTravelDuration } from "./macos-input-drag.js";
 import { pointerModifierFlags, withHeldModifiers } from "./macos-input-modifiers.js";
 import {
 	type MousePost,
@@ -383,7 +384,9 @@ export class MacOSInputController {
 	 * releaseActivation) at the cost of the clicks and window commands above.
 	 */
 	private async activateBehind(pid: number, window: SkyLightTargetWindow): Promise<boolean> {
-		if (!this.isBackground || !this.backgroundActivation) {
+		// Notification hosts are nonactivating accessory apps, not document windows.
+		// Priming and later deactivating them can dismiss the hosted banner.
+		if (!this.isBackground || !this.backgroundActivation || window.layer === 21) {
 			return false;
 		}
 		this.cancelActivationRelease(pid);
@@ -495,6 +498,9 @@ export class MacOSInputController {
 	): Promise<T> {
 		this.beforeInput();
 		await keyboardWindowFocuser(pid, window.id);
+		if (currentInputScope()?.target?.windowId !== undefined && focusedWindowIdForPid(pid) !== window.id) {
+			throw new Error("observed command target is not the verified focused window; input refused");
+		}
 		const activate = this.activations.has(pid) || (this.isBackground && wantsActivation());
 		const held = activate ? await this.activateBehind(pid, window) : false;
 		try {
@@ -585,8 +591,32 @@ export class MacOSInputController {
 
 	async move(position: Point): Promise<void> {
 		const call = this.beginCall("move the pointer");
-		this.beforeInput();
-		await this.postMove(call, position);
+		await this.serialize(async () => {
+			this.beforeInput();
+			const window = await this.pointerWindow(call, position);
+			this.requirePointerWindow(call, window);
+			const previous = this.pointer.position();
+			// An app-targeted path starts inside that window, never through another app or display.
+			const from =
+				window === undefined
+					? previous
+					: {
+							x: Math.max(window.bounds.x, Math.min(window.bounds.x + window.bounds.width - 1, previous.x)),
+							y: Math.max(window.bounds.y, Math.min(window.bounds.y + window.bounds.height - 1, previous.y)),
+						};
+			const duration = pointerTravelDuration(from, position);
+			const steps = dragSteps(duration);
+			this.overlay.setMode("pointer");
+			for (let step = 1; step <= steps; step += 1) {
+				this.checkpoint(call);
+				const at = interpolatePointEased(from, position, step / steps);
+				await this.mousePost(call)("move", at, "left", undefined, window);
+				this.trackPointer(at);
+				if (step < steps) {
+					await delayMilliseconds(duration / steps);
+				}
+			}
+		});
 	}
 
 	private async postMove(call: InputCall, position: Point): Promise<void> {
@@ -675,7 +705,7 @@ export class MacOSInputController {
 			this.checkpoint(call);
 			this.assertDeliverable(keyboardPid);
 			postUnicodeText(segment, keyboardPid, targetWindow);
-			this.noteKeyboardInput(call);
+			this.noteKeyboardInput(call.pid);
 			if (i < segments.length - 1) {
 				await delayMilliseconds(TYPE_CHARACTER_DELAY_MS);
 			}
@@ -721,7 +751,7 @@ export class MacOSInputController {
 				targetPid: keyboardPid,
 				targetWindow,
 			});
-			this.noteKeyboardInput(call);
+			this.noteKeyboardInput(call.pid);
 		}
 	}
 
@@ -752,14 +782,14 @@ export class MacOSInputController {
 		return currentInputScope()?.target?.pid ?? this.defaultTargetPid;
 	}
 
-	/** When keys were last posted to an app, so an accessibility write can wait until they were handled. */
+	/** When keys or a menu equivalent last ran, so an accessibility write can wait until they were handled. */
 	lastKeyboardInputAt(pid: number): number | undefined {
 		return this.keyboardInputAt.get(pid);
 	}
 
-	private noteKeyboardInput(call: InputCall): void {
-		if (call.pid !== undefined) {
-			this.keyboardInputAt.set(call.pid, performance.now());
+	noteKeyboardInput(pid: number | undefined): void {
+		if (pid !== undefined) {
+			this.keyboardInputAt.set(pid, performance.now());
 		}
 	}
 
@@ -768,8 +798,18 @@ export class MacOSInputController {
 		this.beforeInput();
 		const amount = Math.max(0, Math.trunc(Math.abs(options.amount)));
 		const targetWindow = await this.requireSessionWindow(call, "scroll");
-		this.overlay.setMode("scroll");
-		this.pingOverlay();
+		const position =
+			options.position ??
+			(targetWindow === undefined
+				? this.pointer.position()
+				: {
+						x: targetWindow.bounds.x + targetWindow.bounds.width / 2,
+						y: targetWindow.bounds.y + targetWindow.bounds.height / 2,
+					});
+		if (options.position !== undefined) {
+			await this.pointerWindow(call, position);
+		}
+		this.showScrollPointer(position);
 		const unit: Record<ScrollOptions["direction"], [number, number]> = {
 			up: [0, 1],
 			down: [0, -1],
@@ -780,19 +820,18 @@ export class MacOSInputController {
 		// Deliver the total in small steps so it GLIDES smoothly instead of jumping.
 		const perStep = 4;
 		const steps = Math.max(1, Math.ceil(amount / perStep));
-		const delta = amount / steps;
 		await this.holdModifiers(call, options.modifiers, targetWindow, "wheel", async (flags) => {
 			for (let i = 0; i < steps; i++) {
 				this.checkpoint(call);
 				this.assertDeliverable(call.pid);
-				const d = Math.round(delta);
+				const d = Math.round(((i + 1) * amount) / steps) - Math.round((i * amount) / steps);
 				postScrollEvent({
 					deltaX: d * ux,
 					deltaY: d * uy,
 					targetPid: call.pid,
 					targetWindow,
 					flags,
-					position: options.position,
+					position: options.position ?? (targetWindow === undefined ? undefined : position),
 				});
 				if (i < steps - 1) {
 					await delayMilliseconds(14);
@@ -807,8 +846,18 @@ export class MacOSInputController {
 			this.beforeInput();
 			const targetWindow = await this.pointerWindow(call, options.from);
 			this.requirePointerWindow(call, targetWindow);
+			await this.pointerWindow(call, options.to);
+			if (targetWindow !== undefined && !containsPoint(targetWindow, options.to)) {
+				throw new Error("drag destination is outside the target window; observe the destination window first");
+			}
 			this.checkpoint(call);
-			const post = this.mousePost(call);
+			const mousePost = this.mousePost(call);
+			const post: MousePost = async (kind, at, button, clickState, window, flags) => {
+				await mousePost(kind, at, button, clickState, window, flags);
+				if (kind === "drag" || kind === "up") {
+					this.trackPointer(at);
+				}
+			};
 			// Read between drag steps; a stopped drag lets go of the button where it is and sends nothing more.
 			const checkpoint = (): void => this.checkpoint(call);
 			await this.holdModifiers(call, options.modifiers, targetWindow, "pointer", async (flags) => {
@@ -849,6 +898,20 @@ export class MacOSInputController {
 	private markPointer(position: Point): void {
 		this.pointer.moveTo(position);
 		this.overlay.set(position);
+	}
+
+	private trackPointer(position: Point): void {
+		this.pointer.moveTo(position);
+		if (this.overlay.track === undefined) {
+			this.overlay.set(position);
+		} else {
+			this.overlay.track(position);
+		}
+	}
+
+	showScrollPointer(position: Point): void {
+		this.overlay.setMode("scroll");
+		this.markPointer(position);
 	}
 
 	/**
@@ -1020,6 +1083,9 @@ export class MacOSInputController {
 				focusStealWatcher(targetWindow);
 			}
 			await keyboardWindowFocuser(pid, targetWindow.id);
+			if (call.windowId !== undefined && focusedWindowIdForPid(pid) !== targetWindow.id) {
+				throw new Error("observed keyboard target is not the verified focused window; input refused");
+			}
 		}
 		return targetWindow;
 	}

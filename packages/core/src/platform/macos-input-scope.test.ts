@@ -28,6 +28,7 @@ vi.mock("./macos-ffi/skylight.js", () => ({
 }));
 
 import { InputInterrupted, type InputScope, runInInputScope } from "../computer/input-scope.js";
+import * as accessibility from "./macos-ffi/accessibility.js";
 import { NOOP_POINTER_OVERLAY } from "./macos-ffi/cursor-overlay.js";
 import {
 	MacOSInputController,
@@ -47,6 +48,7 @@ const BEHIND = { id: 12, bounds: { x: 100, y: 100, width: 400, height: 300 }, ow
 const OTHER_APP = { id: 21, bounds: { x: 600, y: 0, width: 300, height: 200 }, owner: { processId: 77 } };
 const window12 = { id: 12, bounds: BEHIND.bounds };
 const window21 = { id: 21, bounds: OTHER_APP.bounds };
+const focusedWindows = new Map<number, number>();
 
 function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
 	let resolvePromise: (() => void) | undefined;
@@ -71,12 +73,16 @@ function boundTo(pid: number, windowId: number, interruption?: () => string | un
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	focusedWindows.clear();
+	vi.spyOn(accessibility, "focusedWindowIdForPid").mockImplementation((pid) => focusedWindows.get(pid));
 	coreGraphicsMock.postKeyboardEvent.mockImplementation(() => undefined);
 	coreGraphicsMock.postMouseEvent.mockImplementation(() => undefined);
 	coreGraphicsMock.postUnicodeText.mockImplementation(() => undefined);
 	setOpenWindowsSourceForTesting(() => [FRONT, BEHIND, OTHER_APP]);
 	setOnscreenWindowIdsSourceForTesting(() => [11, 12, 21]);
-	setKeyboardWindowFocuserForTesting(async () => undefined);
+	setKeyboardWindowFocuserForTesting(async (pid, windowId) => {
+		focusedWindows.set(pid, windowId);
+	});
 	setKeyboardPidResolverForTesting((pid) => pid);
 	setFocusStealWatcherForTesting(() => undefined);
 	setPointWindowIdsForTesting(() => undefined);
@@ -86,17 +92,91 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
+describe("#given a pointer bound to an observed window #when moving or dragging #then its path stays spatially scoped", () => {
+	it("moves through paced intermediate points and tracks the overlay without touching the real cursor", async () => {
+		vi.useFakeTimers();
+		const track = vi.fn();
+		const controller = new MacOSInputController(
+			undefined,
+			{ ...NOOP_POINTER_OVERLAY, track },
+			() => false,
+			NO_SLEEP,
+			"background",
+		);
+		const initialMove = runInInputScope(boundTo(42, 12), () => controller.move({ x: 150, y: 150 }));
+		await vi.runAllTimersAsync();
+		await initialMove;
+		coreGraphicsMock.postMouseEvent.mockClear();
+		track.mockClear();
+
+		const moving = runInInputScope(boundTo(42, 12), () => controller.move({ x: 350, y: 250 }));
+		await vi.runAllTimersAsync();
+		await moving;
+
+		const positions = coreGraphicsMock.postMouseEvent.mock.calls.map(([event]) => event.position);
+		expect(positions.length).toBeGreaterThan(2);
+		expect(positions[0]).not.toEqual({ x: 350, y: 250 });
+		expect(positions.at(-1)).toEqual({ x: 350, y: 250 });
+		expect(track.mock.calls.map(([point]) => point)).toEqual(positions);
+		expect(positions.every((point) => point.x >= 150 && point.x <= 350 && point.y >= 150 && point.y <= 250)).toBe(
+			true,
+		);
+		expect(coreGraphicsMock.warpCursorPosition).not.toHaveBeenCalled();
+		controller.close();
+	});
+
+	it("rejects an unobserved drag destination before pressing the button", async () => {
+		const controller = backgroundController();
+
+		await expect(
+			runInInputScope(boundTo(42, 12), () => controller.drag({ from: { x: 150, y: 150 }, to: { x: 650, y: 50 } })),
+		).rejects.toThrow("outside the observed window");
+
+		expect(coreGraphicsMock.postMouseEvent).not.toHaveBeenCalled();
+		controller.close();
+	});
+
+	it("delivers the exact wheel amount at the scroll cursor rather than rounding each step independently", async () => {
+		vi.useFakeTimers();
+		const set = vi.fn();
+		const setMode = vi.fn();
+		const controller = new MacOSInputController(
+			undefined,
+			{ ...NOOP_POINTER_OVERLAY, set, setMode },
+			() => false,
+			NO_SLEEP,
+			"background",
+		);
+		const scrolling = runInInputScope(boundTo(42, 12), () =>
+			controller.scroll({ direction: "down", amount: 10, position: { x: 200, y: 200 } }),
+		);
+		await vi.runAllTimersAsync();
+		await scrolling;
+
+		expect(coreGraphicsMock.postScrollEvent.mock.calls.reduce((sum, [event]) => sum + event.deltaY, 0)).toBe(-10);
+		expect(
+			coreGraphicsMock.postScrollEvent.mock.calls.every(
+				([event]) => event.position.x === 200 && event.position.y === 200,
+			),
+		).toBe(true);
+		expect(setMode).toHaveBeenCalledWith("scroll");
+		expect(set).toHaveBeenCalledWith({ x: 200, y: 200 });
+		controller.close();
+	});
+});
+
 describe("#given input calls for two apps that overlap #when one waits mid-call #then every event keeps its own app and window", () => {
 	it("#when typing for one app is parked on its window focus while another app is typed into and clicked #then no event crosses over", async () => {
 		// given
 		const controller = backgroundController();
 		const firstParked = deferred();
 		const releaseFirst = deferred();
-		setKeyboardWindowFocuserForTesting(async (pid) => {
+		setKeyboardWindowFocuserForTesting(async (pid, windowId) => {
 			if (pid === 42) {
 				firstParked.resolve();
 				await releaseFirst.promise;
 			}
+			focusedWindows.set(pid, windowId);
 		});
 
 		// when
@@ -293,6 +373,7 @@ describe("#given two overlapping windows of one app #when input is bound to the 
 		const focused: Array<readonly [number, number]> = [];
 		setKeyboardWindowFocuserForTesting(async (pid, windowId) => {
 			focused.push([pid, windowId]);
+			focusedWindows.set(pid, windowId);
 		});
 		// The app last took pointer input in its front window; the bound keys must not follow it there.
 		await runInInputScope({ target: { pid: 42 } }, () => controller.click({ x: 50, y: 50 }));

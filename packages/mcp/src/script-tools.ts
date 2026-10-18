@@ -1,9 +1,11 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
-import type { ElementQuery, GuardedComputerInterface, TopLevelWindow } from "@apple-cua/core";
+import { parseElementIndex } from "@apple-cua/core";
+import type { DockAction, DockSnapshot, ElementQuery, GuardedComputerInterface, TopLevelWindow } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
+import type { DockGuardSession } from "./dock-session.js";
 import type { GuardedSession, RunPace, RunStepDriver, VerifyCheckRequest, VerifyRequest } from "./guarded-session.js";
 import type {
 	CallError,
@@ -26,6 +28,18 @@ const MAX_LOG_ENTRIES = 200;
 const MAX_LOG_CHARS = 2_000;
 const MAX_FIND_RESULTS = 25;
 const MAX_BATCH_STEPS = MAX_RUN_STEPS;
+const dockRunTails = new WeakMap<DockGuardSession, Promise<void>>();
+const observationOptionsSchema = z
+	.object({
+		diffOnly: z.boolean().optional(),
+		maxElements: z.number().int().positive().optional(),
+		includeScreenshot: z.boolean().optional(),
+		includeMenuBar: z.boolean().optional(),
+		subtreeOf: z.number().int().nonnegative().optional(),
+		visibleOnly: z.boolean().optional(),
+		elementFormat: z.enum(["json", "table"]).optional(),
+	})
+	.strict();
 
 const runScriptSchema = z.object({
 	code: z.string().min(1).max(MAX_CODE_LENGTH),
@@ -34,17 +48,19 @@ const runScriptSchema = z.object({
 	include_screenshot: z.boolean().optional(),
 });
 
-const RUN_SCRIPT_DESCRIPTION = `Run an async JavaScript function body (loops, branches, reads) in one call. State does not persist between calls. Actions use token, approval, preflight and verification guards. NOT a security sandbox: no require/process/import, but the code has the calling agent's trust; never run untrusted code.
+const RUN_SCRIPT_DESCRIPTION = `Run an async JavaScript body in one call. State does not persist. Actions use token, approval, preflight and verification guards. NOT a security sandbox: no require/process/import; never run untrusted code.
 API (all async; target = element id (number|string) or query {role,label,label_contains,value_contains,text,index}):
+const dock = apple.dock(); await dock.observe(); await dock.click({label:"Finder"}); await dock.showMenu(id); await dock.cancel(id) // fresh Dock IDs or unique/indexed queries; explicit Dock approval; actions require attended console delivery.
 const app = apple.app("Finder"); await apple.apps(); await apple.windows("TextEdit") // list_windows entries, titled
 apple.app("TextEdit",{window:"b.txt"}) // or a window_id: observations, actions, menus and keys act on that window, never the app's focused one; a title matches exactly, else a unique part
-app.observe({diffOnly?,maxElements?}) // get_app_state JSON, remembers the token
+app.observe({diffOnly?,maxElements?,includeScreenshot?,includeMenuBar?,subtreeOf?,visibleOnly?,elementFormat?}) // get_app_state JSON, remembers the token
 app.find({role?,label?,label_contains?,value_contains?,text?}) // find_elements JSON
 app.click(target,{clickCount?,mouseButton?,modifiers?}); app.setValue(target,value); app.type(text); app.press(keys); app.selectText(target,text,{prefix?,suffix?,selection?}); app.secondaryAction(target,"AXShowMenu"); app.menu(["File","New Tab"]); app.scroll(target,direction,pages?) // modifiers refused
+app.drag({x,y},{x,y},{durationMs?,modifiers?})
 app.waitFor(target|{window_title},{gone?,timeoutMs?}); app.step({type:"click",...}) // any run_steps step
 app.verify([{element_index,exists?,value?,label?}],{windowTitle?,timeoutMs?})
-app.batch([apple.steps.click({label:"1"}),apple.steps.press("Return")],{pace?,expect?:{checks?,window_title?,timeout_ms?}}); app.chain(steps) // steps in ONE guarded call, stops at the first failure; apple.steps.* take the app methods' arguments. chain = pace "fast": known targets resolve against ONE read, only cheap guards run between steps, a target created mid-chain or a waitFor reads for itself, intermediate states are not read; default "verified" reads before every element step.
-Scroll-until-found: click/setValue/selectText/secondaryAction with a query target accept {scrollWithin?,maxPages?,vision?,direction?} (or find:{scroll_within,...}): scrollWithin = element id or query (default largest scroll area), direction default down, maxPages 10 (max 50), vision "auto" (accessibility; OCR only where it exposes no text; needs Screen Recording)|"off"|"only". Clipped targets are scrolled into view, else paged in the background. Answer: found:{found_by,pages_scrolled,scrolled_into_view?,vision}; OCR-found text can only be clicked.
+app.batch([apple.steps.click({label:"1"}),apple.steps.press("Return")],{pace?,expect?:{checks?,window_title?,timeout_ms?}}); app.chain(steps) // apple.steps.* use app-method arguments. batch defaults verified; chain is fast: one initial read, stop/window guards between steps, and final verification. New targets and waitFor read when needed; use verified pace when intermediate state matters.
+Scroll-until-found query actions accept {scrollWithin?,maxPages?,vision?,direction?} or find:{scroll_within,...}. Defaults: largest scroll area, down, 10 pages (max 50), vision "auto" (OCR when AX exposes no text, needs Screen Recording); "off"/"only" select AX/OCR. Returns found:{found_by,pages_scrolled,scrolled_into_view?,vision}. OCR targets can only be clicked.
 log(...values); await sleep(ms); JSON, Math, Date available.
 app.reveal(query,findOptions) // bounded reveal without clicking/editing; read_only rejects scrolling.
 Actions return the parsed result (status, changes, observation_token...); the latest token is reused. Acting by element id/coordinates needs an earlier observe()/find(); query targets, type, press, menu, waitFor observe themselves. A refusal or failed step throws ScriptActionError (message, kind, refused, payload), catchable; uncaught, the call errors with {error,kind,failedAction,payload,log,actions}. read_only=true makes every mutation throw before dispatch. timeout_ms (default 30000, max 120000) or cancelling stops further actions and terminates a script that never yields. Different apps overlap under background delivery (Promise.all); the same app runs in call order; attended delivery serializes all. Answers {ok,value,log,actions:[{n,app,kind,ms,status}],elapsedMs}; value must be JSON-serializable (cut at 20 KB). include_screenshot=true attaches the last window image.`;
@@ -95,6 +111,30 @@ function errorMessage(error: unknown): string {
 		return error instanceof ScriptActionError ? error.message : `${name}: ${error["message"]}`;
 	}
 	return String(error);
+}
+
+function dockMatches(element: DockSnapshot["elements"][number], query: ElementQuery): boolean {
+	const label = element.label ?? "";
+	if (
+		query.role !== undefined &&
+		element.role.toLowerCase() !== query.role.toLowerCase() &&
+		!element.role.toLowerCase().replace(/^ax/, "").includes(query.role.toLowerCase().replace(/^ax/, ""))
+	)
+		return false;
+	if (query.label !== undefined && label !== query.label) return false;
+	if (query.labelContains !== undefined && !label.toLowerCase().includes(query.labelContains.toLowerCase()))
+		return false;
+	if (
+		query.valueContains !== undefined &&
+		!(typeof element.value === "string" && element.value.toLowerCase().includes(query.valueContains.toLowerCase()))
+	)
+		return false;
+	if (
+		query.text !== undefined &&
+		!`${label} ${String(element.value ?? "")}`.toLowerCase().includes(query.text.toLowerCase())
+	)
+		return false;
+	return true;
 }
 
 function invalid(message: string): ScriptActionError {
@@ -313,6 +353,8 @@ class ScriptRun {
 	lastImage: ToolContent | undefined;
 	lastFailure: ActionRecord | undefined;
 	private readonly tokens = new Map<string, { readonly token: string; readonly windowId: number | undefined }>();
+	private dockToken: string | undefined;
+	private dockElements: DockSnapshot["elements"] | undefined;
 	private readonly tails = new Map<string, Promise<unknown>>();
 	private nextAction = 1;
 
@@ -321,7 +363,171 @@ class ScriptRun {
 		private readonly driver: RunStepDriver,
 		private readonly options: RunOptions,
 		private readonly signal: AbortSignal,
+		private readonly dockSession?: DockGuardSession,
 	) {}
+
+	dockObserve(): Promise<unknown> {
+		return this.queue("dock", async () => {
+			if (this.dockSession === undefined) throw this.refuseDock("dock-unavailable", "Dock is unavailable");
+			const dockSession = this.dockSession;
+			return await this.queueDockSession(
+				dockSession,
+				async () => await this.execDock("dock.observe", async () => await dockSession.observe()),
+			);
+		});
+	}
+
+	dockAct(rawTarget: unknown, action: DockAction): Promise<unknown> {
+		return this.queue("dock", async () => {
+			if (this.options.readOnly) {
+				throw this.refuseDock("read-only", "run_script is read_only: Dock action was not dispatched");
+			}
+			if (this.signal.aborted) throw this.stopped();
+			if (this.dockSession === undefined) throw this.refuseDock("dock-unavailable", "Dock is unavailable");
+			const dockSession = this.dockSession;
+			return await this.queueDockSession(
+				dockSession,
+				async () => await this.actDockInSession(dockSession, rawTarget, action),
+			);
+		});
+	}
+
+	private async actDockInSession(
+		dockSession: DockGuardSession,
+		rawTarget: unknown,
+		action: DockAction,
+	): Promise<unknown> {
+		let token = this.dockToken;
+		let elementId: number;
+		if (typeof rawTarget === "number" || typeof rawTarget === "string") {
+			if (this.dockElements === undefined || token === undefined)
+				throw this.refuseDock("needs-observation", "call apple.dock().observe() before acting on a Dock id");
+			if (typeof rawTarget === "string" && rawTarget.trim() === "")
+				throw this.refuseDock("invalid-argument", "Dock id must be a non-negative integer");
+			try {
+				elementId = parseElementIndex(rawTarget);
+			} catch {
+				throw this.refuseDock("invalid-argument", "Dock id must be a non-negative integer");
+			}
+		} else if (isRecord(rawTarget)) {
+			const allowed = new Set(["role", "label", "label_contains", "value_contains", "text", "index"]);
+			if (Object.keys(rawTarget).some((key) => !allowed.has(key)))
+				throw this.refuseDock("invalid-argument", "invalid Dock query target");
+			const fields = queryFields(rawTarget);
+			const query = toElementQuery(fields);
+			if (token === undefined || dockSession.observedElements(token) === undefined) {
+				this.clearDockObservation();
+				await this.execDock("dock.observe", async () => await dockSession.observe());
+				token = this.dockToken;
+			}
+			if (this.dockElements === undefined || token === undefined)
+				throw this.refuseDock("needs-observation", "Dock observation returned no token");
+			const matches = this.dockElements.filter((element) => dockMatches(element, query));
+			const index = rawTarget["index"];
+			if (index !== undefined && (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0))
+				throw this.refuseDock("invalid-argument", "Dock query index must be a non-negative integer");
+			const selected = index === undefined ? (matches.length === 1 ? matches[0] : undefined) : matches[index];
+			if (selected === undefined || (index === undefined && matches.length !== 1))
+				throw this.refuseDock(
+					matches.length === 0 ? "dock-element-not-observed" : "dock-target-ambiguous",
+					"Dock query must resolve to exactly one observed element",
+				);
+			elementId = selected.id;
+		} else {
+			throw this.refuseDock("invalid-argument", "Dock target is an observed id or query object");
+		}
+		if (this.signal.aborted) throw this.stopped();
+		if (token === undefined || this.dockElements === undefined)
+			throw this.refuseDock("needs-observation", "Dock observation token is unavailable");
+		const observedToken = token;
+		return await this.execDock(`dock.${action}`, async () => await dockSession.act(observedToken, elementId, action));
+	}
+
+	private queueDockSession<T>(dockSession: DockGuardSession, work: () => Promise<T>): Promise<T> {
+		const next = (dockRunTails.get(dockSession) ?? Promise.resolve()).then(() => {
+			if (this.signal.aborted) throw this.stopped();
+			return work();
+		});
+		dockRunTails.set(
+			dockSession,
+			next.then(
+				() => undefined,
+				() => undefined,
+			),
+		);
+		return next;
+	}
+
+	private refuseDock(refused: string, message: string): ScriptActionError {
+		this.clearDockObservation();
+		const entry = { n: this.nextAction++, app: "Dock", kind: "dock", ms: 0, status: `refused:${refused}` };
+		this.actions.push(entry);
+		this.lastFailure = entry;
+		return new ScriptActionError(message, { kind: "refused", refused });
+	}
+
+	private async execDock(kind: string, call: () => Promise<ToolResult>): Promise<unknown> {
+		if (this.signal.aborted) throw this.stopped();
+		const n = this.nextAction++;
+		const startedAt = Date.now();
+		let result: ToolResult;
+		try {
+			result = await call();
+		} catch (error) {
+			this.clearDockObservation();
+			this.lastFailure = { n, app: "Dock", kind, ms: Date.now() - startedAt, status: "error" };
+			this.actions.push(this.lastFailure);
+			throw new ScriptActionError(errorMessage(error), { kind: "error" });
+		}
+		let parsed: unknown;
+		try {
+			parsed = parseResult(result).payload;
+		} catch (error) {
+			this.clearDockObservation();
+			this.lastFailure = { n, app: "Dock", kind, ms: Date.now() - startedAt, status: "error" };
+			this.actions.push(this.lastFailure);
+			throw new ScriptActionError(errorMessage(error), { kind: "error" });
+		}
+		if (!isRecord(parsed)) {
+			this.clearDockObservation();
+			this.lastFailure = { n, app: "Dock", kind, ms: Date.now() - startedAt, status: "error" };
+			this.actions.push(this.lastFailure);
+			throw new ScriptActionError("Dock returned a non-object result", { kind: "error" });
+		}
+		const payload = parsed;
+		const failure = describeFailure(result, payload);
+		const record = (status: string): void => {
+			const entry = { n, app: "Dock", kind, ms: Date.now() - startedAt, status };
+			this.actions.push(entry);
+			if (failure !== undefined) this.lastFailure = entry;
+		};
+		if (failure !== undefined) {
+			this.clearDockObservation();
+			record(failure.refused === undefined ? "failed" : `refused:${failure.refused}`);
+			throw new ScriptActionError(failure.message, {
+				kind: failure.refused === undefined ? "failed" : "refused",
+				payload,
+				...(failure.refused === undefined ? {} : { refused: failure.refused }),
+			});
+		}
+		record(
+			firstString(pick(payload, "effect")) ?? (pick(payload, "actionDispatched") === true ? "dispatched" : "ok"),
+		);
+		const token = pick(payload, "observation_token");
+		const dockSession = this.dockSession;
+		const elements =
+			typeof token === "string" && dockSession !== undefined ? dockSession.observedElements(token) : undefined;
+		if (typeof token === "string" && elements !== undefined) {
+			this.dockToken = token;
+			this.dockElements = elements;
+		} else this.clearDockObservation();
+		return payload;
+	}
+
+	private clearDockObservation(): void {
+		this.dockToken = undefined;
+		this.dockElements = undefined;
+	}
 
 	log(text: string): void {
 		if (this.logLines.length >= MAX_LOG_ENTRIES) {
@@ -340,7 +546,7 @@ class ScriptRun {
 
 	/** One queue per app, so different apps overlap while one app's actions stay in order. */
 	private queue<T>(app: string, work: () => Promise<T>): Promise<T> {
-		const key = this.options.parallelApps ? app.toLowerCase() : "";
+		const key = this.options.parallelApps && app.toLowerCase() !== "dock" ? app.toLowerCase() : "";
 		const next = (this.tails.get(key) ?? Promise.resolve()).then(() => {
 			if (this.signal.aborted) {
 				throw this.stopped();
@@ -491,7 +697,14 @@ class ScriptRun {
 	}
 
 	observe(target: AppTarget, options: unknown): Promise<unknown> {
-		const maxElements = pick(options, "maxElements");
+		const parsed = observationOptionsSchema.safeParse(options ?? {});
+		if (!parsed.success) {
+			throw invalid(
+				`invalid observe options: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`,
+			);
+		}
+		const { diffOnly, maxElements, includeScreenshot, includeMenuBar, subtreeOf, visibleOnly, elementFormat } =
+			parsed.data;
 		return this.queue(target.app, async () => {
 			const windowId = await this.windowIdFor(target);
 			return await this.exec(
@@ -500,9 +713,13 @@ class ScriptRun {
 				() =>
 					this.session.observe({
 						app: target.app,
-						diffOnly: pick(options, "diffOnly") === true,
-						includeScreenshot: this.options.includeScreenshot,
+						diffOnly: diffOnly === true,
+						includeScreenshot: this.options.includeScreenshot && includeScreenshot !== false,
 						...(typeof maxElements === "number" ? { maxElements } : {}),
+						...(includeMenuBar === undefined ? {} : { includeMenuBar }),
+						...(subtreeOf === undefined ? {} : { subtreeOf }),
+						...(visibleOnly === undefined ? {} : { visibleOnly }),
+						...(elementFormat === undefined ? {} : { elementFormat }),
 						...windowOption(windowId),
 					}),
 				{ windowId },
@@ -738,6 +955,13 @@ async function perform(
 			return await run.batch(handle(call.target), first, second, "fast");
 		case "verify":
 			return await run.verify(handle(call.target), first, second);
+		case "dockObserve":
+			return await run.dockObserve();
+		case "dockAct":
+			if (second !== "AXPress" && second !== "AXShowMenu" && second !== "AXCancel") {
+				throw invalid("Dock action must be AXPress, AXShowMenu, or AXCancel");
+			}
+			return await run.dockAct(first, second);
 	}
 }
 
@@ -822,6 +1046,7 @@ export function registerScriptTools(
 	server: McpServer,
 	session: GuardedSession,
 	computer: GuardedComputerInterface,
+	dockSession?: DockGuardSession,
 ): void {
 	warmWorker();
 	server.registerTool(
@@ -851,6 +1076,7 @@ export function registerScriptTools(
 					includeScreenshot: input.include_screenshot === true,
 				},
 				controller.signal,
+				dockSession,
 			);
 			try {
 				const outcome = controller.signal.aborted

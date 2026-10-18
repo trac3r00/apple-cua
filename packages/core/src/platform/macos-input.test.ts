@@ -284,6 +284,7 @@ describe("#given MacOSInputController target routing", () => {
 			deltaY: -2,
 			targetPid: 9876,
 			targetWindow,
+			position: { x: 250, y: 320 },
 		});
 		controller.close();
 	});

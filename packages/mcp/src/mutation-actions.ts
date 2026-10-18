@@ -35,18 +35,31 @@ export async function click(
 	targetPid: number,
 	observation: InputObservation,
 	input: ClickActionInput,
+	actions?: readonly string[],
 ): Promise<ActionDispatch> {
 	const pressCount = Math.max(1, Math.trunc(input.click_count ?? 1));
 	const button = input.mouse_button ?? "left";
 	const modifiers = normalizeModifiers(input.modifiers);
 	if (input.element_index !== undefined) {
 		const index = parseElementIndex(input.element_index);
+		if (button === "right" && modifiers.length === 0 && pressCount === 1 && actions?.includes("AXShowMenu")) {
+			await computer.performAction(targetPid, index, "AXShowMenu");
+			return { route: "accessibility", delivery: "background" };
+		}
 		if (modifiers.length > 0 || button !== "left") {
 			// AXPress is a plain left press: it carries no modifiers and cannot be a right or middle click (pressing
-			// a Delete button instead of opening its context menu). The element's centre goes through the pointer route.
+			// a Delete button instead of opening its context menu). Without AXShowMenu, aim the pointer at its centre.
 			const gesture = button === "left" ? "click with modifiers" : `${button}-click`;
 			const centre = await elementCentre(computer, targetPid, index, gesture);
 			return await clickScreenPoint(computer, targetPid, centre, button, pressCount, modifiers);
+		}
+		if (
+			computer.delivery === "background" &&
+			computer.isWebElement !== undefined &&
+			(await computer.isWebElement(targetPid, index))
+		) {
+			const centre = await elementCentre(computer, targetPid, index, "click");
+			return await clickScreenPoint(computer, targetPid, centre, button, pressCount, modifiers, false);
 		}
 		try {
 			await pressElement(computer, targetPid, index);
@@ -75,7 +88,15 @@ async function elementCentre(
 	gesture: string,
 ): Promise<Point> {
 	const frame = computer.elementFrame === undefined ? undefined : await computer.elementFrame(targetPid, index);
-	if (frame === undefined || frame.width <= 0 || frame.height <= 0) {
+	if (
+		frame === undefined ||
+		!Number.isFinite(frame.x) ||
+		!Number.isFinite(frame.y) ||
+		!Number.isFinite(frame.width) ||
+		!Number.isFinite(frame.height) ||
+		frame.width <= 0 ||
+		frame.height <= 0
+	) {
 		throw new Error(`cannot ${gesture}: element ${index} has no on-screen frame to aim the pointer at`);
 	}
 	return { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 };
@@ -113,9 +134,10 @@ async function clickScreenPoint(
 	button: ComputerUseMouseButton,
 	pressCount: number,
 	modifiers: ReadonlyArray<KeyModifierName>,
+	allowAccessibilityHitTest = true,
 ): Promise<ActionDispatch> {
 	// An accessibility press at the point cannot carry modifiers, so a modified click is always a pointer click.
-	if (button === "left" && modifiers.length === 0) {
+	if (allowAccessibilityHitTest && button === "left" && modifiers.length === 0) {
 		let pressedAll = true;
 		for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
 			if (!(await computer.pressAtPosition(targetPid, point))) {
@@ -162,9 +184,39 @@ export async function clickResolvedTarget(
 ): Promise<ActionDispatch> {
 	const pressCount = Math.max(1, Math.trunc(target.clickCount ?? 1));
 	const button: ComputerUseMouseButton = target.mouseButton ?? "left";
-	const pointerRoute = target.press === "pointer" || button !== "left";
+	if (button === "right" && pressCount === 1 && target.press !== "pointer" && target.actions.includes("AXShowMenu")) {
+		if (target.hoverFirst === true) {
+			await computer.move(
+				observedPointToScreen(observation, {
+					x: target.frame.x + target.frame.width / 2,
+					y: target.frame.y + target.frame.height / 2,
+				}),
+			);
+		}
+		await computer.performAction(targetPid, target.elementIndex, "AXShowMenu");
+		return { route: "accessibility", delivery: "background" };
+	}
+	const webElementRoute =
+		button === "left" &&
+		(target.press === undefined || target.press === "auto") &&
+		computer.delivery === "background" &&
+		computer.isWebElement !== undefined &&
+		(await computer.isWebElement(targetPid, target.elementIndex));
+	const pointerRoute = target.press === "pointer" || button !== "left" || webElementRoute;
+	if (
+		pointerRoute &&
+		(!Number.isFinite(target.frame.x) ||
+			!Number.isFinite(target.frame.y) ||
+			!Number.isFinite(target.frame.width) ||
+			!Number.isFinite(target.frame.height) ||
+			target.frame.width <= 0 ||
+			target.frame.height <= 0)
+	) {
+		throw new Error(`cannot click: element ${target.elementIndex} has no usable on-screen frame`);
+	}
 	const accessibilityRoute =
-		target.press === "accessibility" || (!pointerRoute && target.actions.includes(AX_PRESS_ACTION));
+		button === "left" &&
+		(target.press === "accessibility" || (!pointerRoute && target.actions.includes(AX_PRESS_ACTION)));
 	const centre = {
 		x: target.frame.x + target.frame.width / 2,
 		y: target.frame.y + target.frame.height / 2,
@@ -178,11 +230,13 @@ export async function clickResolvedTarget(
 		}
 		return { route: "accessibility", delivery: "background" };
 	}
-	const centreScreen = observedPointToScreen(observation, centre);
+	const centreScreen = webElementRoute
+		? await elementCentre(computer, targetPid, target.elementIndex, "click")
+		: observedPointToScreen(observation, centre);
 	if (target.hoverFirst === true) {
 		await computer.move(centreScreen);
 	}
-	if (button === "left") {
+	if (button === "left" && target.press !== "pointer" && !webElementRoute) {
 		let pressedAll = true;
 		for (let pressIndex = 0; pressIndex < pressCount; pressIndex += 1) {
 			if (!(await computer.pressAtPosition(targetPid, centreScreen))) {
@@ -215,7 +269,12 @@ export async function drag(
 	const to = observedPointToScreen(observation, { x: input.to_x, y: input.to_y });
 	const modifiers = normalizeModifiers(input.modifiers);
 	await withTargetedApp(computer, targetPid, async () => {
-		await computer.drag(modifiers.length === 0 ? { from, to } : { from, to, modifiers });
+		await computer.drag({
+			from,
+			to,
+			...(input.duration_ms === undefined ? {} : { duration: input.duration_ms }),
+			...(modifiers.length === 0 ? {} : { modifiers }),
+		});
 	});
 	return { route: "synthetic_events", delivery: syntheticDelivery(computer) };
 }

@@ -86,6 +86,7 @@ const koffiMock = vi.hoisted(() => {
 });
 
 const skyLightMock = vi.hoisted(() => ({
+	postBackgroundEventRecordToWindowOwner: vi.fn(() => true),
 	postCoreGraphicsEventToWindowOwner: vi.fn(),
 	postAuthenticatedSkyLightEventToPid: vi.fn(() => true),
 	postSkyLightEventToPid: vi.fn(),
@@ -98,6 +99,7 @@ vi.mock("./appkit.js", () => ({
 	createNSEventBackedMouseEvent: vi.fn(() => koffiMock.mouseEvent),
 }));
 vi.mock("./skylight.js", () => ({
+	postBackgroundEventRecordToWindowOwner: skyLightMock.postBackgroundEventRecordToWindowOwner,
 	postCoreGraphicsEventToWindowOwner: skyLightMock.postCoreGraphicsEventToWindowOwner,
 	postAuthenticatedSkyLightEventToPid: skyLightMock.postAuthenticatedSkyLightEventToPid,
 	postSkyLightEventToPid: skyLightMock.postSkyLightEventToPid,
@@ -108,6 +110,8 @@ vi.mock("./skylight.js", () => ({
 describe("#given CoreGraphics koffi bindings", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		skyLightMock.postAuthenticatedSkyLightEventToPid.mockReset().mockReturnValue(true);
+		skyLightMock.postCoreGraphicsEventToWindowOwner.mockReset().mockReturnValue(true);
 	});
 
 	describe("#when posting mouse events without a target pid", () => {
@@ -155,6 +159,55 @@ describe("#given CoreGraphics koffi bindings", () => {
 			expect(skyLightMock.postSkyLightEventToPid).toHaveBeenCalledWith(4321, koffiMock.mouseEvent);
 			expect(skyLightMock.postCoreGraphicsEventToWindowOwner).not.toHaveBeenCalled();
 			expect(koffiMock.coreGraphicsFunctions.CGEventPostToPid).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("#when posting to a verified notification-layer window", () => {
+		it("#then posts one background record without a global or duplicate post", async () => {
+			const { postMouseEvent } = await import("./coregraphics.js");
+
+			postMouseEvent({
+				kind: "down",
+				position: { x: 1858, y: 78 },
+				button: "left",
+				clickState: 1,
+				targetPid: 496,
+				targetWindow: { id: 11, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 21 },
+			});
+
+			expect(skyLightMock.postCoreGraphicsEventToWindowOwner).not.toHaveBeenCalled();
+			expect(skyLightMock.postAuthenticatedSkyLightEventToPid).not.toHaveBeenCalled();
+			expect(skyLightMock.postSkyLightEventToPid).not.toHaveBeenCalled();
+			expect(skyLightMock.postBackgroundEventRecordToWindowOwner).toHaveBeenCalledTimes(1);
+			expect(skyLightMock.postBackgroundEventRecordToWindowOwner).toHaveBeenCalledWith(
+				{ id: 11, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 21 },
+				koffiMock.mouseEvent,
+			);
+			expect(koffiMock.coreGraphicsFunctions.CGEventSetIntegerValueField).not.toHaveBeenCalledWith(
+				koffiMock.mouseEvent,
+				7,
+				3,
+			);
+			expect(koffiMock.coreGraphicsFunctions.CGEventPost).not.toHaveBeenCalled();
+			expect(koffiMock.coreGraphicsFunctions.CGWarpMouseCursorPosition).not.toHaveBeenCalled();
+		});
+
+		it("#then a rejected record stops input without another transport", async () => {
+			const { postMouseEvent } = await import("./coregraphics.js");
+			skyLightMock.postBackgroundEventRecordToWindowOwner.mockReturnValueOnce(false);
+			expect(() =>
+				postMouseEvent({
+					kind: "down",
+					position: { x: 1858, y: 78 },
+					button: "left",
+					clickState: 1,
+					targetPid: 496,
+					targetWindow: { id: 11, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 21 },
+				}),
+			).toThrow("failed to post notification-window mouse record without foreground activation");
+			expect(skyLightMock.postSkyLightEventToPid).not.toHaveBeenCalled();
+			expect(skyLightMock.postCoreGraphicsEventToWindowOwner).not.toHaveBeenCalled();
+			expect(koffiMock.coreGraphicsFunctions.CGEventPost).not.toHaveBeenCalled();
 		});
 	});
 

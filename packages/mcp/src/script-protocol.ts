@@ -13,7 +13,17 @@ export interface WorkerTarget {
 	readonly window: WindowSelector | undefined;
 }
 
-export type CallMethod = "apps" | "windows" | "observe" | "find" | "step" | "batch" | "chain" | "verify";
+export type CallMethod =
+	| "apps"
+	| "windows"
+	| "observe"
+	| "find"
+	| "step"
+	| "batch"
+	| "chain"
+	| "verify"
+	| "dockObserve"
+	| "dockAct";
 
 export type ScriptOutcome =
 	| { readonly ok: true; readonly value: unknown; readonly valueTruncated: boolean }

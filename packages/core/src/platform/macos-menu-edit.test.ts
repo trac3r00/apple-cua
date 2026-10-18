@@ -29,6 +29,10 @@ const accessibility = vi.hoisted(() => ({
 	setValueByIndex: vi.fn(),
 	releaseAccessibilitySnapshot: vi.fn(),
 }));
+const keyboardFence = vi.hoisted(() => ({
+	awaitKeyboardFence: vi.fn(async (_lastInput: number | undefined) => ({ waited: false, events: 0, elapsedMs: 0 })),
+	awaitAccessibilityWriteSettled: async () => ({ waited: false, events: 0, elapsedMs: 0 }),
+}));
 
 vi.mock("./macos-ffi/select-text.js", () => selectText);
 vi.mock("./macos-ffi/pasteboard.js", () => pasteboard);
@@ -38,10 +42,7 @@ vi.mock("./macos-ffi/ax-observer.js", () => ({
 	createAxEventWaiter: () => null,
 	waitForAxQuiet: () => ({ quiet: true, events: 0, elapsedMs: 0 }),
 }));
-vi.mock("./keyboard-fence.js", () => ({
-	awaitKeyboardFence: async () => ({ waited: false, events: 0, elapsedMs: 0 }),
-	awaitAccessibilityWriteSettled: async () => ({ waited: false, events: 0, elapsedMs: 0 }),
-}));
+vi.mock("./keyboard-fence.js", () => keyboardFence);
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 
 import { MacOSHostComputer } from "./macos.js";
@@ -52,6 +53,20 @@ describe("#given Edit menu commands that AppKit validates only while its menu is
 	beforeEach(() => {
 		vi.clearAllMocks();
 		selectText.selectedTextOfFocusedElement.mockReturnValue("chosen words");
+	});
+
+	it("#when a menu command precedes focused typing #then its completion arms the keyboard readiness fence", async () => {
+		const clock = vi.spyOn(performance, "now").mockReturnValue(123);
+		const computer = new MacOSHostComputer({ delivery: "background" });
+		try {
+			await computer.invokeMenu(PID, ["File", "New Folder"]);
+			await computer.typeIntoFocused(PID, "bench-folder");
+
+			expect(keyboardFence.awaitKeyboardFence).toHaveBeenCalledWith(123, expect.any(Function), expect.any(Object));
+		} finally {
+			await computer.close();
+			clock.mockRestore();
+		}
 	});
 
 	it("#when Edit > Copy is invoked #then the focused field's selection goes to the clipboard without opening the menu", async () => {

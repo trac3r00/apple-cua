@@ -84,6 +84,8 @@ export interface ComputerInterface {
 	 * control does not support to a click at the control's centre instead of failing.
 	 */
 	elementFrame?(targetPid: number, elementIndex: number): Promise<Rect | undefined>;
+	/** Whether this current observed element belongs to a live web accessibility subtree. */
+	isWebElement?(targetPid: number, elementIndex: number): Promise<boolean>;
 	/**
 	 * Scroll an observed element into view through accessibility (AXScrollToVisible), with no pointer
 	 * and no keyboard. Resolves to the element's settled on-screen frame (global logical points) and

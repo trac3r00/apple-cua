@@ -613,6 +613,7 @@ function retainedRelocatableElement(pid: number, elementIndex: number): AXUIElem
 		const facts = copyElementFacts(element, {
 			useMultipleAttributes: true,
 			skippedApplications: 0,
+			depthTruncated: false,
 			visibleOnly: false,
 		});
 		for (const child of facts.children) {
@@ -760,7 +761,7 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 		// walk starts at the matched window because the application element is not part of
 		// a window observation.
 		const walkInputs = scope.scoped ? scope.roots : [root];
-		const skippedApplications = walkElements(
+		const walkResult = walkElements(
 			walkInputs,
 			maxDepth,
 			maxElements,
@@ -769,7 +770,7 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 			descriptor.visibleOnly,
 		);
 		const contentUnavailable =
-			scope.degenerate > 0 || skippedApplications > 0 ? { windowContentUnavailable: true } : {};
+			scope.degenerate > 0 || walkResult.skippedApplications > 0 ? { windowContentUnavailable: true } : {};
 		if (elements.length === 0) {
 			if (!keepIndexSpace) {
 				replaceElementSnapshot(pid, undefined);
@@ -799,7 +800,7 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 		return {
 			elements,
 			axAvailable: true,
-			truncated: elements.length >= maxElements,
+			truncated: elements.length >= maxElements || walkResult.depthTruncated,
 			walkKey: walkKeyFor(descriptor, maxDepth, maxElements),
 			...(scope.descriptor.windowId !== undefined &&
 			scope.descriptor.subtreeOf === undefined &&
@@ -822,7 +823,9 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 	}
 }
 
-const DEFAULT_AX_MAX_DEPTH = 10;
+// Browser chrome and web layout wrappers can consume ten levels before a
+// toolbar button is reached. The element budget still bounds the walk's cost.
+const DEFAULT_AX_MAX_DEPTH = 30;
 const DEFAULT_AX_MAX_ELEMENTS = 2_000;
 
 interface ResolvedWalkScope {
@@ -838,7 +841,7 @@ interface ResolvedWalkScope {
 
 /**
  * Decide what to walk. The scoped case walks the matched AX window first and then the
- * app's non-window top-level children (sheets, panels, popovers), because those are
+ * app's non-window top-level children (sheets, panels, popovers, popup menus), because those are
  * visible content of the observation; other windows and the menu bar are not. Any
  * failure to match the requested window returns the full, unscoped application walk.
  */
@@ -864,7 +867,7 @@ function resolveWalkScope(root: AXUIElementRef, options: AccessibilityTreeOption
 		const role = copyStringAttribute(child, K_AX_ROLE_ATTRIBUTE) ?? "";
 		if (role === "AXApplication") {
 			degenerate.push(child);
-		} else if (!includeMenuBar && MENU_ROLES.has(role)) {
+		} else if (!includeMenuBar && (role === "AXMenuBar" || role === "AXMenuBarItem")) {
 			menus.push(child);
 		} else if (WINDOW_ROLES.has(role)) {
 			otherWindows.push(child);
@@ -948,8 +951,6 @@ function windowIdOf(element: AXUIElementRef): number | undefined {
 }
 
 const WINDOW_ROLES: ReadonlySet<string> = new Set(["AXWindow", "AXSheet", "AXDialog"]);
-const MENU_ROLES: ReadonlySet<string> = new Set(["AXMenuBar", "AXMenu", "AXMenuBarItem", "AXMenuItem"]);
-
 function walkElements(
 	roots: readonly AXUIElementRef[],
 	maxDepth: number,
@@ -957,21 +958,27 @@ function walkElements(
 	elements: AXTreeElement[],
 	snapshotElements: AXUIElementRef[],
 	visibleOnly: boolean,
-): number {
-	const state: WalkState = { useMultipleAttributes: true, skippedApplications: 0, visibleOnly };
+): { skippedApplications: number; depthTruncated: boolean } {
+	const state: WalkState = {
+		useMultipleAttributes: true,
+		skippedApplications: 0,
+		depthTruncated: false,
+		visibleOnly,
+	};
 	for (const root of roots) {
 		if (elements.length >= maxElements) {
 			break;
 		}
 		appendAXElement(root, 0, maxDepth, maxElements, elements, snapshotElements, state);
 	}
-	return state.skippedApplications;
+	return { skippedApplications: state.skippedApplications, depthTruncated: state.depthTruncated };
 }
 
 interface WalkState {
 	useMultipleAttributes: boolean;
 	/** Nested application elements left out of the walk; see windowContentUnavailable. */
 	skippedApplications: number;
+	depthTruncated: boolean;
 	readonly visibleOnly: boolean;
 }
 
@@ -1178,6 +1185,16 @@ function largestContentFrame(scrollArea: AXUIElementRef): AXElementFrame | null 
 }
 
 const MAX_WEB_AREA_ANCESTORS = 40;
+
+/** Read the ancestry of the current observed control, never an unobserved coordinate hit. */
+export function isWebElementByIndex(pid: number, elementIndex: number): boolean {
+	const element = refetchElement(pid, elementIndex);
+	try {
+		return isInsideWebArea(element);
+	} finally {
+		releaseAXElement(element);
+	}
+}
 
 /** True when the element sits inside a web page, whose input handlers only see real key events. */
 function isInsideWebArea(element: AXUIElementRef): boolean {
@@ -1532,6 +1549,7 @@ function appendAXElement(
 			}
 		}
 	} else {
+		state.depthTruncated ||= children.length > 0;
 		for (const child of children) {
 			releaseAXElement(child);
 		}
@@ -1694,7 +1712,12 @@ function assertStillObservedControl(
 	if (observed === undefined) {
 		return;
 	}
-	const facts = copyElementFacts(element, { useMultipleAttributes: true, skippedApplications: 0, visibleOnly: false });
+	const facts = copyElementFacts(element, {
+		useMultipleAttributes: true,
+		skippedApplications: 0,
+		depthTruncated: false,
+		visibleOnly: false,
+	});
 	for (const child of facts.children) {
 		releaseAXElement(child);
 	}

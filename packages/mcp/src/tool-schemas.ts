@@ -244,6 +244,7 @@ export const selectTextSchema = z.object({
 
 const dragFields = {
 	...modifierFields,
+	duration_ms: z.number().finite().nonnegative().optional(),
 	from_x: coordinateSchema,
 	from_y: coordinateSchema,
 	to_x: coordinateSchema,
@@ -471,7 +472,7 @@ export const compactStepSchema = z.object({
 	type: z
 		.enum(STEP_TYPES)
 		.describe(
-			"click{element_index|target,x,y,click_count,mouse_button,modifiers} perform_secondary_action{element_index|target,action} set_value{element_index|target,value} select_text{element_index|target,text,prefix,suffix,selection} drag{from_x,from_y,to_x,to_y,modifiers} scroll{element_index|target,direction,pages} reveal{target,target_index,find: scrolls the target into view, never acts on it} wait_for{target and/or window_title,gone,timeout_ms<=10000} type_text{text} press_keys{keys,hold_seconds,interval_seconds} invoke_menu{path} set_window_frame{x,y,width,height} clipboard_write{exactly one of text,image_path,file_path}. Name an element by element_index (observed id) or target (resolved just before the step), never both.",
+			"click{element_index|target,x,y,click_count,mouse_button,modifiers} perform_secondary_action{element_index|target,action} set_value{element_index|target,value} select_text{element_index|target,text,prefix,suffix,selection} drag{from_x,from_y,to_x,to_y,duration_ms,modifiers} scroll{element_index|target,direction,pages} reveal{target,target_index,find: scrolls the target into view, never acts on it} wait_for{target and/or window_title,gone,timeout_ms<=10000} type_text{text} press_keys{keys,hold_seconds,interval_seconds} invoke_menu{path} set_window_frame{x,y,width,height} clipboard_write{exactly one of text,image_path,file_path}. Name an element by element_index (observed id) or target (resolved just before the step), never both.",
 		),
 	element_index: elementIndexSchema.optional(),
 	target: compactQuerySchema.optional(),
@@ -492,6 +493,7 @@ export const compactStepSchema = z.object({
 	from_y: coordinateSchema.optional(),
 	to_x: coordinateSchema.optional(),
 	to_y: coordinateSchema.optional(),
+	duration_ms: dragFields.duration_ms,
 	direction: directions.optional(),
 	pages: z.number().positive().optional(),
 	gone: z.boolean().optional().describe("wait_for: wait for the target to disappear."),

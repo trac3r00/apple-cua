@@ -4,6 +4,8 @@ import { koffi } from "./koffi.js";
 
 export interface SkyLightTargetWindow {
 	readonly id: number;
+	/** Verified notification layer, retained to skip document-window activation priming. */
+	readonly layer?: number;
 	readonly bounds: {
 		readonly x: number;
 		readonly y: number;
@@ -45,7 +47,7 @@ const CGEventSetWindowLocation = skyLight.func("CGEventSetWindowLocation", "void
 const CGSMainConnectionID = skyLight.func("CGSMainConnectionID", "uint32_t", []) as KoffiFunc<() => number>;
 
 const SLPSPostEventRecordTo = skyLight.func("SLPSPostEventRecordTo", "int32_t", ["void *", "void *"]) as KoffiFunc<
-	(psn: Buffer, eventRecord: Buffer) => number
+	(psn: Buffer, eventRecord: object) => number
 >;
 
 const _SLPSGetFrontProcess = skyLight.func("_SLPSGetFrontProcess", "int32_t", ["void *"]) as KoffiFunc<
@@ -125,10 +127,8 @@ export function buildMouseEventRecord(window: SkyLightTargetWindow, eventType: n
 /**
  * Deliver one synthesized mouse event straight to a window's own process.
  *
- * This is the path that reaches an unfocused window: a CGEvent posted at global coordinates goes
- * to whatever is frontmost, and posting one to a pid does not deliver mouse events at all. The
- * window server, however, accepts a synthesized record addressed to the process and window, which
- * is how a tap or a drag lands in a window the user never brought forward.
+ * This routine brings the target process forward before posting the window-addressed record.
+ * It is not a background-only transport and must not be used when foreground activation is forbidden.
  */
 export function postMouseEventRecordToWindow(
 	window: SkyLightTargetWindow,
@@ -263,6 +263,25 @@ export function postCoreGraphicsEventToWindowOwner(window: SkyLightTargetWindow,
 	}
 	CGEventPostToPSN(targetPsn, event);
 	return true;
+}
+
+/** Post a window-stamped event record without activating a process or using global input. */
+export function postBackgroundEventRecordToWindowOwner(window: SkyLightTargetWindow, event: CGEventRef): boolean {
+	const targetPsn = processSerialNumberForWindow(window.id);
+	if (targetPsn === null) {
+		return false;
+	}
+	const record = eventRecord(event);
+	if (record === null) {
+		return false;
+	}
+	if (
+		koffi.decode(record, RECORD_LENGTH_OFFSET, "uint32_t") !== EVENT_RECORD_LENGTH ||
+		koffi.decode(record, RECORD_WINDOW_ID_OFFSET, "uint32_t") !== window.id
+	) {
+		return false;
+	}
+	return SLPSPostEventRecordTo(targetPsn, record) === 0;
 }
 
 function processSerialNumberForWindow(windowId: number): Buffer | null {

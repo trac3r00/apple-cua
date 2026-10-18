@@ -39,6 +39,48 @@ describe("#given a WindowServer listing with app windows and chrome #when it is 
 	});
 });
 
+describe("#given a Phone call banner #when it is mapped for targeting #then its verified helper window survives", () => {
+	const helper = {
+		bundleId: "com.apple.FaceTime.FaceTimeNotificationExtension",
+		path: "/System/Library/ExtensionKit/Extensions/FaceTimeNotificationExtension.appex",
+	};
+
+	it("includes a layer 21 banner by process identity, not its localized owner name", () => {
+		const banner = listed({ id: 219, layer: 21, ownerName: "Localized helper" });
+
+		const windows = targetableWindows([banner], () => helper);
+
+		expect(windows.map((entry) => entry.id)).toEqual([219]);
+	});
+
+	it("excludes a lookalike helper outside the system bundle", () => {
+		const banner = listed({ id: 219, layer: 21, ownerName: "FaceTimeNotificationExtension" });
+
+		const windows = targetableWindows([banner], () => ({ ...helper, path: "/tmp/Fake.appex" }));
+
+		expect(windows).toEqual([]);
+	});
+
+	it("excludes unverified processes and other helper layers", () => {
+		const banner = listed({ id: 219, layer: 21 });
+		const chrome = listed({ id: 220, layer: 25 });
+
+		expect(targetableWindows([banner], () => undefined)).toEqual([]);
+		expect(targetableWindows([chrome], () => helper)).toEqual([]);
+	});
+
+	it("includes the compositing Notification Center host at notification layer", () => {
+		const host = listed({ id: 11, layer: 21, ownerName: "Notification Center" });
+
+		const windows = targetableWindows([host], () => ({
+			bundleId: "com.apple.notificationcenterui",
+			path: "/System/Library/CoreServices/NotificationCenter.app",
+		}));
+
+		expect(windows.map((entry) => entry.id)).toEqual([11]);
+	});
+});
+
 describe("#given the in-process listing answers #when windows are wanted for targeting #then the helper binary is never consulted", () => {
 	it("uses the in-process listing as-is, chrome already filtered", async () => {
 		const listBinary = vi.fn(async () => [window(99)]);

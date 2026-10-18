@@ -5,11 +5,15 @@
  */
 export type ToolsetProfile = "full" | "lean";
 
+import type { DockSource, HostCapabilities } from "@apple-cua/core";
+
 export interface McpServerOptions {
 	/** Defaults to `APPLE_CUA_TOOLSET`, then `full`. */
 	readonly toolset?: ToolsetProfile;
 	/** Defaults to `APPLE_CUA_IPHONE=1`, then off. */
 	readonly iphone?: boolean;
+	readonly dockSource?: DockSource;
+	readonly dockHostProbe?: () => HostCapabilities;
 }
 
 export interface ResolvedServerOptions {

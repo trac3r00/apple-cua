@@ -94,7 +94,7 @@ export function registerDesktopMutationTools(
 		"click",
 		{
 			description: mutationDescription(
-				"Click an observed element id (semantic path) or screenshot coordinates x,y (last resort); click_count for a double click, mouse_button for right/middle. modifiers (command, shift, option, control) are held during the click, e.g. command-click to add to a selection; an element id with modifiers is clicked at its centre through the pointer route instead of AXPress.",
+				"Click an observed element id (semantic path) or screenshot coordinates x,y (last resort); click_count for a double click, mouse_button for right/middle. A single unmodified right click uses advertised AXShowMenu, otherwise pointer input, never AXPress. modifiers (command, shift, option, control) are held during the click, e.g. command-click to add to a selection; an element id with modifiers is clicked at its centre through the pointer route instead of AXPress.",
 			),
 			inputSchema: clickSchema,
 			annotations: MUTATION_ANNOTATIONS,
@@ -104,7 +104,16 @@ export function registerDesktopMutationTools(
 				input.observation_token,
 				input.app,
 				(observation) => validateClick(input, observation),
-				async (targetPid, observation) => await click(resolvedComputer, targetPid, observation, input),
+				async (targetPid, observation, elements) =>
+					await click(
+						resolvedComputer,
+						targetPid,
+						observation,
+						input,
+						input.element_index === undefined
+							? undefined
+							: elements?.get(parseElementIndex(input.element_index))?.actions,
+					),
 				{ ...outcomeOptions(input), screenPoints: input.element_index === undefined },
 			),
 	);
@@ -113,7 +122,7 @@ export function registerDesktopMutationTools(
 		"click_target",
 		{
 			description: mutationDescription(
-				"Act on a described element in one call: observe, resolve the query, wait up to timeout_ms for it, hover first if hover_first, then press via AXPress when advertised, else click its centre (also when press=pointer or the button is not left). Answers with the resolved target, alternatives not clicked, route and delivery used, and with expect whether the outcome verified. found=false: nothing matched in time, no input was dispatched, near misses are listed and the token for the ids seen is still returned.",
+				"Act on a described element in one call: observe, resolve the query, wait up to timeout_ms for it, hover first if hover_first, then left-press via AXPress when advertised, else click its centre. A single right click uses advertised AXShowMenu unless press=pointer, and never AXPress. Answers with the resolved target, alternatives not clicked, route and delivery used, and with expect whether the outcome verified. found=false: nothing matched in time, no input was dispatched, near misses are listed and the token for the ids seen is still returned.",
 			),
 			inputSchema: clickTargetSchema,
 			annotations: MUTATION_ANNOTATIONS,

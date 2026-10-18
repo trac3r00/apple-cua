@@ -219,18 +219,40 @@ when the needed target cannot be established.
    `--background`; `APPLE_CUA_DELIVERY=attended` opts out): input goes to the app's own window,
    the frontmost app and the person's cursor are left alone, `open_app` launches without bringing
    the app forward, and an action that would need the foreground is refused rather than taking
-   over the machine. A drawn agent cursor shows every action without touching the real pointer
-   (`APPLE_CUA_CURSOR=off` hides it).
+   over the machine. Background work draws no cursor, highlight, or click ripple. Attended
+   delivery can show an adaptive agent cursor without moving the real pointer for semantic
+   actions (`APPLE_CUA_CURSOR=off` hides that feedback).
 
 - Do not bypass a denied/stale/paused MCP action using the raw CLI, AppleScript, shell input
   synthesis, another computer tool or another MCP connection. Those would evade the guard.
-- Keep one active controller for the desktop. Do not drive this Mac from parallel agents or
-  separate MCP servers. Within one server, work is queued per app: each app holds one live
-  observation token, and observing one app does not invalidate another app's token, so
-  independent apps can be observed and driven in parallel. The queue does not serialize other
-  processes or human input.
+- Keep one coordinating agent and one shared MCP server session. Delegate parallel agents
+  only through disjoint worker assignments in that session, not separate MCP servers.
+  Each app holds one live observation token; background workers can drive independent apps
+  concurrently, while attended worker input is serialized. These queues do not serialize
+  unrelated processes or human input.
 
 ## Browser controls, Dock, and cursor identities
+
+### Full-toolset worker delegation
+
+With the full toolset, one main agent may use `manage_workers` to assign
+non-overlapping app tasks, then spawn those workers through its own host runtime.
+Each worker receives its `worker_id` and assignment `observation_token`, acts
+only through `run_worker`, and returns an outcome for the main agent to verify.
+The MCP server does not contain an LLM scheduler or spawn agents. Background
+delivery remains invisible. Attended cursor identities are isolated visual
+indicators, not independent operating-system mice; release workers only after
+their runs finish.
+
+Use `manage_workers` with `op: "observe"` and the assigned `worker_id` to refresh
+that worker's context after a stale token or changed window. Do not use an
+unscoped observation to replace its token. A restarted app needs release and
+reassignment because ownership is pinned to the original process.
+
+Read `visual_context` with the screenshot. Window-scoped AX frames are already
+in screenshot pixels; OCR frames are global logical screen points.
+`image_to_screen` supplies origin and scale only when an image is present.
+Partial, diff-only, and capture-only trees do not describe every control.
 
 Browser pages use their live macOS accessibility tree, not a complete DOM.
 The bounded walk reports `elementsTruncated` for element or depth cuts; use an

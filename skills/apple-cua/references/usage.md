@@ -61,6 +61,21 @@ Read-only tools:
 Mutation tools all require `observation_token` from the latest applicable state, except
 `click_target`, which observes for itself:
 
+In the full toolset, `manage_workers` assigns, observes, inspects, and releases app ownership, and
+`run_worker` executes the same bounded `run_steps` schema under that worker's
+server-issued cursor identity. The main agent is responsible for spawning workers
+through its host runtime and independently checking their reported results. The
+MCP server is not an LLM scheduler. Background workers are invisible; attended
+cursor overlays identify isolated worker contexts but are not separate OS mice.
+Use screenshot pixels only when semantic frames clearly map to that image; missing
+images or inaccessible controls are limitations to report, not permission to guess.
+Assignments and observations return images as MCP image blocks, indexed by each
+worker's `images` field. Refresh a worker with `manage_workers` using
+`op: "observe"` and its `worker_id`; `include_screenshot: false` is the cheaper
+semantic refresh. All workers must share the coordinator's MCP session.
+`visual_context` names the AX/OCR coordinate spaces and the image-to-screen
+mapping; window-scoped AX frames must not be scaled a second time.
+
 - `click`: an observed element ID or screenshot coordinates.
 - `click_target`: acts on a described element in one call — observes the app, resolves the
   same query shape as `find_elements`, waits up to `timeout_ms` for the element to appear,

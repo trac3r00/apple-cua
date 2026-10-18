@@ -87,12 +87,16 @@ describe("parseCursorMotion", () => {
 describe("cursorMotionFromEnvironment", () => {
 	const key = "APPLE_CUA_CURSOR_MOTION";
 
-	it.each([{}, { [key]: undefined }, { [key]: "" }, { [key]: "  " }, { [key]: "off" }])(
-		"#given disabled environment %j #when read #then returns undefined",
+	it.each([{}, { [key]: undefined }, { [key]: "" }, { [key]: "  " }])(
+		"#given absent environment setting %j #when read #then preserves the optional configuration",
 		(environment) => {
 			expect(cursorMotionFromEnvironment(environment)).toBeUndefined();
 		},
 	);
+
+	it("#given explicit off #when read #then disables motion", () => {
+		expect(cursorMotionFromEnvironment({ [key]: "off" })).toBeUndefined();
+	});
 
 	it("#given a style name #when read #then returns it", () => {
 		expect(cursorMotionFromEnvironment({ [key]: "comet_swoop" })).toEqual({ style: "comet_swoop" });

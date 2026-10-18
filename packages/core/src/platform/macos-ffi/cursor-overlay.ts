@@ -5,8 +5,14 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { currentCursorIdentity } from "../../computer/cursor-scope.js";
 import type { Point, Rect } from "../../types/index.js";
-import { type CursorMotionConfig, cursorMotionFromEnvironment, parseCursorMotion } from "./cursor-motion-config.js";
+import {
+	CURSOR_MOTION_ENV,
+	type CursorMotionConfig,
+	cursorMotionFromEnvironment,
+	parseCursorMotion,
+} from "./cursor-motion-config.js";
 import { prepareCursorMotion } from "./cursor-motion.js";
 
 /** "click" is an event rather than a lasting mode: the overlay ripples where the dot lands. */
@@ -31,7 +37,7 @@ export interface OverlayTransport {
 	close(): void;
 }
 
-export type OverlayTransportFactory = () => OverlayTransport | undefined;
+export type OverlayTransportFactory = (identity?: string) => OverlayTransport | undefined;
 
 export const NOOP_POINTER_OVERLAY: PointerOverlay = {
 	set(): void {},
@@ -79,19 +85,31 @@ export function createCursorOverlay(
 	transportFactory?: OverlayTransportFactory,
 	motion?: CursorMotionConfig | null,
 ): PointerOverlay {
-	const configuration = motion === undefined ? cursorMotionFromEnvironment() : parseCursorMotion(motion);
-	const factory =
-		transportFactory ?? (() => defaultSocketTransport(Date.now, spawn, configuration, cursorOverlaySocketPath()));
-	let transport: OverlayTransport | undefined;
-	let resolved = false;
+	const environmentMotion = process.env[CURSOR_MOTION_ENV]?.trim();
+	// Default the renderer, not the shared parser used by persisted CLI settings.
+	const configuration =
+		motion !== undefined
+			? parseCursorMotion(motion)
+			: environmentMotion === undefined || environmentMotion === ""
+				? { style: "adaptive" as const }
+				: cursorMotionFromEnvironment();
+	const transportsByIdentity = new Map<string | undefined, OverlayTransport | undefined>();
 
 	function send(command: string): void {
-		if (!resolved) {
-			resolved = true;
-			transport = safeTransport(factory);
+		const identity = currentCursorIdentity();
+		if (!transportsByIdentity.has(identity)) {
+			transportsByIdentity.set(
+				identity,
+				safeTransport(
+					transportFactory ??
+						((scopedIdentity) =>
+							defaultSocketTransport(Date.now, spawn, configuration, cursorOverlaySocketPath(scopedIdentity))),
+					identity,
+				),
+			);
 		}
 		try {
-			transport?.send(command);
+			transportsByIdentity.get(identity)?.send(command);
 		} catch {}
 	}
 
@@ -117,16 +135,18 @@ export function createCursorOverlay(
 			// Intentionally does NOT stop the daemon — it is shared across commands and
 			// self-terminates on its idle timeout. Closing here would kill the cursor
 			// the moment a single verb's process exits (the original "never showed" bug).
-			try {
-				transport?.close();
-			} catch {}
+			for (const transport of new Set(transportsByIdentity.values())) {
+				try {
+					transport?.close();
+				} catch {}
+			}
 		},
 	};
 }
 
-function safeTransport(factory: OverlayTransportFactory): OverlayTransport | undefined {
+function safeTransport(factory: OverlayTransportFactory, identity: string | undefined): OverlayTransport | undefined {
 	try {
-		return factory();
+		return factory(identity);
 	} catch {
 		return undefined;
 	}

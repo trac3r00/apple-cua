@@ -1,6 +1,6 @@
 import type { AXTreeElement, AppState } from "@apple-cua/core";
 import { describe, expect, it } from "vitest";
-import { observedActionResult, observedRunStepsResult, observedSetFieldsResult } from "./tool-result.js";
+import { observedActionResult, observedRunStepsResult, observedSetFieldsResult, stateResult } from "./tool-result.js";
 
 const state: AppState = {
 	app: "Fixture",
@@ -14,6 +14,57 @@ const state: AppState = {
 	screenshotHeight: 100,
 	display: { width: 100, height: 100, scaleFactor: 1 },
 };
+
+describe("#given image and accessibility coordinates #when observed #then their grounding is explicit", () => {
+	it("keeps image-space element frames and exposes the offset scaled screen mapping", () => {
+		const elements = elementRange(1);
+		const payload = payloadOf(
+			stateResult({
+				...state,
+				elements,
+				screenshotBase64: "aW1hZ2U=",
+				windowBounds: { x: -300, y: 150, width: 200, height: 400 },
+			}),
+		);
+
+		expect(payload["elements"]).toEqual(elements);
+		expect(payload["visual_context"]).toEqual({
+			image_available: true,
+			element_frame_space: "window-screenshot-pixels",
+			ocr_frame_space: "screen-logical-points",
+			tree_coverage: "full",
+			image_to_screen: { origin: { x: -300, y: 150 }, scale: { x: 2, y: 4 } },
+		});
+	});
+
+	it.each([
+		{ flags: { treeSkipped: true }, coverage: "capture-only" },
+		{ flags: { treeOmitted: true }, coverage: "diff-only" },
+		{ flags: { elementsTruncated: true }, coverage: "partial" },
+	])("reports $coverage without manufacturing element targets", ({ flags, coverage }) => {
+		const payload = payloadOf(stateResult({ ...state, ...flags }));
+
+		expect(payload["visual_context"]).toMatchObject({
+			image_available: false,
+			element_frame_space: "screen-logical-points",
+			tree_coverage: coverage,
+		});
+		expect(payload["visual_context"]).not.toHaveProperty("image_to_screen");
+	});
+
+	it("does not offer image mapping when capture was omitted or denied", () => {
+		const payload = payloadOf(
+			stateResult({ ...state, windowBounds: { x: 300, y: 150, width: 200, height: 400 } }, "token", "table"),
+		);
+
+		expect(payload["visual_context"]).toMatchObject({
+			image_available: false,
+			element_frame_space: "window-screenshot-pixels",
+		});
+		expect(payload["visual_context"]).not.toHaveProperty("image_to_screen");
+		expect(payload).not.toHaveProperty("elements");
+	});
+});
 
 describe("#given observed action state #when formatted #then observation is not inferred action success", () => {
 	it.each([

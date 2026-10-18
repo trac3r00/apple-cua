@@ -52,6 +52,8 @@ import {
 } from "./tool-schemas.js";
 import { type McpServerOptions, type ToolsetProfile, resolveServerOptions, serverInstructionsFor } from "./toolset.js";
 import { registerVisualTools } from "./visual-tools.js";
+import { WorkerCoordinator } from "./worker-coordinator.js";
+import { registerWorkerTools } from "./worker-tools.js";
 
 export { FULL_ONLY_TOOL_NAMES, IPHONE_TOOL_NAMES, LEAN_TOOL_NAMES, TOOL_NAMES, toolNamesFor } from "./tool-names.js";
 export type { McpServerOptions, ToolsetProfile } from "./toolset.js";
@@ -64,14 +66,15 @@ class ComputerMcpServer extends McpServer {
 		private readonly session: GuardedSession,
 		private readonly dockSession: DockGuardSession,
 		private readonly stopChord: { stop(): void } | undefined,
+		private readonly workers: WorkerCoordinator,
 		toolset: ToolsetProfile,
 	) {
 		super(SERVER_INFO, { instructions: serverInstructionsFor(toolset) });
 		this.server.onclose = () => {
 			this.stopChord?.stop();
-			this.session.close().catch((error: unknown) => {
+			this.workers.close().catch((error: unknown) => {
 				const details = error instanceof Error ? error.message : String(error);
-				process.stderr.write(`Failed to close macOS computer session: ${details}\n`);
+				process.stderr.write(`Failed to close worker coordinator: ${details}\n`);
 			});
 			this.dockSession.close();
 		};
@@ -82,7 +85,7 @@ class ComputerMcpServer extends McpServer {
 		this.session.invalidate();
 		this.dockSession.close();
 		await super.close();
-		await this.session.close();
+		await this.workers.close();
 	}
 }
 
@@ -118,7 +121,8 @@ export function createMcpServer(
 		probeHost: options?.dockHostProbe ?? probeHostCapabilities,
 		...(stopGate === undefined ? {} : { stopSwitch: stopGate }),
 	});
-	const server = new ComputerMcpServer(session, dockSession, stopChord, toolset);
+	const workers = new WorkerCoordinator(session, resolvedComputer);
+	const server = new ComputerMcpServer(session, dockSession, stopChord, workers, toolset);
 
 	server.registerTool(
 		"verify_state",
@@ -232,6 +236,7 @@ export function createMcpServer(
 		registerDesktopMutationTools(server, session, resolvedComputer);
 		registerPowerTools(server, session, resolvedComputer);
 		registerParallelTools(server, session, resolvedComputer);
+		registerWorkerTools(server, workers);
 	}
 	registerHumanTools(server, session);
 	registerVisualTools(server, session);

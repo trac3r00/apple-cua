@@ -31,6 +31,7 @@ vi.mock("./macos-ffi/skylight.js", () => ({
 	restoreFrontProcessNoWindows: vi.fn(() => true),
 }));
 
+import { currentCursorIdentity, withCursorIdentity } from "../computer/cursor-scope.js";
 import { InputInterrupted, type InputScope, runInInputScope } from "../computer/input-scope.js";
 import * as accessibility from "./macos-ffi/accessibility.js";
 import { NOOP_POINTER_OVERLAY } from "./macos-ffi/cursor-overlay.js";
@@ -99,10 +100,11 @@ afterEach(() => {
 describe("#given a pointer bound to an observed window #when moving or dragging #then its path stays spatially scoped", () => {
 	it("moves through paced intermediate points and tracks the overlay without touching the real cursor", async () => {
 		vi.useFakeTimers();
+		const set = vi.fn();
 		const track = vi.fn();
 		const controller = new MacOSInputController(
 			undefined,
-			{ ...NOOP_POINTER_OVERLAY, track },
+			{ ...NOOP_POINTER_OVERLAY, set, track },
 			() => false,
 			NO_SLEEP,
 			"background",
@@ -121,7 +123,9 @@ describe("#given a pointer bound to an observed window #when moving or dragging 
 		expect(positions.length).toBeGreaterThan(2);
 		expect(positions[0]).not.toEqual({ x: 350, y: 250 });
 		expect(positions.at(-1)).toEqual({ x: 350, y: 250 });
-		expect(track.mock.calls.map(([point]) => point)).toEqual(positions);
+		expect(track).not.toHaveBeenCalled();
+		expect(set).not.toHaveBeenCalled();
+		expect(controller.getCursorPosition()).toEqual({ x: 350, y: 250 });
 		expect(positions.every((point) => point.x >= 150 && point.x <= 350 && point.y >= 150 && point.y <= 250)).toBe(
 			true,
 		);
@@ -144,9 +148,11 @@ describe("#given a pointer bound to an observed window #when moving or dragging 
 		vi.useFakeTimers();
 		const set = vi.fn();
 		const setMode = vi.fn();
+		const highlight = vi.fn();
+		const track = vi.fn();
 		const controller = new MacOSInputController(
 			undefined,
-			{ ...NOOP_POINTER_OVERLAY, set, setMode },
+			{ ...NOOP_POINTER_OVERLAY, set, setMode, highlight, track },
 			() => false,
 			NO_SLEEP,
 			"background",
@@ -163,8 +169,93 @@ describe("#given a pointer bound to an observed window #when moving or dragging 
 				([event]) => event.position.x === 200 && event.position.y === 200,
 			),
 		).toBe(true);
-		expect(setMode).toHaveBeenCalledWith("scroll");
-		expect(set).toHaveBeenCalledWith({ x: 200, y: 200 });
+		expect(setMode).not.toHaveBeenCalled();
+		expect(set).not.toHaveBeenCalled();
+		expect(track).not.toHaveBeenCalled();
+		expect(highlight).not.toHaveBeenCalled();
+		expect(controller.getCursorPosition()).toEqual({ x: 200, y: 200 });
+		controller.close();
+	});
+
+	it("#when background actions request cursor modes #then all injected feedback stays silent", async () => {
+		const set = vi.fn();
+		const track = vi.fn();
+		const setMode = vi.fn();
+		const highlight = vi.fn();
+		const controller = new MacOSInputController(
+			undefined,
+			{ ...NOOP_POINTER_OVERLAY, set, track, setMode, highlight },
+			() => false,
+			NO_SLEEP,
+			"background",
+		);
+
+		controller.showPointer({ x: 175, y: 125 }, true);
+		controller.showScrollPointer({ x: 200, y: 200 });
+		controller.showThinking();
+
+		expect(set).not.toHaveBeenCalled();
+		expect(track).not.toHaveBeenCalled();
+		expect(setMode).not.toHaveBeenCalled();
+		expect(highlight).not.toHaveBeenCalled();
+		expect(controller.getCursorPosition()).toEqual({ x: 200, y: 200 });
+		controller.close();
+	});
+
+	it("#when attended actions request cursor feedback #then the injected overlay remains visible", async () => {
+		const set = vi.fn();
+		const setMode = vi.fn();
+		const controller = new MacOSInputController(
+			undefined,
+			{ ...NOOP_POINTER_OVERLAY, set, setMode },
+			() => false,
+			NO_SLEEP,
+			"attended",
+		);
+
+		controller.showPointer({ x: 175, y: 125 }, true);
+
+		expect(set).toHaveBeenCalledWith({ x: 175, y: 125 });
+		expect(setMode).toHaveBeenNthCalledWith(1, "pointer");
+		expect(setMode).toHaveBeenNthCalledWith(2, "click");
+		controller.close();
+	});
+
+	it("#when two async cursor identities interleave #then logical positions and injected overlay stay distinct", async () => {
+		const set = vi.fn();
+		const controller = new MacOSInputController(
+			undefined,
+			{ ...NOOP_POINTER_OVERLAY, set },
+			() => false,
+			NO_SLEEP,
+			"attended",
+		);
+		const original = controller.getCursorPosition();
+		const firstStarted = deferred();
+		const resumeFirst = deferred();
+		const first = withCursorIdentity("first", async () => {
+			controller.showPointer({ x: 101, y: 102 }, false);
+			firstStarted.resolve();
+			await resumeFirst.promise;
+			expect(currentCursorIdentity()).toBe("first");
+			return controller.getCursorPosition();
+		});
+		await firstStarted.promise;
+
+		const second = await withCursorIdentity("second", async () => {
+			controller.showPointer({ x: 201, y: 202 }, false);
+			await Promise.resolve();
+			return controller.getCursorPosition();
+		});
+		resumeFirst.resolve();
+
+		expect(await first).toEqual({ x: 101, y: 102 });
+		expect(second).toEqual({ x: 201, y: 202 });
+		expect(controller.getCursorPosition()).toEqual(original);
+		expect(set.mock.calls.map(([point]) => point)).toEqual([
+			{ x: 101, y: 102 },
+			{ x: 201, y: 202 },
+		]);
 		controller.close();
 	});
 });

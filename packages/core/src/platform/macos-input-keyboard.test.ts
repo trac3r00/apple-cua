@@ -158,8 +158,8 @@ describe("#given MacOSInputController keyboard input", () => {
 		// then
 		expect(coreGraphicsMock.postUnicodeText.mock.calls.map((call) => call[0]).join("")).toBe("pasted");
 		expect(coreGraphicsMock.postKeyboardEvent).toHaveBeenCalledTimes(2);
-		expect(overlay.setMode).toHaveBeenCalledWith("keyboard");
-		expect(overlay.set).toHaveBeenCalledWith({ x: 1, y: 2 });
+		expect(overlay.setMode).not.toHaveBeenCalled();
+		expect(overlay.set).not.toHaveBeenCalled();
 		expect(coreGraphicsMock.warpCursorPosition).not.toHaveBeenCalled();
 		setBackgroundPasteForTesting(
 			() => false,

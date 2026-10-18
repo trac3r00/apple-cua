@@ -611,15 +611,15 @@ behind your front app, for both its shortcut and menu path. The earlier restorat
 (440-675 ms before and 0-14 ms after, four trials sampled every 2 ms) describe the old route, not a guarantee
 that background input never takes focus.
 
-To see what it is doing, apple-cua draws its own agent cursor: a click-through arrow pointer modelled on Cua
+In attended delivery, apple-cua draws its own agent cursor: a click-through arrow pointer modelled on Cua
 Driver's default theme (blue fill, white outline, soft glow, tip exactly on the target) at a compact
 24-point theme size on a
 floating overlay that glides to every action — pointer clicks, accessibility presses, value
 writes, text selection, typing and scrolls — ripples on each press, and pulses while the agent
 reads an observation. Keyboard input shows a keyboard glyph beside the pointer, including
 keyboard-only actions; the menu bar indicator also names the keyboard mode.
-It is drawn, not your real cursor, so it works in background delivery
-without moving your pointer. Set `APPLE_CUA_CURSOR=off` to hide it. Verified on a live session against Cua Driver 0.28.2: a background
+It is drawn, not your real cursor. Background delivery stays visually silent,
+without cursor artwork or highlights. Set `APPLE_CUA_CURSOR=off` to hide the attended cursor. Verified on a live session against Cua Driver 0.28.2: a background
 click landed with the frontmost app and the real cursor untouched, and the action answer cost
 1.4 KB instead of 121 KB because the post-action image is now opt-in (`include_screenshot: true`).
 

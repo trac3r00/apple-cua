@@ -29,6 +29,19 @@ describe("#given upstream Rust golden trajectories #when the vendored planner ru
 });
 
 describe("#given the native cursor state #when planning its next move #then playback starts at the right hotspot", () => {
+	it("uses the default adaptive style and lands exactly at the requested endpoint", () => {
+		const command = cursorMotionCommand(
+			{ x: 700, y: 400 },
+			{ x: 231, y: 142, shown: true, reducedMotion: false },
+			{ style: "adaptive" },
+		);
+		const payload: unknown = JSON.parse(command.slice("trajectory ".length));
+		expect(payload).toMatchObject({
+			style: "adaptive",
+			samples: expect.arrayContaining([[expect.any(Number), 700, 400, expect.any(Number)]]),
+		});
+	});
+
 	it("starts an interrupted motion from the visible position, not the previous target", () => {
 		const command = cursorMotionCommand(
 			{ x: 700, y: 400 },

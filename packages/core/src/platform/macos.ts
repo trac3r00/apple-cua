@@ -168,8 +168,10 @@ export class MacOSHostComputer extends HostComputer {
 		this.delivery = options.delivery ?? "attended";
 		this.urlBlocklist = options.urlBlocklist ?? [];
 		this.overlay =
-			options.overlay ??
-			(agentCursorEnabled() ? createCursorOverlay(undefined, options.cursorMotion) : NOOP_POINTER_OVERLAY);
+			this.delivery === "background"
+				? NOOP_POINTER_OVERLAY
+				: (options.overlay ??
+					(agentCursorEnabled() ? createCursorOverlay(undefined, options.cursorMotion) : NOOP_POINTER_OVERLAY));
 		this.isLocked = options.isLocked ?? isScreenLocked;
 		this.input = new MacOSInputController(
 			options.defaultTargetPid,

@@ -8,8 +8,10 @@ supported action from a model inference or an unverified dispatch.
 
 1. The agent cursor is visibly smaller: use a 24-point theme canvas instead of
    42 points, retaining the exact target hotspot and noninteractive overlay.
-2. Keyboard input shows a keyboard symbol, including keyboard-only sessions.
-   Pointer, scroll, click, and thinking feedback remain distinct.
+2. Attended keyboard input shows a keyboard symbol, including keyboard-only
+   sessions. Pointer, scroll, click, and thinking feedback remain distinct.
+   The coordinated-cursor policy merged from main keeps all background delivery
+   visually silent, including keyboard input.
 3. A background observation and action can address an explicitly observed window
    in another Mission Control Space without foregrounding or raising the app,
    switching Spaces, or moving the real pointer. Current-Space AppKit activation
@@ -85,8 +87,9 @@ are authorized. Keep this existing worktree and preserve unrelated edits.
 - [x] Build native code successfully. Capture the real overlay in pointer,
   keyboard, scroll, thinking, and click states. Verify smaller artwork, visible
   keyboard glyph, no clipping, unchanged hotspot, and no real pointer movement.
-- [x] Keyboard tests verify feedback for typing, key chords, semantic text
-  replacement, and background paste, without depending on wall-clock luck.
+- [x] Keyboard tests verify attended feedback for typing, key chords, and semantic
+  text replacement; background paste stays visually silent without depending on
+  wall-clock luck.
 - [x] Background target tests include a window absent from the onscreen list;
   attended mode still refuses it. Missing/closed/wrong-PID/ambiguous targets
   refuse rather than retarget. Observation and preflight use the same policy.
@@ -227,3 +230,12 @@ connected-model evidence.
   and both unlock watches completed. The native overlays were already stopped.
   Retained evidence and reproducible fixture/harness source live only under the
   named `.omo/evidence/cursor-spaces-vision/` project directory.
+- Publication integration: merged concurrent main commit `aa6fe95`, preserving
+  worker cursor identities, vision grounding, and visually silent background
+  delivery. The smaller native cursor and keyboard badge remain attended-mode
+  indicators. Integrated repository checks pass 1,565 tests with two opt-in skips,
+  strict typechecks, lint, script tests, and all builds. A fresh real off-Space
+  fixture run verifies actual bottom-button and keyboard effects, one-use tokens,
+  silent background overlays, and immediate Space/front-app/cursor invariants.
+  Its local ignored artifact is
+  `.omo/evidence/cursor-spaces-vision-review/merged-main-verification.json`.

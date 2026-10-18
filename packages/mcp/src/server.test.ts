@@ -11,6 +11,7 @@ const MUTATION_NAMES = [
 	"set_value",
 	"set_fields",
 	"run_steps",
+	"run_worker",
 	"select_text",
 	"drag",
 	"scroll",
@@ -48,6 +49,10 @@ describe("MCP metadata #given a connected client #when initialized #then the con
 			expect(tools.get(name)?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
 			expect(tools.get(name)?.inputSchema.required).toContain("observation_token");
 		}
+		expect(tools.get("manage_workers")?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+		expect(tools.get("manage_workers")?.inputSchema.required).toContain("op");
+		expect(tools.get("manage_workers")?.inputSchema.properties).toHaveProperty("assignments");
+		expect(tools.get("manage_workers")?.inputSchema.properties).toHaveProperty("worker_id");
 	});
 });
 

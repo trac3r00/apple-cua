@@ -518,6 +518,31 @@ function stateToolResult(
 	options: { readonly boundDiff?: boolean; readonly elementFormat?: ElementFormat | undefined } = {},
 ): ToolResult {
 	const payload: Record<string, unknown> = { ...state, screenshotBase64: undefined };
+	const imageAvailable = state.screenshotBase64.length > 0;
+	const bounds = state.windowBounds;
+	// Native window observations already map AX frames into screenshot pixels.
+	// OCR frames remain global logical points; never apply the AX mapping twice.
+	payload["visual_context"] = {
+		image_available: imageAvailable,
+		element_frame_space: bounds === undefined ? "screen-logical-points" : "window-screenshot-pixels",
+		ocr_frame_space: "screen-logical-points",
+		tree_coverage:
+			state.treeSkipped === true
+				? "capture-only"
+				: state.treeOmitted === true
+					? "diff-only"
+					: state.elementsTruncated === true
+						? "partial"
+						: "full",
+		...(imageAvailable && bounds !== undefined
+			? {
+					image_to_screen: {
+						origin: { x: bounds.x, y: bounds.y },
+						scale: { x: bounds.width / state.screenshotWidth, y: bounds.height / state.screenshotHeight },
+					},
+				}
+			: {}),
+	};
 	if (options.elementFormat === "table" && state.treeSkipped !== true && state.treeOmitted !== true) {
 		payload["elements"] = undefined;
 		payload["element_columns"] = ELEMENT_TABLE_COLUMNS;

@@ -1,0 +1,121 @@
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { expectFromInput } from "./step-actions.js";
+import type { ToolContent, ToolResult } from "./tool-result.js";
+import { manageWorkersSchema, parseRunSteps, runWorkerSchema, workerManagementRequestSchema } from "./tool-schemas.js";
+import type { WorkerCoordinator } from "./worker-coordinator.js";
+import type { WorkerAssignment, WorkerObservation, WorkerRunResult } from "./worker-coordinator.js";
+
+function attributedEntry(
+	attribution:
+		| Omit<WorkerObservation, "result">
+		| Omit<WorkerRunResult, "result">
+		| Omit<WorkerAssignment, "observation">,
+	result: ToolResult,
+	images: ToolContent[],
+): Record<string, unknown> {
+	const texts: unknown[] = [];
+	const imageIndexes: number[] = [];
+	for (const item of result.content) {
+		if (item.type === "text") {
+			try {
+				const parsed: unknown = JSON.parse(item.text);
+				texts.push(parsed);
+			} catch {
+				texts.push(item.text);
+			}
+		} else {
+			imageIndexes.push(images.length);
+			images.push(item);
+		}
+	}
+	const value = texts.length === 1 ? texts[0] : texts;
+	const resultFields =
+		typeof value === "object" && value !== null && !Array.isArray(value)
+			? Object.fromEntries(Object.entries(value))
+			: { result: value };
+	const attributed = {
+		...resultFields,
+		...attribution,
+		...(imageIndexes.length === 0 ? {} : { images: imageIndexes }),
+	};
+	return attributed;
+}
+
+function attributedResult(
+	attribution: Omit<WorkerObservation, "result"> | Omit<WorkerRunResult, "result">,
+	result: ToolResult,
+): ToolResult {
+	const images: ToolContent[] = [];
+	const attributed = attributedEntry(attribution, result, images);
+	return {
+		content: [{ type: "text", text: JSON.stringify(attributed, null, 2) }, ...images],
+		...(result.isError === true ? { isError: true } : {}),
+	};
+}
+
+function assignedResult(assignments: readonly WorkerAssignment[]): ToolResult {
+	const images: ToolContent[] = [];
+	const entries = assignments.map(({ observation, ...assignment }) =>
+		observation === undefined ? assignment : attributedEntry(assignment, observation, images),
+	);
+	return { content: [{ type: "text", text: JSON.stringify(entries, null, 2) }, ...images] };
+}
+
+function objectResult(value: unknown): ToolResult {
+	return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
+}
+
+export function registerWorkerTools(server: McpServer, coordinator: WorkerCoordinator): void {
+	server.registerTool(
+		"manage_workers",
+		{
+			description:
+				"Assign disjoint app tasks, observe a worker for a fresh token, inspect assignments, or release an idle worker. Cursor ids are server-created.",
+			inputSchema: manageWorkersSchema,
+			annotations: { readOnlyHint: false, destructiveHint: true },
+		},
+		async (input) => {
+			const request = workerManagementRequestSchema.parse(input);
+			switch (request.op) {
+				case "assign":
+					return assignedResult(await coordinator.assign(request.assignments));
+				case "status":
+					return objectResult(coordinator.status());
+				case "observe": {
+					const observation = await coordinator.observe(request.worker_id, {
+						...(request.include_screenshot === undefined
+							? {}
+							: { includeScreenshot: request.include_screenshot }),
+						...(request.max_elements === undefined ? {} : { maxElements: request.max_elements }),
+					});
+					const { result, ...attribution } = observation;
+					return attributedResult(attribution, result);
+				}
+				case "release":
+					coordinator.release(request.worker_id);
+					return objectResult({ released: request.worker_id });
+			}
+		},
+	);
+	server.registerTool(
+		"run_worker",
+		{
+			description:
+				"Run verified run_steps for an assigned worker using its one-use token and isolated cursor identity. Images remain image content blocks with indexes in the attributed result; refusals set isError.",
+			inputSchema: runWorkerSchema,
+			annotations: { readOnlyHint: false, destructiveHint: true },
+		},
+		async (input, extra) => {
+			const result: WorkerRunResult = await coordinator.run(
+				input.worker_id,
+				input.observation_token,
+				parseRunSteps(input.steps, "run_worker"),
+				expectFromInput(input.expect),
+				{ fullState: input.full_state === true, includeScreenshot: input.include_screenshot === true },
+				{ signal: extra.signal, ...(input.pace === undefined ? {} : { pace: input.pace }) },
+			);
+			const { result: innerResult, ...attribution } = result;
+			return attributedResult(attribution, innerResult);
+		},
+	);
+}

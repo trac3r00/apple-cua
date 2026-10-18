@@ -57,6 +57,8 @@ describe("full toolset #given the default #when tools are listed #then desktop t
 		const { harness, names } = await connect({ toolset: "full", iphone: false });
 
 		expect(names).toEqual([...toolNamesFor("full", false)].sort());
+		expect(names).toContain("manage_workers");
+		expect(names).toContain("run_worker");
 		for (const name of mentionedTools(harness.client.getInstructions() ?? "")) {
 			expect(names).toContain(name);
 		}

@@ -2,11 +2,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, jsonPayload, jsonText, observe } from "./protocol-client-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
 
-const cases: readonly {
+interface MutationCase {
 	readonly name: string;
 	readonly arguments: Record<string, unknown>;
 	readonly expected: Effect;
-}[] = [
+}
+const cases: readonly MutationCase[] = [
 	{
 		name: "click",
 		arguments: { app: "Finder", element_index: "9" },

@@ -12,6 +12,8 @@ const includeScreenshotSchema = z.boolean().optional();
 const MAX_SET_FIELD_UPDATES = 10;
 /** Upper bound for one ordered action batch, so a single request stays reviewable. */
 export const MAX_RUN_STEPS = 20;
+/** Maximum intermediate points in a single drag, keeping each gesture bounded. */
+export const MAX_DRAG_WAYPOINTS = 100;
 /** Upper bound for one wait_for step inside a batch. */
 const MAX_WAIT_MILLISECONDS = 10_000;
 /** Upper bound for the matches one element query answers with. */
@@ -244,11 +246,16 @@ export const selectTextSchema = z.object({
 
 const dragFields = {
 	...modifierFields,
-	duration_ms: z.number().finite().nonnegative().optional(),
 	from_x: coordinateSchema,
 	from_y: coordinateSchema,
 	to_x: coordinateSchema,
 	to_y: coordinateSchema,
+	duration_ms: z.number().finite().int().min(0).max(30_000).optional(),
+	waypoints: z
+		.array(z.object({ x: z.number().finite(), y: z.number().finite() }).strict())
+		.max(MAX_DRAG_WAYPOINTS)
+		.optional(),
+	mouse_button: z.enum(["left", "right", "middle"]).optional(),
 };
 
 export const dragSchema = z.object({
@@ -472,7 +479,7 @@ export const compactStepSchema = z.object({
 	type: z
 		.enum(STEP_TYPES)
 		.describe(
-			"click{element_index|target,x,y,click_count,mouse_button,modifiers} perform_secondary_action{element_index|target,action} set_value{element_index|target,value} select_text{element_index|target,text,prefix,suffix,selection} drag{from_x,from_y,to_x,to_y,duration_ms,modifiers} scroll{element_index|target,direction,pages} reveal{target,target_index,find: scrolls the target into view, never acts on it} wait_for{target and/or window_title,gone,timeout_ms<=10000} type_text{text} press_keys{keys,hold_seconds,interval_seconds} invoke_menu{path} set_window_frame{x,y,width,height} clipboard_write{exactly one of text,image_path,file_path}. Name an element by element_index (observed id) or target (resolved just before the step), never both.",
+			"Use element_index or target, never both, for element actions; target resolves before dispatch. click may use x/y. drag uses from_x/from_y/to_x/to_y with optional waypoints. reveal scrolls target into view without acting. wait_for uses target and/or window_title, gone and timeout_ms<=10000. clipboard_write requires exactly one of text, image_path, file_path.",
 		),
 	element_index: elementIndexSchema.optional(),
 	target: compactQuerySchema.optional(),
@@ -494,6 +501,11 @@ export const compactStepSchema = z.object({
 	to_x: coordinateSchema.optional(),
 	to_y: coordinateSchema.optional(),
 	duration_ms: dragFields.duration_ms,
+	waypoints: z
+		.array(z.object({ x: z.number().finite(), y: z.number().finite() }).strict())
+		.max(MAX_DRAG_WAYPOINTS)
+		.optional()
+		.describe("drag: screenshot-local waypoints."),
 	direction: directions.optional(),
 	pages: z.number().positive().optional(),
 	gone: z.boolean().optional().describe("wait_for: wait for the target to disappear."),

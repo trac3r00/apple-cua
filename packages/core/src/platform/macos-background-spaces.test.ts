@@ -58,6 +58,10 @@ vi.mock("./macos-ffi/accessibility.js", () => ({
 	extractAccessibilityTree: fixture.extractAccessibilityTree,
 	focusedElementFrame: vi.fn(),
 	focusedWindowIdForPid: vi.fn(() => fixture.focusedWindowId),
+	focusedWindowIdsForObservationPid: vi.fn(() => ({
+		focusedWindowId: fixture.focusedWindowId,
+		sheetOwnerWindowId: undefined,
+	})),
 	focusedWindowIsModal: vi.fn(() => false),
 	focusedWindowShowsFilePanel: vi.fn(() => false),
 	isWebElementByIndex: vi.fn(() => false),

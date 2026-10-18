@@ -613,7 +613,7 @@ export class GuardedSession {
 						fullState: request.fullState === true,
 						includeScreenshot,
 					});
-					const windowEvents = await this.describeWindowSideEffects(beforeAction);
+					const windowEvents = await this.describeWindowSideEffects(beforeAction, targetPid);
 					return observedActionResult(
 						outcome.state,
 						outcome.contextUnchanged,
@@ -750,7 +750,7 @@ export class GuardedSession {
 			}
 			try {
 				const outcome = await this.readOutcome(expected.pid, expected.observation, options);
-				const windowEvents = await this.describeWindowSideEffects(beforeAction);
+				const windowEvents = await this.describeWindowSideEffects(beforeAction, expected.pid);
 				return observedActionResult(
 					outcome.state,
 					outcome.contextUnchanged,
@@ -1146,7 +1146,7 @@ export class GuardedSession {
 				);
 				const verification =
 					expect === undefined ? undefined : await this.runChecks(expected.pid, outcome.state, expect);
-				const windowEvents = await this.describeWindowSideEffects(beforeAction);
+				const windowEvents = await this.describeWindowSideEffects(beforeAction, expected.pid);
 				return observedRunStepsResult(
 					outcome.state,
 					report,
@@ -1598,14 +1598,19 @@ export class GuardedSession {
 		}
 	}
 
-	private async describeWindowSideEffects(baseline: readonly number[] | undefined): Promise<readonly WindowEvent[]> {
+	private async describeWindowSideEffects(
+		baseline: readonly number[] | undefined,
+		targetPid: number,
+	): Promise<readonly WindowEvent[]> {
 		if (baseline === undefined || this.windowProbe === undefined) {
 			return [];
 		}
 		try {
 			const known = new Set(baseline);
 			const probe = this.windowProbe;
-			let opened = (await timed("windowProbe.after", () => probe())).filter((window) => !known.has(window.id));
+			let opened = (await timed("windowProbe.after", () => probe({ titlesFor: [targetPid] }))).filter(
+				(window) => window.ownerPid === targetPid && !known.has(window.id),
+			);
 			const untitled = [...new Set(opened.filter((window) => window.title === "").map((window) => window.ownerPid))];
 			if (untitled.length > 0) {
 				// Titles the WindowServer withholds come from the apps that opened the windows.

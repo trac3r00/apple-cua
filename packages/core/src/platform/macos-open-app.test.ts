@@ -1,20 +1,27 @@
 import { describe, expect, it } from "vitest";
 
 import type { AppInfo } from "../accessibility/types.js";
-import { type AppOpenLauncher, openApplication, openArguments } from "./macos-open-app.js";
+import { type AppLister, type AppOpenLauncher, openApplication, openArguments } from "./macos-open-app.js";
 
 function app(name: string, bundleId: string, pid: number): AppInfo {
 	return { name, bundleId, pid, isRunning: true };
 }
 
 class FakeLister {
-	calls = 0;
 	apps: AppInfo[] = [];
 	onCall: ((call: number) => void) | undefined;
+	listAppsCalls = 0;
+	identityCalls = 0;
 
 	async listApps(): Promise<AppInfo[]> {
-		this.calls += 1;
-		this.onCall?.(this.calls);
+		this.listAppsCalls += 1;
+		this.onCall?.(this.identityCalls + this.listAppsCalls);
+		return [...this.apps];
+	}
+
+	async listAppIdentities(): Promise<AppInfo[]> {
+		this.identityCalls += 1;
+		this.onCall?.(this.identityCalls);
 		return [...this.apps];
 	}
 }
@@ -37,7 +44,7 @@ describe("#given an app that is already running #when opened #then it is activat
 		lister.apps = [app("Finder", "com.apple.finder", 1234)];
 		const { launcher, targets } = recordingLauncher();
 
-		const result = await openApplication(lister, "finder", { launcher });
+		const result = await openApplication(lister, "finder", { launcher: { ...launcher, background: false } });
 
 		expect(result).toEqual({
 			name: "Finder",
@@ -47,7 +54,38 @@ describe("#given an app that is already running #when opened #then it is activat
 			activated: true,
 		});
 		expect(targets).toEqual(["com.apple.finder"]);
-		expect(lister.calls).toBe(1);
+		expect(lister.identityCalls).toBe(1);
+		expect(lister.listAppsCalls).toBe(0);
+	});
+
+	it("uses identity-only inventory when the lister supports it", async () => {
+		const lister = new FakeLister();
+		lister.apps = [app("Finder", "com.apple.finder", 1234)];
+
+		await openApplication(lister, "Finder", {
+			launcher: { ...recordingLauncher().launcher, background: true },
+		});
+
+		expect(lister.identityCalls).toBe(1);
+		expect(lister.listAppsCalls).toBe(0);
+	});
+
+	it("falls back to enriched inventory when identity inventory is unavailable", async () => {
+		const lister: AppLister = {
+			listApps: async () => [app("Finder", "com.apple.finder", 1234)],
+		};
+
+		const result = await openApplication(lister, "Finder", {
+			launcher: { ...recordingLauncher().launcher, background: true },
+		});
+
+		expect(result.pid).toBe(1234);
+	});
+});
+
+describe("#given the default launcher #when launching an app #then it stays in the background", () => {
+	it("builds background open arguments by default", () => {
+		expect(openArguments("Finder")).toEqual(["-g", "-a", "Finder"]);
 	});
 });
 
@@ -55,7 +93,7 @@ describe("#given an app that is not running #when opening it makes it appear on 
 	it("polls until the app shows up and answers with its pid", async () => {
 		const lister = new FakeLister();
 		lister.onCall = (call) => {
-			if (call >= 3) {
+			if (call >= 2) {
 				lister.apps = [app("Safari", "com.apple.Safari", 4321)];
 			}
 		};
@@ -71,7 +109,7 @@ describe("#given an app that is not running #when opening it makes it appear on 
 			activated: false,
 		});
 		expect(targets).toEqual(["Safari"]);
-		expect(lister.calls).toBeGreaterThanOrEqual(3);
+		expect(lister.identityCalls).toBeGreaterThanOrEqual(2);
 	});
 });
 
@@ -96,16 +134,17 @@ describe("#given a launcher that refuses #when opening #then the refusal surface
 		};
 
 		await expect(openApplication(lister, "No Such", { launcher, timeoutMs: 100 })).rejects.toThrow(/can't be opened/);
-		expect(lister.calls).toBe(1);
+		expect(lister.identityCalls).toBe(1);
 	});
 });
 
 describe("#given a bundle id and an app name #when the open arguments are built #then a bundle id goes to -b and a name to -a", () => {
 	it("picks the flag that matches the target shape", () => {
-		expect(openArguments("com.apple.Safari")).toEqual(["-b", "com.apple.Safari"]);
-		expect(openArguments("Finder")).toEqual(["-a", "Finder"]);
-		expect(openArguments("Visual Studio Code")).toEqual(["-a", "Visual Studio Code"]);
+		expect(openArguments("com.apple.Safari")).toEqual(["-g", "-b", "com.apple.Safari"]);
+		expect(openArguments("Finder")).toEqual(["-g", "-a", "Finder"]);
+		expect(openArguments("Visual Studio Code")).toEqual(["-g", "-a", "Visual Studio Code"]);
 		expect(openArguments("Finder", true)).toEqual(["-g", "-a", "Finder"]);
-		expect(openArguments("com.apple.Safari", true)).toEqual(["-g", "-b", "com.apple.Safari"]);
+		expect(openArguments("Finder", false)).toEqual(["-a", "Finder"]);
+		expect(openArguments("com.apple.Safari", false)).toEqual(["-b", "com.apple.Safari"]);
 	});
 });

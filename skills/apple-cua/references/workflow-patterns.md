@@ -1,0 +1,99 @@
+# Desktop workflow patterns
+
+Use these patterns with the guarded stdio MCP server. They describe current
+apple-cua contracts; they do not authorize a target or replace user confirmation.
+
+## Background and per-app input scopes
+
+Background delivery is the default. Each action is scoped to the observed app
+process and window; `observe_apps` issues per-app observation tokens and
+`run_parallel` runs one batch per app on independent input lanes, with independent
+logical pointer positions and PID-scoped overlay markers. Same-app input is serialized;
+the native hardware cursor remains singular. Keep one desktop controller,
+never transfer tokens or element IDs between apps, and target each action using
+that app's own newest observation.
+
+## Window and coordinate targeting
+
+Aim pointer actions only at the exact observed window and its returned screenshot.
+Use element IDs or semantic `target` queries first. When coordinates are necessary,
+use the coordinate space documented by that observation; never convert screenshot
+pixels to global logical points by guesswork. Current background pointer actions are
+window-targeted. `displays` reports each screen's ID, global origin, logical size
+and scale. `windowDisplayId` identifies the greatest-overlap screen;
+`windowDisplayIds` includes every screen intersected by a spanning window.
+Observe the target in place rather than moving it to the main screen.
+
+## Cheapest confirming observation
+
+Choose the smallest read that can answer the concrete question:
+
+1. For a known control, use `find_elements` or a semantic action `target` query.
+2. For a known element after a mutation, use its returned value/effect evidence;
+   use `include_screenshot: false` to refresh element IDs and geometry.
+3. Use `diff_only` to compare with a prior state, or `element_format: "table"` to
+   reduce the size of a large tree.
+4. Use `verify_state` for an explicit value, label, element-exists/gone, or window
+   expectation.
+5. Request a window screenshot when pixels are the only evidence, such as artwork
+   not exposed through accessibility.
+
+An unchanged accessibility tree is not proof that an action failed. Read the
+action's effect, evidence and escalation; do not replay a non-idempotent action.
+
+## Bounded batches and drawing
+
+Use `run_steps` for a coherent sequence of at most 20 known steps. It validates
+the batch before dispatch, stops at the first failed step, supports bounded
+`wait_for`, and can verify an explicit end condition. Split work before a decision,
+external side effect, uncertain transition, or step whose target depends on
+unobserved intermediate state. Never use a fixed sleep as a readiness check.
+
+For a canvas, inspect the observed window and tool controls. `drag` holds one
+button from its start through up to 100 intermediate `waypoints: [{x,y}]` to its
+end. Every point uses the observed screenshot's coordinates. Set integer
+`duration_ms` from 0 to 30000 for paced samples; choose `mouse_button` left, right
+or middle and held `modifiers` for the app's drawing, orbit or pan tool.
+Verify the mark or view change with AX evidence or a window screenshot.
+Separate strokes are separate drag steps. Pressure/tilt, multi-touch and cursor
+button-state visualization are not provided.
+
+## Finished-work blocks
+
+Decide the document's content, reading order, spacing and completion evidence
+before inserting objects. Establish one correctly sized and styled native object,
+inspect it, then repeat that verified pattern for its peers. A finished artifact
+must have coherent content and no clipped text, overlaps, placeholders or leftover
+test objects; successful input dispatch is not the acceptance test.
+
+Use `run_script` to keep a coherent block in one guarded call. A block might insert,
+label and position one card, or fill a slide's known placeholders. Keep transient
+menu opening and the observed selection in the same block: background activation
+can expire between agent calls and dismiss the menu. Prefer direct, observed menu
+commands over opening a picker solely to rediscover the same object.
+
+Use fast chains for stable known targets. A picker that reorders recent items is
+not stable: use a fresh query action or verified batch at that boundary. After a
+partial result, inspect the completed-step receipt and resulting pixels, then
+continue only the unfinished work. Never replay the entire block.
+
+Canvas text editing is app-specific. Entering a Keynote placeholder clears its
+placeholder text; an extra Select All can be both unnecessary and refused in the
+background. Text insertion can also trigger native smart punctuation or lists.
+Read the rendered text rather than assuming the submitted string is unchanged.
+For a chord, use one key string, such as `keys: ["command+shift+g"]` or
+`app.press("command+shift+g")`; separate array entries are separate presses.
+
+An empty AX diff cannot prove that a native canvas object was unchanged. Inspect
+the canvas at meaningful boundaries, not after every keystroke. Conversely, an
+unrelated application opening a window is never evidence for the target action.
+
+For a save sheet, observe its parent document when that document's AX tree exposes
+the sheet and its fields. Do not use a sheet-sized image showing a scaled parent
+document for coordinates. Verify the entered filename, the final named window and
+the saved artifact; a Save click or title match alone does not verify its content.
+
+Keep a run ledger: actual actions, observations, elapsed call times, refusals,
+partial blocks and corrective edits. Include failed attempts in the accounting.
+Judge the complete artifact and uninterrupted workflow, not the number of tests
+or isolated successful clicks.

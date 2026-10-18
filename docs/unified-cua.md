@@ -1,4 +1,10 @@
-# One macOS computer-use stack: what apple-cua took from Codex, Cua Driver and OmO
+# Historical comparison: what apple-cua took from Codex, Cua Driver and OmO
+
+This is a dated comparison record, not current setup guidance or a live benchmark.
+The observations below were measured on 2026-10-05/06 with the named versions,
+machine, harness and scenarios. Keep those results as historical evidence; consult
+the current skill and `docs/bundle-capability-audit.md` for actionable workflows
+and the verified reuse boundaries.
 
 Measured 2026-10-05 on an Apple M4, console session, background delivery. Three reference stacks were
 inspected and run on this Mac:
@@ -10,7 +16,7 @@ inspected and run on this Mac:
 - **OmO's `computer` tool** (Quartz backend; `capabilities()` reports background window input, a focus guard and a
   global stop path).
 
-## What each one does best, and where it now lives in apple-cua
+## Recorded capability comparison (2026-10-05 snapshot)
 
 | Strength | Reference | apple-cua |
 |---|---|---|
@@ -25,7 +31,7 @@ Beyond the three: guarded tokens on every mutation, per-action outcome envelopes
 `set_fields` read-back, `observe_apps`/`run_parallel`, `ask_user` elicitation, iPhone Mirroring tools, and a drawn
 agent cursor.
 
-## Head-to-head: Calculator 12 x 12 in the background
+## Historical head-to-head: Calculator 12 x 12 in the background (n=1)
 
 Same Mac, same window state (sidebar hidden), run back to back, n=1 each. Each run first cleared the display and read
 it back (all three read `0`), then pressed 1 2 x 1 2 = and read `144`. Terminal stayed frontmost in every run.
@@ -55,7 +61,7 @@ Raw evidence: `.omo/plans/qa-unified-evidence.json` (apple-cua leg) and `.omo/pl
 Video recording and trajectory replay, named sessions, the OmniParser perception extension (AGPL), and paste with
 clipboard restore (apple-cua's `type_text` already passes multiline Unicode on the bench).
 
-## Follow-up: lighter, faster, quieter (2026-10-05)
+## Historical follow-up: lighter, faster, quieter (2026-10-05)
 
 Measured on this Mac, background delivery.
 
@@ -77,7 +83,7 @@ since). The focus guard runs on its own thread because the input thread is busy 
 target steals the front. Lazy-loading modules was measured and dropped: startup cost is spread across the MCP SDK,
 zod and core with no single heavy module (the best candidate saved about 9 ms).
 
-## Review fixes (2026-10-06)
+## Historical review fixes (2026-10-06)
 
 After all of these, the six complex background scenarios still pass 18/18 with
 0 real-cursor moves and 0 front-app changes, and are faster: Finder multi-select 2.9 -> 2.55 s, TextEdit save 0.84 ->

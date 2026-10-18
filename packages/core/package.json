@@ -16,6 +16,10 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
+		},
+		"./stop": {
+			"types": "./dist/platform/stop-switch.d.ts",
+			"import": "./dist/platform/stop-switch.js"
 		}
 	},
 	"scripts": {

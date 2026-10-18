@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { runInInputScope } from "../computer/input-scope.js";
 import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
 import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
 
@@ -89,7 +90,7 @@ describe("#given MacOSInputController target routing", () => {
 	it("#when clicking with a target pid and no visible window #then refuses unsafe public pid fallback", async () => {
 		// given
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController(1234);
+		const controller = new MacOSInputController(1234, undefined, undefined, undefined, "attended");
 
 		// when/then
 		await expect(controller.click({ x: 500, y: 300 })).rejects.toThrow(
@@ -110,7 +111,7 @@ describe("#given MacOSInputController target routing", () => {
 			},
 		]);
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController(1234);
+		const controller = new MacOSInputController(1234, undefined, undefined, undefined, "attended");
 
 		// when
 		await controller.click({ x: 50, y: 70 });
@@ -191,7 +192,7 @@ describe("#given MacOSInputController target routing", () => {
 	it("#when clicking without a target pid #then keeps the existing CoreGraphics global path", async () => {
 		// given
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController();
+		const controller = new MacOSInputController(undefined, undefined, undefined, undefined, "attended");
 
 		// when
 		await controller.click({ x: 10, y: 20 }, "right");
@@ -344,13 +345,13 @@ describe("#given MacOSInputController target routing", () => {
 			close: vi.fn(),
 		};
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController(1234, overlay);
+		const controller = new MacOSInputController(1234, overlay, undefined, undefined, "attended");
 
 		// when
 		await controller.click({ x: 50, y: 70 });
 
 		// then
-		expect(overlay.set).toHaveBeenCalledWith({ x: 50, y: 70 });
+		expect(overlay.set).toHaveBeenCalledWith({ x: 50, y: 70 }, 1234);
 		expect(controller.getCursorPosition()).toEqual({ x: 50, y: 70 });
 		controller.close();
 		expect(overlay.close).toHaveBeenCalledOnce();
@@ -454,6 +455,24 @@ describe("#given MacOSInputController target routing", () => {
 		expect(controller.getCursorPosition()).toEqual({ x: 1, y: 2 });
 		controller.close();
 	});
+
+	it("#when two app scopes move #then each cursor position remains independent", async () => {
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
+			{ id: 88, owner: { processId: 5678 }, bounds: { x: 400, y: 20, width: 300, height: 200 } },
+		]);
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(undefined, undefined, undefined, undefined, "background");
+
+		await runInInputScope({ target: { pid: 1234 } }, () => controller.move({ x: 50, y: 70 }));
+		await runInInputScope({ target: { pid: 5678 } }, () => controller.move({ x: 450, y: 70 }));
+		const first = await runInInputScope({ target: { pid: 1234 } }, async () => controller.getCursorPosition());
+		const second = await runInInputScope({ target: { pid: 5678 } }, async () => controller.getCursorPosition());
+
+		expect(first).toEqual({ x: 50, y: 70 });
+		expect(second).toEqual({ x: 450, y: 70 });
+		controller.close();
+	});
 });
 
 describe("#given background delivery #when a targeted pointer action runs #then the user focus and cursor are left alone", () => {
@@ -483,10 +502,27 @@ describe("#given background delivery #when a targeted pointer action runs #then 
 		const { MacOSInputController } = await import("./macos-input.js");
 		const controller = new MacOSInputController(1234, undefined, undefined, undefined, "background");
 
-		await controller.drag({ from: { x: 40, y: 60 }, to: { x: 140, y: 160 } });
+		await controller.drag({
+			from: { x: 40, y: 60 },
+			waypoints: [
+				{ x: 80, y: 100 },
+				{ x: 110, y: 130 },
+			],
+			to: { x: 140, y: 160 },
+			button: "right",
+			duration: 0,
+			modifiers: ["shift"],
+		});
 
 		expect(skyLightMock.beginFocusWithoutRaise).not.toHaveBeenCalled();
 		expect(coreGraphicsMock.warpCursorPosition).not.toHaveBeenCalled();
+		const dragEvents = coreGraphicsMock.postMouseEvent.mock.calls
+			.map(([event]) => event)
+			.filter(({ button }) => button === "right");
+		expect(dragEvents.map(({ kind }) => kind)).toEqual(["down", "drag", "drag", "drag", "up"]);
+		expect(dragEvents.every(({ button, flags }) => button === "right" && flags === 0x00020000)).toBe(true);
+		expect(dragEvents[0]).toMatchObject({ position: { x: 40, y: 60 } });
+		expect(dragEvents.at(-1)).toMatchObject({ position: { x: 140, y: 160 } });
 		controller.close();
 	});
 });

@@ -799,6 +799,10 @@ function observationContext(state: AppState): Record<string, unknown> {
 		...(state.windowId === undefined ? {} : { windowId: state.windowId }),
 		...(state.windowTitle === undefined ? {} : { windowTitle: state.windowTitle }),
 		...(state.windowBounds === undefined ? {} : { windowBounds: state.windowBounds }),
+		display: state.display,
+		...(state.displays === undefined ? {} : { displays: state.displays }),
+		...(state.windowDisplayId === undefined ? {} : { windowDisplayId: state.windowDisplayId }),
+		...(state.windowDisplayIds === undefined ? {} : { windowDisplayIds: state.windowDisplayIds }),
 		...(state.contentKind === undefined ? {} : { contentKind: state.contentKind }),
 	};
 }

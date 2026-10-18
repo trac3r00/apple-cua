@@ -19,12 +19,12 @@ import { prepareCursorMotion } from "./cursor-motion.js";
 export type PointerMode = "pointer" | "scroll" | "thinking" | "keyboard" | "click";
 
 export interface PointerOverlay {
-	set(point: Point): void;
+	set(point: Point, pid?: number, direct?: boolean): void;
 	/** Already-paced input samples must not start another glide behind the real gesture. */
-	track?(point: Point): void;
-	highlight(rect: Rect): void;
-	setMode(mode: PointerMode): void;
-	hide(): void;
+	track?(point: Point, pid?: number): void;
+	highlight(rect: Rect, pid?: number): void;
+	setMode(mode: PointerMode, pid?: number): void;
+	hide(pid?: number): void;
 	close(): void;
 }
 
@@ -33,18 +33,28 @@ export interface PointerOverlay {
 // daemon so the cursor survives across separate CLI commands (each apple-cua verb is
 // its own short-lived process); tests inject a fake transport to capture commands.
 export interface OverlayTransport {
-	send(command: string): void;
+	send(command: string, pid?: number, direct?: boolean): void;
 	close(): void;
 }
 
 export type OverlayTransportFactory = (identity?: string) => OverlayTransport | undefined;
 
 export const NOOP_POINTER_OVERLAY: PointerOverlay = {
-	set(): void {},
-	highlight(): void {},
-	setMode(): void {},
-	hide(): void {},
-	close(): void {},
+	set(): void {
+		/* no-op */
+	},
+	highlight(): void {
+		/* no-op */
+	},
+	setMode(): void {
+		/* no-op */
+	},
+	hide(): void {
+		/* no-op */
+	},
+	close(): void {
+		/* no-op */
+	},
 };
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
@@ -94,9 +104,18 @@ export function createCursorOverlay(
 				? { style: "adaptive" as const }
 				: cursorMotionFromEnvironment();
 	const transportsByIdentity = new Map<string | undefined, OverlayTransport | undefined>();
+	const pidsByIdentity = new Map<string | undefined, Set<number>>();
 
-	function send(command: string): void {
+	function send(command: string, pid?: number, direct = false): void {
 		const identity = currentCursorIdentity();
+		if (pid !== undefined) {
+			let pids = pidsByIdentity.get(identity);
+			if (pids === undefined) {
+				pids = new Set<number>();
+				pidsByIdentity.set(identity, pids);
+			}
+			pids.add(pid);
+		}
 		if (!transportsByIdentity.has(identity)) {
 			transportsByIdentity.set(
 				identity,
@@ -109,36 +128,50 @@ export function createCursorOverlay(
 			);
 		}
 		try {
-			transportsByIdentity.get(identity)?.send(command);
-		} catch {}
+			transportsByIdentity.get(identity)?.send(command, pid, direct);
+		} catch {
+			/* best-effort overlay */
+		}
 	}
 
 	return {
-		set(point: Point): void {
-			send(`set ${Math.round(point.x)} ${Math.round(point.y)}\n`);
+		set(point: Point, pid?: number, direct?: boolean): void {
+			send(`set ${Math.round(point.x)} ${Math.round(point.y)}\n`, pid, direct);
 		},
-		track(point: Point): void {
-			send(`track ${Math.round(point.x)} ${Math.round(point.y)}\n`);
+		track(point: Point, pid?: number): void {
+			send(`track ${Math.round(point.x)} ${Math.round(point.y)}\n`, pid, true);
 		},
-		highlight(rect: Rect): void {
+		highlight(rect: Rect, pid?: number): void {
 			send(
 				`highlight ${Math.round(rect.x)} ${Math.round(rect.y)} ${Math.round(rect.width)} ${Math.round(rect.height)}\n`,
+				pid,
 			);
 		},
-		setMode(mode: PointerMode): void {
-			send(`mode ${mode}\n`);
+		setMode(mode: PointerMode, pid?: number): void {
+			send(`mode ${mode}\n`, pid);
 		},
-		hide(): void {
-			send("hide\n");
+		hide(pid?: number): void {
+			send("hide\n", pid);
 		},
 		close(): void {
+			for (const [identity, pids] of pidsByIdentity) {
+				for (const pid of pids) {
+					try {
+						transportsByIdentity.get(identity)?.send("hide\n", pid);
+					} catch {
+						/* best-effort overlay */
+					}
+				}
+			}
 			// Intentionally does NOT stop the daemon — it is shared across commands and
 			// self-terminates on its idle timeout. Closing here would kill the cursor
 			// the moment a single verb's process exits (the original "never showed" bug).
 			for (const transport of new Set(transportsByIdentity.values())) {
 				try {
 					transport?.close();
-				} catch {}
+				} catch {
+					/* shared daemon outlives this command */
+				}
 			}
 		},
 	};
@@ -205,10 +238,12 @@ export function defaultSocketTransport(
 				}
 			});
 			child.unref();
-		} catch {}
+		} catch {
+			/* unavailable overlay is non-fatal */
+		}
 	}
 
-	function deliver(command: string, attempt: number, finished?: () => void): void {
+	function deliver(command: string, attempt: number, finished?: () => void, direct = false): void {
 		let socket: ReturnType<typeof connect>;
 		try {
 			socket = connect(socketPath);
@@ -224,7 +259,7 @@ export function defaultSocketTransport(
 			}
 		});
 		socket.on("connect", () => {
-			if (motion !== undefined && command.startsWith("set ")) {
+			if (!direct && motion !== undefined && /^set /.test(command)) {
 				socket.setTimeout(2_000, () => socket.destroy(new Error("Cursor overlay state request timed out")));
 				void prepareCursorMotion(socket, command, motion).then(
 					(prepared) => socket.end(prepared),
@@ -240,41 +275,56 @@ export function defaultSocketTransport(
 			try {
 				socket.write(command);
 				socket.end();
-			} catch {}
+			} catch {
+				/* socket failure is handled by its error event */
+			}
 		});
 		socket.on("error", () => {
 			// No daemon listening yet — start one and retry briefly so the very first
 			// command still lands once the daemon has bound its socket.
 			try {
 				socket.destroy();
-			} catch {}
+			} catch {
+				/* continue daemon startup after a failed destroy */
+			}
 			ensureDaemon();
 			if (attempt < 2) {
 				retrying = true;
-				setTimeout(() => deliver(command, attempt + 1, finished), 150);
+				setTimeout(() => deliver(command, attempt + 1, finished, direct), 150);
 			}
 		});
 	}
 
-	const pending: string[] = [];
+	const pending: Array<{ readonly command: string; readonly direct: boolean }> = [];
 	let sending = false;
 	function sendNext(): void {
-		const command = pending.shift();
-		if (command === undefined) {
+		const next = pending.shift();
+		if (next === undefined) {
 			sending = false;
 			return;
 		}
-		deliver(command, 0, sendNext);
+		deliver(next.command, 0, sendNext, next.direct);
 	}
 
 	return {
-		send(command: string): void {
-			pending.push(command);
+		send(command: string, pid?: number, direct = false): void {
+			// PID markers are direct-update lanes: querying state and planning a
+			// trajectory for every drag sample would queue stale positions behind input.
+			const directUpdate = direct || pid !== undefined;
+			const directCommand = directUpdate ? command.replace(/^set /, "set-direct ") : command;
+			const scoped = pid === undefined ? directCommand : `pid ${pid} ${directCommand}`;
+			if (motion === undefined) {
+				deliver(scoped, 0, undefined, directUpdate);
+				return;
+			}
+			pending.push({ command: scoped, direct: directUpdate });
 			if (!sending) {
 				sending = true;
 				sendNext();
 			}
 		},
-		close(): void {},
+		close(): void {
+			/* shared daemon outlives this transport */
+		},
 	};
 }

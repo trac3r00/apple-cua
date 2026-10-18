@@ -1,5 +1,5 @@
 import type { KoffiFunc } from "koffi";
-import type { Rect } from "../../types/index.js";
+import type { DisplayInventoryEntry } from "../../accessibility/types.js";
 import { koffi } from "./koffi.js";
 
 const coreGraphics = koffi.load("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics");
@@ -19,6 +19,13 @@ const CGDisplayBounds = coreGraphics.func("CGDisplayBounds", CG_RECT, ["uint32_t
 		readonly size: { readonly width: number; readonly height: number };
 	}
 >;
+const CGDisplayPixelsWide = coreGraphics.func("CGDisplayPixelsWide", "size_t", ["uint32_t"]) as KoffiFunc<
+	(display: number) => number
+>;
+const CGDisplayPixelsHigh = coreGraphics.func("CGDisplayPixelsHigh", "size_t", ["uint32_t"]) as KoffiFunc<
+	(display: number) => number
+>;
+const CGMainDisplayID = coreGraphics.func("CGMainDisplayID", "uint32_t", []) as KoffiFunc<() => number>;
 
 const DISPLAY_ID_BYTES = 4;
 
@@ -27,8 +34,9 @@ const DISPLAY_ID_BYTES = 4;
  * coordinates the window list uses. Undefined when the list cannot be read, names no display, or a display appeared
  * while it was read: callers must then treat the layout as unknown.
  */
-export function onlineDisplayBounds(): readonly Rect[] | undefined {
+export function onlineDisplayInfo(): readonly DisplayInventoryEntry[] | undefined {
 	try {
+		const mainDisplayId = CGMainDisplayID();
 		const count = Buffer.alloc(DISPLAY_ID_BYTES);
 		if (CGGetOnlineDisplayList(0, null, count) !== 0) {
 			return undefined;
@@ -43,13 +51,32 @@ export function onlineDisplayBounds(): readonly Rect[] | undefined {
 		if (found === 0 || found >= capacity) {
 			return undefined;
 		}
-		const displays: Rect[] = [];
+		const displays: DisplayInventoryEntry[] = [];
 		for (let index = 0; index < found; index += 1) {
-			const { origin, size } = CGDisplayBounds(ids.readUInt32LE(index * DISPLAY_ID_BYTES));
-			displays.push({ x: origin.x, y: origin.y, width: size.width, height: size.height });
+			const id = ids.readUInt32LE(index * DISPLAY_ID_BYTES);
+			const { origin, size } = CGDisplayBounds(id);
+			const horizontalScale = size.width > 0 ? CGDisplayPixelsWide(id) / size.width : 1;
+			const verticalScale = size.height > 0 ? CGDisplayPixelsHigh(id) / size.height : 1;
+			const scaleFactor = Math.max(1, Math.round((horizontalScale + verticalScale) / 2));
+			displays.push({
+				id,
+				isMain: id === mainDisplayId,
+				x: origin.x,
+				y: origin.y,
+				width: size.width,
+				height: size.height,
+				scaleFactor: Math.max(1, scaleFactor),
+			});
 		}
 		return displays;
 	} catch {
 		return undefined;
 	}
+}
+
+/** Legacy bounds view retained for the input gesture lane. */
+export function onlineDisplayBounds():
+	| readonly { readonly x: number; readonly y: number; readonly width: number; readonly height: number }[]
+	| undefined {
+	return onlineDisplayInfo()?.map(({ x = 0, y = 0, width, height }) => ({ x, y, width, height }));
 }

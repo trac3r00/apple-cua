@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Point, Rect } from "../types/index.js";
-import { type ScreenLayout, primerPosition } from "./macos-input-pointer.js";
+import { type MousePost, type ScreenLayout, postDragSequence, primerPosition } from "./macos-input-pointer.js";
 
 const MAIN: Rect = { x: 0, y: 0, width: 1920, height: 1080 };
 const MENU_BAR: Rect = { x: 0, y: 0, width: 1920, height: 25 };
@@ -78,5 +78,66 @@ describe("#given the displays and on-screen windows the activation primer must m
 		const layout = { displays: [{ x: -huge, y: -huge, width: 2 * huge, height: 2 * huge }], windows: [] };
 
 		expect(primerPosition(layout)).toBeUndefined();
+	});
+});
+
+describe("#given a drag path #when it traverses waypoints #then one selected button remains held throughout", () => {
+	it("posts every waypoint with the chosen button and held modifiers", async () => {
+		const events: Array<{ kind: string; x: number; y: number; button: string; flags: number | undefined }> = [];
+		const post: MousePost = async (kind, position, button, _clickState, _targetWindow, flags) => {
+			events.push({ kind, x: position.x, y: position.y, button, flags });
+		};
+
+		await postDragSequence(
+			post,
+			{
+				from: { x: 0, y: 0 },
+				waypoints: [20, 40].map((x) => ({ x, y: x / 2 })),
+				to: { x: 60, y: 30 },
+				button: "right",
+				duration: 0,
+			},
+			undefined,
+			0x10,
+		);
+
+		expect(events[0]).toMatchObject({ kind: "down", x: 0, y: 0, button: "right", flags: 0x10 });
+		expect(events.some((event) => event.kind === "drag" && event.x === 20 && event.y === 10)).toBe(true);
+		expect(events.some((event) => event.kind === "drag" && event.x === 40 && event.y === 20)).toBe(true);
+		expect(events.at(-1)).toMatchObject({ kind: "up", x: 60, y: 30, button: "right", flags: 0x10 });
+		expect(events.every((event) => event.button === "right" && event.flags === 0x10)).toBe(true);
+	});
+
+	it("releases the selected button at the last posted point when cancelled", async () => {
+		const events: Array<{ kind: string; x: number; y: number; button: string }> = [];
+		const post: MousePost = async (kind, position, button) => {
+			events.push({ kind, x: position.x, y: position.y, button });
+		};
+		let checks = 0;
+
+		await expect(
+			postDragSequence(
+				post,
+				{
+					from: { x: 0, y: 0 },
+					waypoints: [{ x: 50, y: 0 }],
+					to: { x: 100, y: 0 },
+					button: "middle",
+					duration: 0,
+				},
+				undefined,
+				undefined,
+				() => {
+					checks += 1;
+					if (checks === 2) {
+						throw new Error("cancelled");
+					}
+				},
+			),
+		).rejects.toThrow("cancelled");
+
+		expect(events[0]).toMatchObject({ kind: "down", button: "middle" });
+		expect(events.at(-1)).toMatchObject({ kind: "up", button: "middle", x: 50, y: 0 });
+		expect(events.some((event) => event.kind === "drag")).toBe(true);
 	});
 });

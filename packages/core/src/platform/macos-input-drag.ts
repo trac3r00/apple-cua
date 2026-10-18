@@ -1,7 +1,6 @@
 import type { Point } from "../types/index.js";
 
 const DEFAULT_DRAG_FRAME_MILLISECONDS = 16;
-const MAX_DRAG_STEPS = 60;
 
 /** Distance-based travel time in milliseconds, bounded so large displays do not create long gestures. */
 export function pointerTravelDuration(from: Point, to: Point): number {
@@ -13,7 +12,7 @@ export function dragSteps(duration: number): number {
 	if (duration <= 0) {
 		return 1;
 	}
-	return Math.max(1, Math.min(MAX_DRAG_STEPS, Math.ceil(duration / DEFAULT_DRAG_FRAME_MILLISECONDS)));
+	return Math.max(1, Math.ceil(duration / DEFAULT_DRAG_FRAME_MILLISECONDS));
 }
 
 function interpolatePoint(from: Point, to: Point, progress: number): Point {

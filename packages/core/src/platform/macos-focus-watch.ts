@@ -95,24 +95,17 @@ export interface FocusWatchJob {
 let worker: Worker | undefined;
 let workerReady = false;
 let workerFailed = false;
-/** Guards posted to a worker that has not confirmed it is running; they are watched here if it never does. */
-const unconfirmedGuards = new Set<FocusRestoreToken>();
 
 function startWorker(): Worker {
 	const created = new Worker(new URL("./macos-focus-watch-worker.js", import.meta.url));
 	created.unref();
 	created.once("message", () => {
 		workerReady = true;
-		unconfirmedGuards.clear();
 	});
 	const fail = (): void => {
 		workerFailed = true;
 		workerReady = false;
 		worker = undefined;
-		for (const guard of unconfirmedGuards) {
-			watchForFocusSteal(guard);
-		}
-		unconfirmedGuards.clear();
 	};
 	created.once("error", fail);
 	created.once("exit", fail);
@@ -128,7 +121,7 @@ export function startFocusStealWatch(guard: FocusRestoreToken): void {
 	// this thread's loop turning, which is the thing that may be blocked.
 	worker ??= startWorker();
 	if (!workerReady) {
-		unconfirmedGuards.add(guard);
+		watchForFocusSteal(guard);
 	}
 	const job: FocusWatchJob = { previousPsn: guard.previousPsn, targetPsn: guard.targetPsn };
 	worker.postMessage(job);

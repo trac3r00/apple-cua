@@ -1,10 +1,16 @@
-import type { TopLevelWindow } from "@apple-cua/core";
+import type { TopLevelWindow, TopLevelWindowOptions } from "@apple-cua/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 
-function window(id: number, title: string): TopLevelWindow {
-	return { id, ownerPid: 1234, ownerName: "Finder", title, bounds: { x: 0, y: 0, width: 800, height: 600 } };
+function window(id: number, title: string, ownerPid = 1234): TopLevelWindow {
+	return {
+		id,
+		ownerPid,
+		ownerName: ownerPid === 1234 ? "Finder" : "Terminal",
+		title,
+		bounds: { x: 0, y: 0, width: 800, height: 600 },
+	};
 }
 
 let closeHarness: (() => Promise<void>) | undefined;
@@ -123,6 +129,34 @@ describe("#given an action #when a window appears while it runs #then the answer
 			windowEvents: [{ id: 2, ownerPid: 1234, ownerName: "Finder", title: "New Window" }],
 		});
 		expect(payload["escalation"]).toBeUndefined();
+	});
+
+	it("ignores a new unrelated-app window when the target accessibility tree did not change", async () => {
+		const computer = new FakeGuardedComputer();
+		computer.postActionSummary = { added: 0, removed: 0, changed: 0 };
+		let probeCalls = 0;
+		const titleRequests: (TopLevelWindowOptions | undefined)[] = [];
+		const probe = async (options?: TopLevelWindowOptions): Promise<readonly TopLevelWindow[]> => {
+			titleRequests.push(options);
+			probeCalls += 1;
+			return probeCalls === 1 ? [window(1, "Documents")] : [window(1, "Documents"), window(2, "", 5678)];
+		};
+		const harness = await createHarness(computer, probe);
+		closeHarness = harness.close;
+		const token = await observe(harness);
+
+		const payload = jsonPayload(
+			await harness.client.callTool({
+				name: "click",
+				arguments: { app: "Finder", observation_token: token, element_index: "9" },
+			}),
+		);
+
+		expect(titleRequests).toEqual([undefined, { titlesFor: [1234] }]);
+		expect(payload["windowEvents"]).toBeUndefined();
+		expect(payload["observationStatus"]).toBe("unchanged");
+		expect(payload["effect"]).toBe("suspected_noop");
+		expect(payload["evidence"]).toEqual([]);
 	});
 
 	it("reports no window events when the window set did not change", async () => {

@@ -8,6 +8,10 @@ const coreGraphicsMock = vi.hoisted(() => ({
 	postUnicodeText: vi.fn(),
 	warpCursorPosition: vi.fn(),
 }));
+const focusMock = vi.hoisted(() => ({
+	beginFocusWithoutRaise: vi.fn(),
+	setProcessAppActive: vi.fn(() => false),
+}));
 
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/window-list.js", () => ({
@@ -24,8 +28,8 @@ vi.mock("./macos-ffi/coregraphics.js", () => ({
 // The target sits behind the person's app in every case here, and is never told it is active.
 vi.mock("./macos-ffi/skylight.js", () => ({
 	focusGuardFor: () => null,
-	setProcessAppActive: vi.fn(() => false),
-	beginFocusWithoutRaise: vi.fn(() => null),
+	setProcessAppActive: focusMock.setProcessAppActive,
+	beginFocusWithoutRaise: focusMock.beginFocusWithoutRaise,
 	frontProcessSerialNumber: vi.fn(() => null),
 	processSerialNumbersMatch: () => false,
 	restoreFrontProcessNoWindows: vi.fn(() => true),
@@ -95,6 +99,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.useRealTimers();
+	vi.restoreAllMocks();
 });
 
 describe("#given a pointer bound to an observed window #when moving or dragging #then its path stays spatially scoped", () => {
@@ -125,7 +130,10 @@ describe("#given a pointer bound to an observed window #when moving or dragging 
 		expect(positions.at(-1)).toEqual({ x: 350, y: 250 });
 		expect(track).not.toHaveBeenCalled();
 		expect(set).not.toHaveBeenCalled();
-		expect(controller.getCursorPosition()).toEqual({ x: 350, y: 250 });
+		expect(await runInInputScope(boundTo(42, 12), async () => controller.getCursorPosition())).toEqual({
+			x: 350,
+			y: 250,
+		});
 		expect(positions.every((point) => point.x >= 150 && point.x <= 350 && point.y >= 150 && point.y <= 250)).toBe(
 			true,
 		);
@@ -139,6 +147,23 @@ describe("#given a pointer bound to an observed window #when moving or dragging 
 		await expect(
 			runInInputScope(boundTo(42, 12), () => controller.drag({ from: { x: 150, y: 150 }, to: { x: 650, y: 50 } })),
 		).rejects.toThrow("outside the observed window");
+
+		expect(coreGraphicsMock.postMouseEvent).not.toHaveBeenCalled();
+		controller.close();
+	});
+
+	it("rejects an out-of-window waypoint even when both endpoints are observed", async () => {
+		const controller = backgroundController();
+
+		await expect(
+			runInInputScope(boundTo(42, 12), () =>
+				controller.drag({
+					from: { x: 150, y: 150 },
+					waypoints: [{ x: 650, y: 50 }],
+					to: { x: 350, y: 250 },
+				}),
+			),
+		).rejects.toThrow("drag waypoint is outside the target window");
 
 		expect(coreGraphicsMock.postMouseEvent).not.toHaveBeenCalled();
 		controller.close();
@@ -173,7 +198,10 @@ describe("#given a pointer bound to an observed window #when moving or dragging 
 		expect(set).not.toHaveBeenCalled();
 		expect(track).not.toHaveBeenCalled();
 		expect(highlight).not.toHaveBeenCalled();
-		expect(controller.getCursorPosition()).toEqual({ x: 200, y: 200 });
+		expect(await runInInputScope(boundTo(42, 12), async () => controller.getCursorPosition())).toEqual({
+			x: 200,
+			y: 200,
+		});
 		controller.close();
 	});
 
@@ -215,9 +243,9 @@ describe("#given a pointer bound to an observed window #when moving or dragging 
 
 		controller.showPointer({ x: 175, y: 125 }, true);
 
-		expect(set).toHaveBeenCalledWith({ x: 175, y: 125 });
-		expect(setMode).toHaveBeenNthCalledWith(1, "pointer");
-		expect(setMode).toHaveBeenNthCalledWith(2, "click");
+		expect(set).toHaveBeenCalledWith({ x: 175, y: 125 }, undefined);
+		expect(setMode).toHaveBeenNthCalledWith(1, "pointer", undefined);
+		expect(setMode).toHaveBeenNthCalledWith(2, "click", undefined);
 		controller.close();
 	});
 
@@ -297,6 +325,79 @@ describe("#given input calls for two apps that overlap #when one waits mid-call 
 			[77, window21],
 			[77, window21],
 		]);
+		controller.close();
+	});
+});
+
+describe("#given two background app lanes #when one drag is parked #then the other app progresses independently", () => {
+	it("completes the second pid drag before the first pid drag is released", async () => {
+		vi.useFakeTimers();
+		const controller = backgroundController();
+		const first = runInInputScope(boundTo(42, 12), () =>
+			controller.drag({ from: { x: 350, y: 150 }, to: { x: 400, y: 200 }, duration: 32 }),
+		);
+		await vi.advanceTimersByTimeAsync(0);
+		const second = runInInputScope(boundTo(77, 21), () =>
+			controller.drag({ from: { x: 650, y: 50 }, to: { x: 700, y: 100 }, duration: 0 }),
+		);
+		await vi.advanceTimersByTimeAsync(0);
+		const completedPids = coreGraphicsMock.postMouseEvent.mock.calls
+			.filter(([event]) => event.kind === "up")
+			.map(([event]) => event.targetPid);
+		expect(completedPids).toContain(77);
+		expect(completedPids).not.toContain(42);
+		await vi.runAllTimersAsync();
+		await Promise.all([first, second]);
+		controller.close();
+	});
+});
+
+describe("#given an observed hidden window #when its exact background scope clicks #then it targets that window without raising it", () => {
+	it("resolves the pid and window from the full observed inventory", async () => {
+		const controller = backgroundController();
+		const hiddenWindow = { id: 55, bounds: { x: 800, y: 400, width: 300, height: 200 } };
+		setOpenWindowsSourceForTesting(
+			() => [FRONT, OTHER_APP],
+			() => [FRONT, OTHER_APP, { ...hiddenWindow, owner: { processId: 42 } }],
+		);
+		vi.spyOn(accessibility, "windowMinimizedForPid").mockReturnValue(false);
+		setOnscreenWindowIdsSourceForTesting(() => [11, 21]);
+
+		await runInInputScope(boundTo(42, hiddenWindow.id), () => controller.click({ x: 850, y: 450 }));
+
+		expect(
+			coreGraphicsMock.postMouseEvent.mock.calls.map(([event]) => [event.targetPid, event.targetWindow]),
+		).toEqual([
+			[42, hiddenWindow],
+			[42, hiddenWindow],
+		]);
+		expect(coreGraphicsMock.warpCursorPosition).not.toHaveBeenCalled();
+		expect(focusMock.beginFocusWithoutRaise).not.toHaveBeenCalled();
+		expect(focusMock.setProcessAppActive).not.toHaveBeenCalled();
+		controller.close();
+	});
+});
+
+describe("#given two gestures for one background app #when the first drag is parked #then the next click waits", () => {
+	it("posts the queued click only after releasing the drag", async () => {
+		vi.useFakeTimers();
+		const controller = backgroundController();
+		const drag = runInInputScope(boundTo(42, 12), () =>
+			controller.drag({ from: { x: 350, y: 150 }, to: { x: 400, y: 200 }, duration: 32 }),
+		);
+		await vi.advanceTimersByTimeAsync(0);
+		const click = runInInputScope(boundTo(42, 12), () => controller.click({ x: 400, y: 200 }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		const beforeRelease = coreGraphicsMock.postMouseEvent.mock.calls.map(([event]) => event);
+		expect(beforeRelease.some((event) => event.kind === "down" && event.position.x === 400)).toBe(false);
+
+		await vi.runAllTimersAsync();
+		await Promise.all([drag, click]);
+		const samePidEvents = coreGraphicsMock.postMouseEvent.mock.calls
+			.map(([event]) => event)
+			.filter((event) => event.targetPid === 42);
+		expect(samePidEvents.map((event) => event.kind)).toEqual(["down", "drag", "drag", "up", "down", "up"]);
 		controller.close();
 	});
 });
@@ -404,6 +505,45 @@ describe("#given a stop arrives while input is going out #when the call is mid-w
 		const posted = coreGraphicsMock.postMouseEvent.mock.calls.map(([event]) => event);
 		expect(posted.map((event) => event.kind)).toEqual(["down", "drag", "drag", "up"]);
 		expect(posted[3]?.position).toEqual(posted[2]?.position);
+		const lastPosition = await runInInputScope(boundTo(42, 12), async () => controller.getCursorPosition());
+		expect(lastPosition).toEqual(posted[2]?.position);
+		controller.close();
+	});
+
+	it("#when background drag samples post #then the logical pointer follows without feedback or changed flags", async () => {
+		const overlay = { set: vi.fn(), highlight: vi.fn(), setMode: vi.fn(), hide: vi.fn(), close: vi.fn() };
+		const controller = new MacOSInputController(undefined, overlay, () => false, NO_SLEEP, "background");
+		const positions: Array<{ readonly x: number; readonly y: number }> = [];
+		coreGraphicsMock.postMouseEvent.mockImplementation(({ kind, position, targetPid, flags }) => {
+			if (kind === "drag") {
+				positions.push(position);
+				expect(targetPid).toBe(42);
+				expect(flags).toBe(0x00020000);
+			}
+		});
+
+		await runInInputScope(boundTo(42, 12), () =>
+			controller.drag({
+				from: { x: 150, y: 150 },
+				waypoints: [{ x: 250, y: 250 }],
+				to: { x: 450, y: 350 },
+				duration: 0,
+				button: "right",
+				modifiers: ["shift"],
+			}),
+		);
+
+		expect(positions.length).toBeGreaterThan(1);
+		expect(overlay.set).not.toHaveBeenCalled();
+		expect(overlay.setMode).not.toHaveBeenCalled();
+		expect(await runInInputScope(boundTo(42, 12), async () => controller.getCursorPosition())).toEqual(
+			positions.at(-1),
+		);
+		const dragEvents = coreGraphicsMock.postMouseEvent.mock.calls
+			.map(([event]) => event)
+			.filter((event) => event.kind === "drag");
+		expect(dragEvents.every((event) => event.button === "right")).toBe(true);
+		expect(dragEvents.every((event) => event.flags === 0x00020000)).toBe(true);
 		controller.close();
 	});
 });

@@ -16,9 +16,19 @@ export interface AXTreeElement {
 }
 
 export interface DisplayInfo {
-	width: number;
-	height: number;
-	scaleFactor: number;
+	readonly id?: number;
+	readonly isMain?: boolean;
+	readonly x?: number;
+	readonly y?: number;
+	readonly width: number;
+	readonly height: number;
+	readonly scaleFactor: number;
+}
+
+export interface DisplayInventoryEntry extends DisplayInfo {
+	readonly id: number;
+	readonly x: number;
+	readonly y: number;
 }
 
 export interface AxTreeChangeSummary {
@@ -44,6 +54,8 @@ export interface WindowInventoryEntry {
 	readonly id: number;
 	readonly title: string;
 	readonly bounds: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+	readonly displayIds?: readonly number[];
+	readonly displayId?: number;
 }
 
 export interface AppState {
@@ -58,6 +70,8 @@ export interface AppState {
 	screenshotHeight: number;
 	screenshotMimeType?: "image/png" | "image/jpeg";
 	display: DisplayInfo;
+	/** Every online display in global logical coordinates; undefined if inventory is unavailable. */
+	displays?: readonly DisplayInventoryEntry[];
 	/**
 	 * Key of the observation these element ids came from. A caller that intends to act on an id
 	 * passes this back so the driver can prove the ids are still the current observation rather
@@ -102,6 +116,10 @@ export interface AppState {
 	 * map onto the screen through this rect.
 	 */
 	windowBounds?: { x: number; y: number; width: number; height: number };
+	/** Display containing the observed window, when its global bounds intersect one. */
+	windowDisplayId?: number;
+	/** Displays intersecting the observed window, ordered by intersection area descending. */
+	windowDisplayIds?: readonly number[];
 	/** WindowServer id of the window this observation was scoped to. */
 	windowId?: number;
 	/** Title of that window, when the window server reports one. */

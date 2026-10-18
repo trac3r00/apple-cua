@@ -16,6 +16,9 @@
 
 static NSWindow *gWindow = nil;
 static NSView *gPointerView = nil;
+static NSMutableDictionary<NSNumber *, NSWindow *> *gMarkerWindows = nil;
+static NSMutableDictionary<NSNumber *, NSView *> *gMarkerViews = nil;
+static NSMutableDictionary<NSNumber *, NSNumber *> *gMarkerModes = nil;
 static NSWindow *gHighlightWindow = nil;
 static NSTimer *gHighlightTimer = nil;
 // Click feedback: an expanding ring drawn where a press lands, so a person
@@ -125,6 +128,10 @@ static NSTimeInterval gTrajArrival = 0.0;
 static NSPoint gTrajToOrigin;
 static NSStatusItem *gStatusItem = nil;
 
+static NSWindow *marker_window(NSNumber *key, BOOL create);
+static void apply_marker_set(double x, double y, NSNumber *markerKey);
+static void apply_direct_set(double x, double y);
+
 static void cancel_trajectory(void) {
   if (gTrajTimer != nil) {
     [gTrajTimer invalidate];
@@ -197,14 +204,25 @@ static void remove_status_item(void) {
 
 static void start_ripple(NSPoint windowOrigin);
 
-static void apply_mode(const char *name) {
+static void apply_mode(const char *name, NSNumber *markerKey) {
+  if (markerKey != nil) {
+    int markerMode = strncmp(name, "scroll", 6) == 0
+                         ? 1
+                         : (strncmp(name, "think", 5) == 0 ? 2 : 0);
+    gMarkerModes[markerKey] = @(markerMode);
+    NSView *view = gMarkerViews[markerKey];
+    [view setNeedsDisplay:YES];
+    return;
+  }
   // "click" is an event, not a mode: ripple at the tip where the cursor is
   // heading, once it arrives.
   if (strncmp(name, "click", 5) == 0) {
-    if (gWindow == nil || !gShown) {
+    NSWindow *window = marker_window(markerKey, NO);
+    if (window == nil || (markerKey == nil && !gShown) ||
+        (markerKey != nil && window.isVisible == NO)) {
       return;
     }
-    NSPoint destination = gScootTimer != nil ? gScootTo : gWindow.frame.origin;
+    NSPoint destination = gScootTimer != nil ? gScootTo : window.frame.origin;
     NSTimeInterval wait = gScootTimer != nil ? kScootDuration : 0.0;
     if (gTrajTimer != nil) {
       destination = gTrajToOrigin;
@@ -239,9 +257,11 @@ static void apply_mode(const char *name) {
   // Only repaint/raise if the cursor is already positioned — a mode set before
   // the first `set` must NOT flash the cursor at (0,0); it applies once
   // positioned.
-  if (gWindow != nil && gShown) {
-    [gWindow orderFrontRegardless];
-    [gPointerView setNeedsDisplay:YES];
+  NSWindow *window = marker_window(markerKey, NO);
+  NSView *view = markerKey == nil ? gPointerView : gMarkerViews[markerKey];
+  if (window != nil && (markerKey != nil || gShown)) {
+    [window orderFrontRegardless];
+    [view setNeedsDisplay:YES];
   }
 }
 
@@ -447,6 +467,7 @@ static void draw_cue(CGContextRef ctx, NSBezierPath *geometry, CGFloat px,
 }
 
 @interface OverlayPointerView : NSView
+@property(nonatomic, strong) NSNumber *markerKey;
 @end
 
 @implementation OverlayPointerView
@@ -463,10 +484,12 @@ static void draw_cue(CGContextRef ctx, NSBezierPath *geometry, CGFloat px,
   CGContextScaleCTM(ctx, artScale, artScale);
   CGContextTranslateCTM(ctx, -kThemeTipX, -kThemeTipY);
 
-  BOOL clicking = gRippleTimer != nil;
+  int mode =
+      self.markerKey == nil ? gMode : [gMarkerModes[self.markerKey] intValue];
+  BOOL clicking = self.markerKey == nil && gRippleTimer != nil;
   CGFloat clickFrame = gRipple * 20.0;
   CGFloat loopFrame = gPulse * 48.0;
-  CGFloat breathe = (gMode == 2) ? (0.5 - 0.5 * cos(gPulse * 2.0 * M_PI)) : 0.0;
+  CGFloat breathe = (mode == 2) ? (0.5 - 0.5 * cos(gPulse * 2.0 * M_PI)) : 0.0;
 
   // Press squish (Cua: 100% -> 93% -> 103% -> 100%), pivoting on the tip so it
   // never leaves the target.
@@ -481,12 +504,12 @@ static void draw_cue(CGContextRef ctx, NSBezierPath *geometry, CGFloat px,
   draw_arrow(1.0 + 1.6 * breathe);
   CGContextRestoreGState(ctx);
 
-  if (gMode == 1) {
+  if (mode == 1) {
     static const Keyframe y[3] = {{0, 68}, {24, 60}, {48, 68}};
     static const Keyframe a[3] = {{0, 0.42}, {24, 1.0}, {48, 0.42}};
     draw_cue(ctx, scroll_chevrons_path(), 59, keyframe_value(y, 3, loopFrame),
              1.0, keyframe_value(a, 3, loopFrame));
-  } else if (gMode == 2) {
+  } else if (mode == 2) {
     static const Keyframe s[3] = {{0, 0.88}, {24, 1.0}, {48, 1.08}};
     static const Keyframe a[5] = {{0, 0}, {7, 1}, {34, 1}, {44, 0}, {48, 0}};
     draw_cue(ctx, observe_arcs_path(), 72, 54, keyframe_value(s, 3, loopFrame),
@@ -503,6 +526,37 @@ static void draw_cue(CGContextRef ctx, NSBezierPath *geometry, CGFloat px,
   CGContextRestoreGState(ctx);
 }
 @end
+
+// AppKit marker objects are created and accessed only from the main queue.
+static NSWindow *marker_window(NSNumber *key, BOOL create) {
+  if (key == nil) {
+    return gWindow;
+  }
+  NSWindow *window = gMarkerWindows[key];
+  if (window != nil || !create) {
+    return window;
+  }
+  NSRect frame = NSMakeRect(0, 0, kOverlaySize, kOverlaySize);
+  window = [[NSWindow alloc] initWithContentRect:frame
+                                       styleMask:NSWindowStyleMaskBorderless
+                                         backing:NSBackingStoreBuffered
+                                           defer:NO];
+  [window setOpaque:NO];
+  [window setBackgroundColor:[NSColor clearColor]];
+  [window setHasShadow:NO];
+  [window setIgnoresMouseEvents:YES];
+  [window setLevel:NSFloatingWindowLevel];
+  [window setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                NSWindowCollectionBehaviorStationary |
+                                NSWindowCollectionBehaviorIgnoresCycle |
+                                NSWindowCollectionBehaviorFullScreenAuxiliary];
+  OverlayPointerView *view = [[OverlayPointerView alloc] initWithFrame:frame];
+  view.markerKey = key;
+  [window setContentView:view];
+  gMarkerWindows[key] = window;
+  gMarkerViews[key] = view;
+  return window;
+}
 
 // Press ripple: an expanding ring in the Cua effect colour, centred on the
 // arrow tip.
@@ -595,7 +649,9 @@ static CGFloat primary_screen_height(void) {
 }
 
 static void apply_set(double x, double y) {
-  if (gWindow == nil) {
+  NSWindow *window = gWindow;
+  NSView *view = gPointerView;
+  if (window == nil) {
     return;
   }
   gGeneration++;
@@ -610,23 +666,23 @@ static void apply_set(double x, double y) {
       NSMakePoint(x - kHotspotX, screenHeight - y + kHotspotY - kOverlaySize);
   if (!gShown) {
     gShown = YES;
-    [gWindow setAlphaValue:0.0];
-    [gWindow setFrameOrigin:target];
-    [gWindow orderFrontRegardless];
+    [window setAlphaValue:0.0];
+    [window setFrameOrigin:target];
+    [window orderFrontRegardless];
     [NSAnimationContext
         runAnimationGroup:^(NSAnimationContext *context) {
           context.duration = kFadeInDuration;
-          [[gWindow animator] setAlphaValue:1.0];
+          [[window animator] setAlphaValue:1.0];
         }
         completionHandler:nil];
     return;
   }
-  [gWindow orderFrontRegardless];
+  [window orderFrontRegardless];
   if (gScootTimer != nil) {
     [gScootTimer invalidate];
     gScootTimer = nil;
   }
-  gScootFrom = gWindow.frame.origin;
+  gScootFrom = window.frame.origin;
   gScootTo = target;
   gScootStart = [NSDate timeIntervalSinceReferenceDate];
   gScootTimer = [NSTimer
@@ -646,16 +702,15 @@ static void apply_set(double x, double y) {
                                          : 1.0 -
                                                pow(-2.0 * progress + 2.0, 2.0) /
                                                    2.0;
-                                 [gWindow
-                                     setFrameOrigin:NSMakePoint(
-                                                        gScootFrom.x +
-                                                            (gScootTo.x -
-                                                             gScootFrom.x) *
-                                                                eased,
-                                                        gScootFrom.y +
-                                                            (gScootTo.y -
-                                                             gScootFrom.y) *
-                                                                eased)];
+                                 [window setFrameOrigin:NSMakePoint(
+                                                            gScootFrom.x +
+                                                                (gScootTo.x -
+                                                                 gScootFrom.x) *
+                                                                    eased,
+                                                            gScootFrom.y +
+                                                                (gScootTo.y -
+                                                                 gScootFrom.y) *
+                                                                    eased)];
                                  if (progress >= 1.0) {
                                    [timer invalidate];
                                    if (gScootTimer == timer) {
@@ -663,6 +718,43 @@ static void apply_set(double x, double y) {
                                    }
                                  }
                                }];
+}
+
+static void apply_marker_set(double x, double y, NSNumber *markerKey) {
+  if (markerKey == nil) {
+    return;
+  }
+  NSWindow *window = marker_window(markerKey, YES);
+  if (window == nil || !isfinite(x) || !isfinite(y)) {
+    return;
+  }
+  CGFloat screenHeight = primary_screen_height();
+  NSPoint target =
+      NSMakePoint(x - kHotspotX, screenHeight - y + kHotspotY - kOverlaySize);
+  [window setAlphaValue:1.0];
+  [window setFrameOrigin:target];
+  [window orderFrontRegardless];
+}
+
+static void apply_direct_set(double x, double y) {
+  NSWindow *window = gWindow;
+  if (window == nil || !isfinite(x) || !isfinite(y)) {
+    return;
+  }
+  CGFloat screenHeight = primary_screen_height();
+  NSPoint target =
+      NSMakePoint(x - kHotspotX, screenHeight - y + kHotspotY - kOverlaySize);
+  gGeneration++;
+  cancel_trajectory();
+  if (gScootTimer != nil) {
+    [gScootTimer invalidate];
+    gScootTimer = nil;
+  }
+  [window setAlphaValue:1.0];
+  [window setFrameOrigin:target];
+  [window orderFrontRegardless];
+  gShown = YES;
+  ensure_status_item();
 }
 
 static void apply_highlight(double x, double y, double w, double h) {
@@ -703,7 +795,15 @@ static void apply_highlight(double x, double y, double w, double h) {
                                }];
 }
 
-static void apply_hide(void) {
+static void apply_hide(NSNumber *markerKey) {
+  if (markerKey != nil) {
+    NSWindow *window = marker_window(markerKey, NO);
+    [window orderOut:nil];
+    [gMarkerWindows removeObjectForKey:markerKey];
+    [gMarkerViews removeObjectForKey:markerKey];
+    [gMarkerModes removeObjectForKey:markerKey];
+    return;
+  }
   gGeneration++;
   cancel_trajectory();
   if (gScootTimer != nil) {
@@ -740,7 +840,9 @@ static NSPoint origin_for_point(double x, double y) {
 // Take ownership of samples (count * {t, x, y, heading}) and play them back.
 static void play_trajectory(double *samples, size_t count, double arrival,
                             NSString *style) {
-  if (gWindow == nil) {
+  NSWindow *window = gWindow;
+  NSView *view = gPointerView;
+  if (window == nil) {
     free(samples);
     return;
   }
@@ -802,9 +904,9 @@ static void play_trajectory(double *samples, size_t count, double arrival,
                           y = a[2] + (b[2] - a[2]) * u;
                           h = a[3] + remainder(b[3] - a[3], 2.0 * M_PI) * u;
                         }
-                        [gWindow setFrameOrigin:origin_for_point(x, y)];
+                        [window setFrameOrigin:origin_for_point(x, y)];
                         gHeading = h;
-                        [gPointerView setNeedsDisplay:YES];
+                        [view setNeedsDisplay:YES];
                         if (done) {
                           [tick invalidate];
                           if (gTrajTimer == tick) {
@@ -836,21 +938,25 @@ static void write_all(int fd, const char *bytes, size_t length) {
 
 // Reply with the hotspot actually drawn now, in global top-left points. Pure
 // query: shows nothing and leaves the idle timer alone.
-static void write_state(int fd) {
+static void write_state(int fd, NSNumber *markerKey) {
   double x = 0.0;
   double y = 0.0;
-  if (gWindow != nil) {
-    NSPoint origin = gWindow.frame.origin;
+  NSWindow *window = marker_window(markerKey, NO);
+  BOOL visible = window != nil && window.isVisible;
+  BOOL shown = markerKey == nil ? gShown : visible;
+  if (window != nil) {
+    NSPoint origin = window.frame.origin;
     x = origin.x + kHotspotX;
     y = primary_screen_height() - (origin.y + kOverlaySize - kHotspotY);
   }
   BOOL reduced =
       [[NSWorkspace sharedWorkspace] accessibilityDisplayShouldReduceMotion];
-  char out[192];
-  int length =
-      snprintf(out, sizeof(out),
-               "{\"x\":%.6f,\"y\":%.6f,\"shown\":%s,\"reducedMotion\":%s}\n", x,
-               y, gShown ? "true" : "false", reduced ? "true" : "false");
+  char out[224];
+  int length = snprintf(out, sizeof(out),
+                        "{\"x\":%.6f,\"y\":%.6f,\"shown\":%s,\"visible\":%s,"
+                        "\"reducedMotion\":%s}\n",
+                        x, y, shown ? "true" : "false",
+                        visible ? "true" : "false", reduced ? "true" : "false");
   if (length > 0) {
     write_all(fd, out, (size_t)length);
   }
@@ -946,75 +1052,117 @@ static int dispatch_command_line(const char *line, int replyFd) {
   // sscanf accepts "nan" and "inf"; a non-finite frame makes Core Animation
   // throw and would end the overlay, so such lines are dropped like any other
   // malformed command.
-  if (strncmp(line, "trajectory ", 11) == 0) {
+  const char *command = line;
+  NSNumber *key = nil;
+  if (strncmp(command, "pid ", 4) == 0) {
+    char *end = NULL;
+    unsigned long long pid = strtoull(command + 4, &end, 10);
+    if (end == command + 4 || *end != ' ') {
+      return 0;
+    }
+    key = @(pid);
+    command = end + 1;
+  }
+  if (strncmp(command, "trajectory ", 11) == 0) {
     size_t count = 0;
     double arrival = 0.0;
     NSString *style = nil;
-    double *samples = parse_trajectory(line + 11, &count, &arrival, &style);
+    double *samples = parse_trajectory(command + 11, &count, &arrival, &style);
     if (samples == NULL) {
       return 0;
     }
+    NSNumber *markerKey = key;
     dispatch_async(dispatch_get_main_queue(), ^{
-      play_trajectory(samples, count, arrival, style);
+      if (markerKey != nil) {
+        const double *last = samples + (count - 1) * 4;
+        apply_marker_set(last[1], last[2], markerKey);
+        free(samples);
+      } else {
+        play_trajectory(samples, count, arrival, style);
+      }
       reset_idle_timer();
     });
-  } else if (strncmp(line, "state", 5) == 0 &&
-             (line[5] == '\0' || isspace((unsigned char)line[5]))) {
+  } else if (strncmp(command, "state", 5) == 0 &&
+             (command[5] == '\0' || isspace((unsigned char)command[5]))) {
     // Answered on the main queue, in order after earlier commands; the
     // reader waits so the reply fd cannot be closed underneath it.
     dispatch_semaphore_t answered = dispatch_semaphore_create(0);
+    NSNumber *markerKey = key;
     dispatch_async(dispatch_get_main_queue(), ^{
-      write_state(replyFd);
+      write_state(replyFd, markerKey);
       dispatch_semaphore_signal(answered);
     });
     dispatch_semaphore_wait(answered, DISPATCH_TIME_FOREVER);
-  } else if (sscanf(line, "track %lf %lf", &x, &y) == 2) {
+  } else if (sscanf(command, "track %lf %lf", &x, &y) == 2) {
     if (!isfinite(x) || !isfinite(y)) {
       return 0;
     }
+    NSNumber *markerKey = key;
     dispatch_async(dispatch_get_main_queue(), ^{
-      apply_set(x, y);
-      if (gScootTimer != nil) {
-        [gScootTimer invalidate];
-        gScootTimer = nil;
+      if (markerKey != nil) {
+        apply_marker_set(x, y, markerKey);
+      } else {
+        apply_direct_set(x, y);
       }
-      [gWindow setFrameOrigin:NSMakePoint(x - kHotspotX,
-                                          primary_screen_height() - y +
-                                              kHotspotY - kOverlaySize)];
       reset_idle_timer();
     });
-  } else if (sscanf(line, "set %lf %lf", &x, &y) == 2) {
+  } else if (sscanf(command, "set %lf %lf", &x, &y) == 2) {
     if (!isfinite(x) || !isfinite(y)) {
       return 0;
     }
+    NSNumber *markerKey = key;
     dispatch_async(dispatch_get_main_queue(), ^{
-      apply_set(x, y);
+      if (markerKey != nil) {
+        apply_marker_set(x, y, markerKey);
+      } else {
+        apply_set(x, y);
+      }
       reset_idle_timer();
     });
-  } else if (sscanf(line, "highlight %lf %lf %lf %lf", &x, &y, &w, &h) == 4) {
+  } else if (sscanf(command, "set-direct %lf %lf", &x, &y) == 2) {
+    if (!isfinite(x) || !isfinite(y)) {
+      return 0;
+    }
+    NSNumber *markerKey = key;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (markerKey != nil) {
+        apply_marker_set(x, y, markerKey);
+      } else {
+        apply_direct_set(x, y);
+      }
+      reset_idle_timer();
+    });
+  } else if (sscanf(command, "highlight %lf %lf %lf %lf", &x, &y, &w, &h) ==
+             4) {
     if (!isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h)) {
       return 0;
     }
+    NSNumber *markerKey = key;
     dispatch_async(dispatch_get_main_queue(), ^{
       apply_highlight(x, y, w, h);
       reset_idle_timer();
     });
-  } else if (strncmp(line, "hide", 4) == 0) {
+  } else if (strncmp(command, "hide", 4) == 0) {
+    NSNumber *markerKey = key;
     dispatch_async(dispatch_get_main_queue(), ^{
-      apply_hide();
+      apply_hide(markerKey);
       reset_idle_timer();
     });
-  } else if (strncmp(line, "mode ", 5) == 0) {
+  } else if (strncmp(command, "mode ", 5) == 0) {
     char name[32] = {0};
-    if (sscanf(line, "mode %31s", name) == 1) {
+    if (sscanf(command, "mode %31s", name) == 1) {
       char *copy = strdup(name);
+      NSNumber *markerKey = key;
       dispatch_async(dispatch_get_main_queue(), ^{
-        apply_mode(copy);
+        if (markerKey != nil) {
+          marker_window(markerKey, YES);
+        }
+        apply_mode(copy, markerKey);
         free(copy);
         reset_idle_timer();
       });
     }
-  } else if (strncmp(line, "quit", 4) == 0) {
+  } else if (strncmp(command, "quit", 4) == 0) {
     return 1;
   }
   return 0;
@@ -1182,6 +1330,9 @@ int main(int argc, const char *argv[]) {
   @autoreleasepool {
     [NSApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    gMarkerWindows = [NSMutableDictionary dictionary];
+    gMarkerViews = [NSMutableDictionary dictionary];
+    gMarkerModes = [NSMutableDictionary dictionary];
 
     NSRect frame = NSMakeRect(0, 0, kOverlaySize, kOverlaySize);
     gWindow = [[NSWindow alloc] initWithContentRect:frame

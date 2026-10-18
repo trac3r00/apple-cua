@@ -11,6 +11,7 @@ export interface AppOpenLauncher {
 
 export interface AppLister {
 	listApps(): Promise<AppInfo[]>;
+	listAppIdentities?(): Promise<AppInfo[]>;
 }
 
 export interface OpenApplicationOptions {
@@ -38,12 +39,12 @@ const BUNDLE_ID_SHAPE = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
  * A bundle id goes to open -b, an app name to open -a. In the background, -g launches the app
  * without bringing it forward, so opening it does not take focus from the person at the Mac.
  */
-export function openArguments(target: string, background = false): readonly string[] {
+export function openArguments(target: string, background = true): readonly string[] {
 	return [...(background ? ["-g"] : []), ...(BUNDLE_ID_SHAPE.test(target) ? ["-b", target] : ["-a", target])];
 }
 
 export function spawnOpenLauncher(options: { readonly background?: boolean } = {}): AppOpenLauncher {
-	const background = options.background === true;
+	const background = options.background !== false;
 	return {
 		background,
 		async launch(target: string): Promise<void> {
@@ -74,7 +75,7 @@ function delayMilliseconds(milliseconds: number): Promise<void> {
 }
 
 /**
- * Open an app the way a person means it: if it is running, bring it forward; if it is not,
+ * Open an app without taking focus: if it is running, keep it in the background; if it is not,
  * launch it and wait until it is actually observable, so the caller's next observation sees a
  * real window instead of racing the launch. The answer always names what open did and which
  * process the caller can now observe.
@@ -87,7 +88,8 @@ export async function openApplication(
 	const launcher = options.launcher ?? spawnOpenLauncher();
 	const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MILLISECONDS;
 	const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MILLISECONDS;
-	const running = findMatchingApp(await lister.listApps(), name);
+	const listApps = lister.listAppIdentities?.bind(lister) ?? lister.listApps.bind(lister);
+	const running = findMatchingApp(await listApps(), name);
 	await launcher.launch(running?.bundleId ?? name);
 	if (running !== undefined) {
 		return {
@@ -99,8 +101,8 @@ export async function openApplication(
 		};
 	}
 	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		const appeared = findMatchingApp(await lister.listApps(), name);
+	while (true) {
+		const appeared = findMatchingApp(await listApps(), name);
 		if (appeared !== undefined) {
 			return {
 				name: appeared.name,

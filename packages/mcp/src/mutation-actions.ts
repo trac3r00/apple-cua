@@ -256,6 +256,9 @@ export async function clickResolvedTarget(
 
 export function validateDrag(input: DragActionInput, observation: InputObservation): void {
 	validatePoint(observation, { x: input.from_x, y: input.from_y });
+	for (const waypoint of input.waypoints ?? []) {
+		validatePoint(observation, waypoint);
+	}
 	validatePoint(observation, { x: input.to_x, y: input.to_y });
 }
 
@@ -266,12 +269,15 @@ export async function drag(
 	input: DragActionInput,
 ): Promise<ActionDispatch> {
 	const from = observedPointToScreen(observation, { x: input.from_x, y: input.from_y });
+	const waypoints = input.waypoints?.map((point) => observedPointToScreen(observation, point));
 	const to = observedPointToScreen(observation, { x: input.to_x, y: input.to_y });
 	const modifiers = normalizeModifiers(input.modifiers);
 	await withTargetedApp(computer, targetPid, async () => {
 		await computer.drag({
 			from,
 			to,
+			...(waypoints === undefined ? {} : { waypoints }),
+			...(input.mouse_button === undefined ? {} : { button: input.mouse_button }),
 			...(input.duration_ms === undefined ? {} : { duration: input.duration_ms }),
 			...(modifiers.length === 0 ? {} : { modifiers }),
 		});

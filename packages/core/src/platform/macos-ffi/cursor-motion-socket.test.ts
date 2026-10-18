@@ -171,4 +171,63 @@ describe("#given configured motion over a real socket #when commands arrive toge
 		expect(commands).toEqual(["state\n", "hide\n"]);
 		expect(stderr).toHaveBeenCalledTimes(1);
 	});
+
+	it("direct-updates pid-scoped moves without state queries or motion planning", async () => {
+		directory = await mkdtemp(join(tmpdir(), "apple-cua-motion-test-"));
+		endpoint.path = join(directory, "overlay.sock");
+		const events = new EventEmitter();
+		const commands: string[] = [];
+		server = createServer((socket) => {
+			socket.on("data", (chunk: Buffer) => {
+				const command = chunk.toString("utf8");
+				commands.push(command);
+				if (command === "pid 321 mode thinking\n") {
+					events.emit("complete");
+				}
+			});
+		});
+		const listening = once(server, "listening", { signal: AbortSignal.timeout(5_000) });
+		server.listen(endpoint.path);
+		await listening;
+		const complete = once(events, "complete", { signal: AbortSignal.timeout(5_000) });
+		const transport = defaultSocketTransport(Date.now, undefined, { style: "magnetic" });
+
+		transport.send("set 640 360\n", 321);
+		transport.send("mode thinking\n", 321);
+		await complete;
+
+		expect(commands).toEqual(["pid 321 set-direct 640 360\n", "pid 321 mode thinking\n"]);
+	});
+
+	it("sends direct pid samples without querying state or planning motion", async () => {
+		directory = await mkdtemp(join(tmpdir(), "apple-cua-motion-test-"));
+		endpoint.path = join(directory, "overlay.sock");
+		const events = new EventEmitter();
+		const commands: string[] = [];
+		server = createServer((socket) => {
+			socket.on("data", (chunk: Buffer) => {
+				const command = chunk.toString("utf8");
+				commands.push(command);
+				if (commands.length === 3) {
+					events.emit("complete");
+				}
+			});
+		});
+		const listening = once(server, "listening", { signal: AbortSignal.timeout(5_000) });
+		server.listen(endpoint.path);
+		await listening;
+		const complete = once(events, "complete", { signal: AbortSignal.timeout(5_000) });
+		const transport = defaultSocketTransport(Date.now, undefined, { style: "magnetic" });
+
+		transport.send("set 10 20\n", 321, true);
+		transport.send("set 30 40\n", 321, true);
+		transport.send("set 50 60\n", 321, true);
+		await complete;
+
+		expect(commands).toEqual([
+			"pid 321 set-direct 10 20\n",
+			"pid 321 set-direct 30 40\n",
+			"pid 321 set-direct 50 60\n",
+		]);
+	});
 });

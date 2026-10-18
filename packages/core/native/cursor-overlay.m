@@ -31,9 +31,7 @@ static NSPoint gScootFrom;
 static NSPoint gScootTo;
 static NSTimeInterval gScootStart;
 
-// Cursor MODE: 0 = pointer (acting/clicking), 1 = scroll (chevron cue beside
-// the arrow), 2 = thinking/observing (glow breathes and "looking" arcs pulse so
-// it never just vanishes while the agent reasons).
+// Cursor MODE: 0 = pointer, 1 = scroll, 2 = thinking/observing, 3 = keyboard.
 static int gMode = 0;
 static double gPulse =
     0.0; // 0..1 animation phase for the scroll/observe cue loop
@@ -72,7 +70,7 @@ static const CGFloat kOverlaySize = 96.0;
 static const CGFloat kHotspotX = 48.0;
 static const CGFloat kHotspotY = 48.0;
 static const CGFloat kThemeCanvas = 128.0;
-static const CGFloat kThemeDisplaySize = 42.0;
+static const CGFloat kThemeDisplaySize = 24.0;
 // Apex of the rounded tip on the theme canvas. Cua declares (55, 30) - a point
 // on the top edge about 3pt right of the visible tip - so we pin the visible
 // apex instead: what a person reads as "where it points".
@@ -141,11 +139,18 @@ static void update_status_item(void) {
   if (gStatusItem == nil) {
     return;
   }
-  NSString *mode =
-      gMode == 1 ? @"scroll" : (gMode == 2 ? @"thinking" : @"pointer");
+  NSString *mode = gMode == 1   ? @"scroll"
+                   : gMode == 2 ? @"thinking"
+                   : gMode == 3 ? @"keyboard"
+                                : @"pointer";
   NSString *label = [NSString
       stringWithFormat:@"apple-cua running, mode %@, motion %@", mode, gStyle];
   NSStatusBarButton *button = gStatusItem.button;
+  NSString *symbol = gMode == 3 ? @"keyboard" : @"cursorarrow";
+  NSImage *image = [NSImage imageWithSystemSymbolName:symbol
+                             accessibilityDescription:@"apple-cua running"];
+  image.template = YES;
+  button.image = image;
   button.title = @"apple-cua";
   button.toolTip = label;
   [button setAccessibilityLabel:label];
@@ -177,10 +182,6 @@ static void ensure_status_item(void) {
   if (gStatusItem == nil) {
     gStatusItem = [[NSStatusBar systemStatusBar]
         statusItemWithLength:NSVariableStatusItemLength];
-    NSImage *image = [NSImage imageWithSystemSymbolName:@"cursorarrow"
-                               accessibilityDescription:@"apple-cua running"];
-    image.template = YES;
-    gStatusItem.button.image = image;
     gStatusItem.button.imagePosition = NSImageLeft;
   }
   update_status_item();
@@ -225,6 +226,8 @@ static void apply_mode(const char *name) {
     mode = 1;
   } else if (strncmp(name, "think", 5) == 0) {
     mode = 2;
+  } else if (strncmp(name, "keyboard", 8) == 0) {
+    mode = 3;
   }
   gMode = mode;
   update_status_item();
@@ -254,6 +257,10 @@ static NSColor *cua_fill(CGFloat alpha) {
 
 static NSColor *cua_ink(CGFloat alpha) {
   return [NSColor colorWithSRGBRed:1.0 green:1.0 blue:1.0 alpha:alpha];
+}
+
+static NSColor *cursor_edge(CGFloat alpha) {
+  return [NSColor colorWithSRGBRed:0.05 green:0.18 blue:0.26 alpha:alpha];
 }
 
 static NSColor *cua_effect(CGFloat alpha) {
@@ -372,6 +379,28 @@ static NSBezierPath *observe_arcs_path(void) {
   return path;
 }
 
+static NSBezierPath *keyboard_path(void) {
+  NSBezierPath *path = round_path();
+  [path appendBezierPathWithRoundedRect:NSMakeRect(22, 46, 72, 42)
+                                xRadius:7
+                                yRadius:7];
+  for (int row = 0; row < 2; row++) {
+    int keys = row == 0 ? 7 : 6;
+    CGFloat keyWidth = row == 0 ? 5 : 6;
+    CGFloat gap = row == 0 ? 4 : 5;
+    CGFloat start = row == 0 ? 29 : 31;
+    for (int key = 0; key < keys; key++) {
+      NSRect rect = NSMakeRect(start + key * (keyWidth + gap), 53 + row * 11,
+                               keyWidth, 5);
+      [path appendBezierPathWithRoundedRect:rect xRadius:1.5 yRadius:1.5];
+    }
+  }
+  [path appendBezierPathWithRoundedRect:NSMakeRect(43, 76, 30, 5)
+                                xRadius:1.5
+                                yRadius:1.5];
+  return path;
+}
+
 static void stroke_path(NSBezierPath *path, CGFloat width, NSColor *color) {
   [path setLineWidth:width];
   [color setStroke];
@@ -390,6 +419,7 @@ static void draw_arrow(CGFloat glowBoost) {
   }
   [cua_fill(1.0) setFill];
   [path fill];
+  stroke_path(path, 9.0, cursor_edge(1.0));
   stroke_path(path, 5.0, cua_ink(1.0));
 }
 
@@ -410,6 +440,7 @@ static void draw_cue(CGContextRef ctx, NSBezierPath *geometry, CGFloat px,
     stroke_path(geometry, width + glow[i][0],
                 cua_fill(alpha * glow[i][1] / 100.0));
   }
+  stroke_path(geometry, width + 3.5, cursor_edge(alpha));
   stroke_path(geometry, width + 1.5, cua_ink(alpha));
   stroke_path(geometry, width - 1.0, cua_fill(alpha));
   CGContextRestoreGState(ctx);
@@ -460,6 +491,8 @@ static void draw_cue(CGContextRef ctx, NSBezierPath *geometry, CGFloat px,
     static const Keyframe a[5] = {{0, 0}, {7, 1}, {34, 1}, {44, 0}, {48, 0}};
     draw_cue(ctx, observe_arcs_path(), 72, 54, keyframe_value(s, 3, loopFrame),
              keyframe_value(a, 5, loopFrame));
+  } else if (gMode == 3) {
+    draw_cue(ctx, keyboard_path(), 150, 78, 0.75, 1.0);
   }
   if (clicking) {
     static const Keyframe s[3] = {{0, 1.1}, {8, 1.3}, {20, 1.5}};

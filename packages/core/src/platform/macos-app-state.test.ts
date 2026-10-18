@@ -75,7 +75,7 @@ const WINDOW_BOUNDS = { x: 300, y: 150, width: 2560, height: 1600 };
 
 function fakePng(width: number, height: number): Buffer {
 	const data = globalThis.Buffer.alloc(24);
-	data.write("PNG\r\n\n", 0, "latin1");
+	data.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 	data.writeUInt32BE(width, 16);
 	data.writeUInt32BE(height, 20);
 	return data;
@@ -162,6 +162,31 @@ describe("#given one observation #when the driver resolves its target window and
 
 		expect(state.windowId).toBe(99);
 		expect(windowMock.openWindows.mock.calls.length).toBe(1);
+	});
+});
+
+describe("#given an injected overlay #when observing in background #then no highlight or cursor is drawn", () => {
+	it("ignores injected visual feedback while retaining the observed window and elements", async () => {
+		const overlay = {
+			set: vi.fn(),
+			track: vi.fn(),
+			highlight: vi.fn(),
+			setMode: vi.fn(),
+			hide: vi.fn(),
+			close: vi.fn(),
+		};
+		const computer = new MacOSHostComputer({ delivery: "background", overlay });
+		try {
+			const state = await computer.getAppState(TARGET_PID, { settleMs: 0, includeScreenshot: false });
+
+			expect(state.windowId).toBe(99);
+			expect(state.elements).not.toHaveLength(0);
+			expect(overlay.highlight).not.toHaveBeenCalled();
+			expect(overlay.setMode).not.toHaveBeenCalled();
+			expect(overlay.set).not.toHaveBeenCalled();
+		} finally {
+			await computer.close();
+		}
 	});
 });
 

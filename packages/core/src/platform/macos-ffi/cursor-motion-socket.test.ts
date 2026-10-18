@@ -11,7 +11,7 @@ vi.mock("node:net", async (importOriginal) => {
 	return { ...actual, connect: () => actual.connect(endpoint.path) };
 });
 
-import { defaultSocketTransport } from "./cursor-overlay.js";
+import { createCursorOverlay, defaultSocketTransport } from "./cursor-overlay.js";
 
 let directory: string | undefined;
 let server: Server | undefined;
@@ -28,6 +28,62 @@ afterEach(async () => {
 		directory = undefined;
 	}
 	vi.restoreAllMocks();
+	vi.unstubAllEnvs();
+});
+
+describe("#given renderer motion defaults #when a cursor moves #then optional saved settings stay independent", () => {
+	it.each([
+		{ environment: undefined, motion: undefined, adaptive: true },
+		{ environment: "", motion: undefined, adaptive: true },
+		{ environment: "off", motion: undefined, adaptive: false },
+		{ environment: undefined, motion: null, adaptive: false },
+	])(
+		"uses adaptive=$adaptive for environment=$environment and motion=$motion",
+		async ({ environment, motion, adaptive }) => {
+			vi.stubEnv("APPLE_CUA_CURSOR_MOTION", environment);
+			directory = await mkdtemp(join(tmpdir(), "apple-cua-renderer-motion-"));
+			endpoint.path = join(directory, "overlay.sock");
+			const events = new EventEmitter();
+			const commands: string[] = [];
+			server = createServer((socket) => {
+				let buffer = "";
+				socket.on("data", (chunk: Buffer) => {
+					buffer += chunk.toString("utf8");
+					let end = buffer.indexOf("\n");
+					while (end >= 0) {
+						const line = buffer.slice(0, end);
+						buffer = buffer.slice(end + 1);
+						commands.push(line);
+						if (line === "state") {
+							socket.write('{"x":120,"y":180,"shown":true,"reducedMotion":false}\n');
+						}
+						if (line === "hide") events.emit("hidden");
+						end = buffer.indexOf("\n");
+					}
+				});
+			});
+			const listening = once(server, "listening", { signal: AbortSignal.timeout(5_000) });
+			server.listen(endpoint.path);
+			await listening;
+			const hidden = once(events, "hidden", { signal: AbortSignal.timeout(5_000) });
+			const overlay = createCursorOverlay(undefined, motion);
+
+			overlay.set({ x: 640, y: 360 });
+			overlay.hide();
+			await hidden;
+			overlay.close();
+
+			if (adaptive) {
+				expect(commands[0]).toBe("state");
+				const trajectory = commands[1];
+				if (trajectory === undefined) throw new Error("missing renderer trajectory");
+				expect(JSON.parse(trajectory.slice("trajectory ".length))).toMatchObject({ style: "adaptive" });
+				expect(commands[2]).toBe("hide");
+			} else {
+				expect(commands).toEqual(["set 640 360", "hide"]);
+			}
+		},
+	);
 });
 
 describe("#given configured motion over a real socket #when commands arrive together #then they stay ordered", () => {

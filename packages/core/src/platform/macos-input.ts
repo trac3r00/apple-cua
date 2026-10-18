@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { currentCursorIdentity } from "../computer/cursor-scope.js";
 import { type InputScope, assertInputMayContinue, currentInputScope } from "../computer/input-scope.js";
 import { assertScreenUnlocked } from "../computer/lock-guard.js";
 import { VirtualPointer } from "../computer/virtual-pointer.js";
@@ -258,7 +259,8 @@ export class MacOSInputController {
 	};
 	private exitHookRegistered = false;
 	private readonly overlay: PointerOverlay;
-	private readonly pointer: VirtualPointer;
+	private readonly processPointer: VirtualPointer;
+	private readonly pointersByIdentity = new Map<string, VirtualPointer>();
 	private readonly isLocked: () => boolean;
 	private readonly displaySleep: DisplaySleepAssertion;
 	private gestureChain: Promise<void> = Promise.resolve();
@@ -279,8 +281,21 @@ export class MacOSInputController {
 		this.overlay = overlay;
 		this.isLocked = isLocked;
 		this.displaySleep = displaySleep;
-		this.pointer = new VirtualPointer(readRealCursorPosition());
+		this.processPointer = new VirtualPointer(readRealCursorPosition());
 		this.setTarget(targetPid);
+	}
+
+	private get pointer(): VirtualPointer {
+		const identity = currentCursorIdentity();
+		if (identity === undefined) {
+			return this.processPointer;
+		}
+		let pointer = this.pointersByIdentity.get(identity);
+		if (pointer === undefined) {
+			pointer = new VirtualPointer(this.processPointer.position());
+			this.pointersByIdentity.set(identity, pointer);
+		}
+		return pointer;
 	}
 
 	private beforeInput(): void {
@@ -606,7 +621,9 @@ export class MacOSInputController {
 						};
 			const duration = pointerTravelDuration(from, position);
 			const steps = dragSteps(duration);
-			this.overlay.setMode("pointer");
+			if (this.delivery !== "background") {
+				this.overlay.setMode("pointer");
+			}
 			for (let step = 1; step <= steps; step += 1) {
 				this.checkpoint(call);
 				const at = interpolatePointEased(from, position, step / steps);
@@ -897,11 +914,16 @@ export class MacOSInputController {
 
 	private markPointer(position: Point): void {
 		this.pointer.moveTo(position);
-		this.overlay.set(position);
+		if (!this.isBackground) {
+			this.overlay.set(position);
+		}
 	}
 
 	private trackPointer(position: Point): void {
 		this.pointer.moveTo(position);
+		if (this.isBackground) {
+			return;
+		}
 		if (this.overlay.track === undefined) {
 			this.overlay.set(position);
 		} else {
@@ -910,17 +932,21 @@ export class MacOSInputController {
 	}
 
 	showScrollPointer(position: Point): void {
-		this.overlay.setMode("scroll");
+		if (!this.isBackground) {
+			this.overlay.setMode("scroll");
+		}
 		this.markPointer(position);
 	}
 
 	/**
-	 * Show where the agent is acting with the drawn overlay dot, and ripple it for a press. This only
-	 * moves the overlay and the virtual pointer model, never the person's real cursor, so it is safe
-	 * under background delivery; routes that act without any pointer (accessibility presses) use it
-	 * too, so every action is visible to whoever is watching.
+	 * Show where the agent is acting with the drawn overlay dot, and ripple it for a press. Background
+	 * delivery updates only the logical pointer model and never emits overlay feedback.
 	 */
 	showPointer(position: Point, press: boolean): void {
+		if (this.isBackground) {
+			this.pointer.moveTo(position);
+			return;
+		}
 		this.overlay.setMode("pointer");
 		this.markPointer(position);
 		if (press) {
@@ -929,14 +955,18 @@ export class MacOSInputController {
 	}
 
 	showThinking(): void {
-		this.overlay.setMode("thinking");
+		if (!this.isBackground) {
+			this.overlay.setMode("thinking");
+		}
 	}
 
 	// Keep the overlay cursor visible during keyboard-only actions (e.g. typing a
 	// URL in browser.navigate, which never moves the mouse) by re-asserting it at
 	// the last known pointer position. Also resets the daemon's idle timer.
 	private pingOverlay(): void {
-		this.overlay.set(this.pointer.position());
+		if (!this.isBackground) {
+			this.overlay.set(this.pointer.position());
+		}
 	}
 
 	/** Mouse events of one call, addressed to its app; with no app they would take the HID tap (see assertDeliverable). */

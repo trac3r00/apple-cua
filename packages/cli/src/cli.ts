@@ -588,7 +588,7 @@ async function withComputer(
 	const showCursor = program.opts<GlobalOptions>().cursor !== false && agentCursorEnabled();
 	const background = program.opts<GlobalOptions>().background === true;
 	const computer = new MacOSHostComputer({
-		...(background ? { delivery: "background" as const } : {}),
+		delivery: background ? "background" : "attended",
 		...(showCursor ? { cursorMotion: resolveCursorMotion(resolveLayout().configPath) } : {}),
 		...hostOptions,
 		...(showCursor ? {} : { overlay: NOOP_POINTER_OVERLAY }),

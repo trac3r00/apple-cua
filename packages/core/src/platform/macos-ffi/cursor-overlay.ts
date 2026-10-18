@@ -312,10 +312,6 @@ export function defaultSocketTransport(
 			const directUpdate = direct;
 			const directCommand = directUpdate ? command.replace(/^set /, "set-direct ") : command;
 			const scoped = pid === undefined ? directCommand : `pid ${pid} ${directCommand}`;
-			if (motion === undefined) {
-				deliver(scoped, 0, undefined, directUpdate);
-				return;
-			}
 			pending.push({ command: scoped, direct: directUpdate });
 			if (!sending) {
 				sending = true;

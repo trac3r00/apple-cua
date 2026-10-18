@@ -652,8 +652,8 @@ export class GuardedSession {
 	}
 
 	/**
-	 * Open an app the way a person means it: bring it forward when it runs, launch it when it
-	 * does not, and wait until it is observable. Opening authorizes no observation and no input.
+	 * Open an app using the configured launcher's delivery policy and wait until it is observable.
+	 * Background launch does not bring it forward. Opening authorizes no observation or input.
 	 */
 	openApp(request: OpenAppRequest): Promise<ToolResult> {
 		return this.enqueue(undefined, async () => {
@@ -1608,7 +1608,7 @@ export class GuardedSession {
 		try {
 			const known = new Set(baseline);
 			const probe = this.windowProbe;
-			let opened = (await timed("windowProbe.after", () => probe({ titlesFor: [targetPid] }))).filter(
+			let opened = (await timed("windowProbe.after", () => probe())).filter(
 				(window) => window.ownerPid === targetPid && !known.has(window.id),
 			);
 			const untitled = [...new Set(opened.filter((window) => window.title === "").map((window) => window.ownerPid))];

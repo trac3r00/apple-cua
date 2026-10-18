@@ -12,7 +12,8 @@ This package is the engine the other surfaces wrap. It provides:
 - The guarded layer — `GuardedComputerInterface`, observation tokens, preflight, and the
   per-app input lanes that stop an action naming an observation it no longer holds.
 - Targeting — `matchElements` / `suggestNearMisses` (describe a control by role, label or text)
-  and `openApplication` (activate or launch an app and wait until it is observable).
+  and `openApplication` (launch or reopen an app without foreground activation by default,
+  then wait until it is observable; an explicit foreground launcher can activate it).
 
 ```bash
 pnpm --filter @apple-cua/core build

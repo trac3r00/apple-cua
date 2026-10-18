@@ -102,4 +102,36 @@ describe("#given a focus watch whose worker has not reported ready", () => {
 			targetPsn: mocks.targetPsn,
 		});
 	});
+
+	it("#when startup protection sees a deliberate switch before readiness #then no queued worker can undo it", async () => {
+		const { startFocusStealWatch } = await import("./macos-focus-watch.js");
+		startFocusStealWatch({ previousPsn: mocks.previousPsn, targetPsn: mocks.targetPsn });
+		mocks.intent.deliberate = true;
+		mocks.state.front = mocks.targetPsn;
+		await vi.advanceTimersByTimeAsync(10);
+
+		mocks.workerHandlers.get("message")?.();
+		await vi.runAllTimersAsync();
+
+		expect(mocks.worker.postMessage).not.toHaveBeenCalled();
+		expect(mocks.restoreFrontProcessNoWindows).not.toHaveBeenCalled();
+	});
+
+	it("#when a ready worker fails after the startup watch expires #then the next job installs local protection", async () => {
+		const { startFocusStealWatch } = await import("./macos-focus-watch.js");
+		const guard = { previousPsn: mocks.previousPsn, targetPsn: mocks.targetPsn };
+		startFocusStealWatch(guard);
+		mocks.workerHandlers.get("message")?.();
+		await vi.runAllTimersAsync();
+		mocks.frontProcessSerialNumber.mockClear();
+		mocks.worker.postMessage.mockClear();
+
+		mocks.workerHandlers.get("error")?.();
+		startFocusStealWatch(guard);
+		mocks.state.front = mocks.targetPsn;
+		await vi.advanceTimersByTimeAsync(10);
+
+		expect(mocks.restoreFrontProcessNoWindows).toHaveBeenCalledWith(guard);
+		expect(mocks.worker.postMessage).not.toHaveBeenCalled();
+	});
 });

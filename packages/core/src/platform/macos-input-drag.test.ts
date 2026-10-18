@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { easedProgress, interpolatePointEased } from "./macos-input-drag.js";
+import { dragSteps, easedProgress, interpolatePointEased } from "./macos-input-drag.js";
+
+describe("#given an explicit drag duration", () => {
+	it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 30_001, Number.MAX_VALUE])(
+		"#when duration is %s #then rejects an unbounded gesture",
+		(duration) => {
+			expect(() => dragSteps(duration)).toThrow(RangeError);
+		},
+	);
+
+	it("#when duration is within the public gesture range #then preserves zero and thirty second gestures", () => {
+		expect(dragSteps(0)).toBe(1);
+		expect(dragSteps(600)).toBe(38);
+		expect(dragSteps(30_000)).toBe(1875);
+	});
+});
 
 describe("#given a pointer travelling between two points #when the path is generated #then it accelerates and decelerates like a hand instead of jumping linearly", () => {
 	const from = { x: 0, y: 0 };

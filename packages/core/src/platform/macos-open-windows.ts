@@ -72,7 +72,8 @@ export function setOpenWindowsSourceForTesting(
 
 /** The full WindowServer listing for read-only validation of an explicitly observed window. */
 export function observedWindowForPid(pid: number, windowId: number): MacOSWindowInfo | undefined {
-	const listed = nativeAllSpacesSourceOverride?.() ?? nativeSourceOverride?.() ?? listNativeAllSpacesWindows();
+	const source = nativeAllSpacesSourceOverride ?? nativeSourceOverride ?? listNativeAllSpacesWindows;
+	const listed = source();
 	return listed?.find((window) => window.id === windowId && window.owner?.processId === pid);
 }
 

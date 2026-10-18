@@ -111,19 +111,21 @@ export async function postDragSequence(
 ): Promise<void> {
 	const button = options.button ?? "left";
 	const points = [options.from, ...(options.waypoints ?? []), options.to];
-	await post("down", options.from, button, 1, targetWindow, flags);
-	const duration = options.duration ?? pointerTravelDuration(options.from, options.to);
 	const distances = points.slice(1).map((point, index) => {
 		const previous = points[index];
 		return previous === undefined ? 0 : Math.hypot(point.x - previous.x, point.y - previous.y);
 	});
 	const totalDistance = distances.reduce((total, distance) => total + distance, 0);
+	const duration = options.duration ?? pointerTravelDuration({ x: 0, y: 0 }, { x: totalDistance, y: 0 });
+	const stepsForDuration = dragSteps(duration);
 	const segmentSteps = distances.map((distance) => {
 		const fraction = totalDistance === 0 ? 1 / distances.length : distance / totalDistance;
-		return Math.max(1, Math.ceil(dragSteps(duration) * fraction));
+		return Math.max(1, Math.ceil(stepsForDuration * fraction));
 	});
 	const totalSteps = segmentSteps.reduce((total, steps) => total + steps, 0);
-	const delay = totalSteps <= 1 ? 0 : duration / totalSteps;
+	await post("down", options.from, button, 1, targetWindow, flags);
+	const started = performance.now();
+	let completedSteps = 0;
 	let at = options.from;
 	try {
 		for (let segment = 0; segment < segmentSteps.length; segment += 1) {
@@ -134,13 +136,17 @@ export async function postDragSequence(
 				continue;
 			}
 			for (let step = 1; step <= steps; step += 1) {
+				completedSteps += 1;
+				// Pace against one gesture clock. Sub-ms intervals and native posting time must not
+				// accumulate a minimum 1ms timer for every waypoint or every sample.
+				const remaining = started + (duration * completedSteps) / totalSteps - performance.now();
+				if (remaining > 0) {
+					await sleep(Math.ceil(remaining));
+				}
 				checkpoint();
 				const position = interpolatePointEased(from, to, step / steps);
 				await post("drag", position, button, 1, targetWindow, flags);
 				at = position;
-				if (delay > 0 && (segment < segmentSteps.length - 1 || step < steps)) {
-					await sleep(delay);
-				}
 			}
 		}
 	} catch (error: unknown) {

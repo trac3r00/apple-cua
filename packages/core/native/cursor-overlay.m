@@ -14,12 +14,24 @@
 #import <sys/un.h>
 #import <unistd.h>
 
+@interface OverlayPointerView : NSView
+@property(nonatomic, strong) NSNumber *markerKey;
+@property(nonatomic) CGFloat heading;
+@property(nonatomic) uint64_t generation;
+@property(nonatomic) NSTimeInterval arrival;
+@property(nonatomic) NSTimeInterval clickStart;
+@property(nonatomic) double pulse;
+@property(nonatomic, strong) NSTimer *cueTimer;
+@end
+
 static NSWindow *gWindow = nil;
 static NSView *gPointerView = nil;
 static NSMutableDictionary<NSNumber *, NSWindow *> *gMarkerWindows = nil;
 static NSMutableDictionary<NSNumber *, NSView *> *gMarkerViews = nil;
 static NSMutableDictionary<NSNumber *, NSNumber *> *gMarkerModes = nil;
 static NSMutableDictionary<NSNumber *, NSTimer *> *gMarkerTimers = nil;
+static NSMutableDictionary<NSNumber *, NSWindow *> *gMarkerHighlights = nil;
+static NSMutableDictionary<NSNumber *, NSTimer *> *gMarkerHighlightTimers = nil;
 static NSWindow *gHighlightWindow = nil;
 static NSTimer *gHighlightTimer = nil;
 // Click feedback: an expanding ring drawn where a press lands, so a person
@@ -205,13 +217,55 @@ static void remove_status_item(void) {
 
 static void start_ripple(NSPoint windowOrigin);
 
+static void start_marker_cue(OverlayPointerView *view) {
+  [view.cueTimer invalidate];
+  view.cueTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 / kThemeFps
+                                                repeats:YES
+                                                  block:^(NSTimer *timer) {
+    view.pulse = fmod(view.pulse + 1.0 / (kThemeFps * kCueLoopDuration), 1.0);
+    if (view.clickStart > 0.0 &&
+        [NSDate timeIntervalSinceReferenceDate] - view.clickStart >= kClickDuration) {
+      view.clickStart = 0.0;
+    }
+    [view setNeedsDisplay:YES];
+    int mode = [gMarkerModes[view.markerKey] intValue];
+    if (mode != 1 && mode != 2 && view.clickStart == 0.0) {
+      [timer invalidate];
+      view.cueTimer = nil;
+    }
+  }];
+}
+
 static void apply_mode(const char *name, NSNumber *markerKey) {
   if (markerKey != nil) {
+    OverlayPointerView *view = (OverlayPointerView *)gMarkerViews[markerKey];
+    if (strncmp(name, "click", 5) == 0) {
+      uint64_t generation = view.generation;
+      double wait = fmax(0.0, view.arrival - [NSDate timeIntervalSinceReferenceDate]);
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(wait * NSEC_PER_SEC)),
+                     dispatch_get_main_queue(), ^{
+        if (gMarkerViews[markerKey] == view && view.generation == generation &&
+            marker_window(markerKey, NO).isVisible) {
+          view.clickStart = [NSDate timeIntervalSinceReferenceDate];
+          start_marker_cue(view);
+        }
+      });
+      return;
+    }
     int markerMode = strncmp(name, "scroll", 6) == 0
                          ? 1
-                         : (strncmp(name, "think", 5) == 0 ? 2 : 0);
+                         : (strncmp(name, "think", 5) == 0
+                                ? 2
+                                : (strncmp(name, "keyboard", 8) == 0 ? 3 : 0));
     gMarkerModes[markerKey] = @(markerMode);
-    NSView *view = gMarkerViews[markerKey];
+    if (markerMode == 1 || markerMode == 2) {
+      start_marker_cue(view);
+    } else {
+      [view.cueTimer invalidate];
+      view.cueTimer = nil;
+      view.pulse = 0.0;
+      view.clickStart = 0.0;
+    }
     [view setNeedsDisplay:YES];
     return;
   }
@@ -467,11 +521,6 @@ static void draw_cue(CGContextRef ctx, NSBezierPath *geometry, CGFloat px,
   CGContextRestoreGState(ctx);
 }
 
-@interface OverlayPointerView : NSView
-@property(nonatomic, strong) NSNumber *markerKey;
-@property(nonatomic) CGFloat heading;
-@end
-
 @implementation OverlayPointerView
 - (BOOL)isFlipped {
   return YES;
@@ -488,10 +537,14 @@ static void draw_cue(CGContextRef ctx, NSBezierPath *geometry, CGFloat px,
 
   int mode =
       self.markerKey == nil ? gMode : [gMarkerModes[self.markerKey] intValue];
-  BOOL clicking = self.markerKey == nil && gRippleTimer != nil;
-  CGFloat clickFrame = gRipple * 20.0;
-  CGFloat loopFrame = gPulse * 48.0;
-  CGFloat breathe = (mode == 2) ? (0.5 - 0.5 * cos(gPulse * 2.0 * M_PI)) : 0.0;
+  BOOL clicking = self.markerKey == nil ? gRippleTimer != nil : self.clickStart > 0.0;
+  double click = self.markerKey == nil
+                     ? gRipple
+                     : fmin(1.0, ([NSDate timeIntervalSinceReferenceDate] - self.clickStart) / kClickDuration);
+  double pulse = self.markerKey == nil ? gPulse : self.pulse;
+  CGFloat clickFrame = click * 20.0;
+  CGFloat loopFrame = pulse * 48.0;
+  CGFloat breathe = (mode == 2) ? (0.5 - 0.5 * cos(pulse * 2.0 * M_PI)) : 0.0;
 
   // Press squish (Cua: 100% -> 93% -> 103% -> 100%), pivoting on the tip so it
   // never leaves the target.
@@ -516,7 +569,7 @@ static void draw_cue(CGContextRef ctx, NSBezierPath *geometry, CGFloat px,
     static const Keyframe a[5] = {{0, 0}, {7, 1}, {34, 1}, {44, 0}, {48, 0}};
     draw_cue(ctx, observe_arcs_path(), 72, 54, keyframe_value(s, 3, loopFrame),
              keyframe_value(a, 5, loopFrame));
-  } else if (gMode == 3) {
+  } else if (mode == 3) {
     draw_cue(ctx, keyboard_path(), 150, 78, 0.75, 1.0);
   }
   if (clicking) {
@@ -733,6 +786,10 @@ static void apply_marker_set(double x, double y, NSNumber *markerKey) {
   }
   [gMarkerTimers[markerKey] invalidate];
   [gMarkerTimers removeObjectForKey:markerKey];
+  OverlayPointerView *view = (OverlayPointerView *)gMarkerViews[markerKey];
+  view.generation++;
+  view.arrival = 0.0;
+  view.clickStart = 0.0;
   CGFloat screenHeight = primary_screen_height();
   NSPoint target =
       NSMakePoint(x - kHotspotX, screenHeight - y + kHotspotY - kOverlaySize);
@@ -762,23 +819,36 @@ static void apply_direct_set(double x, double y) {
   ensure_status_item();
 }
 
-static void apply_highlight(double x, double y, double w, double h) {
-  if (gHighlightWindow == nil || w <= 0.0 || h <= 0.0) {
+static void apply_highlight(double x, double y, double w, double h, NSNumber *key) {
+  if (w <= 0.0 || h <= 0.0) {
     return;
   }
-  ensure_status_item();
-  CGFloat screenHeight = primary_screen_height();
-  [gHighlightWindow setFrame:NSMakeRect(x, screenHeight - y - h, w, h)
-                     display:YES];
-  [gHighlightWindow.contentView setNeedsDisplay:YES];
-  [gHighlightWindow setAlphaValue:1.0];
-  [gHighlightWindow orderFrontRegardless];
-  if (gHighlightTimer != nil) {
-    [gHighlightTimer invalidate];
-    gHighlightTimer = nil;
+  NSWindow *window = key == nil ? gHighlightWindow : gMarkerHighlights[key];
+  if (window == nil && key != nil) {
+    NSRect frame = NSMakeRect(0, 0, w, h);
+    window = [[NSWindow alloc] initWithContentRect:frame
+                                       styleMask:NSWindowStyleMaskBorderless
+                                         backing:NSBackingStoreBuffered defer:NO];
+    [window setOpaque:NO];
+    [window setBackgroundColor:[NSColor clearColor]];
+    [window setHasShadow:NO];
+    [window setIgnoresMouseEvents:YES];
+    [window setLevel:NSFloatingWindowLevel];
+    [window setCollectionBehavior:gHighlightWindow.collectionBehavior];
+    [window setContentView:[[HighlightView alloc] initWithFrame:frame]];
+    gMarkerHighlights[key] = window;
   }
+  if (window == nil) return;
+  if (key == nil) ensure_status_item();
+  CGFloat screenHeight = primary_screen_height();
+  [window setFrame:NSMakeRect(x, screenHeight - y - h, w, h)
+                     display:YES];
+  [window.contentView setNeedsDisplay:YES];
+  [window setAlphaValue:1.0];
+  [window orderFrontRegardless];
+  [(key == nil ? gHighlightTimer : gMarkerHighlightTimers[key]) invalidate];
   NSTimeInterval start = [NSDate timeIntervalSinceReferenceDate];
-  gHighlightTimer = [NSTimer
+  NSTimer *fade = [NSTimer
       scheduledTimerWithTimeInterval:1.0 / 60.0
                              repeats:YES
                                block:^(NSTimer *timer) {
@@ -787,21 +857,34 @@ static void apply_highlight(double x, double y, double w, double h) {
                                       start) /
                                      0.5;
                                  if (progress >= 1.0) {
-                                   [gHighlightWindow setAlphaValue:0.0];
-                                   [gHighlightWindow orderOut:nil];
+                                   [window setAlphaValue:0.0];
+                                   [window orderOut:nil];
                                    [timer invalidate];
-                                   if (gHighlightTimer == timer) {
+                                   if (key != nil) {
+                                     [gMarkerHighlightTimers removeObjectForKey:key];
+                                     [gMarkerHighlights removeObjectForKey:key];
+                                   } else if (gHighlightTimer == timer) {
                                      gHighlightTimer = nil;
                                    }
                                    return;
                                  }
-                                 [gHighlightWindow
+                                 [window
                                      setAlphaValue:1.0 - progress];
                                }];
+  if (key == nil) gHighlightTimer = fade;
+  else gMarkerHighlightTimers[key] = fade;
 }
 
 static void apply_hide(NSNumber *markerKey) {
   if (markerKey != nil) {
+    OverlayPointerView *view = (OverlayPointerView *)gMarkerViews[markerKey];
+    view.generation++;
+    [view.cueTimer invalidate];
+    view.cueTimer = nil;
+    [gMarkerHighlightTimers[markerKey] invalidate];
+    [gMarkerHighlightTimers removeObjectForKey:markerKey];
+    [gMarkerHighlights[markerKey] orderOut:nil];
+    [gMarkerHighlights removeObjectForKey:markerKey];
     [gMarkerTimers[markerKey] invalidate];
     [gMarkerTimers removeObjectForKey:markerKey];
     NSWindow *window = marker_window(markerKey, NO);
@@ -845,7 +928,7 @@ static NSPoint origin_for_point(double x, double y) {
 }
 
 // Each app marker owns its playback; a direct sample or hide cancels only that lane.
-static void play_marker_trajectory(double *samples, size_t count, NSNumber *key) {
+static void play_marker_trajectory(double *samples, size_t count, double arrival, NSNumber *key) {
   NSData *data = [NSData dataWithBytesNoCopy:samples
                                     length:count * 4 * sizeof(double)
                               freeWhenDone:YES];
@@ -855,6 +938,7 @@ static void play_marker_trajectory(double *samples, size_t count, NSNumber *key)
   view.heading = samples[3];
   [view setNeedsDisplay:YES];
   NSTimeInterval start = [NSDate timeIntervalSinceReferenceDate];
+  view.arrival = start + arrival;
   NSTimer *timer = [NSTimer timerWithTimeInterval:1.0 / 60.0
                                         repeats:YES
                                           block:^(NSTimer *tick) {
@@ -1124,7 +1208,7 @@ static int dispatch_command_line(const char *line, int replyFd) {
     NSNumber *markerKey = key;
     dispatch_async(dispatch_get_main_queue(), ^{
       if (markerKey != nil) {
-        play_marker_trajectory(samples, count, markerKey);
+        play_marker_trajectory(samples, count, arrival, markerKey);
       } else {
         play_trajectory(samples, count, arrival, style);
       }
@@ -1187,7 +1271,7 @@ static int dispatch_command_line(const char *line, int replyFd) {
     }
     NSNumber *markerKey = key;
     dispatch_async(dispatch_get_main_queue(), ^{
-      apply_highlight(x, y, w, h);
+      apply_highlight(x, y, w, h, markerKey);
       reset_idle_timer();
     });
   } else if (strncmp(command, "hide", 4) == 0) {
@@ -1382,6 +1466,8 @@ int main(int argc, const char *argv[]) {
     gMarkerViews = [NSMutableDictionary dictionary];
     gMarkerModes = [NSMutableDictionary dictionary];
     gMarkerTimers = [NSMutableDictionary dictionary];
+    gMarkerHighlights = [NSMutableDictionary dictionary];
+    gMarkerHighlightTimers = [NSMutableDictionary dictionary];
 
     NSRect frame = NSMakeRect(0, 0, kOverlaySize, kOverlaySize);
     gWindow = [[NSWindow alloc] initWithContentRect:frame

@@ -103,6 +103,63 @@ afterEach(() => {
 });
 
 describe("#given a pointer bound to an observed window #when moving or dragging #then its path stays spatially scoped", () => {
+	it.each(["background", "attended"] as const)(
+		"#when explicit feedback names a PID under another scope in %s #then position belongs to that PID and identity",
+		async (delivery) => {
+			const set = vi.fn();
+			const setMode = vi.fn();
+			const controller = new MacOSInputController(
+				42,
+				{ ...NOOP_POINTER_OVERLAY, set, setMode },
+				() => false,
+				NO_SLEEP,
+				delivery,
+			);
+			const initial = controller.getCursorPosition();
+			await withCursorIdentity("explicit", async () => {
+				await runInInputScope(boundTo(42, 12), async () => {
+					controller.showPointer({ x: 650, y: 50 }, true, 77);
+					controller.showScrollPointer({ x: 660, y: 60 }, 77);
+					expect(controller.getCursorPosition()).toEqual(initial);
+				});
+				await runInInputScope(boundTo(77, 21), async () => {
+					expect(controller.getCursorPosition()).toEqual({ x: 660, y: 60 });
+				});
+			});
+			await runInInputScope(boundTo(77, 21), async () => {
+				expect(controller.getCursorPosition()).toEqual(initial);
+			});
+			if (delivery === "background") {
+				expect(set).not.toHaveBeenCalled();
+				expect(setMode).not.toHaveBeenCalled();
+			} else {
+				expect(set).toHaveBeenNthCalledWith(1, { x: 650, y: 50 }, 77);
+				expect(set).toHaveBeenNthCalledWith(2, { x: 660, y: 60 }, 77);
+				expect(setMode.mock.calls).toEqual([
+					["pointer", 77],
+					["click", 77],
+					["scroll", 77],
+				]);
+			}
+			controller.close();
+		},
+	);
+
+	it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_VALUE])(
+		"#when a drag duration is %s #then rejects before native input or activation",
+		async (duration) => {
+			const controller = backgroundController();
+			await expect(
+				runInInputScope(boundTo(42, 12), () =>
+					controller.drag({ from: { x: 150, y: 150 }, to: { x: 350, y: 250 }, duration }),
+				),
+			).rejects.toThrow(RangeError);
+			expect(coreGraphicsMock.postMouseEvent).not.toHaveBeenCalled();
+			expect(focusMock.setProcessAppActive).not.toHaveBeenCalled();
+			controller.close();
+		},
+	);
+
 	it("moves through paced intermediate points and tracks the overlay without touching the real cursor", async () => {
 		vi.useFakeTimers();
 		const set = vi.fn();

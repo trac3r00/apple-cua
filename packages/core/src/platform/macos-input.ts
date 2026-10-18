@@ -1,6 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { currentCursorIdentity } from "../computer/cursor-scope.js";
-import { type InputScope, assertInputMayContinue, currentInputScope } from "../computer/input-scope.js";
+import {
+	InputInterrupted,
+	type InputScope,
+	assertInputMayContinue,
+	currentInputScope,
+} from "../computer/input-scope.js";
 import { assertScreenUnlocked } from "../computer/lock-guard.js";
 import { type VirtualPointer, VirtualPointerSet } from "../computer/virtual-pointer.js";
 import type { DragOptions, InputDelivery, KeyModifierName, KeyOptions, Point, ScrollOptions } from "../types/index.js";
@@ -244,6 +249,7 @@ interface InputCall {
 export const BACKGROUND_ACTIVATION_IDLE_MILLISECONDS = 2_000;
 
 export class MacOSInputController {
+	private closed = false;
 	/** The app input goes to when no input scope names one: the constructor's, or setTarget's. */
 	private defaultTargetPid: number | undefined;
 	/** The window each app's input last went to (or its observation named), by pid. */
@@ -304,6 +310,7 @@ export class MacOSInputController {
 	}
 
 	private beforeInput(): void {
+		this.assertOpen();
 		assertScreenUnlocked(this.isLocked());
 		this.displaySleep.acquire();
 	}
@@ -333,7 +340,14 @@ export class MacOSInputController {
 
 	/** Stops the call (InputInterrupted) once its scope says input must stop: the stop switch, a client cancel. */
 	private checkpoint(call: InputCall): void {
+		this.assertOpen();
 		assertInputMayContinue(call.scope);
+	}
+
+	private assertOpen(): void {
+		if (this.closed) {
+			throw new InputInterrupted("input controller is closed");
+		}
 	}
 
 	/**
@@ -904,6 +918,9 @@ export class MacOSInputController {
 	}
 
 	async drag(options: DragOptions): Promise<void> {
+		if (options.duration !== undefined) {
+			dragSteps(options.duration);
+		}
 		const call = this.beginCall("drag");
 		await this.serialize(call.pid, async () => {
 			this.beforeInput();
@@ -950,6 +967,10 @@ export class MacOSInputController {
 	}
 
 	close(): void {
+		if (this.closed) {
+			return;
+		}
+		this.closed = true;
 		for (const timer of this.activationReleaseTimers.values()) {
 			clearTimeout(timer);
 		}

@@ -152,7 +152,7 @@ describe("#given an action #when a window appears while it runs #then the answer
 			}),
 		);
 
-		expect(titleRequests).toEqual([undefined, { titlesFor: [1234] }]);
+		expect(titleRequests).toEqual([undefined, undefined]);
 		expect(payload["windowEvents"]).toBeUndefined();
 		expect(payload["observationStatus"]).toBe("unchanged");
 		expect(payload["effect"]).toBe("suspected_noop");

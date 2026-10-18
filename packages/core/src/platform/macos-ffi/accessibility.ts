@@ -773,10 +773,10 @@ export interface AccessibilityTreeOptions {
 	readonly maxDepth?: number;
 	readonly maxElements?: number;
 	/**
-	 * Scope the walk to one window. When the WindowServer window maps to an AX window,
-	 * only that window plus the app's non-window top-level children (sheets, panels) are
-	 * walked, which is what an observation of one app window actually needs. When the id
-	 * cannot be matched the walk falls back to the whole application tree.
+	 * Scope the walk to an exact WindowServer id, including a matching AXWindows or
+	 * AXFocusedWindow root off-Space. A match includes non-window top-level children
+	 * (sheets, panels, popovers); a missing match keeps only app-level popup menus.
+	 * If window identity cannot be read, return no elements, never unrelated windows.
 	 */
 	readonly windowId?: number | undefined;
 	/** Include the menu bar, which is app-level rather than window content. Default false. */

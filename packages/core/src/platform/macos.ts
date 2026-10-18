@@ -1021,7 +1021,7 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async pressAtPosition(targetPid: number, position: Point): Promise<boolean> {
-		this.input.showPointer(position, true);
+		this.input.showPointer(position, true, targetPid);
 		// A press inside a dispatch bound to an observed window only takes an element of that window.
 		const target = currentInputScope()?.target;
 		const windowId = target?.pid === targetPid ? target.windowId : undefined;
@@ -1043,9 +1043,9 @@ export class MacOSHostComputer extends HostComputer {
 		if (frame !== undefined && frame.width > 0 && frame.height > 0) {
 			const position = { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 };
 			if (scroll) {
-				this.input.showScrollPointer(position);
+				this.input.showScrollPointer(position, targetPid);
 			} else {
-				this.input.showPointer(position, press);
+				this.input.showPointer(position, press, targetPid);
 			}
 		}
 	}

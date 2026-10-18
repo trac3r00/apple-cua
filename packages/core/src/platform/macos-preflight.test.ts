@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { InputInterrupted, runInInputScope } from "../computer/input-scope.js";
 import { setRunningApplicationLookupForTesting } from "./app-list.js";
+import * as coregraphics from "./macos-ffi/coregraphics.js";
+import * as skylight from "./macos-ffi/skylight.js";
 import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
 import type { InputDelivery } from "./macos-input.js";
 import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
@@ -216,6 +219,40 @@ beforeEach(() => {
 });
 
 describe("MacOSHostComputer input observations", () => {
+	it("#given default background drag suspended on window lookup #when closed #then no native input resumes", async () => {
+		const computer = approvedComputer();
+		await observe(computer);
+		const queryStarted = deferred<void>();
+		const windowQuery = deferred<readonly TestWindow[]>();
+		const postMouse = vi.spyOn(coregraphics, "postMouseEvent").mockImplementation(() => undefined);
+		const focusGuard = vi.spyOn(skylight, "focusGuardFor").mockReturnValue(null);
+		windowMock.openWindows.mockImplementationOnce(() => {
+			queryStarted.resolve();
+			return windowQuery.promise;
+		});
+		const drag = runInInputScope({ target: { pid: TARGET_PID, windowId: 99 } }, () =>
+			computer.drag({ from: { x: 150, y: 100 }, to: { x: 200, y: 150 }, duration: 0 }),
+		);
+		const result = drag.then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		try {
+			await queryStarted.promise;
+			await computer.close();
+			windowQuery.resolve([{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
+
+			expect(await result).toBeInstanceOf(InputInterrupted);
+			expect(postMouse).not.toHaveBeenCalled();
+		} finally {
+			windowQuery.resolve([{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
+			await result;
+			await computer.close();
+			postMouse.mockRestore();
+			focusGuard.mockRestore();
+		}
+	});
+
 	it("authorizes the full normalized id set while excluding raw nodes pruned from model output", async () => {
 		const computer = approvedComputer();
 		const firstState = await computer.getAppState(TARGET_PID, { settleMs: 0, requireWindow: true });

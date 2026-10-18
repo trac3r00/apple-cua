@@ -117,11 +117,12 @@ export function startFocusStealWatch(guard: FocusRestoreToken): void {
 		watchForFocusSteal(guard);
 		return;
 	}
-	// Posted at once: a message waits in the worker's port until it is up, and nothing here depends on
-	// this thread's loop turning, which is the thing that may be blocked.
 	worker ??= startWorker();
 	if (!workerReady) {
+		// This job belongs to the local watcher for its entire lifetime. Queuing it in the
+		// worker too would create a second detector that could undo a deliberate app switch.
 		watchForFocusSteal(guard);
+		return;
 	}
 	const job: FocusWatchJob = { previousPsn: guard.previousPsn, targetPsn: guard.targetPsn };
 	worker.postMessage(job);

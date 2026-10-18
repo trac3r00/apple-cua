@@ -155,7 +155,7 @@ export function createMcpServer(
 		"open_app",
 		{
 			description:
-				"Open an app the way a person means it: bring it forward if running, launch it if not, and wait until it is observable. Answers launched and activated with the pid and bundle id. Authorizes no observation or input, so follow with get_app_state or find_elements; fails honestly if the app never becomes observable. Launching is the only way to reach an app this driver cannot observe yet.",
+				"Open an app and wait until it is observable. Background delivery does not bring it forward; attended delivery may activate it. Answers launched and activated with pid and bundle id. Authorizes no observation or input: follow with get_app_state or find_elements. Fails if the app never becomes observable.",
 			inputSchema: openAppSchema,
 			annotations: MUTATION_ANNOTATIONS,
 		},

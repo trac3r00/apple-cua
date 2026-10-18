@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Point, Rect } from "../types/index.js";
 import { type MousePost, type ScreenLayout, postDragSequence, primerPosition } from "./macos-input-pointer.js";
+
+vi.mock("node:timers/promises", () => ({
+	setTimeout: (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)),
+}));
 
 const MAIN: Rect = { x: 0, y: 0, width: 1920, height: 1080 };
 const MENU_BAR: Rect = { x: 0, y: 0, width: 1920, height: 25 };
@@ -82,6 +86,55 @@ describe("#given the displays and on-screen windows the activation primer must m
 });
 
 describe("#given a drag path #when it traverses waypoints #then one selected button remains held throughout", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_VALUE])(
+		"#when duration is %s #then rejects before pressing",
+		async (duration) => {
+			const post = vi.fn<MousePost>();
+			await expect(
+				postDragSequence(post, { from: { x: 0, y: 0 }, to: { x: 10, y: 0 }, duration }, undefined),
+			).rejects.toThrow(RangeError);
+			expect(post).not.toHaveBeenCalled();
+		},
+	);
+
+	it("#when a default path returns to its start #then its total travel sets the duration", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+		const post = vi.fn<MousePost>(async () => undefined);
+		const drag = postDragSequence(
+			post,
+			{ from: { x: 0, y: 0 }, waypoints: [{ x: 400, y: 0 }], to: { x: 0, y: 0 } },
+			undefined,
+		);
+		await vi.runAllTimersAsync();
+		await drag;
+		expect(post.mock.calls.filter(([kind]) => kind === "drag")).toHaveLength(30);
+		expect(post.mock.calls.at(-1)?.[0]).toBe("up");
+	});
+
+	it("#when one millisecond crosses one hundred waypoints #then waits do not accumulate per segment", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+		const started = performance.now();
+		const post = vi.fn<MousePost>(async () => undefined);
+		const drag = postDragSequence(
+			post,
+			{
+				from: { x: 0, y: 0 },
+				waypoints: Array.from({ length: 100 }, (_, index) => ({ x: index + 1, y: 0 })),
+				to: { x: 101, y: 0 },
+				duration: 1,
+			},
+			undefined,
+		);
+		await vi.runAllTimersAsync();
+		await drag;
+		expect(performance.now() - started).toBeLessThanOrEqual(1);
+		expect(post.mock.calls.filter(([kind]) => kind === "drag")).toHaveLength(101);
+	});
+
 	it("posts every waypoint with the chosen button and held modifiers", async () => {
 		const events: Array<{ kind: string; x: number; y: number; button: string; flags: number | undefined }> = [];
 		const post: MousePost = async (kind, position, button, _clickState, _targetWindow, flags) => {

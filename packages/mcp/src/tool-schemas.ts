@@ -479,7 +479,7 @@ export const compactStepSchema = z.object({
 	type: z
 		.enum(STEP_TYPES)
 		.describe(
-			"Use element_index or target, never both, for element actions; target resolves before dispatch. click may use x/y. drag uses from_x/from_y/to_x/to_y with optional waypoints. reveal scrolls target into view without acting. wait_for uses target and/or window_title, gone and timeout_ms<=10000. clipboard_write requires exactly one of text, image_path, file_path.",
+			"Use element_index or target, not both; target resolves before dispatch. click may use x/y. drag: from_x/from_y/to_x/to_y; optional waypoints, duration, mouse_button, modifiers. reveal scrolls target into view. wait_for: target and/or window_title, gone, timeout_ms<=10000. clipboard_write: exactly one of text, image_path, file_path.",
 		),
 	element_index: elementIndexSchema.optional(),
 	target: compactQuerySchema.optional(),

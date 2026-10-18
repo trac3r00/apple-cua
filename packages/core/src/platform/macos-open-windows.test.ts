@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ListedWindow } from "./macos-ffi/window-list.js";
+import * as windowListing from "./macos-ffi/window-list.js";
 import {
 	observedWindowForPid,
 	openWindowsForTargeting,
@@ -163,13 +164,26 @@ describe("#given an explicitly observed hidden window #when validating its owner
 			{ ...window(17182), owner: { processId: 200 } },
 		];
 		setOpenWindowsSourceForTesting(() => inventory);
+		try {
+			expect(observedWindowForPid(100, 16205)?.id).toBe(16205);
+			expect(observedWindowForPid(100, 17182)).toBeUndefined();
+			inventory = [];
+			expect(observedWindowForPid(100, 16205)).toBeUndefined();
+		} finally {
+			setOpenWindowsSourceForTesting(undefined);
+		}
+	});
 
-		expect(observedWindowForPid(100, 16205)?.id).toBe(16205);
-		expect(observedWindowForPid(100, 17182)).toBeUndefined();
-
-		inventory = [];
-		expect(observedWindowForPid(100, 16205)).toBeUndefined();
-		setOpenWindowsSourceForTesting(undefined);
+	it("does not consult host windows when an installed source is unreadable", () => {
+		const native = vi.spyOn(windowListing, "listWindows").mockReturnValue([listed({ id: 16205 })]);
+		setOpenWindowsSourceForTesting(() => undefined);
+		try {
+			expect(observedWindowForPid(100, 16205)).toBeUndefined();
+			expect(native).not.toHaveBeenCalled();
+		} finally {
+			setOpenWindowsSourceForTesting(undefined);
+			native.mockRestore();
+		}
 	});
 });
 

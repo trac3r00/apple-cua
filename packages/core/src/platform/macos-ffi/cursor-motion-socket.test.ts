@@ -148,13 +148,20 @@ describe("#given configured motion over a real socket #when commands arrive toge
 		const events = new EventEmitter();
 		const commands: string[] = [];
 		server = createServer((socket) => {
+			let buffer = "";
 			socket.on("data", (chunk: Buffer) => {
-				const command = chunk.toString("utf8");
-				commands.push(command);
-				if (command === "state\n") {
-					socket.write('{"x":"invalid","y":180,"shown":true,"reducedMotion":false}\n');
-				} else if (command === "hide\n") {
-					events.emit("hidden");
+				buffer += chunk.toString("utf8");
+				let end = buffer.indexOf("\n");
+				while (end >= 0) {
+					const command = buffer.slice(0, end + 1);
+					buffer = buffer.slice(end + 1);
+					commands.push(command);
+					if (command === "state\n") {
+						socket.write('{"x":"invalid","y":180,"shown":true,"reducedMotion":false}\n');
+					} else if (command === "hide\n") {
+						events.emit("hidden");
+					}
+					end = buffer.indexOf("\n");
 				}
 			});
 		});
@@ -228,11 +235,15 @@ describe("#given configured motion over a real socket #when commands arrive toge
 		const events = new EventEmitter();
 		const commands: string[] = [];
 		server = createServer((socket) => {
+			let buffer = "";
 			socket.on("data", (chunk: Buffer) => {
-				const command = chunk.toString("utf8");
-				commands.push(command);
-				if (commands.length === 3) {
-					events.emit("complete");
+				buffer += chunk.toString("utf8");
+				let end = buffer.indexOf("\n");
+				while (end >= 0) {
+					commands.push(buffer.slice(0, end + 1));
+					buffer = buffer.slice(end + 1);
+					if (commands.length === 3) events.emit("complete");
+					end = buffer.indexOf("\n");
 				}
 			});
 		});

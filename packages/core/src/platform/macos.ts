@@ -46,6 +46,7 @@ import {
 	scrollToVisibleByIndex,
 	setValueByIndex,
 	typeIntoFocusedAXElement,
+	windowMinimizedForPid,
 	windowTitlesForPid,
 } from "./macos-ffi/accessibility.js";
 import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
@@ -309,6 +310,7 @@ export class MacOSHostComputer extends HostComputer {
 		if (command !== undefined) {
 			const done = await this.editCommandOnTextField(targetPid, command);
 			if (done) {
+				this.input.showKeyboard();
 				return { resolvedPath: normalized, action: "accessibility" };
 			}
 		}
@@ -543,7 +545,10 @@ export class MacOSHostComputer extends HostComputer {
 		windows?: readonly MacOSWindowInfo[],
 	): Promise<readonly WindowInventoryEntry[]> {
 		try {
-			const list = windows ?? (await openWindowsForTargeting());
+			let list = windows ?? (await openWindowsForTargeting());
+			if (this.delivery === "background") {
+				list = await openWindowsForTargeting(undefined, { includeOffscreen: true });
+			}
 			const entries = visibleWindowsForPid(list, pid).map((window) => ({
 				id: window.id,
 				title: window.title ?? "",
@@ -917,12 +922,14 @@ export class MacOSHostComputer extends HostComputer {
 	async setValue(targetPid: number, elementIndex: number, value: string): Promise<void> {
 		this.showElement(targetPid, elementIndex, false);
 		setValueByIndex(targetPid, elementIndex, value);
+		this.input.showKeyboard();
 		await this.settleAccessibilityWrite(targetPid);
 	}
 
 	async selectText(targetPid: number, elementIndex: number, options: SelectTextOptions): Promise<void> {
 		this.showElement(targetPid, elementIndex, false);
 		selectTextByIndex(targetPid, elementIndex, options);
+		this.input.showKeyboard();
 	}
 
 	async performAction(targetPid: number, elementIndex: number, action: string): Promise<void> {
@@ -948,10 +955,14 @@ export class MacOSHostComputer extends HostComputer {
 						performActionByIndex(targetPid, elementIndex, action);
 					},
 				);
+				this.input.showKeyboard();
 				return;
 			}
 		}
 		performActionByIndex(targetPid, elementIndex, action);
+		if (action === "AXPress" || action === "AXShowMenu") {
+			this.input.showKeyboard();
+		}
 	}
 
 	async isWebElement(targetPid: number, elementIndex: number): Promise<boolean> {
@@ -1058,6 +1069,7 @@ export class MacOSHostComputer extends HostComputer {
 		if (!typeIntoFocusedAXElement(targetPid, text)) {
 			return false;
 		}
+		this.input.showKeyboard();
 		await this.settleAccessibilityWrite(targetPid);
 		return true;
 	}
@@ -1121,7 +1133,7 @@ export class MacOSHostComputer extends HostComputer {
 
 		let targetWindow: Awaited<ReturnType<typeof queryVisibleTargetWindow>>;
 		try {
-			targetWindow = await queryVisibleTargetWindow(expected.pid, expected.windowId);
+			targetWindow = await queryVisibleTargetWindow(expected.pid, expected.windowId, this.delivery === "background");
 		} catch (error) {
 			if (error instanceof Error) {
 				return { ok: false, reason: "window-missing" };
@@ -1136,7 +1148,7 @@ export class MacOSHostComputer extends HostComputer {
 			return { ok: false, reason: "app-not-approved" };
 		}
 		if (targetWindow === undefined) {
-			const otherWindows = await queryVisibleWindowsForPid(expected.pid);
+			const otherWindows = await queryVisibleWindowsForPid(expected.pid, this.delivery === "background");
 			return { ok: false, reason: otherWindows.length > 0 ? "window-changed" : "window-missing" };
 		}
 		if (targetWindow.id !== expected.windowId) {
@@ -1170,20 +1182,34 @@ function appWindowTitles(pid: number): ReadonlyMap<number, string> {
 	}
 }
 
-async function queryVisibleTargetWindow(pid: number, windowId?: number) {
-	const windows = await openWindowsForTargeting();
+async function queryVisibleTargetWindow(pid: number, windowId?: number, allowOffscreen = false) {
+	let windows = await openWindowsForTargeting();
 	const onscreen = currentOnscreenWindowIds();
 	if (windowId !== undefined) {
-		const requested = resolveTargetWindow(windows, pid, onscreen, undefined, windowId);
-		return requested.kind === "resolved" ? requested.window : undefined;
+		let requested = resolveTargetWindow(windows, pid, onscreen, undefined, windowId);
+		if (requested.kind !== "resolved" && allowOffscreen) {
+			windows = await openWindowsForTargeting(undefined, { includeOffscreen: true });
+			requested = resolveTargetWindow(windows, pid, onscreen, undefined, windowId, { allowOffscreen: true });
+		}
+		if (requested.kind !== "resolved") {
+			return undefined;
+		}
+		if (allowOffscreen && !onscreen?.includes(windowId) && windowMinimizedForPid(pid, windowId) !== false) {
+			return undefined;
+		}
+		return requested.window;
 	}
 	const resolution = resolveTargetWindow(windows, pid, onscreen);
 	return resolution.kind === "resolved" ? resolution.window : await selectSystemEventsTargetWindow(windows, pid);
 }
 
-async function queryVisibleWindowsForPid(pid: number) {
+async function queryVisibleWindowsForPid(pid: number, includeOffscreen = false) {
 	try {
-		return visibleWindowsForPid(await openWindowsForTargeting(), pid);
+		const current = visibleWindowsForPid(await openWindowsForTargeting(), pid);
+		if (current.length > 0 || !includeOffscreen) {
+			return current;
+		}
+		return visibleWindowsForPid(await openWindowsForTargeting(undefined, { includeOffscreen: true }), pid);
 	} catch {
 		return [];
 	}

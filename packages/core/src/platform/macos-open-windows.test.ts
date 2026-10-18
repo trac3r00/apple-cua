@@ -101,6 +101,42 @@ describe("#given the in-process listing answers #when windows are wanted for tar
 	});
 });
 
+describe("#given all-Spaces enumeration #when explicitly requested #then the native listing is required", () => {
+	it("uses the injected native all-Spaces source without calling the binary", async () => {
+		const listBinary = vi.fn(async () => [window(99)]);
+
+		const windows = await openWindowsForTargeting(
+			{
+				listNative: () => [window(1)],
+				listNativeAllSpaces: () => [window(1), window(2)],
+				listBinary,
+			},
+			{ includeOffscreen: true },
+		);
+
+		expect(windows.map((entry) => entry.id)).toEqual([1, 2]);
+		expect(listBinary).not.toHaveBeenCalled();
+	});
+
+	it("reports unavailable native all-Spaces listing instead of using the binary", async () => {
+		await expect(
+			openWindowsForTargeting(
+				{ listNative: () => undefined, listBinary: async () => [window(7)] },
+				{ includeOffscreen: true },
+			),
+		).rejects.toThrow(/all-Spaces window listing is unavailable/);
+	});
+
+	it("reports an unreadable native all-Spaces listing honestly", async () => {
+		await expect(
+			openWindowsForTargeting(
+				{ listNative: () => undefined, listNativeAllSpaces: () => undefined, listBinary: async () => [window(7)] },
+				{ includeOffscreen: true },
+			),
+		).rejects.toThrow(/all-Spaces WindowServer listing could not be read/);
+	});
+});
+
 describe("#given the in-process binding cannot read windows #when windows are wanted for targeting #then the helper binary answers", () => {
 	it("falls back to the binary listing", async () => {
 		const windows = await openWindowsForTargeting({

@@ -45,6 +45,10 @@ export type TargetWindowResolution =
 	| { readonly kind: "resolved"; readonly window: SkyLightTargetWindow }
 	| { readonly kind: "unavailable"; readonly reason: string };
 
+export interface TargetWindowPolicy {
+	readonly allowOffscreen?: boolean;
+}
+
 /**
  * Resolve the window input should go to, proven against the WindowServer rather than assumed.
  * An explicit `windowId` is authoritative: when it is gone, or the WindowServer does not
@@ -59,6 +63,7 @@ export function resolveTargetWindow(
 	onscreenWindowIds: readonly number[] | undefined,
 	position?: Point,
 	windowId?: number,
+	policy: TargetWindowPolicy = {},
 ): TargetWindowResolution {
 	if (onscreenWindowIds === undefined) {
 		return {
@@ -75,7 +80,7 @@ export function resolveTargetWindow(
 		if (requested === undefined) {
 			return { kind: "unavailable", reason: `window ${windowId} is no longer open for this app` };
 		}
-		if (!frontToBack.has(windowId)) {
+		if (!frontToBack.has(windowId) && policy.allowOffscreen !== true) {
 			return {
 				kind: "unavailable",
 				reason: `window ${windowId} is not on the current space; it may be minimized or on another space`,

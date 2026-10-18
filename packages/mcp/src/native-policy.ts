@@ -35,5 +35,11 @@ export function createNativeComputer(): GuardedComputerInterface {
 }
 
 export function createNativeWindowProbe(): WindowProbe | undefined {
-	return process.platform === "darwin" ? listTopLevelWindows : undefined;
+	return process.platform === "darwin"
+		? (options) =>
+				listTopLevelWindows({
+					...options,
+					includeOffscreen: options?.includeOffscreen ?? deliveryFromProcessEnvironment() === "background",
+				})
+		: undefined;
 }

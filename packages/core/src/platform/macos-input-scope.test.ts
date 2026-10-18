@@ -10,6 +10,10 @@ const coreGraphicsMock = vi.hoisted(() => ({
 }));
 
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
+vi.mock("./macos-ffi/window-list.js", () => ({
+	listWindows: vi.fn(() => []),
+	listOnscreenWindows: vi.fn(() => []),
+}));
 vi.mock("./macos-ffi/coregraphics.js", () => ({
 	K_CG_EVENT_FLAG_MASK_ALTERNATE: 0x00080000,
 	K_CG_EVENT_FLAG_MASK_COMMAND: 0x00100000,
@@ -357,10 +361,10 @@ describe("#given two overlapping windows of one app #when input is bound to the 
 			"is outside the observed window 12",
 		);
 		await expect(runInInputScope(boundTo(42, 13), () => controller.click(covered))).rejects.toThrow(
-			"the observed window 13 is no longer on screen",
+			"the observed window 13 is unavailable on this Space",
 		);
 		await expect(runInInputScope(boundTo(42, 13), () => controller.typeText("x"))).rejects.toThrow(
-			"the observed window 13 is no longer on screen",
+			"the observed window 13 is unavailable on this Space",
 		);
 
 		expect(coreGraphicsMock.postMouseEvent).not.toHaveBeenCalled();

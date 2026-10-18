@@ -46,6 +46,20 @@ describe("#given an app with several windows #when an observed window id is name
 		expect(minimized.kind).toBe("unavailable");
 		expect(minimized.kind === "unavailable" ? minimized.reason : "").toMatch(/not on the current space/);
 	});
+
+	it("allows only an explicitly named offscreen window when enabled by policy", () => {
+		expect(resolveTargetWindow([first, second], 1234, [100], undefined, 200, { allowOffscreen: true })).toEqual({
+			kind: "resolved",
+			window: toTargetWindow(second),
+		});
+		expect(resolveTargetWindow([first, second], 1234, [100], undefined, 200)).toMatchObject({ kind: "unavailable" });
+		expect(
+			resolveTargetWindow([first, second], 1234, [100], undefined, undefined, { allowOffscreen: true }),
+		).toMatchObject({
+			kind: "resolved",
+			window: toTargetWindow(first),
+		});
+	});
 });
 
 describe("#given no window id #when a point is supplied #then the containing on-screen window wins", () => {
@@ -98,6 +112,12 @@ describe("#given an app whose windows are all off screen #when a target is resol
 
 	it("reports that no window is on the current space for a point too", () => {
 		expect(resolveTargetWindow([first], 1234, [], { x: 10, y: 10 }).kind).toBe("unavailable");
+	});
+
+	it("does not infer an offscreen target from the permission alone", () => {
+		expect(resolveTargetWindow([first, second], 1234, [], undefined, undefined, { allowOffscreen: true }).kind).toBe(
+			"unavailable",
+		);
 	});
 });
 

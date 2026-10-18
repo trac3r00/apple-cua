@@ -26,6 +26,20 @@ const windowMock = vi.hoisted(() => ({
 vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
 // The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
 setOpenWindowsSourceForTesting(() => undefined);
+const windowListMock = vi.hoisted(() => ({
+	listWindows: vi.fn(() => [
+		{
+			id: 99,
+			ownerPid: 1234,
+			layer: 0,
+			ownerName: "Finder",
+			title: "Documents",
+			bounds: { x: 300, y: 150, width: 2560, height: 1600 },
+		},
+	]),
+	listOnscreenWindows: vi.fn(() => []),
+}));
+vi.mock("./macos-ffi/window-list.js", () => windowListMock);
 
 const accessibilityMock = vi.hoisted(() => ({
 	extractAccessibilityTree: vi.fn(),
@@ -75,7 +89,7 @@ const WINDOW_BOUNDS = { x: 300, y: 150, width: 2560, height: 1600 };
 
 function fakePng(width: number, height: number): Buffer {
 	const data = globalThis.Buffer.alloc(24);
-	data.write("PNG\r\n\n", 0, "latin1");
+	data.write("\u0089PNG\r\n\u001a\n", 0, "latin1");
 	data.writeUInt32BE(width, 16);
 	data.writeUInt32BE(height, 20);
 	return data;

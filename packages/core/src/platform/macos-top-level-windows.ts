@@ -10,6 +10,8 @@ export interface TopLevelWindow {
 }
 
 export interface TopLevelWindowOptions {
+	/** Include windows on other Spaces when the caller is using background delivery. */
+	readonly includeOffscreen?: boolean;
 	/**
 	 * Apps (by pid, or "all") whose untitled windows get their titles from the apps themselves over
 	 * accessibility. The WindowServer hides every window title from a process without Screen Recording,
@@ -24,7 +26,7 @@ export type WindowProbe = (options?: TopLevelWindowOptions) => Promise<readonly 
 
 /** On-screen top-level windows, for detecting side effects an action caused outside the observed window. */
 export async function listTopLevelWindows(options: TopLevelWindowOptions = {}): Promise<readonly TopLevelWindow[]> {
-	const windows = await openWindowsForTargeting();
+	const windows = await openWindowsForTargeting(undefined, { includeOffscreen: options.includeOffscreen === true });
 	const summaries: TopLevelWindow[] = [];
 	for (const window of windows) {
 		const ownerPid = window.owner?.processId;

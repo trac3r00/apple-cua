@@ -1,8 +1,39 @@
+import { listTopLevelWindows } from "@apple-cua/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { allowedBundleIdsFromProcessEnvironment, deliveryFromProcessEnvironment } from "./native-policy.js";
+import {
+	allowedBundleIdsFromProcessEnvironment,
+	createNativeWindowProbe,
+	deliveryFromProcessEnvironment,
+} from "./native-policy.js";
+
+vi.mock("@apple-cua/core", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@apple-cua/core")>()),
+	listTopLevelWindows: vi.fn(async () => []),
+}));
 
 afterEach(() => {
 	vi.unstubAllEnvs();
+	vi.clearAllMocks();
+});
+
+describe("#given native window discovery #when its delivery policy is selected #then only background defaults to all Spaces", () => {
+	it.each([
+		{ delivery: undefined, includeOffscreen: undefined, expected: true },
+		{ delivery: "attended", includeOffscreen: undefined, expected: false },
+		{ delivery: undefined, includeOffscreen: false, expected: false },
+	])("preserves explicit scope under $delivery delivery", async ({ delivery, includeOffscreen, expected }) => {
+		vi.stubEnv("APPLE_CUA_DELIVERY", delivery);
+		const probe = createNativeWindowProbe();
+		if (probe === undefined) {
+			expect(process.platform).not.toBe("darwin");
+			return;
+		}
+		await probe({
+			titlesFor: [42],
+			...(includeOffscreen === undefined ? {} : { includeOffscreen }),
+		});
+		expect(listTopLevelWindows).toHaveBeenCalledWith({ titlesFor: [42], includeOffscreen: expected });
+	});
 });
 
 describe("#given the allowlist variable #when the process environment is read #then it lists the approved apps", () => {

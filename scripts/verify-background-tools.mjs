@@ -48,6 +48,11 @@ try {
 	});
 	const action = payload(mutation);
 	assert.notEqual(action.paused, true, JSON.stringify(action));
+	assert.equal(action.actionDispatched, true, JSON.stringify(action));
+	assert.equal(action.runSteps.completed, 1, JSON.stringify(action));
+	assert.equal(action.runSteps.stoppedEarly, false, JSON.stringify(action));
+	assert.equal(action.runSteps.steps[0]?.input_dispatched, true, JSON.stringify(action));
+	assert.equal(action.runSteps.steps[0]?.status, "dispatched", JSON.stringify(action));
 	assert.equal(action.frontmost, false);
 	const verification = await client.callTool("verify_state", {
 		app: "Keynote",

@@ -6,10 +6,10 @@ import { listWindows } from "../packages/core/dist/platform/macos-ffi/window-lis
 import { MacOSHostComputer } from "../packages/core/dist/platform/macos.js";
 
 const fixtureTitle = process.env.APPLE_CUA_FIXTURE_TITLE ?? "apple-cua Background Input QA";
-const window = listWindows({ onScreenOnly: false })
-	.filter((item) => item.title === fixtureTitle)
-	.sort((a, b) => b.id - a.id)[0];
-assert.ok(window);
+const windows = listWindows({ onScreenOnly: false });
+assert.ok(windows, "native window enumeration unavailable; check Screen Recording permission");
+const window = windows.filter((item) => item.title === fixtureTitle).sort((a, b) => b.id - a.id)[0];
+assert.ok(window, `live task-owned fixture window required: ${fixtureTitle}`);
 const tree = extractAccessibilityTree(window.ownerPid, { windowId: window.id });
 const canvas = tree.elements.find((item) => item.label === "Custom drawing canvas");
 assert.ok(canvas);
@@ -22,7 +22,7 @@ const events = [];
 const released = new Promise((resolve, reject) => {
 	timer = setTimeout(() => reject(new Error("cancelled native gesture did not release")), 5000);
 	watcher = watch(log, () => {
-		const lines = readFileSync(log, "utf8").slice(offset).split("\n").filter(Boolean);
+		const lines = readFileSync(log).subarray(offset).toString("utf8").split("\n").filter(Boolean);
 		events.length = 0;
 		for (const line of lines) {
 			try {
@@ -32,7 +32,18 @@ const released = new Promise((resolve, reject) => {
 			}
 		}
 		if (events.some((event) => event.event === "mouseDragged")) stopped = true;
-		if (events.some((event) => event.event === "mouseUp")) {
+		const upIndex = events.findIndex((event) => event.event === "mouseUp");
+		if (
+			upIndex !== -1 &&
+			events
+				.slice(upIndex + 1)
+				.some(
+					(event) =>
+						event.event === "modifierChanged" &&
+						event.previousModifiers.includes("option") &&
+						!event.modifiers.includes("option"),
+				)
+		) {
 			watcher.close();
 			resolve();
 		}
@@ -61,6 +72,12 @@ try {
 	await released;
 	const up = events.find((event) => event.event === "mouseUp");
 	assert.equal(up.button, 1);
+	assert.ok(up.modifiers.includes("option"), "Option missing from native mouseUp");
+	const gesture = events.filter((event) => ["mouseDown", "mouseDragged", "mouseUp"].includes(event.event));
+	assert.ok(
+		gesture.every((event) => event.modifiers.includes("option")),
+		"Option missing during native gesture",
+	);
 	assert.equal(up.orbit.dragging, false);
 	assert.ok(up.locationInCanvas.x < 700, "cancellation did not stop before endpoint");
 	process.stdout.write(`${JSON.stringify({ verified: true, pid: window.ownerPid, up })}\n`);

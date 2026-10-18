@@ -430,7 +430,7 @@ private final class FixtureAppDelegate: NSObject, NSApplicationDelegate, NSWindo
 	}
 
 	func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-		false
+		true
 	}
 
 	func applicationDidResignActive(_ notification: Notification) {

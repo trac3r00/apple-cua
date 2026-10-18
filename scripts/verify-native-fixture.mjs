@@ -30,6 +30,8 @@ const center = (label) => {
 };
 const canvas = tree.elements.find((item) => item.label === "Custom drawing canvas");
 assert.ok(canvas, JSON.stringify(tree));
+assert.equal(typeof canvas.value, "string", "canvas must publish initial state");
+const initialState = JSON.parse(canvas.value);
 const point = (x, y) => ({ x: canvas.frame.x + x, y: canvas.frame.y + y });
 try {
 	await computer.click(center("Draw"));
@@ -53,20 +55,23 @@ try {
 	const value = finalTree.elements.find((item) => item.label === "Custom drawing canvas")?.value;
 	assert.equal(typeof value, "string", "canvas must publish actual resulting state");
 	const state = JSON.parse(value);
-	assert.ok(state.strokes.length >= 1, JSON.stringify(state));
+	assert.equal(state.strokes.length, initialState.strokes.length + 1, JSON.stringify(state));
 	assert.ok(state.strokes.at(-1).length > 3, "stroke must include intermediate samples");
-	assert.ok(state.shapes.length >= 1, JSON.stringify(state));
-	assert.notEqual(state.yaw, 0.65, `orbit projection unchanged: ${JSON.stringify(state)}`);
+	assert.equal(state.shapes.length, initialState.shapes.length + 1, JSON.stringify(state));
+	assert.notEqual(state.yaw, initialState.yaw, `orbit projection unchanged: ${JSON.stringify(state)}`);
 	assert.equal(state.mode, "orbit");
 	await computer.click(center("Text"));
 	await computer.click(center("Text input"));
-	const log = process.env.APPLE_CUA_FIXTURE_LOG ?? "/tmp/apple-cua-fixture-focus.jsonl";
+	const log =
+		process.env.APPLE_CUA_FIXTURE_LOG ??
+		process.env.APPLE_CUA_FIXTURE_FIRST_LOG ??
+		"/tmp/apple-cua-fixture-focus.jsonl";
 	const offset = statSync(log).size;
 	let watcher;
 	let timer;
 	const edited = new Promise((resolve, reject) => {
 		watcher = watch(log, () => {
-			const lines = readFileSync(log, "utf8").slice(offset).split("\n").filter(Boolean);
+			const lines = readFileSync(log).subarray(offset).toString("utf8").split("\n").filter(Boolean);
 			for (const line of lines) {
 				try {
 					const event = JSON.parse(line);
@@ -106,7 +111,9 @@ try {
 		assert.ok(captured.length > 0, "fixture screenshot was unavailable");
 		await writeFile(process.env.APPLE_CUA_FIXTURE_SCREENSHOT, captured);
 	}
-	process.stdout.write(`${JSON.stringify({ verified: true, pid, windowId: window.id, state, before, after })}\n`);
+	process.stdout.write(
+		`${JSON.stringify({ verified: true, pid, windowId: window.id, initialState, state, before, after })}\n`,
+	);
 } finally {
 	computer.close();
 }

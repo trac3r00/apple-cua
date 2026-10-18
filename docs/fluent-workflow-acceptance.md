@@ -28,7 +28,8 @@ Content:
 
 ## Interaction acceptance
 
-- Background-only input; no window relocation, activation or human cleanup.
+- Background-only input; no window relocation, raise or human cleanup. Target-window
+  activation without raising it is permitted by the background pointer contract.
 - Observe each new context; use semantic controls and verified workflow blocks.
   Inspect unknown controls before input. Do not infer an unlabeled button's role
   from AX index order.
@@ -53,7 +54,8 @@ supporting evidence, not substitutes for these finished artifacts.
 - Freeform board `Intent to outcome`: native editable cards, text, arrows and
   pen return path. Named-window verification passed. Capture:
   `.omo/evidence/fluent-workflow/freeform-diagram.png`.
-- Keynote: `/Users/cminseo/Documents/Work without interruption.key`, 541806 bytes
+- Keynote: local run artifact `/Users/cminseo/Documents/Work without interruption.key`
+  (outside the checkout, not distributed with this report), 541806 bytes
   when first saved. Three native slides, not screenshots pasted into slides.
   Named-window verification and file existence both passed.
 - Every slide was inspected after editing; captures are
@@ -76,6 +78,8 @@ observations and 37 batch invocations. A batch is not one physical action, so
 these are not raw click/event counts. Six retained results failed; an earlier
 syntax-only failure and overwritten early selection failure also occurred.
 No failure is excluded from the verdict because it was later recovered.
+Dispatched physical-input totals were not retained separately. The mixed receipts
+cannot reconstruct them, so the action-count acceptance criterion remains unmet.
 
 Useful repeated blocks improved substantially: three matching Keynote cards were
 created, styled, labeled and positioned in one 6.09-second script; each peer
@@ -98,7 +102,7 @@ The run produced three concrete corrections:
 - A file panel's keyboard shortcuts go to the panel instead of an unrelated app
   menu equivalent. Keynote's Go to Folder had been mistaken for Find Previous.
 
-Verification: all workspace typechecks passed; the full Vitest run passed 1401
+Historical verification on 2026-10-09: all workspace typechecks passed; that Vitest run passed 1401
 cases but found 23 failures from one stale preflight mock. After adding the new
 observation helper to that mock without changing assertions, all 25 cases in
 that file passed. This gives passing results for 1424 distinct cases, with two

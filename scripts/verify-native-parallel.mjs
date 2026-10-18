@@ -26,7 +26,7 @@ const before = {
 	pointer: getCurrentCursorPosition(),
 };
 try {
-	const results = await Promise.all(
+	const settled = await Promise.allSettled(
 		windows.map((window, index) =>
 			runInInputScope(
 				{
@@ -48,7 +48,7 @@ try {
 					let timer;
 					const released = new Promise((resolve, reject) => {
 						watcher = watch(log, () => {
-							const appended = readFileSync(log, "utf8").slice(offset);
+							const appended = readFileSync(log).subarray(offset).toString("utf8");
 							if (
 								appended.split("\n").some((line) => {
 									try {
@@ -62,6 +62,7 @@ try {
 						});
 						timer = setTimeout(() => reject(new Error("native mouseUp missing")), 5000);
 					});
+					released.catch(() => undefined);
 					const started = performance.now();
 					try {
 						await computer.drag({
@@ -85,6 +86,10 @@ try {
 			),
 		),
 	);
+	const failures = settled.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+	if (failures.length > 0) throw new AggregateError(failures, "native input lane failed");
+	const results = settled.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+	assert.notDeepEqual(results[0].stroke, results[1].stroke, "native lanes produced identical strokes");
 	assert.ok(
 		Math.max(...results.map((item) => item.started)) < Math.min(...results.map((item) => item.finished)),
 		"native gestures did not overlap",

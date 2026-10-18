@@ -12,7 +12,9 @@ cp scripts/fixtures/Info.plist /tmp/apple-cua-background-qa.app/Contents/Info.pl
 swiftc -framework AppKit scripts/fixtures/background-input.swift \
   -o /tmp/apple-cua-background-qa.app/Contents/MacOS/background-input
 codesign --force --sign - /tmp/apple-cua-background-qa.app
-open -g -n --stdout /tmp/apple-cua-fixture-focus.jsonl \
+export APPLE_CUA_FIXTURE_FIRST_LOG=/tmp/apple-cua-fixture-focus.jsonl
+export APPLE_CUA_FIXTURE_SECOND_LOG=/tmp/apple-cua-fixture-second.jsonl
+open -g -n --stdout "$APPLE_CUA_FIXTURE_FIRST_LOG" \
   --stderr /tmp/apple-cua-fixture-errors.log /tmp/apple-cua-background-qa.app
 ```
 
@@ -23,7 +25,8 @@ packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp \
   scripts/verify-native-fixture.mjs
 ```
 
-The verifier checks actual stroke, rectangle, orbit projection and text outcomes,
+The verifier snapshots the initial canvas and checks one additional stroke and
+rectangle, a changed orbit yaw, and the actual text outcome,
 plus before/after foreground PID, hardware pointer and unchanged window bounds.
 Inspect the fixture's `foregroundChanged` notifications during the run separately;
 before/after equality alone does not rule out transient focus theft.
@@ -32,13 +35,17 @@ a one-point inactive decoration around an unchanged AppKit window, so its
 compositing footprint alone is not evidence that the window moved.
 For task-owned runs, set `APPLE_CUA_FIXTURE_TITLE`,
 `APPLE_CUA_FIXTURE_FIRST_LOG`, and `APPLE_CUA_FIXTURE_SECOND_LOG` to unique
-values. `APPLE_CUA_FIXTURE_SCREENSHOT` optionally retains a JPEG of the exact
+values and use those same log paths in each launch's `--stdout` argument.
+The single-fixture verifier reads `APPLE_CUA_FIXTURE_LOG`, falling back to
+`APPLE_CUA_FIXTURE_FIRST_LOG` and then `/tmp/apple-cua-fixture-focus.jsonl`.
+These log variables configure the verifiers; the fixture writes to stdout.
+`APPLE_CUA_FIXTURE_SCREENSHOT` optionally retains a JPEG of the exact
 fixture window through the existing native-capture/CLI-fallback path.
 
 For independent native input lanes, launch a second process:
 
 ```sh
-open -g -n --stdout /tmp/apple-cua-fixture-second.jsonl \
+open -g -n --stdout "$APPLE_CUA_FIXTURE_SECOND_LOG" \
   --stderr /tmp/apple-cua-fixture-second-errors.log /tmp/apple-cua-background-qa.app
 packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp \
   scripts/verify-native-parallel.mjs
@@ -47,8 +54,11 @@ packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp \
 Run parallel QA with these two fresh processes. The verifier associates the newest
 window with the second log and the next window with the first log, subscribes
 before dispatch, and waits for each native mouseUp with a bounded timeout. It
-checks overlapping gesture intervals, distinct resulting strokes, unchanged
-foreground/pointer, and both window frames. It exits nonzero if an AX window is
+checks overlapping gesture intervals, distinct resulting strokes, and matching
+foreground/pointer and both window-frame snapshots at the run's endpoints.
+Endpoint equality is not a continuous no-focus-theft or no-pointer-movement
+guarantee. It waits for every input lane to settle before closing the controller,
+including when a lane fails. It exits nonzero if an AX window is
 unavailable; it does not activate or relocate a window to bypass that failure.
 
 ## Captured results
@@ -65,10 +75,14 @@ Foreground PID 65822, hardware pointer `(401.625,1134.875)` and window frames
 were unchanged. The native hardware cursor remains singular.
 
 `scripts/verify-native-cancellation.mjs` passed against the newest fixture using
-the second log: it subscribes before dispatch, requests interruption after the
-first native drag event, observes `InputInterrupted`, and verifies a right-button
-mouseUp at `(500,200)` before the intended `(700,300)` endpoint. The native canvas
-reported `dragging:false`. Native logs also record modifier release.
+the second log. That captured run observed a right-button mouseUp at `(500,200)`
+before the intended `(700,300)` endpoint; the native canvas reported
+`dragging:false`, and native logs also recorded modifier release.
+The verifier subscribes before dispatch and requests interruption after the
+first native drag event. Its acceptance criterion is `InputInterrupted`, a
+right-button mouseUp with `dragging:false` and canvas x less than 700, not an
+exact `(500,200)` release coordinate. It additionally requires Option throughout
+the observed gesture and a subsequent native modifier-release record.
 
 Only one physical display was connected. Negative-origin and spanning-window
 regressions cover coordinate contracts but do not prove physical multi-screen QA.
@@ -76,6 +90,17 @@ These results do not establish arbitrary third-party 3D support, tablet pressure
 multi-touch or successful hover tooltips in apps that reject background hover.
 
 ## Real-app follow-up
+
+Current `scripts/verify-real-apps.mjs` runs require explicit task-owned targets:
+set `APPLE_CUA_KEYNOTE_WINDOW_ID` / `APPLE_CUA_KEYNOTE_WINDOW_TITLE` and
+`APPLE_CUA_FREEFORM_WINDOW_ID` / `APPLE_CUA_FREEFORM_WINDOW_TITLE` for the apps
+being checked. Native owner, exact ID, and nonempty expected title must match
+before input. Selecting `Keynote` also requires `APPLE_CUA_KEYNOTE_EXPECT_LABEL`
+for a Shape-picker label absent before the click and present afterwards.
+Selecting `Freeform` requires `APPLE_CUA_FREEFORM_EXPECT_TITLE` for the newly
+created board window. Both selected action paths require dispatch evidence and
+the concrete postcondition, rather than treating a title-only check as proof of
+the action's effect. Historical window IDs below are observations, not defaults.
 
 The user requested Freeform and Keynote acceptance on the real apps. Guarded
 observations initially reached Freeform `Untitled 2` (window 17244) and the

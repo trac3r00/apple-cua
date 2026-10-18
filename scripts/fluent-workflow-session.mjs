@@ -32,10 +32,12 @@ const server = createServer((socket) => {
 		input += data.toString();
 		if (!input.endsWith("\n")) return;
 		socket.pause();
-		const request = JSON.parse(input);
 		const started = performance.now();
-		const before = desktop();
+		let request;
+		let before;
 		try {
+			before = desktop();
+			request = JSON.parse(input);
 			const result = await client.callTool(request.name, request.args);
 			const receipt = {
 				n: ++sequence,
@@ -47,7 +49,16 @@ const server = createServer((socket) => {
 			process.stdout.write(`${JSON.stringify(receipt)}\n`);
 			socket.end(`${JSON.stringify({ result, receipt })}\n`);
 		} catch (error) {
-			socket.end(`${JSON.stringify({ error: String(error) })}\n`);
+			const receipt = {
+				n: ++sequence,
+				name: request?.name ?? null,
+				ms: performance.now() - started,
+				before,
+				after: desktop(),
+				error: String(error),
+			};
+			process.stdout.write(`${JSON.stringify(receipt)}\n`);
+			socket.end(`${JSON.stringify({ error: String(error), receipt })}\n`);
 		}
 	});
 });
@@ -55,9 +66,13 @@ server.listen(path, () => {
 	chmodSync(path, 0o600);
 	process.stdout.write(`READY ${path}\n`);
 });
-process.on("SIGTERM", () => {
+let closing = false;
+function shutdown() {
+	if (closing) return;
+	closing = true;
 	client.stop();
 	server.close();
 	unlinkSync(path);
 	process.exit(0);
-});
+}
+for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, shutdown);

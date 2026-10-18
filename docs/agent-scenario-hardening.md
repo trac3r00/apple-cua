@@ -158,8 +158,8 @@ That refusal is tested by the new protocol scenarios.
 ## Earlier checkpoint (superseded where noted below) and acceptance limits
 
 This section records the state before the continued Chrome acceptance run below.
-Its unresolved browser-fixture item was superseded by the later Chrome result;
-the client-coverage, native-comparison and disturbance limits remain applicable
+The later Chrome result adds Chrome coverage; it does not resolve the Safari
+fixture limitation. The client-coverage, native-comparison and disturbance limits remain applicable
 to the evidence recorded here.
 
 Retained changes: `client-scenarios.protocol.test.ts` adds three complex MCP SDK

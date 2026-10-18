@@ -8,6 +8,8 @@ export const FULL_ONLY_TOOL_NAMES = [
 	"run_steps",
 	"observe_apps",
 	"run_parallel",
+	"manage_workers",
+	"run_worker",
 	"select_text",
 	"drag",
 	"scroll",

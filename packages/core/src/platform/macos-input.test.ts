@@ -335,7 +335,14 @@ describe("#given MacOSInputController target routing", () => {
 		windowMock.openWindows.mockResolvedValue([
 			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
 		]);
-		const overlay = { set: vi.fn(), highlight: vi.fn(), setMode: vi.fn(), hide: vi.fn(), close: vi.fn() };
+		const overlay = {
+			set: vi.fn(),
+			track: vi.fn(),
+			highlight: vi.fn(),
+			setMode: vi.fn(),
+			hide: vi.fn(),
+			close: vi.fn(),
+		};
 		const { MacOSInputController } = await import("./macos-input.js");
 		const controller = new MacOSInputController(1234, overlay);
 
@@ -349,12 +356,19 @@ describe("#given MacOSInputController target routing", () => {
 		expect(overlay.close).toHaveBeenCalledOnce();
 	});
 
-	it("#when clicking under background delivery #then the drawn cursor still shows the click and ripples", async () => {
+	it("#when clicking and moving under background delivery #then injected cursor feedback stays silent", async () => {
 		// given
 		windowMock.openWindows.mockResolvedValue([
 			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
 		]);
-		const overlay = { set: vi.fn(), highlight: vi.fn(), setMode: vi.fn(), hide: vi.fn(), close: vi.fn() };
+		const overlay = {
+			set: vi.fn(),
+			track: vi.fn(),
+			highlight: vi.fn(),
+			setMode: vi.fn(),
+			hide: vi.fn(),
+			close: vi.fn(),
+		};
 		const { MacOSInputController } = await import("./macos-input.js");
 		const controller = new MacOSInputController(
 			1234,
@@ -366,10 +380,21 @@ describe("#given MacOSInputController target routing", () => {
 
 		// when
 		await controller.click({ x: 50, y: 70 });
+		await controller.move({ x: 60, y: 80 });
 
 		// then
-		expect(overlay.set).toHaveBeenCalledWith({ x: 50, y: 70 });
-		expect(overlay.setMode).toHaveBeenLastCalledWith("click");
+		expect(overlay.set).not.toHaveBeenCalled();
+		expect(overlay.track).not.toHaveBeenCalled();
+		expect(overlay.setMode).not.toHaveBeenCalled();
+		expect(overlay.highlight).not.toHaveBeenCalled();
+		expect(overlay.hide).not.toHaveBeenCalled();
+		expect(controller.getCursorPosition()).toEqual({ x: 60, y: 80 });
+		expect(coreGraphicsMock.postMouseEvent).toHaveBeenCalledWith(
+			expect.objectContaining({
+				targetPid: 1234,
+				targetWindow: { id: 99, bounds: { x: 10, y: 20, width: 300, height: 200 } },
+			}),
+		);
 		controller.close();
 	});
 

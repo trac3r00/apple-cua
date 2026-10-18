@@ -511,13 +511,18 @@ export const compactStepSchema = z.object({
 
 export type CompactStep = z.infer<typeof compactStepSchema>;
 
-const compactStepsSchema = z.array(compactStepSchema).min(1).max(MAX_RUN_STEPS);
+export const compactStepsSchema = z.array(compactStepSchema).min(1).max(MAX_RUN_STEPS);
+const workerStepsSchema = z
+	.array(z.unknown())
+	.min(1)
+	.max(MAX_RUN_STEPS)
+	.describe("Steps use the run_steps schema. Every step is strictly validated before any input.");
 
 /**
  * Validate every step of a batch against the strict per-type schema, before anything is dispatched. A bad step
  * refuses the whole call (an invalid-params error naming where it sits and what is wrong) instead of failing midway.
  */
-export function parseRunSteps(steps: readonly CompactStep[], tool: string, where = "steps"): RunStep[] {
+export function parseRunSteps(steps: readonly unknown[], tool: string, where = "steps"): RunStep[] {
 	return steps.map((step, index) => {
 		const parsed = runStepSchema.safeParse(step);
 		if (parsed.success) {
@@ -526,9 +531,13 @@ export function parseRunSteps(steps: readonly CompactStep[], tool: string, where
 		const issues = parsed.error.issues
 			.map((issue) => `${issue.path.length === 0 ? "" : `${issue.path.join(".")}: `}${issue.message}`)
 			.join("; ");
+		const type =
+			typeof step === "object" && step !== null && "type" in step && typeof step.type === "string"
+				? step.type
+				: "unknown";
 		throw new McpError(
 			ErrorCode.InvalidParams,
-			`Input validation error: Invalid arguments for tool ${tool}: ${where}[${index}] (${step.type}): ${issues}`,
+			`Input validation error: Invalid arguments for tool ${tool}: ${where}[${index}] (${type}): ${issues}`,
 		);
 	});
 }
@@ -537,6 +546,45 @@ export const runStepsSchema = z.object({
 	app: appSchema,
 	observation_token: observationTokenSchema,
 	steps: compactStepsSchema,
+	expect: verifyExpectSchema.optional(),
+	pace: paceSchema,
+	full_state: fullStateSchema,
+	include_screenshot: includeScreenshotSchema,
+});
+
+const workerAssignmentsSchema = z
+	.array(z.object({ worker_id: z.string().min(1), task: z.string().min(1), app: appSchema }))
+	.min(1)
+	.max(6);
+
+export const manageWorkersSchema = z.object({
+	op: z.enum(["assign", "status", "observe", "release"]),
+	assignments: workerAssignmentsSchema.optional(),
+	worker_id: z.string().min(1).optional(),
+	include_screenshot: includeScreenshotSchema,
+	max_elements: z.number().int().positive().optional(),
+});
+
+/** The published schema stays flat; each operation is checked before coordinator state changes. */
+export const workerManagementRequestSchema = z.discriminatedUnion("op", [
+	z.object({
+		op: z.literal("assign"),
+		assignments: workerAssignmentsSchema,
+	}),
+	z.object({ op: z.literal("status") }),
+	z.object({
+		op: z.literal("observe"),
+		worker_id: z.string().min(1),
+		include_screenshot: includeScreenshotSchema,
+		max_elements: z.number().int().positive().optional(),
+	}),
+	z.object({ op: z.literal("release"), worker_id: z.string().min(1) }),
+]);
+
+export const runWorkerSchema = z.object({
+	worker_id: z.string().min(1),
+	observation_token: observationTokenSchema,
+	steps: workerStepsSchema,
 	expect: verifyExpectSchema.optional(),
 	pace: paceSchema,
 	full_state: fullStateSchema,

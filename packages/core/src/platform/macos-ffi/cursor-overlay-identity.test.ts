@@ -5,7 +5,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { cursorOverlaySocketPath, defaultSocketTransport } from "./cursor-overlay.js";
+import { withCursorIdentity } from "../../computer/cursor-scope.js";
+import { createCursorOverlay, cursorOverlaySocketPath, defaultSocketTransport } from "./cursor-overlay.js";
+
+function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
+	let resolvePromise: (() => void) | undefined;
+	const promise = new Promise<void>((resolve) => {
+		resolvePromise = resolve;
+	});
+	return {
+		promise,
+		resolve(): void {
+			resolvePromise?.();
+		},
+	};
+}
 
 describe("#given cursor identities #when resolving daemon sockets #then routing is isolated and stable", () => {
 	it("routes distinct identities separately and repeats the same route deterministically", () => {
@@ -31,6 +45,44 @@ describe("#given cursor identities #when resolving daemon sockets #then routing 
 		expect(firstDefault).toBe(cursorOverlaySocketPath());
 		expect(firstDefault).not.toBe(explicit);
 		expect(cursorOverlaySocketPath("stable-cli-session")).toBe(explicit);
+	});
+
+	it("#given an overlay #when identities interleave #then each lazily owns its transport", async () => {
+		const routes: { readonly identity: string; readonly commands: string[]; closes: number }[] = [];
+		const overlay = createCursorOverlay((identity) => {
+			const route = { identity: identity ?? "unscoped", commands: [] as string[], closes: 0 };
+			routes.push(route);
+			return {
+				send(command: string): void {
+					route.commands.push(command);
+				},
+				close(): void {
+					route.closes += 1;
+				},
+			};
+		});
+		const firstStarted = deferred();
+		const resumeFirst = deferred();
+		const first = withCursorIdentity("overlay-one", async () => {
+			overlay.set({ x: 10, y: 11 });
+			firstStarted.resolve();
+			await resumeFirst.promise;
+			overlay.hide();
+		});
+		await firstStarted.promise;
+
+		await withCursorIdentity("overlay-two", async () => {
+			overlay.set({ x: 20, y: 21 });
+			await Promise.resolve();
+		});
+		resumeFirst.resolve();
+		await first;
+		overlay.close();
+
+		expect(routes.map(({ identity, commands, closes }) => ({ identity, commands, closes }))).toEqual([
+			{ identity: "overlay-one", commands: ["set 10 11\n", "hide\n"], closes: 1 },
+			{ identity: "overlay-two", commands: ["set 20 21\n"], closes: 1 },
+		]);
 	});
 
 	it("#given a named cursor #when choosing its socket #then macOS can bind the actual path", async () => {

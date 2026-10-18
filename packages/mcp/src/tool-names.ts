@@ -32,6 +32,7 @@ export const LEAN_TOOL_NAMES = [
 	"get_capabilities",
 	"verify_state",
 	"ask_user",
+	"analyze_screen",
 ] as const;
 
 /** Opt-in iPhone Mirroring tools, registered only with `APPLE_CUA_IPHONE=1`. */

@@ -61,7 +61,7 @@ Measured on this Mac, background delivery.
 
 | Change | Before | After |
 |---|---|---|
-| Tool list an agent loads each session (`APPLE_CUA_TOOLSET=lean`, iPhone opt-in with `APPLE_CUA_IPHONE=1`) | 38 tools, 52 KB | lean 9 tools, 11.5 KB; full 26 tools, 38 KB; full + iPhone 38 tools, 45 KB |
+| Tool list an agent loads each session (`APPLE_CUA_TOOLSET=lean`, iPhone opt-in with `APPLE_CUA_IPHONE=1`) | Tool profiles vary by configured capabilities | lean registers ten tools, including `analyze_screen`; full and iPhone profiles add their respective tools |
 | `run_script` click on Calculator (144 read back each run) | 452 ms | 103-121 ms; about 33 ms in a fast chain (`app.chain`, 6 clicks in 192-207 ms, final build) |
 | Two apps in one `run_script` (`Promise.all`, Calculator chain + Finder find) | 554 ms (one queue) | 494 ms (per-app queues) |
 | Front app held by Finder Go to Folder | Historical restoration: 440-675 ms, then 0-14 ms (worker) and 7 / 15 / 11 ms (old final build) | Now refused before background dispatch; restoration alone did not prevent focus changes |

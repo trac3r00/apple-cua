@@ -51,6 +51,17 @@ describe("#given an overlay transport #when highlighting a window #then it forwa
 	});
 });
 
+describe("#given keyboard mode #when selected #then it serializes the native mode", () => {
+	it("sends the keyboard mode command", () => {
+		const transport = fakeTransport();
+		const overlay = createCursorOverlay(() => transport);
+
+		overlay.setMode("keyboard");
+
+		expect(transport.sends).toEqual(["mode keyboard\n"]);
+	});
+});
+
 describe("#given paced pointer samples #when tracking a gesture #then native playback does not ease them again", () => {
 	it("sends exact tracking commands rather than glide commands", () => {
 		const transport = fakeTransport();

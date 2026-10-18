@@ -16,7 +16,7 @@ import {
 import { prepareCursorMotion } from "./cursor-motion.js";
 
 /** "click" is an event rather than a lasting mode: the overlay ripples where the dot lands. */
-export type PointerMode = "pointer" | "scroll" | "thinking" | "click";
+export type PointerMode = "pointer" | "scroll" | "thinking" | "keyboard" | "click";
 
 export interface PointerOverlay {
 	set(point: Point): void;

@@ -30,7 +30,7 @@ describe("lean toolset #given toolset=lean #when tools are listed #then exactly 
 		const { harness, names } = await connect({ toolset: "lean", iphone: false });
 
 		expect(names).toEqual([...LEAN_TOOL_NAMES].sort());
-		expect(names).toHaveLength(9);
+		expect(names).toHaveLength(10);
 		const instructions = harness.client.getInstructions() ?? "";
 		const mentioned = mentionedTools(instructions);
 		for (const name of mentioned) {

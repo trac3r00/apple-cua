@@ -112,7 +112,7 @@ export function listWindows(options: { readonly onScreenOnly?: boolean } = {}): 
 }
 
 function onScreen(onScreenOnly: boolean): number {
-	return onScreenOnly ? ON_SCREEN_ONLY | EXCLUDE_DESKTOP_ELEMENTS : ALL_WINDOWS;
+	return (onScreenOnly ? ON_SCREEN_ONLY : ALL_WINDOWS) | EXCLUDE_DESKTOP_ELEMENTS;
 }
 
 function copyWindowInfo(option: number): CFTypeRef | null {

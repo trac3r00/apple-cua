@@ -2,8 +2,11 @@ import type { AppOpenLauncher, StopStatusSource, SystemPrompt, TopLevelWindow } 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { CreateMessageRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type {
 	ClientCapabilities,
+	CreateMessageRequest,
+	CreateMessageResult,
 	ElicitRequest,
 	ElicitResult,
 	JSONRPCMessage,
@@ -40,6 +43,7 @@ export async function createHarness(
 	clientOptions?: {
 		readonly capabilities?: ClientCapabilities;
 		readonly onElicit?: (request: ElicitRequest) => ElicitResult | Promise<ElicitResult>;
+		readonly onSample?: (request: CreateMessageRequest) => CreateMessageResult | Promise<CreateMessageResult>;
 		readonly systemPromptProbe?: () => readonly SystemPrompt[];
 		readonly stopSwitch?: StopStatusSource;
 		readonly phoneSource?: PhoneToolSource;
@@ -62,6 +66,9 @@ export async function createHarness(
 	);
 	if (clientOptions?.onElicit !== undefined) {
 		client.setRequestHandler(ElicitRequestSchema, clientOptions.onElicit);
+	}
+	if (clientOptions?.onSample !== undefined) {
+		client.setRequestHandler(CreateMessageRequestSchema, clientOptions.onSample);
 	}
 	const clientTransport = new InMemoryTransport();
 	const serverTransport = new InMemoryTransport();

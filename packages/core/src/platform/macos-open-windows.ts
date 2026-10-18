@@ -15,6 +15,8 @@ const NORMAL_WINDOW_LAYER = 0;
 export interface OpenWindowsSources {
 	/** The in-process WindowServer listing; undefined means this build cannot read it. */
 	readonly listNative: () => readonly MacOSWindowInfo[] | undefined;
+	/** All-Spaces in-process listing; undefined means unsupported or unreadable. */
+	readonly listNativeAllSpaces?: () => readonly MacOSWindowInfo[] | undefined;
 	/** The helper-binary listing, kept for builds where the in-process binding cannot load. */
 	readonly listBinary: () => Promise<readonly MacOSWindowInfo[]>;
 }
@@ -53,6 +55,7 @@ export function targetableWindows(
 }
 
 let nativeSourceOverride: (() => readonly MacOSWindowInfo[] | undefined) | undefined;
+let nativeAllSpacesSourceOverride: (() => readonly MacOSWindowInfo[] | undefined) | undefined;
 
 /**
  * Test seam in the shape of setOnscreenWindowIdsSourceForTesting: production reads the real
@@ -61,8 +64,10 @@ let nativeSourceOverride: (() => readonly MacOSWindowInfo[] | undefined) | undef
  */
 export function setOpenWindowsSourceForTesting(
 	source: (() => readonly MacOSWindowInfo[] | undefined) | undefined,
+	allSpacesSource?: (() => readonly MacOSWindowInfo[] | undefined) | undefined,
 ): void {
 	nativeSourceOverride = source;
+	nativeAllSpacesSourceOverride = allSpacesSource;
 }
 
 function listNativeWindows(): readonly MacOSWindowInfo[] | undefined {
@@ -89,14 +94,33 @@ async function listBinaryWindows(): Promise<readonly MacOSWindowInfo[]> {
 export async function openWindowsForTargeting(
 	sources: OpenWindowsSources = {
 		listNative: nativeSourceOverride ?? listNativeWindows,
+		listNativeAllSpaces: nativeAllSpacesSourceOverride ?? listNativeAllSpacesWindows,
 		listBinary: listBinaryWindows,
 	},
+	options: { readonly includeOffscreen?: boolean } = {},
 ): Promise<readonly MacOSWindowInfo[]> {
+	if (options.includeOffscreen === true) {
+		if (sources.listNativeAllSpaces === undefined) {
+			throw new Error("all-Spaces window listing is unavailable; the helper binary only lists on-screen windows");
+		}
+		const allSpaces = sources.listNativeAllSpaces();
+		if (allSpaces === undefined) {
+			throw new Error(
+				"all-Spaces WindowServer listing could not be read; the helper binary only lists on-screen windows",
+			);
+		}
+		return allSpaces;
+	}
 	const native = sources.listNative();
 	if (native !== undefined) {
 		return native;
 	}
 	return await sources.listBinary();
+}
+
+function listNativeAllSpacesWindows(): readonly MacOSWindowInfo[] | undefined {
+	const listed = listWindows({ onScreenOnly: false });
+	return listed === undefined ? undefined : targetableWindows(listed);
 }
 
 async function openWindowsWithRetry(): Promise<readonly MacOSWindowInfo[]> {

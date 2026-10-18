@@ -53,6 +53,7 @@ const koffiMock = vi.hoisted(() => {
 		attributes: { AXRole: "AXApplication", AXTitle: "Fixture" },
 		children: [windowElement],
 	};
+	const focus: { window: Reference | null } = { window: null };
 	const listRows: Reference[] = ["row-0", "row-1", "row-2", "row-3"].map((title) => ({
 		type: "ax",
 		attributes: { AXRole: "AXRow", AXTitle: title },
@@ -138,6 +139,10 @@ const koffiMock = vi.hoisted(() => {
 		}),
 		AXUIElementCopyAttributeValue: vi.fn(
 			(element: Reference, attribute: Reference, outValue: Array<Reference | null>) => {
+				if (element === applicationElement && attribute.value === "AXFocusedWindow") {
+					outValue[0] = focus.window;
+					return focus.window === null ? -25205 : 0;
+				}
 				if (attribute.value === "AXParent") {
 					outValue[0] = element.parent ?? null;
 					return element.parent === undefined ? -25205 : 0;
@@ -199,6 +204,7 @@ const koffiMock = vi.hoisted(() => {
 		accessibilityFunctions,
 		applicationElement,
 		coreFoundationFunctions,
+		focus,
 		insertedPrefix,
 		menuBarElement,
 		outlineElement,
@@ -228,6 +234,7 @@ const koffiMock = vi.hoisted(() => {
 vi.mock("koffi", () => koffiMock.module);
 
 beforeEach(() => {
+	koffiMock.focus.window = null;
 	koffiMock.applicationElement.children = [koffiMock.windowElement];
 	koffiMock.windowElement.children = [koffiMock.textField, koffiMock.targetButton];
 	koffiMock.observableState.fieldValue = "initial";
@@ -251,6 +258,31 @@ afterEach(async () => {
 });
 
 describe("#given a window-scoped accessibility walk", () => {
+	it("#when an off-Space window is exposed only as AXFocusedWindow #then its controls remain observed and actionable", async () => {
+		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
+		koffiMock.applicationElement.children = [];
+		koffiMock.focus.window = koffiMock.windowElement;
+
+		const state = extractAccessibilityTree(process.pid, { windowId: 42 });
+		const button = state.elements.find((element) => element.label === "Target Button");
+		expect(state.axAvailable).toBe(true);
+		expect(state.windowTitle).toBe("Fixture");
+		expect(state.elements.map((element) => element.role)).toEqual(["AXWindow", "AXTextField", "AXButton"]);
+		if (button === undefined) throw new Error("focused window button was not observed");
+		performActionByIndex(process.pid, button.id, "AXPress");
+		expect(koffiMock.observableState.pressCount).toBe(1);
+	});
+
+	it("#when the focused off-Space window has a different id #then it is not attributed to the requested window", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+		koffiMock.applicationElement.children = [];
+		koffiMock.focus.window = koffiMock.windowElement;
+
+		const state = extractAccessibilityTree(process.pid, { windowId: 999 });
+		expect(state.elements).toEqual([]);
+		expect(state.axAvailable).toBe(false);
+		expect(state.windowTitle).toBeUndefined();
+	});
 	it.each([42, 999])(
 		"#when a popup menu is a top-level child and window id is %s #then its items remain observed without the menu bar",
 		async (windowId) => {

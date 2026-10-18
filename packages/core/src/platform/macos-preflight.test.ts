@@ -61,6 +61,10 @@ vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
 setOpenWindowsSourceForTesting(() => undefined);
 vi.mock("./macos-ffi/accessibility.js", () => accessibilityMock);
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
+vi.mock("./macos-ffi/window-list.js", () => ({
+	listWindows: vi.fn(() => []),
+	listOnscreenWindows: vi.fn(() => []),
+}));
 vi.mock("./macos-ffi/screenshot.js", () => screenshotMock);
 
 import type { InputObservation } from "../computer/guarded-interface.js";

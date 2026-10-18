@@ -470,6 +470,45 @@ export function raiseWindowInApp(pid: number, windowId: number): boolean {
 	}
 }
 
+/** Returns the AXMinimized state for a reachable window, or undefined when unavailable. */
+export function windowMinimizedForPid(pid: number, windowId: number): boolean | undefined {
+	if (!isRunning(pid) || AXUIElementGetWindowSpi === null) {
+		return undefined;
+	}
+	let root: AXUIElementRef | null = null;
+	let windows: CFTypeRef | null = null;
+	let minimized: CFTypeRef | null = null;
+	let matchedWindow: AXUIElementRef | null = null;
+	try {
+		root = createApplicationElement(pid);
+		windows = copyOptionalAttributeValue(root, "AXWindows");
+		if (windows !== null && isCFArray(windows)) {
+			for (let index = 0; index < cfArrayLength(windows); index++) {
+				const window = cfArrayValueAt(windows, index);
+				if (window !== null && windowIdOf(window) === windowId) {
+					matchedWindow = cfRetain(window);
+					break;
+				}
+			}
+		}
+		matchedWindow ??= copyFocusedWindowForId(root, windowId);
+		if (matchedWindow === null) {
+			return undefined;
+		}
+		minimized = copyOptionalAttributeValue(matchedWindow, "AXMinimized");
+		return minimized !== null && isCFBoolean(minimized) ? fromCFBoolean(minimized) : undefined;
+	} catch {
+		return undefined;
+	} finally {
+		cfRelease(minimized);
+		cfRelease(matchedWindow);
+		cfRelease(windows);
+		if (root !== null) {
+			releaseAXElement(root);
+		}
+	}
+}
+
 /**
  * The title of each of the app's windows, by WindowServer window id, read from the app's own
  * accessibility windows. The WindowServer hides window titles from a process without Screen Recording
@@ -847,7 +886,7 @@ interface ResolvedWalkScope {
  */
 function resolveWalkScope(root: AXUIElementRef, options: AccessibilityTreeOptions): ResolvedWalkScope {
 	const children = copyElementChildren(root);
-	const appChildren = children.length;
+	let appChildren = children.length;
 	const includeMenuBar = options.includeMenuBar === true;
 	const windowId = options.windowId;
 	if (windowId === undefined || AXUIElementGetWindowSpi === null) {
@@ -873,6 +912,15 @@ function resolveWalkScope(root: AXUIElementRef, options: AccessibilityTreeOption
 			otherWindows.push(child);
 		} else {
 			attached.push(child);
+		}
+	}
+	// AppKit can omit every application child on another Space while its focused window
+	// remains readable. Only the exact requested WindowServer id can supply that root.
+	if (windows.length === 0) {
+		const focused = copyFocusedWindowForId(root, windowId);
+		if (focused !== null) {
+			windows.push(focused);
+			appChildren = Math.max(appChildren, 1);
 		}
 	}
 
@@ -948,6 +996,15 @@ function windowIdOf(element: AXUIElementRef): number | undefined {
 	}
 	const out = new Uint32Array(1);
 	return AXUIElementGetWindowSpi(element, out) === AX_SUCCESS ? out[0] : undefined;
+}
+
+function copyFocusedWindowForId(root: AXUIElementRef, windowId: number): AXUIElementRef | null {
+	const focused = copyOptionalAttributeValue(root, K_AX_FOCUSED_WINDOW_ATTRIBUTE);
+	if (focused === null || windowIdOf(focused) === windowId) {
+		return focused;
+	}
+	cfRelease(focused);
+	return null;
 }
 
 const WINDOW_ROLES: ReadonlySet<string> = new Set(["AXWindow", "AXSheet", "AXDialog"]);

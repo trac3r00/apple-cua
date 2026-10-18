@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ListedWindow } from "./macos-ffi/window-list.js";
-import { openWindowsForTargeting, targetableWindows } from "./macos-open-windows.js";
+import { openWindowsForTargeting, setOpenWindowsSourceForTesting, targetableWindows } from "./macos-open-windows.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
 
 function listed(partial: Partial<ListedWindow> & { id: number }): ListedWindow {
@@ -97,6 +97,56 @@ describe("#given the in-process listing answers #when windows are wanted for tar
 		const windows = await openWindowsForTargeting({ listNative: () => [], listBinary });
 
 		expect(windows).toEqual([]);
+		expect(listBinary).not.toHaveBeenCalled();
+	});
+});
+
+describe("#given all-Spaces enumeration #when explicitly requested #then the native listing is required", () => {
+	it("uses the injected native all-Spaces source without calling the binary", async () => {
+		const listBinary = vi.fn(async () => [window(99)]);
+		const windows = await openWindowsForTargeting(
+			{
+				listNative: () => [window(1)],
+				listNativeAllSpaces: () => [window(1), window(2)],
+				listBinary,
+			},
+			{ includeOffscreen: true },
+		);
+
+		expect(windows.map((entry) => entry.id)).toEqual([1, 2]);
+		expect(listBinary).not.toHaveBeenCalled();
+	});
+
+	it("uses a separate all-Spaces fixture through the default source path", async () => {
+		setOpenWindowsSourceForTesting(
+			() => [window(1)],
+			() => [window(1), window(2)],
+		);
+		try {
+			expect((await openWindowsForTargeting()).map((entry) => entry.id)).toEqual([1]);
+			const windows = await openWindowsForTargeting(undefined, { includeOffscreen: true });
+			expect(windows.map((entry) => entry.id)).toEqual([1, 2]);
+		} finally {
+			setOpenWindowsSourceForTesting(undefined);
+		}
+	});
+
+	it("reports unavailable native all-Spaces listing instead of using the binary", async () => {
+		const listBinary = vi.fn(async () => [window(7)]);
+		await expect(
+			openWindowsForTargeting({ listNative: () => undefined, listBinary }, { includeOffscreen: true }),
+		).rejects.toThrow(/all-Spaces window listing is unavailable/);
+		expect(listBinary).not.toHaveBeenCalled();
+	});
+
+	it("reports an unreadable native all-Spaces listing honestly", async () => {
+		const listBinary = vi.fn(async () => [window(7)]);
+		await expect(
+			openWindowsForTargeting(
+				{ listNative: () => undefined, listNativeAllSpaces: () => undefined, listBinary },
+				{ includeOffscreen: true },
+			),
+		).rejects.toThrow(/all-Spaces WindowServer listing could not be read/);
 		expect(listBinary).not.toHaveBeenCalled();
 	});
 });

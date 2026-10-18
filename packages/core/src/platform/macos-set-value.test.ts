@@ -17,6 +17,7 @@ const inputControllerMock = vi.hoisted(() => {
 			>()
 			.mockResolvedValue(undefined);
 		readonly typeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+		readonly showKeyboard = vi.fn();
 		readonly close = vi.fn();
 	}
 
@@ -64,6 +65,7 @@ describe("#given MacOSHostComputer.setValue #when called #then it writes through
 
 		// then
 		expect(accessibilityMock.setValueByIndex).toHaveBeenCalledWith(1234, 7, "updated");
+		expect(firstInputController().showKeyboard).toHaveBeenCalledOnce();
 	});
 
 	it("never falls back to synthetic keyboard input that would hijack the user", async () => {

@@ -9,6 +9,14 @@ const coreGraphicsMock = vi.hoisted(() => ({
 	warpCursorPosition: vi.fn(),
 }));
 
+const overlayMock = vi.hoisted(() => ({
+	set: vi.fn(),
+	highlight: vi.fn(),
+	setMode: vi.fn(),
+	hide: vi.fn(),
+	close: vi.fn(),
+}));
+
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/coregraphics.js", () => ({
 	K_CG_EVENT_FLAG_MASK_ALTERNATE: 0x00080000,
@@ -65,6 +73,30 @@ describe("#given MacOSInputController keyboard input", () => {
 		vi.useRealTimers();
 	});
 
+	it("#when typing one character #then shows keyboard feedback at the virtual cursor", async () => {
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(undefined, overlayMock);
+
+		await controller.typeText("x");
+
+		expect(overlayMock.setMode).toHaveBeenCalledWith("keyboard");
+		expect(overlayMock.set).toHaveBeenCalledWith({ x: 1, y: 2 });
+		expect(coreGraphicsMock.warpCursorPosition).not.toHaveBeenCalled();
+		controller.close();
+	});
+
+	it("#when pressing a key chord #then shows keyboard feedback at the virtual cursor", async () => {
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(undefined, overlayMock);
+
+		await controller.pressKey("a", { modifiers: ["cmd"] });
+
+		expect(overlayMock.setMode).toHaveBeenCalledWith("keyboard");
+		expect(overlayMock.set).toHaveBeenCalledWith({ x: 1, y: 2 });
+		expect(coreGraphicsMock.warpCursorPosition).not.toHaveBeenCalled();
+		controller.close();
+	});
+
 	it("#given two windows of one app #when typing into the observed one #then that window is made the app's focused window first", async () => {
 		// given
 		const { MacOSInputController, setKeyboardWindowFocuserForTesting, setOnscreenWindowIdsSourceForTesting } =
@@ -114,7 +146,8 @@ describe("#given MacOSInputController keyboard input", () => {
 		setOnscreenWindowIdsSourceForTesting(() => [12]);
 		const window = { id: 12, bounds: { x: 0, y: 0, width: 400, height: 300 }, owner: { processId: 42 } };
 		const noSleep = { acquire: () => undefined, release: () => undefined };
-		const controller = new MacOSInputController(42, undefined, () => false, noSleep, "background");
+		const overlay = { ...overlayMock };
+		const controller = new MacOSInputController(42, overlay, () => false, noSleep, "background");
 		await controller.rememberTargetWindow(42, 12, [window]);
 
 		// when
@@ -125,6 +158,9 @@ describe("#given MacOSInputController keyboard input", () => {
 		// then
 		expect(coreGraphicsMock.postUnicodeText.mock.calls.map((call) => call[0]).join("")).toBe("pasted");
 		expect(coreGraphicsMock.postKeyboardEvent).toHaveBeenCalledTimes(2);
+		expect(overlay.setMode).not.toHaveBeenCalled();
+		expect(overlay.set).not.toHaveBeenCalled();
+		expect(coreGraphicsMock.warpCursorPosition).not.toHaveBeenCalled();
 		setBackgroundPasteForTesting(
 			() => false,
 			() => undefined,

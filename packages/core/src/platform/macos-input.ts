@@ -12,6 +12,7 @@ import {
 	focusedWindowShowsFilePanel,
 	raiseWindowInApp,
 	windowIdsAtScreenPoint,
+	windowMinimizedForPid,
 	windowTitlesForPid,
 } from "./macos-ffi/accessibility.js";
 import {
@@ -78,6 +79,9 @@ export function setOnscreenWindowIdsSourceForTesting(source: () => readonly numb
 let keyboardWindowFocuser: (pid: number, windowId: number) => Promise<void> = async (pid, windowId) => {
 	const focusedId = focusedWindowIdForPid(pid);
 	if (focusedId === windowId || focusedWindowIsModal(pid)) {
+		return;
+	}
+	if (!currentOnscreenWindowIds()?.includes(windowId)) {
 		return;
 	}
 	if (focusedId !== undefined) {
@@ -365,12 +369,24 @@ export class MacOSInputController {
 		// Read first: an unknown modifier name is refused here, before anything is posted.
 		const modified = pointerModifierFlags(modifiers) !== 0;
 		const pid = call.pid;
+		if (
+			this.isBackground &&
+			targetWindow !== undefined &&
+			!currentOnscreenWindowIds()?.includes(targetWindow.id) &&
+			modified
+		) {
+			throw new Error("modified pointer input refused for an off-Space window; activation priming is unavailable");
+		}
 		let held = false;
 		if (pid !== undefined && targetWindow !== undefined) {
-			held =
-				activation === "pointer" || modified
-					? await this.activateBehind(pid, targetWindow)
-					: this.postponeActivationRelease(pid);
+			if (this.isBackground && !currentOnscreenWindowIds()?.includes(targetWindow.id)) {
+				held = false;
+			} else {
+				held =
+					activation === "pointer" || modified
+						? await this.activateBehind(pid, targetWindow)
+						: this.postponeActivationRelease(pid);
+			}
 		}
 		try {
 			return await this.postWithHeldModifiers(call, modifiers, targetWindow, gesture);
@@ -512,6 +528,14 @@ export class MacOSInputController {
 		command: (held: boolean) => Promise<T>,
 	): Promise<T> {
 		this.beforeInput();
+		if (this.isBackground && !currentOnscreenWindowIds()?.includes(window.id)) {
+			const target = await this.windowByIdForPid(pid, window.id, undefined, true);
+			if (target === undefined || focusedWindowIdForPid(pid) !== window.id) {
+				throw new Error("off-Space command target is unavailable or is not the app's verified focused window");
+			}
+			focusStealWatcher(target);
+			return await command(false);
+		}
 		await keyboardWindowFocuser(pid, window.id);
 		if (currentInputScope()?.target?.windowId !== undefined && focusedWindowIdForPid(pid) !== window.id) {
 			throw new Error("observed command target is not the verified focused window; input refused");
@@ -594,10 +618,12 @@ export class MacOSInputController {
 		if (!Number.isSafeInteger(pid) || pid <= 0) {
 			throw new Error("target pid must be a positive integer");
 		}
-		const targetWindow =
-			windowId === undefined
-				? await this.visibleWindowForPid(pid, undefined, windows)
-				: await this.windowByIdForPid(pid, windowId, windows);
+		let targetWindow: SkyLightTargetWindow | undefined;
+		if (windowId === undefined) {
+			targetWindow = await this.visibleWindowForPid(pid, undefined, windows);
+		} else {
+			targetWindow = await this.windowByIdForPid(pid, windowId, windows, this.isBackground);
+		}
 		if (targetWindow !== undefined) {
 			this.targetWindowsByPid.set(pid, targetWindow);
 		}
@@ -707,7 +733,7 @@ export class MacOSInputController {
 		this.beforeInput();
 		const targetWindow = await this.requireSessionWindow(call, "keyboard");
 		const keyboardPid = this.keyboardPid(call);
-		this.pingOverlay();
+		this.showKeyboard();
 		// Pace keystrokes: posting characters back-to-back outruns the target app's
 		// event processing and drops characters ("https://example.com" -> "https://e").
 		// A small inter-character delay lets each keystroke be consumed before the next,
@@ -743,7 +769,7 @@ export class MacOSInputController {
 		const flags = modifierFlags(options?.modifiers ?? []);
 		const targetWindow = await this.requireSessionWindow(call, "keyboard");
 		const keyboardPid = this.keyboardPid(call);
-		this.pingOverlay();
+		this.showKeyboard();
 		this.checkpoint(call);
 		this.assertDeliverable(keyboardPid);
 		postKeyboardEvent({
@@ -789,6 +815,7 @@ export class MacOSInputController {
 		const call = this.beginCall("press keys");
 		this.beforeInput();
 		await this.requireSessionWindow(call, "keyboard");
+		this.showKeyboard();
 	}
 
 	/**
@@ -807,6 +834,9 @@ export class MacOSInputController {
 	noteKeyboardInput(pid: number | undefined): void {
 		if (pid !== undefined) {
 			this.keyboardInputAt.set(pid, performance.now());
+		}
+		if (!this.isBackground) {
+			this.overlay.setMode("keyboard");
 		}
 	}
 
@@ -960,11 +990,10 @@ export class MacOSInputController {
 		}
 	}
 
-	// Keep the overlay cursor visible during keyboard-only actions (e.g. typing a
-	// URL in browser.navigate, which never moves the mouse) by re-asserting it at
-	// the last known pointer position. Also resets the daemon's idle timer.
-	private pingOverlay(): void {
+	/** Show attended keyboard activity while background delivery remains visually silent. */
+	showKeyboard(): void {
 		if (!this.isBackground) {
+			this.overlay.setMode("keyboard");
 			this.overlay.set(this.pointer.position());
 		}
 	}
@@ -1003,6 +1032,10 @@ export class MacOSInputController {
 				`pointer input refused: (${Math.round(position.x)}, ${Math.round(position.y)}) is outside the observed window ${bound.id}; observe the app again`,
 			);
 		}
+		if (!currentOnscreenWindowIds()?.includes(bound.id)) {
+			this.targetWindowsByPid.set(pid, bound);
+			return bound;
+		}
 		const covering = frontmostWindowAt(windows, pid, position);
 		const hosted =
 			covering !== undefined &&
@@ -1020,10 +1053,10 @@ export class MacOSInputController {
 		action: "pointer" | "keyboard" | "scroll",
 		windows?: readonly MacOSWindowInfo[],
 	): Promise<SkyLightTargetWindow> {
-		const targetWindow = await this.windowByIdForPid(pid, windowId, windows);
+		const targetWindow = await this.windowByIdForPid(pid, windowId, windows, this.isBackground);
 		if (targetWindow === undefined) {
 			throw new Error(
-				`${action} input refused: the observed window ${windowId} is no longer on screen for this app; observe the app again`,
+				`${action} input refused: the observed window ${windowId} is unavailable on this Space for this app, is minimized, or its minimized state is unknown; observe the app again`,
 			);
 		}
 		return targetWindow;
@@ -1046,10 +1079,25 @@ export class MacOSInputController {
 		pid: number,
 		windowId: number,
 		windows?: readonly MacOSWindowInfo[],
+		allowOffscreen = false,
 	): Promise<SkyLightTargetWindow | undefined> {
-		const list = windows ?? (await openWindowsForTargeting());
-		const resolution = resolveTargetWindow(list, pid, currentOnscreenWindowIds(), undefined, windowId);
-		return resolution.kind === "resolved" ? resolution.window : undefined;
+		const onscreenIds = currentOnscreenWindowIds();
+		const currentList = windows ?? (await openWindowsForTargeting());
+		const currentResolution = resolveTargetWindow(currentList, pid, onscreenIds, undefined, windowId);
+		if (currentResolution.kind === "resolved") {
+			return currentResolution.window;
+		}
+		if (!allowOffscreen || onscreenIds?.includes(windowId)) {
+			return undefined;
+		}
+		const allSpaces = await openWindowsForTargeting(undefined, { includeOffscreen: true });
+		const resolution = resolveTargetWindow(allSpaces, pid, onscreenIds, undefined, windowId, {
+			allowOffscreen: true,
+		});
+		if (resolution.kind !== "resolved" || windowMinimizedForPid(pid, windowId) !== false) {
+			return undefined;
+		}
+		return resolution.window;
 	}
 
 	private requirePointerWindow(call: InputCall, targetWindow: SkyLightTargetWindow | undefined): void {
@@ -1087,8 +1135,8 @@ export class MacOSInputController {
 	}
 
 	/**
-	 * The window keyboard and wheel input of a call goes to: the observed window it is bound to (refused once that is
-	 * off screen), else the window the app's input last went to, else its front window.
+	 * The window keyboard and wheel input of a call goes to its observed window, else the window the app's input last
+	 * went to, else its front window.
 	 */
 	private async requireSessionWindow(
 		call: InputCall,
@@ -1098,10 +1146,24 @@ export class MacOSInputController {
 		if (pid === undefined) {
 			return undefined;
 		}
-		const targetWindow =
-			call.windowId === undefined
-				? (this.targetWindowsByPid.get(pid) ?? (await this.visibleWindowForPid(pid)))
-				: await this.boundWindow(pid, call.windowId, action);
+		let targetWindow: SkyLightTargetWindow | undefined;
+		if (call.windowId !== undefined) {
+			targetWindow = await this.boundWindow(pid, call.windowId, action);
+		} else {
+			const remembered = this.targetWindowsByPid.get(pid);
+			if (remembered === undefined) {
+				targetWindow = await this.visibleWindowForPid(pid);
+			} else if (currentOnscreenWindowIds()?.includes(remembered.id)) {
+				targetWindow = remembered;
+			} else if (this.isBackground) {
+				targetWindow = await this.windowByIdForPid(pid, remembered.id, undefined, true);
+			}
+			if (remembered !== undefined && targetWindow === undefined) {
+				throw new Error(
+					`${action} input refused: the remembered window ${remembered.id} is unavailable on this Space, is minimized, or its minimized state is unknown`,
+				);
+			}
+		}
 		if (targetWindow === undefined) {
 			throw new Error(
 				`targeted ${action} input requires get_app_state, a visible target window, or a prior pointer action`,
@@ -1109,6 +1171,15 @@ export class MacOSInputController {
 		}
 		this.targetWindowsByPid.set(pid, targetWindow);
 		if (action === "keyboard") {
+			if (this.isBackground && !currentOnscreenWindowIds()?.includes(targetWindow.id)) {
+				if (focusedWindowIdForPid(pid) !== targetWindow.id) {
+					throw new Error(
+						"keyboard input refused for an off-Space observed window: it must already be the app's verified focused window",
+					);
+				}
+				focusStealWatcher(targetWindow);
+				return targetWindow;
+			}
 			if (this.isBackground) {
 				focusStealWatcher(targetWindow);
 			}

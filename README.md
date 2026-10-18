@@ -383,13 +383,12 @@ shows: "scroll, click test1, Cmd-click test2" in a 152-row background Finder lis
 instead of 7 calls and 7.4 s.
 
 Pick how much the agent loads with `APPLE_CUA_TOOLSET`. `full` (the default) registers every desktop tool;
-`lean` registers nine — `get_capabilities`, `list_apps`, `list_windows`, `open_app`, `get_app_state`,
-`find_elements`, `verify_state`, `run_script` and `ask_user` — and does everything else through `run_script`.
-The iPhone tools are opt-in with `APPLE_CUA_IPHONE=1` under either profile. Measured on the tool list an agent
-loads every session: lean 9 tools / 11.5 KB, full 26 / 38 KB, full with iPhone 38 / 45 KB, against 38 tools /
-52 KB before (lean saves about 10k tokens per session). `run_steps` and `run_parallel` publish one flat step
-schema and still validate every step against the strict per-type schema before anything is dispatched; a test
-holds the byte budgets.
+`lean` registers ten — `get_capabilities`, `list_apps`, `list_windows`, `open_app`, `get_app_state`,
+`find_elements`, `verify_state`, `run_script`, `ask_user` and `analyze_screen` — and does everything else
+through `run_script`.
+The iPhone tools are opt-in with `APPLE_CUA_IPHONE=1` under either profile.
+`run_steps` and `run_parallel` publish one flat step schema and still validate every step
+against the strict per-type schema before anything is dispatched.
 
 **Context-first contract (MCP migration):**
 
@@ -612,12 +611,15 @@ behind your front app, for both its shortcut and menu path. The earlier restorat
 (440-675 ms before and 0-14 ms after, four trials sampled every 2 ms) describe the old route, not a guarantee
 that background input never takes focus.
 
-To see what it is doing, apple-cua draws its own agent cursor: a click-through arrow pointer modelled on Cua
-Driver's default theme (blue fill, white outline, soft glow, tip exactly on the target) on a
+In attended delivery, apple-cua draws its own agent cursor: a click-through arrow pointer modelled on Cua
+Driver's default theme (blue fill, white outline, soft glow, tip exactly on the target) at a compact
+24-point theme size on a
 floating overlay that glides to every action — pointer clicks, accessibility presses, value
 writes, text selection, typing and scrolls — ripples on each press, and pulses while the agent
-reads an observation. It is drawn, not your real cursor, so it works in background delivery
-without moving your pointer. Set `APPLE_CUA_CURSOR=off` to hide it. Verified on a live session against Cua Driver 0.28.2: a background
+reads an observation. Keyboard input shows a keyboard glyph beside the pointer, including
+keyboard-only actions; the menu bar indicator also names the keyboard mode.
+It is drawn, not your real cursor. Background delivery stays visually silent,
+without cursor artwork or highlights. Set `APPLE_CUA_CURSOR=off` to hide the attended cursor. Verified on a live session against Cua Driver 0.28.2: a background
 click landed with the frontmost app and the real cursor untouched, and the action answer cost
 1.4 KB instead of 121 KB because the post-action image is now opt-in (`include_screenshot: true`).
 
@@ -653,7 +655,7 @@ and does not import the upstream canvas themes or effect rendering.
 #### Menu bar indicator
 
 While the cursor overlay is active, a single `apple-cua` item appears in the menu bar. Its menu shows `apple-cua running`,
-the current mode (`pointer`, `scroll` or `thinking`) and the last cursor motion style (`default` for the original glide). It means
+the current mode (`pointer`, `scroll`, `thinking` or `keyboard`) and the last cursor motion style (`default` for the original glide). It means
 the overlay is active, not merely that motion is configured.
 
 - All CLI commands and MCP servers share one overlay daemon, so there is one item no matter how many clients are driving.
@@ -678,11 +680,43 @@ cheapest way to look at pixels; `settle_ms` caps the pre-capture UI settle wait 
 restarting at 0, and `include_menu_bar` adds application menus when they are part of the task.
 When a tree is capped the answer says so in `elementsTruncated`, and a walk at a different budget
 is treated as a fresh baseline rather than diffed against a differently truncated one, so a diff
-never reports elements that were merely outside the budget as removed. `list_windows` names every
-on-screen top-level window with its id, pid, app, title and bounds so an agent can pick its target
+never reports elements that were merely outside the budget as removed. `list_windows` names
+targetable top-level windows (including other Spaces in background delivery) with their id, pid,
+app, title and bounds so an agent can pick its target
 before observing instead of guessing. Drilling in with `subtree_of` costs what the branch costs:
 on a Finder window whose full tree is 718 elements, re-observing a row returned 10 elements in
 165 ms instead of roughly 810 ms for the window.
+
+#### Background windows in other Spaces
+
+In background delivery, `list_windows` can enumerate windows outside the current Mission Control
+Space. Observe the intended `window_id` explicitly; observations and subsequent input stay bound
+to that window rather than selecting another document at the same screen position. Capture uses
+the window's own pixels, so another Space does not need to become visible.
+
+Off-Space input uses direct process/window routes. It does not raise a window or select a Window
+menu entry to make it key. Keyboard input requires the observed window to already be the app's
+focused window; minimized windows, an unknown minimized state, or a closed target are refused
+rather than restored or silently replaced. Attended delivery keeps its current-Space restriction.
+Some applications do not accept background events; verify the resulting state instead of treating
+dispatch as success. Mission Control's own overview is not an application window to drive.
+
+#### Visual element analysis
+
+`analyze_screen({app, window_id?})` observes an approved application window and asks the connected
+MCP client's vision model to inspect its complete image from top to bottom. It includes icon-only
+controls and static text rather than treating OCR text boxes or the main window frame as the
+whole interface. The client must support image sampling; no separate model endpoint or API key
+is required by the server.
+
+The result preserves the screenshot and original observation token alongside visual regions in
+screenshot pixel coordinates, inferred interactions, confidence, coverage, and truncation.
+Visual regions are not accessibility IDs or proof that a control is enabled or actionable.
+Prefer observed accessibility IDs where available; otherwise inspect the visual region and use
+the existing guarded coordinate action, then verify its effect. The analysis covers the approved
+window, not unrelated applications sharing the display. Observe other windows individually.
+When sampling or capture is unavailable, the tool reports why instead of inventing detections;
+use an ordinary screenshot observation for direct inspection by the agent.
 
 ## Action surface
 

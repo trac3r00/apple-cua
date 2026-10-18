@@ -803,9 +803,9 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 			truncated: elements.length >= maxElements || walkResult.depthTruncated,
 			walkKey: walkKeyFor(descriptor, maxDepth, maxElements),
 			...(scope.descriptor.windowId !== undefined &&
-				scope.descriptor.subtreeOf === undefined &&
-				elements[0]?.role === "AXWindow" &&
-				elements[0].label !== null
+			scope.descriptor.subtreeOf === undefined &&
+			elements[0]?.role === "AXWindow" &&
+			elements[0].label !== null
 				? { windowTitle: elements[0].label }
 				: {}),
 			...contentUnavailable,

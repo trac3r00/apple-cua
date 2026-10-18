@@ -115,12 +115,25 @@ function errorMessage(error: unknown): string {
 
 function dockMatches(element: DockSnapshot["elements"][number], query: ElementQuery): boolean {
 	const label = element.label ?? "";
-	if (query.role !== undefined && element.role.toLowerCase() !== query.role.toLowerCase() &&
-		!element.role.toLowerCase().replace(/^ax/, "").includes(query.role.toLowerCase().replace(/^ax/, ""))) return false;
+	if (
+		query.role !== undefined &&
+		element.role.toLowerCase() !== query.role.toLowerCase() &&
+		!element.role.toLowerCase().replace(/^ax/, "").includes(query.role.toLowerCase().replace(/^ax/, ""))
+	)
+		return false;
 	if (query.label !== undefined && label !== query.label) return false;
-	if (query.labelContains !== undefined && !label.toLowerCase().includes(query.labelContains.toLowerCase())) return false;
-	if (query.valueContains !== undefined && !(typeof element.value === "string" && element.value.toLowerCase().includes(query.valueContains.toLowerCase()))) return false;
-	if (query.text !== undefined && !`${label} ${String(element.value ?? "")}`.toLowerCase().includes(query.text.toLowerCase())) return false;
+	if (query.labelContains !== undefined && !label.toLowerCase().includes(query.labelContains.toLowerCase()))
+		return false;
+	if (
+		query.valueContains !== undefined &&
+		!(typeof element.value === "string" && element.value.toLowerCase().includes(query.valueContains.toLowerCase()))
+	)
+		return false;
+	if (
+		query.text !== undefined &&
+		!`${label} ${String(element.value ?? "")}`.toLowerCase().includes(query.text.toLowerCase())
+	)
+		return false;
 	return true;
 }
 
@@ -351,14 +364,15 @@ class ScriptRun {
 		private readonly options: RunOptions,
 		private readonly signal: AbortSignal,
 		private readonly dockSession?: DockGuardSession,
-	) { }
+	) {}
 
 	dockObserve(): Promise<unknown> {
 		return this.queue("dock", async () => {
 			if (this.dockSession === undefined) throw this.refuseDock("dock-unavailable", "Dock is unavailable");
 			const dockSession = this.dockSession;
-			return await this.queueDockSession(dockSession, async () =>
-				await this.execDock("dock.observe", async () => await dockSession.observe()),
+			return await this.queueDockSession(
+				dockSession,
+				async () => await this.execDock("dock.observe", async () => await dockSession.observe()),
 			);
 		});
 	}
@@ -371,8 +385,9 @@ class ScriptRun {
 			if (this.signal.aborted) throw this.stopped();
 			if (this.dockSession === undefined) throw this.refuseDock("dock-unavailable", "Dock is unavailable");
 			const dockSession = this.dockSession;
-			return await this.queueDockSession(dockSession, async () =>
-				await this.actDockInSession(dockSession, rawTarget, action),
+			return await this.queueDockSession(
+				dockSession,
+				async () => await this.actDockInSession(dockSession, rawTarget, action),
 			);
 		});
 	}
@@ -425,10 +440,7 @@ class ScriptRun {
 		if (token === undefined || this.dockElements === undefined)
 			throw this.refuseDock("needs-observation", "Dock observation token is unavailable");
 		const observedToken = token;
-		return await this.execDock(
-			`dock.${action}`,
-			async () => await dockSession.act(observedToken, elementId, action),
-		);
+		return await this.execDock(`dock.${action}`, async () => await dockSession.act(observedToken, elementId, action));
 	}
 
 	private queueDockSession<T>(dockSession: DockGuardSession, work: () => Promise<T>): Promise<T> {
@@ -436,7 +448,13 @@ class ScriptRun {
 			if (this.signal.aborted) throw this.stopped();
 			return work();
 		});
-		dockRunTails.set(dockSession, next.then(() => undefined, () => undefined));
+		dockRunTails.set(
+			dockSession,
+			next.then(
+				() => undefined,
+				() => undefined,
+			),
+		);
 		return next;
 	}
 
@@ -492,12 +510,13 @@ class ScriptRun {
 				...(failure.refused === undefined ? {} : { refused: failure.refused }),
 			});
 		}
-		record(firstString(pick(payload, "effect")) ?? (pick(payload, "actionDispatched") === true ? "dispatched" : "ok"));
+		record(
+			firstString(pick(payload, "effect")) ?? (pick(payload, "actionDispatched") === true ? "dispatched" : "ok"),
+		);
 		const token = pick(payload, "observation_token");
 		const dockSession = this.dockSession;
-		const elements = typeof token === "string" && dockSession !== undefined
-			? dockSession.observedElements(token)
-			: undefined;
+		const elements =
+			typeof token === "string" && dockSession !== undefined ? dockSession.observedElements(token) : undefined;
 		if (typeof token === "string" && elements !== undefined) {
 			this.dockToken = token;
 			this.dockElements = elements;
@@ -684,15 +703,8 @@ class ScriptRun {
 				`invalid observe options: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`,
 			);
 		}
-		const {
-			diffOnly,
-			maxElements,
-			includeScreenshot,
-			includeMenuBar,
-			subtreeOf,
-			visibleOnly,
-			elementFormat,
-		} = parsed.data;
+		const { diffOnly, maxElements, includeScreenshot, includeMenuBar, subtreeOf, visibleOnly, elementFormat } =
+			parsed.data;
 		return this.queue(target.app, async () => {
 			const windowId = await this.windowIdFor(target);
 			return await this.exec(
@@ -975,15 +987,15 @@ function runInWorker(code: string, run: ScriptRun, signal: AbortSignal, timeoutM
 			finish(
 				signal.reason === "timeout"
 					? {
-						ok: false,
-						kind: "timeout",
-						error: `run_script timed out after ${timeoutMs} ms; no further actions were dispatched`,
-					}
+							ok: false,
+							kind: "timeout",
+							error: `run_script timed out after ${timeoutMs} ms; no further actions were dispatched`,
+						}
 					: {
-						ok: false,
-						kind: "cancelled",
-						error: "run_script was cancelled; no further actions were dispatched",
-					},
+							ok: false,
+							kind: "cancelled",
+							error: "run_script was cancelled; no further actions were dispatched",
+						},
 			);
 		const answer = async (call: Extract<WorkerMessage, { readonly type: "call" }>): Promise<void> => {
 			let reply: HostMessage;

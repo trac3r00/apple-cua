@@ -42,9 +42,9 @@ export function primerPosition(layout: ScreenLayout | undefined): Point | undefi
 	}
 	const candidate = rects.some((rect) => covers(rect, PRIMER_USUAL_POSITION))
 		? {
-			x: Math.min(...rects.map((rect) => rect.x)) - 1,
-			y: Math.min(...rects.map((rect) => rect.y)) - 1,
-		}
+				x: Math.min(...rects.map((rect) => rect.x)) - 1,
+				y: Math.min(...rects.map((rect) => rect.y)) - 1,
+			}
 		: PRIMER_USUAL_POSITION;
 	// Checked again rather than trusted: past 2^53 subtracting 1 no longer moves a coordinate.
 	return rects.some((rect) => covers(rect, candidate)) ? undefined : candidate;

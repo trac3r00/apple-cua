@@ -33,8 +33,8 @@ import {
 } from "./macos-ffi/skylight.js";
 import { listOnscreenWindows, listWindows } from "./macos-ffi/window-list.js";
 import { startFocusStealWatch } from "./macos-focus-watch.js";
-import { pointerModifierFlags, withHeldModifiers } from "./macos-input-modifiers.js";
 import { dragSteps, interpolatePointEased, pointerTravelDuration } from "./macos-input-drag.js";
+import { pointerModifierFlags, withHeldModifiers } from "./macos-input-modifiers.js";
 import {
 	type MousePost,
 	type ScreenLayout,
@@ -597,10 +597,13 @@ export class MacOSInputController {
 			this.requirePointerWindow(call, window);
 			const previous = this.pointer.position();
 			// An app-targeted path starts inside that window, never through another app or display.
-			const from = window === undefined ? previous : {
-				x: Math.max(window.bounds.x, Math.min(window.bounds.x + window.bounds.width - 1, previous.x)),
-				y: Math.max(window.bounds.y, Math.min(window.bounds.y + window.bounds.height - 1, previous.y)),
-			};
+			const from =
+				window === undefined
+					? previous
+					: {
+							x: Math.max(window.bounds.x, Math.min(window.bounds.x + window.bounds.width - 1, previous.x)),
+							y: Math.max(window.bounds.y, Math.min(window.bounds.y + window.bounds.height - 1, previous.y)),
+						};
 			const duration = pointerTravelDuration(from, position);
 			const steps = dragSteps(duration);
 			this.overlay.setMode("pointer");
@@ -795,12 +798,14 @@ export class MacOSInputController {
 		this.beforeInput();
 		const amount = Math.max(0, Math.trunc(Math.abs(options.amount)));
 		const targetWindow = await this.requireSessionWindow(call, "scroll");
-		const position = options.position ?? (targetWindow === undefined
-			? this.pointer.position()
-			: {
-				x: targetWindow.bounds.x + targetWindow.bounds.width / 2,
-				y: targetWindow.bounds.y + targetWindow.bounds.height / 2,
-			});
+		const position =
+			options.position ??
+			(targetWindow === undefined
+				? this.pointer.position()
+				: {
+						x: targetWindow.bounds.x + targetWindow.bounds.width / 2,
+						y: targetWindow.bounds.y + targetWindow.bounds.height / 2,
+					});
 		if (options.position !== undefined) {
 			await this.pointerWindow(call, position);
 		}

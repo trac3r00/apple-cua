@@ -1,11 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type {
-	DockAction,
-	DockSnapshot,
-	DockSource,
-	HostCapabilities,
-	StopStatusSource,
-} from "@apple-cua/core";
+import type { DockAction, DockSnapshot, DockSource, HostCapabilities, StopStatusSource } from "@apple-cua/core";
 import { createNativeDockSource, describeUserStop } from "@apple-cua/core";
 import type { ToolResult } from "./tool-result.js";
 import { refusalResult, textResult } from "./tool-result.js";
@@ -86,8 +80,7 @@ export class DockGuardSession {
 			if (this.now() - entry.issuedAt >= this.ttlMs) return refusalResult("dock-token-expired");
 			if (!DOCK_ACTIONS.has(action)) return refusalResult("dock-action-unsupported");
 			const element = entry.snapshot.elements.find((candidate) => candidate.id === elementId);
-			if (element === undefined || !DOCK_ROLES.has(element.role))
-				return refusalResult("dock-element-not-observed");
+			if (element === undefined || !DOCK_ROLES.has(element.role)) return refusalResult("dock-element-not-observed");
 			if (!element.actions.includes(action)) return refusalResult("dock-action-not-advertised");
 
 			const refusal = this.policyRefusal(true);
@@ -97,14 +90,16 @@ export class DockGuardSession {
 				await this.source.act(entry.snapshot, elementId, action);
 			} catch (error) {
 				return {
-					...textResult(JSON.stringify({
-						actionAttempted: true,
-						effect: "unverifiable",
-						route: "accessibility",
-						delivery: "attended",
-						surface: "dock",
-						message: `Dock action attempt failed; dispatch status is unknown and it will not be replayed: ${errorMessage(error)}`,
-					})),
+					...textResult(
+						JSON.stringify({
+							actionAttempted: true,
+							effect: "unverifiable",
+							route: "accessibility",
+							delivery: "attended",
+							surface: "dock",
+							message: `Dock action attempt failed; dispatch status is unknown and it will not be replayed: ${errorMessage(error)}`,
+						}),
+					),
 					isError: true,
 				};
 			}
@@ -120,7 +115,10 @@ export class DockGuardSession {
 							route: "accessibility",
 							delivery: "attended",
 							surface: "dock",
-							message: nextRefusal === undefined ? "Dock action dispatched; fresh context is not safely reusable." : "Dock action dispatched; fresh observation was not authorized.",
+							message:
+								nextRefusal === undefined
+									? "Dock action dispatched; fresh context is not safely reusable."
+									: "Dock action dispatched; fresh observation was not authorized.",
 						}),
 					);
 				}

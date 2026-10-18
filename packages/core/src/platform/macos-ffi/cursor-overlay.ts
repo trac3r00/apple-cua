@@ -34,11 +34,11 @@ export interface OverlayTransport {
 export type OverlayTransportFactory = () => OverlayTransport | undefined;
 
 export const NOOP_POINTER_OVERLAY: PointerOverlay = {
-	set(): void { },
-	highlight(): void { },
-	setMode(): void { },
-	hide(): void { },
-	close(): void { },
+	set(): void {},
+	highlight(): void {},
+	setMode(): void {},
+	hide(): void {},
+	close(): void {},
 };
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
@@ -51,7 +51,9 @@ const overlayBinaryCandidatePaths: readonly string[] = [
 // Each process has its own daemon unless callers supply a stable cursor identity.
 const DEFAULT_CURSOR_IDENTITY = `process-${process.pid}`;
 
-export function cursorOverlaySocketPath(identity = process.env["APPLE_CUA_CURSOR_ID"] ?? DEFAULT_CURSOR_IDENTITY): string {
+export function cursorOverlaySocketPath(
+	identity = process.env["APPLE_CUA_CURSOR_ID"] ?? DEFAULT_CURSOR_IDENTITY,
+): string {
 	if (
 		identity.length === 0 ||
 		identity.length > 1_024 ||
@@ -78,7 +80,8 @@ export function createCursorOverlay(
 	motion?: CursorMotionConfig | null,
 ): PointerOverlay {
 	const configuration = motion === undefined ? cursorMotionFromEnvironment() : parseCursorMotion(motion);
-	const factory = transportFactory ?? (() => defaultSocketTransport(Date.now, spawn, configuration, cursorOverlaySocketPath()));
+	const factory =
+		transportFactory ?? (() => defaultSocketTransport(Date.now, spawn, configuration, cursorOverlaySocketPath()));
 	let transport: OverlayTransport | undefined;
 	let resolved = false;
 
@@ -89,7 +92,7 @@ export function createCursorOverlay(
 		}
 		try {
 			transport?.send(command);
-		} catch { }
+		} catch {}
 	}
 
 	return {
@@ -116,7 +119,7 @@ export function createCursorOverlay(
 			// the moment a single verb's process exits (the original "never showed" bug).
 			try {
 				transport?.close();
-			} catch { }
+			} catch {}
 		},
 	};
 }
@@ -182,7 +185,7 @@ export function defaultSocketTransport(
 				}
 			});
 			child.unref();
-		} catch { }
+		} catch {}
 	}
 
 	function deliver(command: string, attempt: number, finished?: () => void): void {
@@ -217,14 +220,14 @@ export function defaultSocketTransport(
 			try {
 				socket.write(command);
 				socket.end();
-			} catch { }
+			} catch {}
 		});
 		socket.on("error", () => {
 			// No daemon listening yet — start one and retry briefly so the very first
 			// command still lands once the daemon has bound its socket.
 			try {
 				socket.destroy();
-			} catch { }
+			} catch {}
 			ensureDaemon();
 			if (attempt < 2) {
 				retrying = true;
@@ -252,6 +255,6 @@ export function defaultSocketTransport(
 				sendNext();
 			}
 		},
-		close(): void { },
+		close(): void {},
 	};
 }

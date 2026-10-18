@@ -14,11 +14,13 @@ function element(
 	return { id, role, label, value, actions, children: [], frame: { x: 0, y: 0, width: 0, height: 0 } };
 }
 
-function setup(elements: AXTreeElement[] = [
-	element(3, "AXDockItem", "Finder", ["AXPress", "AXShowMenu"]),
-	element(4, "AXMenuItem", "Options", ["AXPress"]),
-	element(5, "AXButton", "Unrelated button", ["AXPress"]),
-]) {
+function setup(
+	elements: AXTreeElement[] = [
+		element(3, "AXDockItem", "Finder", ["AXPress", "AXShowMenu"]),
+		element(4, "AXMenuItem", "Options", ["AXPress"]),
+		element(5, "AXButton", "Unrelated button", ["AXPress"]),
+	],
+) {
 	let liveElements = elements;
 	let key: string | undefined = "1:dock";
 	let pid: number | undefined = DOCK_PID;

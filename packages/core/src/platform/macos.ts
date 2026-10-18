@@ -317,8 +317,8 @@ export class MacOSHostComputer extends HostComputer {
 			window === undefined
 				? await invokeMenu(targetPid, normalized)
 				: await invokeWindowMenu(targetPid, normalized, (disabled, run) =>
-					this.input.withWindowCommand(targetPid, window, disabled, run),
-				);
+						this.input.withWindowCommand(targetPid, window, disabled, run),
+					);
 		this.input.noteKeyboardInput(targetPid);
 		return result;
 	}
@@ -388,21 +388,21 @@ export class MacOSHostComputer extends HostComputer {
 			window === undefined
 				? "not-held"
 				: await this.input.withWindowCommand(
-					pid,
-					window,
-					() => true,
-					async (held): Promise<"pressed" | "not-held" | "still-disabled"> => {
-						if (!held) {
-							return "not-held";
-						}
-						const enabled = await waitForKeyEquivalentEnabled(pid, chord.key, chord.modifiers);
-						if (enabled === undefined) {
-							return "still-disabled";
-						}
-						pressMenuItem(pid, enabled.path);
-						return "pressed";
-					},
-				);
+						pid,
+						window,
+						() => true,
+						async (held): Promise<"pressed" | "not-held" | "still-disabled"> => {
+							if (!held) {
+								return "not-held";
+							}
+							const enabled = await waitForKeyEquivalentEnabled(pid, chord.key, chord.modifiers);
+							if (enabled === undefined) {
+								return "still-disabled";
+							}
+							pressMenuItem(pid, enabled.path);
+							return "pressed";
+						},
+					);
 		if (outcome === "not-held") {
 			// The app was not told it is active: an item that read enabled is pressed as before, one that read
 			// disabled is refused.
@@ -639,10 +639,10 @@ export class MacOSHostComputer extends HostComputer {
 		const windowCandidates =
 			windowInventory.length > 1
 				? windowInventory.map((window) =>
-					window.id === targetWindow?.id && targetWindowTitle !== undefined
-						? { ...window, title: targetWindowTitle }
-						: window,
-				)
+						window.id === targetWindow?.id && targetWindowTitle !== undefined
+							? { ...window, title: targetWindowTitle }
+							: window,
+					)
 				: undefined;
 		const ocrText =
 			tree?.windowContentUnavailable === true && targetWindow !== undefined
@@ -940,9 +940,14 @@ export class MacOSHostComputer extends HostComputer {
 			if (opensMenu) {
 				// AppKit accepts popup actions while inactive but does not show them. Hold only this app
 				// active behind the person's app, just as a background pointer gesture does.
-				await this.input.withWindowCommand(targetPid, window, () => true, async () => {
-					performActionByIndex(targetPid, elementIndex, action);
-				});
+				await this.input.withWindowCommand(
+					targetPid,
+					window,
+					() => true,
+					async () => {
+						performActionByIndex(targetPid, elementIndex, action);
+					},
+				);
 				return;
 			}
 		}

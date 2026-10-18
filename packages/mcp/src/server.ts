@@ -105,9 +105,9 @@ export function createMcpServer(
 		resolvedComputer,
 		windowProbe ?? (computer === undefined ? createNativeWindowProbe() : undefined),
 		appLauncher ??
-		(computer === undefined
-			? spawnOpenLauncher({ background: resolvedComputer.delivery === "background" })
-			: undefined),
+			(computer === undefined
+				? spawnOpenLauncher({ background: resolvedComputer.delivery === "background" })
+				: undefined),
 		systemPromptProbe ?? (computer === undefined ? currentSystemPrompts : undefined),
 		stopGate,
 	);

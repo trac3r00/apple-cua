@@ -28,14 +28,18 @@ const HOST: HostCapabilities = {
 
 class MutableStop implements StopStatusSource {
 	state: StopStatus = { stopped: false };
-	status(): StopStatus { return this.state; }
+	status(): StopStatus {
+		return this.state;
+	}
 }
 
 class Deferred<T> {
 	readonly promise: Promise<T>;
 	resolve!: (value: T) => void;
 	constructor() {
-		this.promise = new Promise((resolve) => { this.resolve = resolve; });
+		this.promise = new Promise((resolve) => {
+			this.resolve = resolve;
+		});
 	}
 }
 
@@ -45,15 +49,17 @@ function resultText(result: ToolResult): string {
 	return content.text;
 }
 
-function setup(overrides: {
-	readonly delivery?: "background" | "attended";
-	readonly allowedBundleIds?: readonly string[];
-	readonly host?: HostCapabilities;
-	readonly stopSwitch?: StopStatusSource;
-	readonly source?: DockSource;
-	readonly now?: () => number;
-	readonly ttlMs?: number;
-} = {}) {
+function setup(
+	overrides: {
+		readonly delivery?: "background" | "attended";
+		readonly allowedBundleIds?: readonly string[];
+		readonly host?: HostCapabilities;
+		readonly stopSwitch?: StopStatusSource;
+		readonly source?: DockSource;
+		readonly now?: () => number;
+		readonly ttlMs?: number;
+	} = {},
+) {
 	let current = SNAPSHOT;
 	let generation = 0;
 	const read = vi.fn(async () => ({ ...current, observationKey: `dock:${++generation}` }));
@@ -71,7 +77,9 @@ function setup(overrides: {
 		session,
 		read,
 		act,
-		setSnapshot(snapshot: DockSnapshot) { current = snapshot; },
+		setSnapshot(snapshot: DockSnapshot) {
+			current = snapshot;
+		},
 	};
 }
 
@@ -214,9 +222,7 @@ describe("DockGuardSession", () => {
 			read: async () => ({
 				...SNAPSHOT,
 				observationKey: `dock:${++generation}`,
-				elements: generation === 1
-					? SNAPSHOT.elements
-					: [{ ...DOCK_ITEM, label: "Finder menu" }],
+				elements: generation === 1 ? SNAPSHOT.elements : [{ ...DOCK_ITEM, label: "Finder menu" }],
 			}),
 			act: vi.fn(async () => undefined),
 		};

@@ -547,7 +547,8 @@ export class MacOSHostComputer extends HostComputer {
 		try {
 			let list = windows ?? (await openWindowsForTargeting());
 			if (this.delivery === "background") {
-				list = await openWindowsForTargeting(undefined, { includeOffscreen: true });
+				// Optional broader inventory must not erase windows already proven on this Space.
+				list = await openWindowsForTargeting(undefined, { includeOffscreen: true }).catch(() => list);
 			}
 			const entries = visibleWindowsForPid(list, pid).map((window) => ({
 				id: window.id,

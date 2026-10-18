@@ -159,6 +159,9 @@ describe("#given an explicitly observed window on another Space", () => {
 		native.focusedWindowIdForPid.mockReturnValue(TARGET.id);
 		const controller = await makeController();
 		try {
+			native.postUnicodeText.mockImplementationOnce(() => {
+				expect(native.watchFocusSteal).toHaveBeenCalledWith(expect.objectContaining({ id: TARGET.id }));
+			});
 			await runInInputScope({ target: { pid: 1234, windowId: TARGET.id } }, () => controller.typeText("xy"));
 			await runInInputScope({ target: { pid: 1234, windowId: TARGET.id } }, () => controller.pressKey("Return"));
 
@@ -243,7 +246,10 @@ describe("#given an explicitly observed window on another Space", () => {
 	it("#when a window command targets an off-Space document #then never raises or primes it", async () => {
 		native.focusedWindowIdForPid.mockReturnValue(TARGET.id);
 		const controller = await makeController();
-		const command = vi.fn(async (held: boolean) => held);
+		const command = vi.fn(async (held: boolean) => {
+			expect(native.watchFocusSteal).toHaveBeenCalledWith(expect.objectContaining({ id: TARGET.id }));
+			return held;
+		});
 		try {
 			await expect(controller.withWindowCommand(1234, TARGET, () => true, command)).resolves.toBe(false);
 			expect(command).toHaveBeenCalledWith(false);

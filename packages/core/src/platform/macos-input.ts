@@ -518,6 +518,7 @@ export class MacOSInputController {
 			if (target === undefined || focusedWindowIdForPid(pid) !== window.id) {
 				throw new Error("off-Space command target is unavailable or is not the app's verified focused window");
 			}
+			focusStealWatcher(target);
 			return await command(false);
 		}
 		await keyboardWindowFocuser(pid, window.id);
@@ -1144,6 +1145,7 @@ export class MacOSInputController {
 						"keyboard input refused for an off-Space observed window: it must already be the app's verified focused window",
 					);
 				}
+				focusStealWatcher(targetWindow);
 				return targetWindow;
 			}
 			if (this.isBackground) {

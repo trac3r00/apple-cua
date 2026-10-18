@@ -55,6 +55,7 @@ export function targetableWindows(
 }
 
 let nativeSourceOverride: (() => readonly MacOSWindowInfo[] | undefined) | undefined;
+let nativeAllSpacesSourceOverride: (() => readonly MacOSWindowInfo[] | undefined) | undefined;
 
 /**
  * Test seam in the shape of setOnscreenWindowIdsSourceForTesting: production reads the real
@@ -63,8 +64,10 @@ let nativeSourceOverride: (() => readonly MacOSWindowInfo[] | undefined) | undef
  */
 export function setOpenWindowsSourceForTesting(
 	source: (() => readonly MacOSWindowInfo[] | undefined) | undefined,
+	allSpacesSource?: (() => readonly MacOSWindowInfo[] | undefined) | undefined,
 ): void {
 	nativeSourceOverride = source;
+	nativeAllSpacesSourceOverride = allSpacesSource;
 }
 
 function listNativeWindows(): readonly MacOSWindowInfo[] | undefined {
@@ -91,7 +94,7 @@ async function listBinaryWindows(): Promise<readonly MacOSWindowInfo[]> {
 export async function openWindowsForTargeting(
 	sources: OpenWindowsSources = {
 		listNative: nativeSourceOverride ?? listNativeWindows,
-		listNativeAllSpaces: listNativeAllSpacesWindows,
+		listNativeAllSpaces: nativeAllSpacesSourceOverride ?? listNativeAllSpacesWindows,
 		listBinary: listBinaryWindows,
 	},
 	options: { readonly includeOffscreen?: boolean } = {},

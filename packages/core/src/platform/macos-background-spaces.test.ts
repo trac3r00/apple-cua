@@ -156,6 +156,29 @@ afterEach(() => {
 });
 
 describe("#given an explicit window on another Space #when the background host observes it #then identity and bounds stay bound", () => {
+	it("preserves current-Space inventory when all-Spaces enumeration fails", async () => {
+		const computer = approvedBackgroundComputer();
+		fixture.currentWindows.push({
+			id: 11,
+			owner: { processId: PID, name: "Fixture App" },
+			title: "Second current window",
+			bounds: { x: 410, y: 0, width: 400, height: 300 },
+		});
+		fixture.openWindowsForTargeting
+			.mockImplementationOnce(async () => fixture.currentWindows)
+			.mockRejectedValueOnce(new Error("all-Spaces enumeration unavailable"));
+		try {
+			const state = await computer.getAppState(PID, {
+				settleMs: 0,
+				requireWindow: true,
+				windowId: 10,
+			});
+			expect(state.windowCandidates?.map((window) => window.id)).toEqual([10, 11]);
+		} finally {
+			await computer.close();
+		}
+	});
+
 	it("tries current-Space windows first, falls back to all-Spaces, and captures the exact id", async () => {
 		const computer = approvedBackgroundComputer();
 		try {

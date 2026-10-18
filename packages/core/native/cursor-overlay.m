@@ -61,7 +61,7 @@ static void reset_idle_timer(void) {
 }
 
 // Cursor geometry. The arrow is authored on Cua's 128-unit theme canvas and
-// drawn at its 42-point display size. The overlay window is a fixed box with
+// drawn at kThemeDisplaySize points. The overlay window is a fixed box with
 // the arrow tip pinned at (kHotspotX, kHotspotY) from its top-left corner, so
 // every screen point the agent targets lands exactly on the tip.
 // The box is square with the hotspot at its centre so artwork rotated about the

@@ -383,13 +383,12 @@ shows: "scroll, click test1, Cmd-click test2" in a 152-row background Finder lis
 instead of 7 calls and 7.4 s.
 
 Pick how much the agent loads with `APPLE_CUA_TOOLSET`. `full` (the default) registers every desktop tool;
-`lean` registers nine — `get_capabilities`, `list_apps`, `list_windows`, `open_app`, `get_app_state`,
-`find_elements`, `verify_state`, `run_script` and `ask_user` — and does everything else through `run_script`.
-The iPhone tools are opt-in with `APPLE_CUA_IPHONE=1` under either profile. Measured on the tool list an agent
-loads every session: lean 9 tools / 11.5 KB, full 26 / 38 KB, full with iPhone 38 / 45 KB, against 38 tools /
-52 KB before (lean saves about 10k tokens per session). `run_steps` and `run_parallel` publish one flat step
-schema and still validate every step against the strict per-type schema before anything is dispatched; a test
-holds the byte budgets.
+`lean` registers ten — `get_capabilities`, `list_apps`, `list_windows`, `open_app`, `get_app_state`,
+`find_elements`, `verify_state`, `run_script`, `ask_user` and `analyze_screen` — and does everything else
+through `run_script`.
+The iPhone tools are opt-in with `APPLE_CUA_IPHONE=1` under either profile.
+`run_steps` and `run_parallel` publish one flat step schema and still validate every step
+against the strict per-type schema before anything is dispatched.
 
 **Context-first contract (MCP migration):**
 

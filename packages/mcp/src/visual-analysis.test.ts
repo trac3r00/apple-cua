@@ -97,7 +97,11 @@ describe("#given visual analysis output #when parsing #then only bounded image f
 
 	it("rejects nonfinite confidence and oversized element lists", () => {
 		expect(() =>
-			parseVisualAnalysis(response([element("infinite", 0, 0, { confidence: Number.POSITIVE_INFINITY })]), 100, 100),
+			parseVisualAnalysis(
+				'{"elements":[{"label":"infinite","role":"button","interaction":"click","confidence":1e999,"frame":{"x":0,"y":0,"width":20,"height":10}}],"coverage":{"top":true,"middle":true,"bottom":true},"truncated":false}',
+				100,
+				100,
+			),
 		).toThrow();
 		expect(() =>
 			parseVisualAnalysis(

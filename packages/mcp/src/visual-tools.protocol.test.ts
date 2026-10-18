@@ -73,6 +73,14 @@ describe("#given an approved observed window #when analyze_screen samples it #th
 		expect(request?.params.temperature).toBe(0);
 		expect(request?.params.maxTokens).toBe(16_000);
 		expect(request?.params).not.toHaveProperty("tools");
+		expect(harness.computer.stateOptions.at(-1)).toMatchObject({ windowId: 71 });
+		expect(payload["visualAnalysis"]).toMatchObject({
+			elements: expect.arrayContaining([
+				expect.objectContaining({ label: "Icon-only back", frame: { x: 2, y: 2, width: 10, height: 10 } }),
+				expect.objectContaining({ label: "Bottom action", frame: { x: 20, y: 370, width: 40, height: 20 } }),
+			]),
+			coverage: { top: true, middle: true, bottom: true },
+		});
 		expect(payload["visualAnalysisCompleteness"]).toEqual({
 			inferredFromModelReportedCoverage: true,
 			verified: false,
@@ -98,15 +106,28 @@ describe("#given an approved observed window #when analyze_screen samples it #th
 		expect(replay.isError).toBe(true);
 	});
 
-	it("marks model-reported incomplete coverage and token limit as an incomplete inference", async () => {
-		const harness = await run(() => ({
-			...sample(
+	it("marks model-reported incomplete coverage as an incomplete inference", async () => {
+		const harness = await run(() =>
+			sample(
 				JSON.stringify({
 					elements: [],
 					coverage: { top: true, middle: false, bottom: true },
 					truncated: false,
 				}),
 			),
+		);
+		const payload = jsonPayload(
+			await harness.client.callTool({ name: "analyze_screen", arguments: { app: "Finder" } }),
+		);
+		expect(payload["visualAnalysisCompleteness"]).toEqual({
+			inferredFromModelReportedCoverage: false,
+			verified: false,
+		});
+	});
+
+	it("marks a sampling token limit as an incomplete inference", async () => {
+		const harness = await run(() => ({
+			...sample(visualResponse),
 			stopReason: "maxTokens",
 		}));
 		const payload = jsonPayload(

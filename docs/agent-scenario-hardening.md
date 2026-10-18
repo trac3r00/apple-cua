@@ -21,7 +21,7 @@ skipped. The repository-wide formatting blockers noted below remain pre-existing
 | --- | --- | --- |
 | OmO | Live MCP capabilities, guarded desktop/browser actions, and verification | Not a general agent success-rate benchmark |
 | Codex | Real `exec` session called `get_capabilities` successfully using transient stdio configuration | Read-only tool call, not all agent task types; default `gpt-6.1-sol` failed, advertised `gpt-6-astra` succeeded |
-| Hermes | Real `mcp test apple-cua` connected in 1,295 ms and discovered all nine lean tools | Discovery, not a model-driven desktop task |
+| Hermes | Real `mcp test apple-cua` connected in 1,295 ms and discovered the lean tool profile | Discovery, not a model-driven desktop task; this historical run predates `analyze_screen` |
 | Claude | Transient MCP model-driven smoke attempted | Provider returned HTTP 429 weekly quota; no tool call occurred |
 | OpenClaw | Documented registration path; no local installation established | No live client run |
 | Doldori | User clarified the product name; primary contract not identified | No configuration or compatibility certification |

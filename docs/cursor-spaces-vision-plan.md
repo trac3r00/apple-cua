@@ -11,10 +11,11 @@ supported action from a model inference or an unverified dispatch.
 2. Keyboard input shows a keyboard symbol, including keyboard-only sessions.
    Pointer, scroll, click, and thinking feedback remain distinct.
 3. A background observation and action can address an explicitly observed window
-   in another Mission Control Space without activating the app, raising a window,
-   switching Spaces, or moving the real pointer. Attended input retains its
-   current-Space restrictions. Closed, minimized, and ambiguous windows must not
-   silently become another target.
+   in another Mission Control Space without foregrounding or raising the app,
+   switching Spaces, or moving the real pointer. Current-Space AppKit activation
+   is distinct from foregrounding; the off-Space path intentionally skips
+   activation. Attended input retains its current-Space restrictions. Closed,
+   minimized, and ambiguous windows must not silently become another target.
 4. The connected agent's vision model inspects the entire approved window from
    top to bottom, including icon-only controls, text, toolbars, sidebars, content,
    sheets, and bottom controls. It returns bounded visual regions in screenshot
@@ -113,6 +114,14 @@ element completeness, universal application event delivery, or a successful
 action merely because a model or API said so. Record unresolved gaps explicitly.
 
 ## Evidence ledger
+
+Evidence paths under `.omo/evidence/cursor-spaces-vision/` below refer to
+local ignored run artifacts; those files are not included in this checkout.
+Reproducible repository checks include
+`pnpm exec vitest run packages/mcp/src/visual-tools.protocol.test.ts packages/mcp/src/visual-analysis.test.ts`,
+`pnpm typecheck:tests`, `pnpm lint`, and `pnpm build`. These commands establish
+repository test/build behavior only; they do not reproduce live desktop or
+connected-model evidence.
 
 - Foundation worker verification: 41 tests passed in four targeted test files.
   Standalone MCP typecheck could not resolve the unbuilt core workspace package;

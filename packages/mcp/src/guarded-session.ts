@@ -134,6 +134,8 @@ export interface ObservationOptions {
 	readonly settleMs?: number;
 	/** Cap the accessibility elements returned for this observation. */
 	readonly maxElements?: number;
+	/** Return only elements fully visible in the observed window. */
+	readonly visibleOnly?: boolean;
 	/** Include the application menu bar, which is app chrome rather than window content. */
 	readonly includeMenuBar?: boolean;
 	/**
@@ -253,15 +255,24 @@ export interface RunStepDriver {
 	/** The same step aimed at a screen point (global logical points) where text was read from the window's pixels. */
 	readonly resolveAtPoint: (step: RunStep, observation: InputObservation, point: Point) => RunStep;
 	readonly validate: (step: RunStep, observation: InputObservation) => void;
-	readonly dispatch: (step: RunStep, targetPid: number, observation: InputObservation) => Promise<StepDispatch>;
+	readonly dispatch: (
+		step: RunStep,
+		targetPid: number,
+		observation: InputObservation,
+		actions?: readonly string[],
+	) => Promise<StepDispatch>;
 }
 
-// biome-ignore lint/suspicious/noConfusingVoidType: a mutation may report how it dispatched input, or report nothing when its route is not known to it
-type Mutation = (targetPid: number, observation: InputObservation) => Promise<ActionDispatch | void>;
+type Mutation = (
+	targetPid: number,
+	observation: InputObservation,
+	elements: ObservedElementIdentity | undefined,
+	// biome-ignore lint/suspicious/noConfusingVoidType: a mutation may report how it dispatched input, or report nothing when its route is not known to it
+) => Promise<ActionDispatch | void>;
 type Validation = (observation: InputObservation) => void;
 type ObservedElementIdentity = ReadonlyMap<
 	number,
-	{ readonly role: string; readonly label: string | null; readonly y: number }
+	{ readonly role: string; readonly label: string | null; readonly y: number; readonly actions: readonly string[] }
 >;
 
 type TargetLookup<T> = { readonly found: T } | { readonly missing: string };
@@ -414,6 +425,7 @@ export class GuardedSession {
 				...(request.settleMs === undefined ? {} : { settleMs: request.settleMs }),
 				...(request.windowId === undefined ? {} : { windowId: request.windowId }),
 				...(request.maxElements === undefined ? {} : { maxElements: request.maxElements }),
+				...(request.visibleOnly === undefined ? {} : { visibleOnly: request.visibleOnly }),
 				...(request.includeMenuBar === undefined ? {} : { includeMenuBar: request.includeMenuBar }),
 				...(request.subtreeOf === undefined ? {} : { subtreeOf: request.subtreeOf }),
 			});
@@ -727,7 +739,7 @@ export class GuardedSession {
 			let dispatch: Awaited<ReturnType<Mutation>>;
 			try {
 				dispatch = await this.inInputScope(expected.pid, expected.observation, undefined, () =>
-					action(expected.pid, expected.observation),
+					action(expected.pid, expected.observation, expected.elements),
 				);
 			} catch (error: unknown) {
 				const interrupted = this.interruptedResult(expected.pid, error);
@@ -971,6 +983,7 @@ export class GuardedSession {
 				}
 
 				let runnable = step;
+				let targetActions: readonly string[] | undefined;
 				let resolvedElement:
 					| { readonly id: number; readonly role: string; readonly label: string | null }
 					| undefined;
@@ -989,10 +1002,14 @@ export class GuardedSession {
 					foundEvidence = searched.evidence;
 					if (searched.found.kind === "element") {
 						const element = searched.found.element;
+						targetActions = element.actions;
 						resolvedElement = { id: element.id, role: element.role, label: element.label };
 						// A control that does not advertise AXPress (a Finder row's name field) takes no accessibility
 						// press, so its click goes to the centre the search just measured, through the pointer route.
-						const pointerClick = step.type === "click" && !element.actions.includes(AX_PRESS_ACTION);
+						const pointerClick =
+							step.type === "click" &&
+							!element.actions.includes(AX_PRESS_ACTION) &&
+							!(step.mouse_button === "right" && element.actions.includes("AXShowMenu"));
 						runnable = pointerClick
 							? driver.resolveAtPoint(step, expected.observation, searched.found.centre)
 							: driver.resolve(step, element.id);
@@ -1016,6 +1033,7 @@ export class GuardedSession {
 						break;
 					}
 					const match = located.found;
+					targetActions = match.element.actions;
 					resolvedElement = { id: match.element.id, role: match.element.role, label: match.element.label };
 					runnable = driver.resolve(step, match.element.id);
 				}
@@ -1042,6 +1060,7 @@ export class GuardedSession {
 						stoppedEarly = true;
 						break;
 					}
+					targetActions = located.found.actions;
 				}
 
 				if (guardNeeded) {
@@ -1068,7 +1087,7 @@ export class GuardedSession {
 				try {
 					const dispatch = await timed("dispatch", () =>
 						this.inInputScope(expected.pid, expected.observation, control.signal, () =>
-							driver.dispatch(runnable, expected.pid, expected.observation),
+							driver.dispatch(runnable, expected.pid, expected.observation, targetActions),
 						),
 					);
 					reports.push({
@@ -1812,7 +1831,10 @@ function observedElementIdentity(state: AppState): ObservedElementIdentity | und
 	return new Map(
 		state.elements.map(
 			(element) =>
-				[element.id, { role: element.role, label: element.label, y: Math.round(element.frame.y) }] as const,
+				[
+					element.id,
+					{ role: element.role, label: element.label, y: Math.round(element.frame.y), actions: element.actions },
+				] as const,
 		),
 	);
 }

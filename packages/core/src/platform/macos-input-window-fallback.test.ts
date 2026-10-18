@@ -109,6 +109,10 @@ describe("#given target windows without owner metadata", () => {
 			deltaY: -3,
 			targetPid: 17264,
 			targetWindow,
+			position: {
+				x: targetWindow.bounds.x + targetWindow.bounds.width / 2,
+				y: targetWindow.bounds.y + targetWindow.bounds.height / 2,
+			},
 		});
 		controller.close();
 	});

@@ -15,7 +15,9 @@ vi.mock("node:net", () => ({
 		const socket = Object.assign(new EventEmitter(), {
 			write: () => true,
 			end: () => undefined,
-			destroy: () => undefined,
+			destroy: () => {
+				queueMicrotask(() => socket.emit("close"));
+			},
 		});
 		queueMicrotask(() => socket.emit("error", new Error("ECONNREFUSED")));
 		return socket;

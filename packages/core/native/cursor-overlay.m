@@ -935,6 +935,21 @@ static int dispatch_command_line(const char *line, int replyFd) {
       dispatch_semaphore_signal(answered);
     });
     dispatch_semaphore_wait(answered, DISPATCH_TIME_FOREVER);
+  } else if (sscanf(line, "track %lf %lf", &x, &y) == 2) {
+    if (!isfinite(x) || !isfinite(y)) {
+      return 0;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+      apply_set(x, y);
+      if (gScootTimer != nil) {
+        [gScootTimer invalidate];
+        gScootTimer = nil;
+      }
+      [gWindow setFrameOrigin:NSMakePoint(x - kHotspotX,
+                                          primary_screen_height() - y +
+                                              kHotspotY - kOverlaySize)];
+      reset_idle_timer();
+    });
   } else if (sscanf(line, "set %lf %lf", &x, &y) == 2) {
     if (!isfinite(x) || !isfinite(y)) {
       return 0;
@@ -1144,7 +1159,9 @@ int main(int argc, const char *argv[]) {
     [gWindow setBackgroundColor:[NSColor clearColor]];
     [gWindow setHasShadow:NO];
     [gWindow setIgnoresMouseEvents:YES];
-    [gWindow setLevel:NSFloatingWindowLevel];
+    // Stay above notification banners while remaining a non-interactive,
+    // non-activating overlay.
+    [gWindow setLevel:NSStatusWindowLevel];
     [gWindow
         setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
                               NSWindowCollectionBehaviorStationary |
@@ -1182,7 +1199,7 @@ int main(int argc, const char *argv[]) {
     [gRippleWindow setBackgroundColor:[NSColor clearColor]];
     [gRippleWindow setHasShadow:NO];
     [gRippleWindow setIgnoresMouseEvents:YES];
-    [gRippleWindow setLevel:NSFloatingWindowLevel];
+    [gRippleWindow setLevel:NSStatusWindowLevel];
     [gRippleWindow
         setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
                               NSWindowCollectionBehaviorStationary |

@@ -507,7 +507,7 @@ export function postActionErrorResult(error: unknown, partial?: Record<string, u
 }
 
 const TRUNCATED_ELEMENTS_NOTE =
-	"elements is capped at the driver's element budget, so controls further down the tree are missing; reveal or find the control yourself instead of asking a person to scroll (run_steps reveal or app.reveal, find_elements, a higher max_elements, or subtree_of with a parent element id), then inspect and verify";
+	"the accessibility tree is partial because its element or depth budget was reached; use subtree_of with an observed parent to inspect deeper descendants, a higher max_elements for element-budget cuts, or reveal/find for off-screen controls, then inspect and verify";
 
 const TREE_SKIPPED_NOTE =
 	"the accessibility tree was skipped for this capture-only observation (include_accessibility_tree=false), so no element ids were produced and no observation_token was issued; call get_app_state with the tree before any element action";

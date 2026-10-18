@@ -37,6 +37,7 @@ import {
 	focusedElementFrame,
 	focusedWindowIdForPid,
 	focusedWindowIsModal,
+	isWebElementByIndex,
 	performActionByIndex,
 	pressElementAtScreenPoint,
 	rebaselineObservedElement,
@@ -261,6 +262,7 @@ export class MacOSHostComputer extends HostComputer {
 		const pid = this.input.currentTargetPid;
 		const modifiers = options?.modifiers ?? [];
 		if (this.delivery === "background" && pid !== undefined && commandChordMask(modifiers) !== undefined) {
+			await this.assertBackgroundFinderCommand(pid, { key, modifiers });
 			await this.input.prepareKeyboardTarget();
 			// Select All in a native text field is done on the field itself, which has taken effect when
 			// this returns: text typed next always replaces the selection instead of racing a posted key.
@@ -279,9 +281,13 @@ export class MacOSHostComputer extends HostComputer {
 			const chord = { key, modifiers };
 			if (plan.kind === "refuse" && item !== undefined) {
 				await this.pressKeyEquivalent(pid, chord, item.path, plan.message);
+				this.input.noteKeyboardInput(pid);
 				return;
 			}
 			if (await this.runBackgroundKeyPlan(pid, plan, chord)) {
+				if (plan.kind === "menu") {
+					this.input.noteKeyboardInput(pid);
+				}
 				return;
 			}
 		}
@@ -298,6 +304,7 @@ export class MacOSHostComputer extends HostComputer {
 	 */
 	async invokeMenu(targetPid: number, path: readonly string[]): Promise<InvokeMenuResult> {
 		const normalized = normalizeMenuPath(path);
+		await this.assertBackgroundFinderCommand(targetPid, { path: normalized });
 		const command = normalized.length === 2 && normalized[0] === "Edit" ? normalized[1] : undefined;
 		if (command !== undefined) {
 			const done = await this.editCommandOnTextField(targetPid, command);
@@ -306,11 +313,52 @@ export class MacOSHostComputer extends HostComputer {
 			}
 		}
 		const window = this.observedWindow(targetPid);
-		if (window === undefined) {
-			return await invokeMenu(targetPid, normalized);
+		const result =
+			window === undefined
+				? await invokeMenu(targetPid, normalized)
+				: await invokeWindowMenu(targetPid, normalized, (disabled, run) =>
+					this.input.withWindowCommand(targetPid, window, disabled, run),
+				);
+		this.input.noteKeyboardInput(targetPid);
+		return result;
+	}
+
+	private async assertBackgroundFinderCommand(
+		pid: number,
+		command: {
+			readonly key?: string;
+			readonly modifiers?: readonly string[];
+			readonly path?: readonly string[];
+		},
+	): Promise<void> {
+		if (this.delivery !== "background" || (applicationIsFrontmost(pid) && !this.input.holdsActivation(pid))) {
+			return;
 		}
-		return await invokeWindowMenu(targetPid, normalized, (disabled, run) =>
-			this.input.withWindowCommand(targetPid, window, disabled, run),
+		const chord =
+			command.key?.toLowerCase() === "g" &&
+			commandChordMask(command.modifiers ?? []) === commandChordMask(["shift", "cmd"]);
+		if (!chord && command.path === undefined) {
+			return;
+		}
+		const bundleId =
+			this.inputObservations.get(pid)?.bundleId ??
+			(await getRunningMacOSApps()).find((app) => app.pid === pid)?.bundleId;
+		if (bundleId !== "com.apple.finder") {
+			return;
+		}
+		const path = command.path;
+		if (!chord && path !== undefined) {
+			const equivalent = findMenuKeyEquivalent(pid, "g", ["shift", "cmd"])?.path;
+			const matched =
+				equivalent?.length === path.length && equivalent.every((segment, index) => segment === path[index]);
+			const named =
+				path.length === 2 && path[0] === "Go" && (path[1] === "Go to Folder…" || path[1] === "Go to Folder...");
+			if (!matched && !named) {
+				return;
+			}
+		}
+		throw new Error(
+			"Background command refused: Finder Go to Folder activates Finder and changes the person's front app. No key or menu action was sent. Call ask_user if the person needs to perform this command.",
 		);
 	}
 
@@ -340,21 +388,21 @@ export class MacOSHostComputer extends HostComputer {
 			window === undefined
 				? "not-held"
 				: await this.input.withWindowCommand(
-						pid,
-						window,
-						() => true,
-						async (held): Promise<"pressed" | "not-held" | "still-disabled"> => {
-							if (!held) {
-								return "not-held";
-							}
-							const enabled = await waitForKeyEquivalentEnabled(pid, chord.key, chord.modifiers);
-							if (enabled === undefined) {
-								return "still-disabled";
-							}
-							pressMenuItem(pid, enabled.path);
-							return "pressed";
-						},
-					);
+					pid,
+					window,
+					() => true,
+					async (held): Promise<"pressed" | "not-held" | "still-disabled"> => {
+						if (!held) {
+							return "not-held";
+						}
+						const enabled = await waitForKeyEquivalentEnabled(pid, chord.key, chord.modifiers);
+						if (enabled === undefined) {
+							return "still-disabled";
+						}
+						pressMenuItem(pid, enabled.path);
+						return "pressed";
+					},
+				);
 		if (outcome === "not-held") {
 			// The app was not told it is active: an item that read enabled is pressed as before, one that read
 			// disabled is refused.
@@ -591,10 +639,10 @@ export class MacOSHostComputer extends HostComputer {
 		const windowCandidates =
 			windowInventory.length > 1
 				? windowInventory.map((window) =>
-						window.id === targetWindow?.id && targetWindowTitle !== undefined
-							? { ...window, title: targetWindowTitle }
-							: window,
-					)
+					window.id === targetWindow?.id && targetWindowTitle !== undefined
+						? { ...window, title: targetWindowTitle }
+						: window,
+				)
 				: undefined;
 		const ocrText =
 			tree?.windowContentUnavailable === true && targetWindow !== undefined
@@ -878,14 +926,31 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async performAction(targetPid: number, elementIndex: number, action: string): Promise<void> {
-		this.showElement(targetPid, elementIndex, true);
+		this.showElement(targetPid, elementIndex, !action.startsWith("AXScroll"), action.startsWith("AXScroll"));
 		// Pressing or focusing an element can make its app activate itself (Safari does for a web
 		// field); background delivery hands the front back to the person's app when that happens.
 		const observation = this.inputObservations.get(targetPid);
 		if (this.delivery === "background" && observation !== undefined) {
-			guardAgainstFocusSteal({ id: observation.windowId, bounds: observation.windowBounds });
+			const window = { id: observation.windowId, bounds: observation.windowBounds };
+			guardAgainstFocusSteal(window);
+			const element = this.lastAxTreeByPid.get(targetPid)?.elements.find((item) => item.id === elementIndex);
+			const opensMenu =
+				action === "AXShowMenu" ||
+				(action === "AXPress" && (element?.role === "AXPopUpButton" || element?.role === "AXMenuButton"));
+			if (opensMenu) {
+				// AppKit accepts popup actions while inactive but does not show them. Hold only this app
+				// active behind the person's app, just as a background pointer gesture does.
+				await this.input.withWindowCommand(targetPid, window, () => true, async () => {
+					performActionByIndex(targetPid, elementIndex, action);
+				});
+				return;
+			}
 		}
 		performActionByIndex(targetPid, elementIndex, action);
+	}
+
+	async isWebElement(targetPid: number, elementIndex: number): Promise<boolean> {
+		return isWebElementByIndex(targetPid, elementIndex);
 	}
 
 	async pressAtPosition(targetPid: number, position: Point): Promise<boolean> {
@@ -901,7 +966,7 @@ export class MacOSHostComputer extends HostComputer {
 	 * centre first to keep every action visible. The frame lookup is display only: when it fails the
 	 * action still runs and reports its own error, so a lookup failure is not surfaced here.
 	 */
-	private showElement(targetPid: number, elementIndex: number, press: boolean): void {
+	private showElement(targetPid: number, elementIndex: number, press: boolean, scroll = false): void {
 		let frame: Rect | undefined;
 		try {
 			frame = elementFrameByIndex(targetPid, elementIndex);
@@ -909,7 +974,12 @@ export class MacOSHostComputer extends HostComputer {
 			return;
 		}
 		if (frame !== undefined && frame.width > 0 && frame.height > 0) {
-			this.input.showPointer({ x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 }, press);
+			const position = { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 };
+			if (scroll) {
+				this.input.showScrollPointer(position);
+			} else {
+				this.input.showPointer(position, press);
+			}
 		}
 	}
 

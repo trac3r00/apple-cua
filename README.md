@@ -32,6 +32,39 @@ If you need strong VM isolation, use cua. If you need low-latency host-native co
 
 ## Quickstart
 
+### Phone, FaceTime, and iPhone compatibility
+
+Mac Phone is available on macOS 26 or later; FaceTime and iPhone cellular relay
+also depend on the user's Apple service configuration. Floating call banners are
+composited by Notification Center, with separate FaceTime helpers behind it.
+Each target requires explicit approval under its own bundle ID:
+
+- `com.apple.notificationcenterui` (the visible banner host on macOS 26.7)
+- `com.apple.FaceTime.FaceTimeNotificationExtension`
+- `com.apple.facetime.NotificationViewBridgeService`
+- `com.apple.facetime.NotificationService`
+
+The driver discovers these background hosts and targets their notification-layer
+windows after verifying the bundle identity and system path. Main-app approval does
+not grant host/helper approval. The banner's AX tree may expose only a placeholder
+group; its screenshot identifies the actual Call control. Hidden helper windows
+are not a substitute for the visible host. Follow the [call-banner workflow](skills/apple-cua/SKILL.md#phone-and-facetime-call-banners)
+and confirm the displayed recipient before dialing.
+
+Discovery is verified; background dialing is not. On macOS 26.7, per-process
+and window-owner background clicks were dispatched without a visible call-state
+change. The window-owner attempt preserved the real pointer and frontmost app,
+but the recipient confirmed that no call occurred. The ineffective mouse
+window-owner experiment was removed. An opaque banner and a dispatched
+event do not establish call support. Do not replay an uncertain Call action.
+
+iOS 26 and iOS 27 fall within Apple's documented iOS 18-or-later
+[iPhone Mirroring requirements](https://support.apple.com/en-ie/120421), but this is
+eligibility, not an end-to-end test result. The banner failure and helper identities
+were measured on macOS 26.7. macOS 27 and iOS 26/27 calling have not been validated
+on devices here. Mirroring does not expose the iPhone microphone for phone calls;
+[Mac call relay](https://support.apple.com/en-ie/102405) is a separate service.
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash
 ```
@@ -572,10 +605,12 @@ background app it is active: apple-cua then autosaves nothing, but a first-mouse
 background click on activating its window, and window commands that need the app active are refused with nothing
 sent.
 
-Some apps bring themselves forward when background input reaches them (Finder on Go to Folder, Safari on a
-web field). A watcher on its own thread checks every 10 ms and hands the front straight back to your app, and
-stops for good if you switch apps yourself. Measured on a background Finder Go to Folder, the target held the
-front for 440-675 ms before and 0-14 ms after (four trials, sampled every 2 ms).
+Some apps bring themselves forward when background input reaches them. A watcher on its own thread checks
+every 10 ms and hands the front back to your app, stopping if you switch apps yourself. Restoration does not
+prevent a transient focus change. Finder Go to Folder is therefore refused before dispatch when Finder is
+behind your front app, for both its shortcut and menu path. The earlier restoration measurements
+(440-675 ms before and 0-14 ms after, four trials sampled every 2 ms) describe the old route, not a guarantee
+that background input never takes focus.
 
 To see what it is doing, apple-cua draws its own agent cursor: a click-through arrow pointer modelled on Cua
 Driver's default theme (blue fill, white outline, soft glow, tip exactly on the target) on a

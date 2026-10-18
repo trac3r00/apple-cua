@@ -35,6 +35,7 @@ import {
 import {
 	type SkyLightTargetWindow,
 	postAuthenticatedSkyLightEventToPid,
+	postBackgroundEventRecordToWindowOwner,
 	postCoreGraphicsEventToWindowOwner,
 	postSkyLightEventToPid,
 	setSkyLightIntegerField,
@@ -138,16 +139,11 @@ function makeMouseEvent(
 	// The app reads modifiers from the NSEvent backing a targeted event, not from the CGEvent flags
 	// set afterwards, so held modifiers have to be part of the NSEvent itself. NSEventModifierFlags
 	// use the same bits as CGEventFlags for command, option, control and shift.
+	const eventType = mouseEventType(kind, button);
 	const event =
 		targetWindow === undefined
-			? createMouseEvent(mouseEventType(kind, button), position, mouseButtonNumber(button))
-			: createNSEventBackedMouseEvent(
-					mouseEventType(kind, button),
-					position,
-					flags ?? 0,
-					targetWindow.id,
-					kind === "move" ? 0 : 1,
-				);
+			? createMouseEvent(eventType, position, mouseButtonNumber(button))
+			: createNSEventBackedMouseEvent(eventType, position, flags ?? 0, targetWindow.id, kind === "move" ? 0 : 1);
 	setLocation(event, position);
 	stampEvent(event);
 	return event;
@@ -164,6 +160,12 @@ function postMouse(
 	}
 	if (targetWindow === undefined) {
 		throw new Error("targeted mouse input requires a target window from get_app_state or a visible app window");
+	}
+	if (targetWindow.layer === 21) {
+		if (!postBackgroundEventRecordToWindowOwner(targetWindow, event)) {
+			throw new Error("failed to post notification-window mouse record without foreground activation");
+		}
+		return;
 	}
 	postSkyLightEventToPid(targetPid, event);
 }
@@ -233,7 +235,9 @@ function stampTargetedMouseEvent(
 	position: CGPoint,
 	targetWindow: SkyLightTargetWindow | undefined,
 ): void {
-	setIntegerValueField(event, K_CG_MOUSE_EVENT_SUBTYPE, 3);
+	if (targetWindow?.layer !== 21) {
+		setIntegerValueField(event, K_CG_MOUSE_EVENT_SUBTYPE, 3);
+	}
 	if (targetWindow !== undefined) {
 		setIntegerValueField(event, K_CG_MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER, targetWindow.id);
 		setIntegerValueField(

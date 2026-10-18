@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
+import { MacOSInputController, setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
 import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
 
 type ExecFileCallback = (error: Error | null, stdout: string | Buffer, stderr: string) => void;
@@ -474,6 +474,34 @@ describe("#given an app-approval store #when an app is not approved #then get_ap
 	});
 });
 
+describe("#given a call helper #when only FaceTime is approved #then helper approval is still required", () => {
+	it("keeps helper identity and refuses main-app approval inheritance", async () => {
+		const helper = {
+			name: "FaceTimeNotificationExtension",
+			bundleId: "com.apple.FaceTime.FaceTimeNotificationExtension",
+			pid: TARGET_PID,
+			isActive: false,
+			path: "/System/Library/ExtensionKit/Extensions/FaceTimeNotificationExtension.appex",
+		};
+		setRunningApplicationLookupForTesting({
+			getRunningApplications: () => [helper],
+			findRunningApplication: () => helper,
+		});
+		const approval = new AppApprovalStore(["com.apple.FaceTime"]);
+		const computer = new MacOSHostComputer({ appApproval: approval });
+
+		await expect(computer.getAppState(TARGET_PID, { settleMs: 0, includeScreenshot: false })).rejects.toThrow(
+			/needs your approval/,
+		);
+
+		approval.approveForSession(helper.bundleId);
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0, includeScreenshot: false });
+		expect(state.bundleId).toBe(helper.bundleId);
+		expect(state.pid).toBe(TARGET_PID);
+		expect(state.windowId).toBe(99);
+	});
+});
+
 describe("#given a URL blocklist #when a browser is on a blocked URL #then get_app_state is refused", () => {
 	it("refuses Safari on a blocklisted URL", async () => {
 		childProcessMock.execFile.mockReset();
@@ -704,6 +732,61 @@ describe("#given an observed AX app #when the host closes #then its retained acc
 
 		expect(accessibilityMock.releaseAccessibilitySnapshot).toHaveBeenCalledOnce();
 		expect(accessibilityMock.releaseAccessibilitySnapshot).toHaveBeenCalledWith(TARGET_PID);
+	});
+});
+
+describe("#given an inactive observed app #when opening a native menu #then the app is held active only behind the front app", () => {
+	it.each([
+		["AXPopUpButton", "AXPress"],
+		["AXMenuButton", "AXPress"],
+		["AXTextArea", "AXShowMenu"],
+	])("activates %s for %s before dispatch", async (role, action) => {
+		accessibilityMock.extractAccessibilityTree.mockReturnValue({
+			axAvailable: true,
+			truncated: false,
+			walkKey: "popup-window-99",
+			elements: [
+				{
+					id: 5,
+					role,
+					label: "Menu",
+					value: null,
+					frame: { x: 800, y: 550, width: 200, height: 160 },
+					actions: [action],
+					children: [],
+				},
+			],
+		});
+		const computer = new MacOSHostComputer({ delivery: "background" });
+		await computer.getAppState(TARGET_PID, { settleMs: 0, includeScreenshot: false });
+		let held = false;
+		const activation = vi
+			.spyOn(MacOSInputController.prototype, "withWindowCommand")
+			.mockImplementation(async (_pid, _window, wantsActivation, command) => {
+				held = wantsActivation();
+				try {
+					return await command(held);
+				} finally {
+					held = false;
+				}
+			});
+		accessibilityMock.performActionByIndex.mockImplementation(() => {
+			expect(held).toBe(true);
+		});
+		try {
+			await computer.performAction(TARGET_PID, 5, action);
+			expect(activation).toHaveBeenCalledWith(
+				TARGET_PID,
+				{ id: 99, bounds: WINDOW_BOUNDS },
+				expect.any(Function),
+				expect.any(Function),
+			);
+			expect(accessibilityMock.performActionByIndex).toHaveBeenCalledWith(TARGET_PID, 5, action);
+			expect(held).toBe(false);
+		} finally {
+			activation.mockRestore();
+			await computer.close();
+		}
 	});
 });
 

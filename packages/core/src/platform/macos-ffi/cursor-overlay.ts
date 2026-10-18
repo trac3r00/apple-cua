@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
@@ -13,6 +14,8 @@ export type PointerMode = "pointer" | "scroll" | "thinking" | "click";
 
 export interface PointerOverlay {
 	set(point: Point): void;
+	/** Already-paced input samples must not start another glide behind the real gesture. */
+	track?(point: Point): void;
 	highlight(rect: Rect): void;
 	setMode(mode: PointerMode): void;
 	hide(): void;
@@ -31,11 +34,11 @@ export interface OverlayTransport {
 export type OverlayTransportFactory = () => OverlayTransport | undefined;
 
 export const NOOP_POINTER_OVERLAY: PointerOverlay = {
-	set(): void {},
-	highlight(): void {},
-	setMode(): void {},
-	hide(): void {},
-	close(): void {},
+	set(): void { },
+	highlight(): void { },
+	setMode(): void { },
+	hide(): void { },
+	close(): void { },
 };
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
@@ -45,10 +48,22 @@ const overlayBinaryCandidatePaths: readonly string[] = [
 	join(moduleDirectory, "../../native/cursor-overlay"),
 ];
 
-// One shared daemon per user, keyed by a stable socket path. The daemon vanishes
-// this many seconds after the last command, so it cleans itself up when a session
-// ends but stays put while commands keep arriving.
-const overlaySocketPath = join(tmpdir(), "apple-cua-cursor.sock");
+// Each process has its own daemon unless callers supply a stable cursor identity.
+const DEFAULT_CURSOR_IDENTITY = `process-${process.pid}`;
+
+export function cursorOverlaySocketPath(identity = process.env["APPLE_CUA_CURSOR_ID"] ?? DEFAULT_CURSOR_IDENTITY): string {
+	if (
+		identity.length === 0 ||
+		identity.length > 1_024 ||
+		Array.from(identity).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+	) {
+		throw new Error("APPLE_CUA_CURSOR_ID must be a non-empty identity without control characters");
+	}
+	// macOS sun_path holds 104 bytes including its terminator. Keep the filename
+	// short enough for the per-user /var/folders temporary directory.
+	const digest = createHash("sha256").update(identity).digest("hex").slice(0, 24);
+	return join(tmpdir(), `ac-${digest}.sock`);
+}
 // Long enough to stay visible across a multi-step agent session (vision steps take
 // a few seconds each) so the cursor glides continuously instead of fading out and
 // back in between commands; still self-cleans when the session truly ends.
@@ -63,7 +78,7 @@ export function createCursorOverlay(
 	motion?: CursorMotionConfig | null,
 ): PointerOverlay {
 	const configuration = motion === undefined ? cursorMotionFromEnvironment() : parseCursorMotion(motion);
-	const factory = transportFactory ?? (() => defaultSocketTransport(Date.now, spawn, configuration));
+	const factory = transportFactory ?? (() => defaultSocketTransport(Date.now, spawn, configuration, cursorOverlaySocketPath()));
 	let transport: OverlayTransport | undefined;
 	let resolved = false;
 
@@ -74,12 +89,15 @@ export function createCursorOverlay(
 		}
 		try {
 			transport?.send(command);
-		} catch {}
+		} catch { }
 	}
 
 	return {
 		set(point: Point): void {
 			send(`set ${Math.round(point.x)} ${Math.round(point.y)}\n`);
+		},
+		track(point: Point): void {
+			send(`track ${Math.round(point.x)} ${Math.round(point.y)}\n`);
 		},
 		highlight(rect: Rect): void {
 			send(
@@ -98,7 +116,7 @@ export function createCursorOverlay(
 			// the moment a single verb's process exits (the original "never showed" bug).
 			try {
 				transport?.close();
-			} catch {}
+			} catch { }
 		},
 	};
 }
@@ -130,6 +148,7 @@ export function defaultSocketTransport(
 	now: () => number = Date.now,
 	spawnProcess: SpawnOverlayProcess = spawn,
 	motion?: CursorMotionConfig,
+	socketPath = cursorOverlaySocketPath(),
 ): OverlayTransport {
 	let lastSpawnAt = Number.NEGATIVE_INFINITY;
 	// A binary that cannot be executed (ENOENT/EACCES) will not become executable by retrying every
@@ -150,7 +169,7 @@ export function defaultSocketTransport(
 			return;
 		}
 		try {
-			const child = spawnProcess(binaryPath, ["--socket", overlaySocketPath, "--idle", overlayIdleSeconds], {
+			const child = spawnProcess(binaryPath, ["--socket", socketPath, "--idle", overlayIdleSeconds], {
 				detached: true,
 				stdio: "ignore",
 			});
@@ -163,13 +182,13 @@ export function defaultSocketTransport(
 				}
 			});
 			child.unref();
-		} catch {}
+		} catch { }
 	}
 
 	function deliver(command: string, attempt: number, finished?: () => void): void {
 		let socket: ReturnType<typeof connect>;
 		try {
-			socket = connect(overlaySocketPath);
+			socket = connect(socketPath);
 		} catch {
 			ensureDaemon();
 			finished?.();
@@ -198,14 +217,14 @@ export function defaultSocketTransport(
 			try {
 				socket.write(command);
 				socket.end();
-			} catch {}
+			} catch { }
 		});
 		socket.on("error", () => {
 			// No daemon listening yet — start one and retry briefly so the very first
 			// command still lands once the daemon has bound its socket.
 			try {
 				socket.destroy();
-			} catch {}
+			} catch { }
 			ensureDaemon();
 			if (attempt < 2) {
 				retrying = true;
@@ -227,16 +246,12 @@ export function defaultSocketTransport(
 
 	return {
 		send(command: string): void {
-			if (motion === undefined) {
-				deliver(command, 0);
-				return;
-			}
 			pending.push(command);
 			if (!sending) {
 				sending = true;
 				sendNext();
 			}
 		},
-		close(): void {},
+		close(): void { },
 	};
 }

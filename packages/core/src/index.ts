@@ -109,6 +109,12 @@ export {
 } from "./platform/macos-open-app.js";
 export { setWindowFrame } from "./platform/macos-window-frame.js";
 export {
+	type DockAction,
+	type DockSnapshot,
+	type DockSource,
+	createNativeDockSource,
+} from "./platform/macos-dock.js";
+export {
 	type OcrBox,
 	type OcrTextObservation,
 	type RecognizeTextOptions,

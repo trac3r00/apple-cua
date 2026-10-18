@@ -146,6 +146,17 @@ const stepBuilders = Object.freeze({
 			modifiers: pick(options, "modifiers"),
 		}),
 	}),
+	drag: (from: unknown, to: unknown, options?: unknown): StepObject => ({
+		type: "drag",
+		from_x: pick(from, "x"),
+		from_y: pick(from, "y"),
+		to_x: pick(to, "x"),
+		to_y: pick(to, "y"),
+		...defined({
+			duration_ms: pick(options, "durationMs") ?? pick(options, "duration_ms"),
+			modifiers: pick(options, "modifiers"),
+		}),
+	}),
 	setValue: (target: unknown, value: unknown, options?: unknown): StepObject => ({
 		type: "set_value",
 		...targetWithFind(target, options),
@@ -304,6 +315,7 @@ function makeAppHandle(target: WorkerTarget): Readonly<Record<string, unknown>> 
 		observe: (options?: unknown) => call("observe", target, [options]),
 		find: (query: unknown, options?: unknown) => call("find", target, [query, options]),
 		click: (element: unknown, options?: unknown) => act(stepBuilders.click(element, options)),
+		drag: (from: unknown, to: unknown, options?: unknown) => act(stepBuilders.drag(from, to, options)),
 		setValue: (element: unknown, value: unknown, options?: unknown) =>
 			act(stepBuilders.setValue(element, value, options)),
 		type: (text: unknown) => act(stepBuilders.type(text)),
@@ -345,6 +357,13 @@ const apple = Object.freeze({
 		return call("windows", undefined, [name]);
 	},
 	steps: stepBuilders,
+	dock: () =>
+		Object.freeze({
+			observe: () => call("dockObserve", undefined, []),
+			click: (target: unknown) => call("dockAct", undefined, [target, "AXPress"]),
+			showMenu: (target: unknown) => call("dockAct", undefined, [target, "AXShowMenu"]),
+			cancel: (target: unknown) => call("dockAct", undefined, [target, "AXCancel"]),
+		}),
 });
 
 function serializeValue(value: unknown): { readonly value: unknown; readonly valueTruncated: boolean } {

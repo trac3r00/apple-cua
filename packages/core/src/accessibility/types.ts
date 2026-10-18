@@ -84,9 +84,9 @@ export interface AppState {
 	 */
 	treeSkipped?: boolean;
 	/**
-	 * True when the accessibility walk stopped at the element budget, so `elements`
-	 * is a prefix of the real tree rather than all of it. Raise `max_elements` to see
-	 * the rest.
+	 * True when `elements` is incomplete because the element budget was reached or descendants were omitted
+	 * at the depth limit. Raise `max_elements` for budget truncation, or observe a subtree
+	 * to explore descendants omitted at the depth limit.
 	 */
 	elementsTruncated?: boolean;
 	/**

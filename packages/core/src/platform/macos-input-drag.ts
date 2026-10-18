@@ -3,6 +3,12 @@ import type { Point } from "../types/index.js";
 const DEFAULT_DRAG_FRAME_MILLISECONDS = 16;
 const MAX_DRAG_STEPS = 60;
 
+/** Distance-based travel time in milliseconds, bounded so large displays do not create long gestures. */
+export function pointerTravelDuration(from: Point, to: Point): number {
+	const distance = Math.hypot(to.x - from.x, to.y - from.y);
+	return distance === 0 ? 0 : Math.min(600, Math.max(120, distance * 0.6));
+}
+
 export function dragSteps(duration: number): number {
 	if (duration <= 0) {
 		return 1;

@@ -139,6 +139,8 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	postActionSummary: AppState["axChangeSummary"] = { added: 1, removed: 0, changed: 0 };
 	readonly hiddenElementIds = new Set<number>();
 	readonly elementLabelOverrides = new Map<number, string>();
+	readonly elementActions = new Map<number, readonly string[]>();
+	readonly extraElements: AXTreeElement[] = [];
 	readonly fieldValues = new Map<number, string | null>([
 		[20, "draft"],
 		[21, "queued"],
@@ -466,7 +468,7 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 				label: this.elementLabelOverrides.get(9) ?? "Open",
 				value: null,
 				frame: { x: 10, y: 20, width: 30, height: 40 },
-				actions: ["AXPress"],
+				actions: [...(this.elementActions.get(9) ?? ["AXPress"])],
 				children: [],
 			},
 			{
@@ -499,7 +501,7 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 				children: [],
 			});
 		}
-		return [...elements, ...this.scrollListElements(visibleOnly)].filter(
+		return [...elements, ...this.extraElements, ...this.scrollListElements(visibleOnly)].filter(
 			(element) => !this.hiddenElementIds.has(element.id),
 		);
 	}

@@ -1,7 +1,6 @@
 import type { KoffiFunc } from "koffi";
+import { isDiscoverableApplication } from "../macos-call-helpers.js";
 import { koffi } from "./koffi.js";
-
-const NS_APPLICATION_ACTIVATION_POLICY_REGULAR = 0;
 
 const appKit = koffi.load("/System/Library/Frameworks/AppKit.framework/AppKit");
 const objc = koffi.load("/usr/lib/libobjc.A.dylib");
@@ -189,9 +188,6 @@ function readApplicationArray(array: object): WorkspaceRunningApplication[] {
 }
 
 function readApplication(reference: object): WorkspaceRunningApplication | undefined {
-	if (msgInteger(reference, activationPolicySelector) !== NS_APPLICATION_ACTIVATION_POLICY_REGULAR) {
-		return undefined;
-	}
 	const name = readStringProperty(reference, localizedNameSelector);
 	const bundleId = readStringProperty(reference, bundleIdentifierSelector);
 	const pid = msgProcessIdentifier(reference, processIdentifierSelector);
@@ -200,6 +196,9 @@ function readApplication(reference: object): WorkspaceRunningApplication | undef
 	}
 	const bundleUrl = msgPointer(reference, bundleUrlSelector);
 	const path = bundleUrl === null ? "" : readStringProperty(bundleUrl, pathSelector);
+	if (!isDiscoverableApplication(msgInteger(reference, activationPolicySelector), bundleId, path)) {
+		return undefined;
+	}
 	return {
 		name,
 		bundleId,

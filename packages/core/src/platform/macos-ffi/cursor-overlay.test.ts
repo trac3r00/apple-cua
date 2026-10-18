@@ -51,6 +51,17 @@ describe("#given an overlay transport #when highlighting a window #then it forwa
 	});
 });
 
+describe("#given paced pointer samples #when tracking a gesture #then native playback does not ease them again", () => {
+	it("sends exact tracking commands rather than glide commands", () => {
+		const transport = fakeTransport();
+		const overlay = createCursorOverlay(() => transport);
+
+		overlay.track?.({ x: -100.4, y: 240.6 });
+
+		expect(transport.sends).toEqual(["track -100 241\n"]);
+	});
+});
+
 describe("#given no overlay transport #when driven #then every call is a safe no-op", () => {
 	it("never throws when the factory yields nothing", () => {
 		const overlay = createCursorOverlay(() => undefined);

@@ -124,6 +124,28 @@ async function resetDesktop(): Promise<void> {
 
 const PRIMER = ["mouse:down:-1,-1:0", "mouse:up:-1,-1:0"];
 
+describe("#given a nonactivating notification host #when clicking in background #then no app activation lifecycle is synthesized", () => {
+	beforeEach(resetDesktop);
+
+	it("posts only the requested gesture and does not prime or deactivate the host", async () => {
+		setOpenWindowsSourceForTesting(() => [
+			{ ...WINDOW, owner: { processId: 1234, name: "Notification Center" }, layer: 21 },
+		]);
+		const controller = await backgroundController();
+		try {
+			await controller.click({ x: 50, y: 70 });
+			controller.close();
+
+			expect(log.events).toEqual(["mouse:down:50,70:0", "mouse:up:50,70:0"]);
+			expect(skyLightMock.setProcessAppActive).not.toHaveBeenCalled();
+			expect(coreGraphicsMock.warpCursorPosition).not.toHaveBeenCalled();
+		} finally {
+			controller.close();
+			setOpenWindowsSourceForTesting(() => undefined);
+		}
+	});
+});
+
 describe("#given a background controller holding modifiers across a pointer gesture", () => {
 	beforeEach(resetDesktop);
 
@@ -244,13 +266,15 @@ describe("#given a background controller holding modifiers across a pointer gest
 		await controller.drag({ from: { x: 20, y: 30 }, to: { x: 60, y: 30 }, modifiers: ["alt"] });
 
 		const mouse = coreGraphicsMock.postMouseEvent.mock.calls.map(([call]) => [call.kind, call.flags]);
-		expect(mouse).toEqual([
+		expect(mouse.slice(0, 3)).toEqual([
 			["down", undefined],
 			["up", undefined],
 			["down", OPTION],
-			["drag", OPTION],
-			["up", OPTION],
 		]);
+		const dragging = mouse.slice(3, -1);
+		expect(dragging.length).toBeGreaterThan(1);
+		expect(dragging.every(([kind, flags]) => kind === "drag" && flags === OPTION)).toBe(true);
+		expect(mouse.at(-1)).toEqual(["up", OPTION]);
 		controller.close();
 	});
 

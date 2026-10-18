@@ -116,3 +116,16 @@ describe("#given window enumeration #when filtering by process #then only visibl
 		expect(candidates.map((candidate) => candidate.id)).toEqual([100, 200]);
 	});
 });
+
+describe("#given a verified notification host #when resolving its observed window #then its delivery layer is retained", () => {
+	it("retains the notification layer on the exact on-screen target", () => {
+		const host = { ...first, layer: 21 };
+
+		const resolved = resolveTargetWindow([host], 1234, [100], undefined, 100);
+
+		expect(resolved).toEqual({
+			kind: "resolved",
+			window: { id: 100, bounds: first.bounds, layer: 21 },
+		});
+	});
+});

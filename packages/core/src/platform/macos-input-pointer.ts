@@ -2,7 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { DragOptions, Point, Rect } from "../types/index.js";
 import type { MouseButton } from "./macos-ffi/coregraphics.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
-import { dragSteps, interpolatePointEased } from "./macos-input-drag.js";
+import { dragSteps, interpolatePointEased, pointerTravelDuration } from "./macos-input-drag.js";
 import { runFocusLeasedGesture } from "./macos-targeted-gesture.js";
 
 /** `flags` is the held-modifier CGEventFlags mask to stamp on the event; undefined leaves the flags alone. */
@@ -42,9 +42,9 @@ export function primerPosition(layout: ScreenLayout | undefined): Point | undefi
 	}
 	const candidate = rects.some((rect) => covers(rect, PRIMER_USUAL_POSITION))
 		? {
-				x: Math.min(...rects.map((rect) => rect.x)) - 1,
-				y: Math.min(...rects.map((rect) => rect.y)) - 1,
-			}
+			x: Math.min(...rects.map((rect) => rect.x)) - 1,
+			y: Math.min(...rects.map((rect) => rect.y)) - 1,
+		}
 		: PRIMER_USUAL_POSITION;
 	// Checked again rather than trusted: past 2^53 subtracting 1 no longer moves a coordinate.
 	return rects.some((rect) => covers(rect, candidate)) ? undefined : candidate;
@@ -109,7 +109,7 @@ export async function postDragSequence(
 	checkpoint: () => void = () => undefined,
 ): Promise<void> {
 	await post("down", options.from, "left", 1, targetWindow, flags);
-	const duration = options.duration ?? 0;
+	const duration = options.duration ?? pointerTravelDuration(options.from, options.to);
 	const steps = dragSteps(duration);
 	const delay = steps <= 1 ? 0 : duration / steps;
 	let at = options.from;

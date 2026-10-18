@@ -4,6 +4,37 @@ This guide describes guarded accessibility-based interaction through `run_script
 
 ## Choose the surface and inspect it
 
+### Host-managed worker delegation
+
+The full MCP toolset exposes `manage_workers` and `run_worker`. The coordinating
+agent assigns disjoint app ownership and task descriptions, then asks its host
+agent runtime to spawn the workers. The MCP server supplies bounded guarded
+execution; it does not spawn language-model agents or schedule them. Workers
+use only their assigned `worker_id` and latest token with `run_worker`, and
+return verified results to the coordinator. The coordinator independently
+checks outcomes before releasing each idle assignment. Assignments create
+distinct cursor identities on the server; background delivery has no visible
+cursor, while attended cursors are visual indicators, not independent OS mice.
+Release refuses a busy worker so app ownership cannot be taken while a run is
+in flight.
+
+All workers use the same coordinator-owned MCP session. Claims do not extend
+across separate server processes. Recover stale context with
+`manage_workers({op: "observe", worker_id: "assigned-id"})`, not an unrelated
+`get_app_state` call that would invalidate the worker's token. App ownership is
+pinned to a process; release and reassign after an app restarts.
+
+Observe screenshots together with semantic elements and their frames. Use a
+coordinate only when the visible target and screenshot coordinate space are
+clear. If a screenshot is missing, a control is inaccessible, or the mapping is
+uncertain, report that limitation and request a fresh observation or human
+assistance rather than inventing a control.
+`visual_context.element_frame_space` identifies frames already mapped to window
+screenshot pixels, while OCR frames remain global logical screen points. The
+`image_to_screen` origin and scale describe the inverse mapping and are omitted
+when there is no image. Tree coverage is explicit, including partial, diff-only,
+and capture-only observations. Image blocks remain images, not base64 JSON text.
+
 Start with a read-only, narrow observation. Resolve the actual app and window rather than assuming the frontmost window is the intended one. `apple.windows("App")` lists current windows and IDs; pass a window title or one of its observed IDs to `apple.app`. A title must match exactly or identify one unique window. Ambiguous or missing windows are refused. A bound app handle continues to refer to that window if its title changes.
 
 ```js

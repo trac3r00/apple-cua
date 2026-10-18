@@ -1,0 +1,29 @@
+{
+	"name": "@apple-cua/browser",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "Compact Chromium browser automation with the apple-cua stop gate",
+	"bin": {
+		"apple-cua-browser": "./dist/cli.js",
+		"apple-cua-browser-mcp": "./dist/server.js"
+	},
+	"exports": {
+		".": "./dist/index.js"
+	},
+	"scripts": {
+		"build": "tsgo",
+		"typecheck": "tsgo --noEmit",
+		"test": "vitest --run --root ../.. packages/browser",
+		"verify:browser": "node scripts/verify.mjs"
+	},
+	"dependencies": {
+		"@apple-cua/core": "workspace:*",
+		"@modelcontextprotocol/sdk": "^1.0.0",
+		"ws": "8.20.1",
+		"zod": "4.4.3"
+	},
+	"devDependencies": {
+		"@types/ws": "^8.5.13"
+	}
+}

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Browser-Skill-OmO</title>
+		<style>
+			:root { color-scheme: light dark; }
+			body { font: 16px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 32rem; padding: 0 1rem; }
+			h1 { font-size: 1.5rem; }
+			label { display: block; margin: 1rem 0 .35rem; }
+			input { box-sizing: border-box; padding: .5rem; width: 100%; min-height: 44px; font: inherit; }
+			button { margin: 1rem .5rem 1rem 0; padding: .5rem 1rem; min-height: 44px; font: inherit; }
+			#connect-local:not(:disabled) { background: Highlight; color: HighlightText; border: 1px solid Highlight; border-radius: 4px; }
+			summary { min-height: 44px; cursor: pointer; }
+			#status { min-height: 1.5em; }
+			@media (max-width: 480px) { body { font-size: 17px; } }
+		</style>
+	</head>
+	<body>
+		<h1>Browser-Skill-OmO</h1>
+		<p>Pairs automatically with the installed local service. Agent pages stay in a minimized background window.</p>
+		<button id="connect-local" type="button">Connect local service</button>
+		<button id="stop" type="button">Stop actions</button>
+		<details>
+			<summary>Manual connection settings</summary>
+		<form id="settings">
+			<label for="port">Loopback server port</label>
+			<input id="port" name="port" type="number" min="1" max="65535" value="47953" required>
+			<label for="token">Connection token</label>
+			<input id="token" name="token" type="password" autocomplete="off" required>
+			<button type="submit">Save and connect</button>
+		</form>
+		</details>
+		<p id="status" role="status" aria-live="polite"></p>
+		<script src="options.js"></script>
+	</body>
+</html>

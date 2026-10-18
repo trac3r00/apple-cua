@@ -38,6 +38,7 @@ export function pageRuntime(input) {
 				"image",
 				"password",
 				"radio",
+				"range",
 				"reset",
 				"submit",
 			].includes(element.type);
@@ -151,7 +152,7 @@ export function pageRuntime(input) {
 		};
 		visit(document);
 		return {
-			url: `${location.origin}${location.pathname}`,
+			url: `${location.origin}${location.pathname}`.slice(0, 8192),
 			title: document.title.slice(0, 500),
 			revision: `${state.prefix}:${state.generation}`,
 			rows,
@@ -178,7 +179,8 @@ export function pageRuntime(input) {
 					selection.addRange(range);
 				}
 				state.fillWait = new Promise((resolveFill) => {
-					const matches = () => (element.isContentEditable ? element.textContent : element.value) === input.text;
+					const matches = () =>
+						visible(element) && (element.isContentEditable ? element.textContent : element.value) === input.text;
 					const changed = () => {
 						if (matches()) finish(true);
 					};
@@ -200,6 +202,7 @@ export function pageRuntime(input) {
 		if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return fail("target center outside viewport");
 		let hit = document.elementFromPoint(x, y);
 		while (hit?.shadowRoot) {
+			if (hit === element || element.contains(hit)) break;
 			const inner = hit.shadowRoot.elementFromPoint(x, y);
 			if (!inner || inner === hit) break;
 			hit = inner;
@@ -212,6 +215,7 @@ export function pageRuntime(input) {
 
 	if (input.method === "fillComplete") {
 		const element = state.fillTarget;
+		if (element && !visible(element)) return fail("fill target unavailable");
 		if (element && (element.isContentEditable ? element.textContent : element.value) === state.fillText)
 			return { ok: true };
 		return state.fillWait ?? fail("no fill is pending");
@@ -246,20 +250,38 @@ export function pageRuntime(input) {
 	if (input.method === "verify") {
 		const text = input.text;
 		const timeoutMs = input.timeoutMs ?? 3000;
-		const contains = () => document.body?.innerText.includes(text) ?? false;
-		if (contains()) return { ok: true };
+		const roots = () => {
+			const found = [document];
+			for (const root of found) {
+				for (const element of root.querySelectorAll("*")) {
+					if (element.shadowRoot) found.push(element.shadowRoot);
+				}
+			}
+			return found;
+		};
+		const contains = (current) =>
+			current.some((root) =>
+				root === document
+					? document.body?.innerText.includes(text)
+					: Array.from(root.children).some((element) => element.innerText?.includes(text)),
+			);
+		if (contains(roots())) return { ok: true };
 		return new Promise((resolvePromise) => {
-			const observer = new MutationObserver(() => {
-				if (contains()) finish(true);
-			});
+			const observer = new MutationObserver(() => check());
+			const check = () => {
+				const current = roots();
+				for (const root of current) {
+					observer.observe(root, { subtree: true, childList: true, characterData: true });
+				}
+				if (contains(current)) finish(true);
+			};
 			const finish = (ok) => {
 				observer.disconnect();
 				clearTimeout(timer);
 				resolvePromise(ok ? { ok: true } : { error: "timeout" });
 			};
-			observer.observe(document, { subtree: true, childList: true, characterData: true });
 			const timer = setTimeout(() => finish(false), timeoutMs);
-			if (contains()) finish(true);
+			check();
 		});
 	}
 	return fail("unsupported method");

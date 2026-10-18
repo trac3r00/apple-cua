@@ -287,10 +287,16 @@ async function openTab(url) {
 			openingWindow = undefined;
 		}
 	}
-	const tab = await chrome.tabs.create({ windowId: agentWindowId, url: parsed.href, active: false });
+	const windowId = agentWindowId;
+	if (windowId === undefined) throw new Error("Background agent window was closed");
+	const background = await chrome.windows.get(windowId);
+	if (background.state !== "minimized" || background.focused)
+		throw new Error("Background agent window was revealed. Stop and return it to the background before continuing.");
+	if (stopped || !ready || agentWindowId !== windowId) throw new Error("Actions stopped");
+	const tab = await chrome.tabs.create({ windowId, url: parsed.href, active: false });
 	const state = {
 		tabId: tab.id,
-		windowId: agentWindowId,
+		windowId,
 		attached: false,
 		contextId: undefined,
 		contextGeneration: 0,
@@ -432,7 +438,11 @@ async function runSteps(state, command) {
 		if (step.action === "scroll") {
 			const prepared = await evaluate(state, "prepareScroll", { deltaY: step.deltaY });
 			if (prepared?.ok !== true) throw new Error("Scroll preparation failed");
-			if (prepared.needed) await trustedScroll(state, step.deltaY);
+			if (prepared.needed) {
+				if (!(await checkpoint(command.id, index)) || stopped || state.cancelled)
+					throw new Error("Actions stopped");
+				await trustedScroll(state, step.deltaY);
+			}
 			const scrolled = await evaluate(state, "scrollComplete");
 			if (scrolled?.ok !== true) throw new Error("Document scroll was not verified");
 		} else {
@@ -501,6 +511,7 @@ async function trustedScroll(state, deltaY) {
 	if (!viewport || !Number.isFinite(viewport.clientWidth) || !Number.isFinite(viewport.clientHeight)) {
 		throw new Error("Viewport unavailable");
 	}
+	if (stopped || state.cancelled) throw new Error("Actions stopped");
 	await chrome.debugger.sendCommand({ tabId: state.tabId }, "Input.dispatchMouseEvent", {
 		type: "mouseWheel",
 		x: viewport.clientWidth / 2,
@@ -538,11 +549,14 @@ async function pressKey(state, key) {
 	}
 }
 
-chrome.debugger.onEvent.addListener((source, method) => {
+chrome.debugger.onEvent.addListener((source, method, params) => {
 	if (source.tabId === undefined) return;
 	const state = tabsOwned.get(source.tabId);
 	if (!state) return;
-	if (method === "Page.frameNavigated" || method === "Runtime.executionContextsCleared") {
+	if (
+		(method === "Page.frameNavigated" && params?.frame && !params.frame.parentId) ||
+		method === "Runtime.executionContextsCleared"
+	) {
 		state.contextId = undefined;
 		state.frameId = undefined;
 		state.revision = undefined;

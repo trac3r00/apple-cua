@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { homedir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -14,7 +14,7 @@ const execFileAsync = promisify(execFile);
 
 export const SERVICE_LABEL = "com.browser_skill_omo.daemon";
 export const NATIVE_HOST_NAME = "com.browser_skill_omo.bridge";
-export const EXTENSION_ID = "cbdbpdmibmlmkhiacendnbbcohpbibln";
+export const EXTENSION_ID = "mlnfdbnljbighojpekgblaphpojllkdf";
 export const extensionIdSchema = z.string().regex(/^[a-p]{32}$/);
 export const DEFAULT_PORT = 47953;
 
@@ -204,7 +204,7 @@ async function ensurePrivateLog(path: string): Promise<void> {
 function serviceContext(options: ServiceOptions) {
 	const homeDirectory = options.homeDirectory ?? homedir();
 	const packageRoot = resolve(options.packageRoot ?? dirname(dirname(fileURLToPath(import.meta.url))));
-	const stateDirectory = options.stateDirectory ?? resolveStateDir();
+	const stateDirectory = resolve(options.stateDirectory ?? resolveStateDir());
 	const paths = pathsFor(homeDirectory, packageRoot, stateDirectory);
 	const nodePath = options.nodePath ?? process.execPath;
 	const uid = options.uid ?? userInfo().uid;
@@ -243,18 +243,56 @@ export async function installBrowserService(options: ServiceOptions = {}): Promi
 			`Port ${connection.port} is already in use. Stop the existing browser serve process before installing the daemon.`,
 		);
 	}
-	await writePrivateFile(
-		context.paths.launchAgent,
-		renderLaunchAgent(context.paths, context.nodePath, connection.port),
+	const artifacts = [
+		{
+			path: context.paths.launchAgent,
+			contents: renderLaunchAgent(context.paths, context.nodePath, connection.port),
+			mode: 0o600,
+		},
+		{
+			path: context.paths.nativeHostLauncher,
+			contents: renderNativeHostLauncher(context.paths, context.nodePath, extensionId),
+			mode: 0o700,
+		},
+		{
+			path: context.paths.nativeHostManifest,
+			contents: renderNativeHostManifest(context.paths, extensionId),
+			mode: 0o600,
+		},
+	];
+	const backups = await Promise.all(
+		artifacts.map(async ({ path }) => {
+			try {
+				return { path, contents: await readFile(path), mode: (await stat(path)).mode & 0o777 };
+			} catch (error) {
+				if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+					return { path, contents: undefined, mode: undefined };
+				}
+				throw error;
+			}
+		}),
 	);
-	await writePrivateFile(
-		context.paths.nativeHostLauncher,
-		renderNativeHostLauncher(context.paths, context.nodePath, extensionId),
-	);
-	await chmod(context.paths.nativeHostLauncher, 0o700);
-	await writePrivateFile(context.paths.nativeHostManifest, renderNativeHostManifest(context.paths, extensionId));
-	const bootstrapped = await context.launchctl(["bootstrap", context.domain, context.paths.launchAgent]);
-	if (bootstrapped.code !== 0) throw new Error(`Could not start the browser LaunchAgent: ${bootstrapped.stderr}`);
+	const writtenPaths = new Set<string>();
+	try {
+		for (const artifact of artifacts) {
+			writtenPaths.add(artifact.path);
+			await writePrivateFile(artifact.path, artifact.contents);
+			await chmod(artifact.path, artifact.mode);
+		}
+		const bootstrapped = await context.launchctl(["bootstrap", context.domain, context.paths.launchAgent]);
+		if (bootstrapped.code !== 0) throw new Error(`Could not start the browser LaunchAgent: ${bootstrapped.stderr}`);
+	} catch (error) {
+		for (const backup of backups) {
+			if (!writtenPaths.has(backup.path)) continue;
+			if (backup.contents === undefined) {
+				await rm(backup.path, { force: true });
+			} else {
+				await writeFile(backup.path, backup.contents);
+				await chmod(backup.path, backup.mode);
+			}
+		}
+		throw error;
+	}
 	return context.paths;
 }
 
@@ -263,7 +301,7 @@ export async function doctorBrowserService(options: ServiceOptions = {}): Promis
 	if ((options.platform ?? process.platform) !== "darwin") {
 		throw new Error("The persistent browser service is supported only on macOS.");
 	}
-	const [launchAgent, nativeHostManifest, connectionReady] = await Promise.all([
+	const [launchAgent, nativeHostManifest, nativeHostLauncher, connectionReady] = await Promise.all([
 		readFile(context.paths.launchAgent, "utf8").then(
 			() => true,
 			(error: unknown) => {
@@ -272,6 +310,13 @@ export async function doctorBrowserService(options: ServiceOptions = {}): Promis
 			},
 		),
 		readFile(context.paths.nativeHostManifest, "utf8").then(
+			() => true,
+			(error: unknown) => {
+				if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+				throw error;
+			},
+		),
+		readFile(context.paths.nativeHostLauncher).then(
 			() => true,
 			(error: unknown) => {
 				if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
@@ -288,7 +333,7 @@ export async function doctorBrowserService(options: ServiceOptions = {}): Promis
 	]);
 	const status = await context.launchctl(["print", context.serviceTarget]);
 	return {
-		installed: launchAgent && nativeHostManifest,
+		installed: launchAgent && nativeHostManifest && nativeHostLauncher,
 		running: status.code === 0,
 		connectionReady,
 		launchAgent: context.paths.launchAgent,
@@ -311,6 +356,7 @@ export async function uninstallBrowserService(options: ServiceOptions = {}): Pro
 	await Promise.all([
 		rm(context.paths.launchAgent, { force: true }),
 		rm(context.paths.nativeHostManifest, { force: true }),
+		rm(context.paths.nativeHostLauncher, { force: true }),
 	]);
 	return context.paths;
 }

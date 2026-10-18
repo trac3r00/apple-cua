@@ -1,15 +1,50 @@
+import { createServer } from "node:net";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { BrowserBridge } from "./bridge.js";
-import { createBrowserMcpServer } from "./server.js";
+import * as connection from "./connection.js";
+import { createBrowserMcpServer, main } from "./server.js";
 
 describe("browser MCP contract", () => {
 	const cleanups: (() => Promise<void>)[] = [];
 
 	afterEach(async () => {
 		for (const close of cleanups.splice(0)) await close();
+		vi.restoreAllMocks();
+	});
+
+	it("#given connection publication fails #when starting MCP #then closes transports and releases the port", async () => {
+		const failure = new Error("connection publication failed");
+		vi.spyOn(connection, "connectionToken").mockResolvedValue("a".repeat(64));
+		vi.spyOn(connection, "writeConnection").mockRejectedValue(failure);
+		const listen = BrowserBridge.prototype.listen;
+		const closeBridge = vi.spyOn(BrowserBridge.prototype, "close");
+		let port = 0;
+		vi.spyOn(BrowserBridge.prototype, "listen").mockImplementation(async function (this: BrowserBridge) {
+			cleanups.push(async () => {
+				if (!closeBridge.mock.contexts.includes(this)) await this.close();
+			});
+			port = await listen.call(this, 0);
+			return port;
+		});
+		const closeServer = vi.spyOn(McpServer.prototype, "close");
+		const closeTransport = vi.spyOn(StdioServerTransport.prototype, "close");
+		await expect(main()).rejects.toBe(failure);
+		expect(closeServer).toHaveResolved();
+		expect(closeTransport).toHaveResolved();
+		const probe = createServer();
+		try {
+			await new Promise<void>((resolve, reject) => {
+				probe.once("error", reject);
+				probe.listen(port, "127.0.0.1", resolve);
+			});
+		} finally {
+			await new Promise<void>((resolve, reject) => probe.close((error) => (error ? reject(error) : resolve())));
+		}
 	});
 
 	async function harness() {
@@ -60,9 +95,10 @@ describe("browser MCP contract", () => {
 
 	it("#given an unowned tab #when requesting observation #then returns a stale error through MCP", async () => {
 		const client = await harness();
+		await client.callTool({ name: "browser_space", arguments: { space: "known" } });
 		const result = await client.callTool({
 			name: "browser_observe",
-			arguments: { space: "missing", page: "p1" },
+			arguments: { space: "known", page: "p1" },
 		});
 		expect(result.isError).toBe(true);
 		const content = z.array(z.object({ type: z.literal("text"), text: z.string() })).parse(result.content);

@@ -15,14 +15,16 @@ node skills/apple-cua-browser/scripts/browser.mjs install
 node skills/apple-cua-browser/scripts/browser.mjs doctor
 ```
 
-Load the unpacked extension once. Unpaired extensions obtain the private local
+Load `packages/browser/extension/` as an unpacked extension once. Unpaired extensions obtain the private local
 connection automatically through the native host. Existing pairings can use
 **Connect local service** to explicitly resume. No key/port copying or startup
 browser window is needed. Do not run another daemon on the service port.
-The host defaults to Brave extension ID `cbdbpdmibmlmkhiacendnbbcohpbibln`.
-For another unpacked checkout, set `APPLE_CUA_BROWSER_EXTENSION_ID` to the ID
-shown on the browser's Extensions page when running `install`. The installer
-binds both the manifest and native host to that exact ID.
+The bundled public manifest key fixes the extension ID to
+`mlnfdbnljbighojpekgblaphpojllkdf` in every checkout; no private key is shipped.
+Reload the unpacked extension and rerun `install` when upgrading from a
+path-derived ID. For a deliberately customized extension identity, set
+`APPLE_CUA_BROWSER_EXTENSION_ID` to its ID when running `install`. The installer
+binds both the native messaging registration and launcher to that exact ID.
 `uninstall` removes only the service/host, preserving key and logs.
 
 Manual daemon setup is an alternative:
@@ -33,7 +35,7 @@ pnpm --filter @apple-cua/browser build
 node packages/browser/dist/server.js
 ```
 
-Configure that stdio command in your MCP client. Load `extension/` as an unpacked
+Configure that stdio command in your MCP client. Load `packages/browser/extension/` as an unpacked
 extension in Chromium 125+, then enter the running server's port and pairing
 token in extension options. Only one paired extension is accepted. The server
 prints its generated key to stderr, never MCP stdout; the owner-only connection

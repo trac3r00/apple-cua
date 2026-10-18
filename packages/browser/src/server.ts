@@ -154,7 +154,7 @@ export function createBrowserMcpServer(
 	return server;
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
 	const stop = new StopSwitch();
 	const bridge = new BrowserBridge(stop, 15000, await connectionToken());
 	const controller = new BrowserController(bridge);
@@ -167,29 +167,34 @@ async function main(): Promise<void> {
 			.max(65535)
 			.parse(process.env["APPLE_CUA_BROWSER_PORT"] ?? 47953),
 	);
-	await writeConnection({ port, token: bridge.token });
-	process.stderr.write(`apple-cua browser: port ${port}; extension pairing token ${bridge.token}\n`);
 	const server = createBrowserMcpServer(bridge, controller);
-	let closing = false;
-	const shutdown = async () => {
-		if (closing) return;
-		closing = true;
-		await bridge.close();
+	const transport = new StdioServerTransport();
+	let closing: Promise<void> | undefined;
+	const shutdown = () => {
+		closing ??= bridge.close();
+		return closing;
 	};
 	server.server.onclose = () => {
 		shutdown().catch((error: unknown) => {
 			process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
 		});
 	};
-	for (const signal of ["SIGINT", "SIGTERM"] as const) {
-		process.once(signal, () => {
-			server.close().catch((error: unknown) => {
-				process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-				process.exitCode = 1;
+	try {
+		await writeConnection({ port, token: bridge.token });
+		process.stderr.write(`apple-cua browser: port ${port}; extension pairing token ${bridge.token}\n`);
+		for (const signal of ["SIGINT", "SIGTERM"] as const) {
+			process.once(signal, () => {
+				server.close().catch((error: unknown) => {
+					process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+					process.exitCode = 1;
+				});
 			});
-		});
+		}
+		await server.connect(transport);
+	} catch (error: unknown) {
+		await Promise.all([shutdown(), server.close(), transport.close()]);
+		throw error;
 	}
-	await server.connect(new StdioServerTransport());
 }
 
 if (process.argv[1] !== undefined && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

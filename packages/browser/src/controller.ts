@@ -40,6 +40,8 @@ export class BrowserController {
 			readonly session: BrowserSession;
 			readonly pages: Map<string, { readonly tabId: number; readonly generation: number }>;
 			nextPage: number;
+			finishing: boolean;
+			opening: number;
 		}
 	>();
 
@@ -50,8 +52,9 @@ export class BrowserController {
 	}
 
 	async dispatch(value: unknown, signal?: AbortSignal): Promise<unknown> {
-		if (signal !== undefined) return this.bridge.withCancellation(signal, () => this.dispatch(value));
 		const input = controllerRequestSchema.parse(value);
+		if (signal !== undefined && input.action !== "open")
+			return this.bridge.withCancellation(signal, () => this.dispatch(value));
 		switch (input.action) {
 			case "status":
 				return {
@@ -65,10 +68,15 @@ export class BrowserController {
 			}
 			case "open": {
 				const state = this.create(input.space);
-				const opened = await state.session.open(input.url);
-				const page = `p${state.nextPage++}`;
-				state.pages.set(page, { tabId: opened.tabId, generation: this.bridge.generation });
-				return { space: input.space, page };
+				state.opening++;
+				try {
+					const opened = await state.session.open(input.url, signal);
+					const page = `p${state.nextPage++}`;
+					state.pages.set(page, { tabId: opened.tabId, generation: this.bridge.generation });
+					return { space: input.space, page };
+				} finally {
+					state.opening--;
+				}
 			}
 			case "observe": {
 				const { state, tabId } = this.target(input.space, input.page);
@@ -95,13 +103,20 @@ export class BrowserController {
 			case "finish": {
 				const state = this.spaces.get(input.space);
 				if (state === undefined) throw new BrowserError("stale", "Unknown task space");
+				if (state.finishing || state.opening > 0)
+					throw new BrowserError("busy", "Task space is opening or finishing");
+				state.finishing = true;
 				const abandoned: string[] = [];
-				for (const [page, owned] of state.pages) {
-					if (owned.generation !== this.bridge.generation) abandoned.push(page);
-					else await state.session.close(owned.tabId);
-					state.pages.delete(page);
+				try {
+					for (const [page, owned] of state.pages) {
+						if (owned.generation !== this.bridge.generation) abandoned.push(page);
+						else await state.session.close(owned.tabId);
+						state.pages.delete(page);
+					}
+					this.spaces.delete(input.space);
+				} finally {
+					state.finishing = false;
 				}
-				this.spaces.delete(input.space);
 				return abandoned.length === 0 ? { finished: input.space } : { finished: input.space, abandoned };
 			}
 		}
@@ -109,11 +124,16 @@ export class BrowserController {
 
 	private create(space: string) {
 		const existing = this.spaces.get(space);
-		if (existing !== undefined) return existing;
+		if (existing !== undefined) {
+			if (existing.finishing) throw new BrowserError("busy", "Task space is finishing");
+			return existing;
+		}
 		const state = {
 			session: new BrowserSession(this.bridge),
 			pages: new Map<string, { readonly tabId: number; readonly generation: number }>(),
 			nextPage: 1,
+			finishing: false,
+			opening: 0,
 		};
 		this.spaces.set(space, state);
 		return state;
@@ -123,6 +143,7 @@ export class BrowserController {
 		const state = this.spaces.get(space);
 		const owned = state?.pages.get(page);
 		if (state === undefined || owned === undefined) throw new BrowserError("stale", "Unknown task space or page");
+		if (state.finishing) throw new BrowserError("busy", "Task space is finishing");
 		return { state, tabId: owned.tabId };
 	}
 }

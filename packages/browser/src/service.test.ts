@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
+import { createHash, createPublicKey } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -11,11 +12,13 @@ import {
 	EXTENSION_ID,
 	NATIVE_HOST_NAME,
 	SERVICE_LABEL,
+	doctorBrowserService,
 	initializeConnectionMetadata,
 	installBrowserService,
 	renderLaunchAgent,
 	renderNativeHostLauncher,
 	renderNativeHostManifest,
+	uninstallBrowserService,
 } from "./service.js";
 
 const nativeManifestSchema = z
@@ -33,6 +36,141 @@ describe("browser service artifacts", () => {
 
 	afterEach(async () => {
 		await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+	});
+
+	it("#given the bundled public key #when deriving the unpacked extension identity #then matches default registration", async () => {
+		const manifest = z
+			.object({ key: z.string() })
+			.parse(JSON.parse(await readFile(new URL("../extension/manifest.json", import.meta.url), "utf8")));
+		const publicKey = Buffer.from(manifest.key, "base64");
+		expect(createPublicKey({ key: publicKey, format: "der", type: "spki" }).type).toBe("public");
+		const extensionId = createHash("sha256")
+			.update(publicKey)
+			.digest("hex")
+			.slice(0, 32)
+			.replace(/[0-9a-f]/g, (digit) => String.fromCharCode(97 + Number.parseInt(digit, 16)));
+
+		expect(extensionId).toBe(EXTENSION_ID);
+	});
+
+	it("#given a relative state directory #when installing #then all persisted state references are absolute", async () => {
+		const homeDirectory = await mkdtemp(join(tmpdir(), "browser-relative-state-"));
+		directories.push(homeDirectory);
+		const stateDirectory = join(homeDirectory, "state");
+		const paths = await installBrowserService({
+			extensionId: EXTENSION_ID,
+			homeDirectory,
+			packageRoot: join(homeDirectory, "package"),
+			platform: "darwin",
+			stateDirectory: relative(process.cwd(), stateDirectory),
+			isPortListening: async () => false,
+			launchctl: async (args) => ({ code: args[0] === "print" ? 113 : 0, stderr: "" }),
+		});
+
+		expect(paths.stateDirectory).toBe(stateDirectory);
+		expect(paths.nativeHostLauncher).toBe(join(stateDirectory, "browser-native-host"));
+		expect(await readFile(paths.launchAgent, "utf8")).toContain(`<string>${stateDirectory}</string>`);
+		expect(await readFile(paths.nativeHostLauncher, "utf8")).toContain(`APPLE_CUA_STATE_DIR='${stateDirectory}'`);
+		const registration = nativeManifestSchema.parse(JSON.parse(await readFile(paths.nativeHostManifest, "utf8")));
+		expect(registration.path).toBe(paths.nativeHostLauncher);
+		expect(await readConnection(stateDirectory)).toMatchObject({ port: DEFAULT_PORT });
+	});
+
+	it.each(["none", "all", "mixed"])(
+		"#given %s existing artifacts #when bootstrap fails #then removes new files and restores existing bytes and modes",
+		async (existing) => {
+			const homeDirectory = await mkdtemp(join(tmpdir(), "browser-bootstrap-rollback-"));
+			directories.push(homeDirectory);
+			const stateDirectory = join(homeDirectory, "state");
+			const artifacts = [
+				join(homeDirectory, "Library", "LaunchAgents", `${SERVICE_LABEL}.plist`),
+				join(stateDirectory, "browser-native-host"),
+				join(
+					homeDirectory,
+					"Library",
+					"Application Support",
+					"BraveSoftware",
+					"Brave-Browser",
+					"NativeMessagingHosts",
+					`${NATIVE_HOST_NAME}.json`,
+				),
+			];
+			const preserved = existing === "all" ? artifacts : existing === "mixed" ? artifacts.slice(0, 1) : [];
+			for (const path of preserved) {
+				await mkdir(dirname(path), { recursive: true });
+				await writeFile(path, `existing:${path}`);
+				await chmod(path, 0o640);
+			}
+			await mkdir(stateDirectory, { recursive: true });
+			const unrelated = join(stateDirectory, "unrelated");
+			await writeFile(unrelated, "keep");
+			await expect(
+				installBrowserService({
+					homeDirectory,
+					packageRoot: join(homeDirectory, "package"),
+					stateDirectory,
+					platform: "darwin",
+					isPortListening: async () => false,
+					launchctl: async (args) => ({ code: args[0] === "print" ? 113 : 5, stderr: "bootstrap failed" }),
+				}),
+			).rejects.toThrow();
+
+			for (const path of artifacts) {
+				if (preserved.includes(path)) {
+					expect(await readFile(path, "utf8")).toBe(`existing:${path}`);
+					expect((await stat(path)).mode & 0o777).toBe(0o640);
+				} else {
+					await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+				}
+			}
+			expect(await readFile(unrelated, "utf8")).toBe("keep");
+		},
+	);
+
+	it("#given installed service artifacts #when uninstalling #then removes the launcher but preserves connection and logs", async () => {
+		const homeDirectory = await mkdtemp(join(tmpdir(), "browser-uninstall-"));
+		directories.push(homeDirectory);
+		const options = {
+			homeDirectory,
+			packageRoot: join(homeDirectory, "package"),
+			stateDirectory: join(homeDirectory, "state"),
+			platform: "darwin",
+			isPortListening: async () => false,
+			launchctl: async (args: readonly string[]) => ({ code: args[0] === "print" ? 113 : 0, stderr: "" }),
+		} satisfies Parameters<typeof installBrowserService>[0];
+		const paths = await installBrowserService(options);
+		const connection = await readConnection(options.stateDirectory);
+		await writeFile(paths.stdoutLog, "existing log");
+
+		await uninstallBrowserService(options);
+
+		for (const path of [paths.launchAgent, paths.nativeHostManifest, paths.nativeHostLauncher]) {
+			await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+		}
+		expect(await readConnection(options.stateDirectory)).toEqual(connection);
+		expect(await readFile(paths.stdoutLog, "utf8")).toBe("existing log");
+		expect(await readFile(paths.stderrLog, "utf8")).toBe("");
+	});
+
+	it("#given a registration without its launcher #when doctor runs #then reports installation incomplete", async () => {
+		const homeDirectory = await mkdtemp(join(tmpdir(), "browser-doctor-"));
+		directories.push(homeDirectory);
+		const options = {
+			homeDirectory,
+			packageRoot: join(homeDirectory, "package"),
+			stateDirectory: join(homeDirectory, "state"),
+			platform: "darwin",
+			isPortListening: async () => false,
+			launchctl: async (args: readonly string[]) => ({ code: args[0] === "print" ? 113 : 0, stderr: "" }),
+		} satisfies Parameters<typeof installBrowserService>[0];
+		const paths = await installBrowserService(options);
+		expect((await doctorBrowserService(options)).installed).toBe(true);
+		await rm(paths.nativeHostLauncher);
+
+		const result = await doctorBrowserService(options);
+
+		expect(result.installed).toBe(false);
+		expect(result.connectionReady).toBe(true);
 	});
 
 	it("#given an empty state directory #when initializing service metadata #then persists a private reusable key", async () => {
@@ -105,6 +243,7 @@ describe("browser service artifacts", () => {
 			platform: "darwin",
 			uid: 501,
 			stateDirectory,
+			extensionId: EXTENSION_ID,
 			isPortListening: async () => false,
 			launchctl,
 		});

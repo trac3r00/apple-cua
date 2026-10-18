@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveStateDir } from "@apple-cua/core/stop";
 import { z } from "zod";
@@ -21,6 +21,7 @@ export async function readConnection(stateDir: string = resolveStateDir()): Prom
 export async function writeConnection(connection: Connection, stateDir: string = resolveStateDir()): Promise<void> {
 	const parsed = connectionSchema.parse(connection);
 	await mkdir(stateDir, { recursive: true, mode: 0o700 });
+	await chmod(stateDir, 0o700);
 	const path = join(stateDir, CONNECTION_FILE_NAME);
 	const temporary = `${path}.${randomUUID()}.tmp`;
 	await writeFile(temporary, `${JSON.stringify(parsed)}\n`, { mode: 0o600 });

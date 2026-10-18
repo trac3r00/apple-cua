@@ -25,7 +25,7 @@ export const expectSchema = z.object({
 	timeoutMs: z.number().int().min(1).max(10000).default(3000),
 });
 export const observationSchema = z.object({
-	url: z.string(),
+	url: z.string().max(8192),
 	title: z.string().max(500),
 	revision: z.string(),
 	rows: z

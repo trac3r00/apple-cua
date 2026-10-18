@@ -31,12 +31,18 @@ export class BrowserSession {
 		this.transport = transport;
 	}
 
-	async open(url: string): Promise<{ readonly tabId: number }> {
+	async open(url: string, signal?: AbortSignal): Promise<{ readonly tabId: number }> {
+		if (signal?.aborted) throw new BrowserError("stopped", "Browser open was cancelled before tab creation");
+		const generation = this.transport.generation;
+		// Once creation starts, retain the result even if the caller leaves so the
+		// controller can publish ownership and finish can still close the tab.
 		const result = openResultSchema.parse(await this.transport.request({ method: "open", url }));
+		if (generation !== this.transport.generation)
+			throw new BrowserError("stale", "Extension reconnected during open");
 		this.tabs.set(result.tabId, {
 			observation: undefined,
 			token: undefined,
-			generation: this.transport.generation,
+			generation,
 			busy: false,
 		});
 		return result;
@@ -94,8 +100,13 @@ export class BrowserSession {
 	async close(tabId: number): Promise<void> {
 		const tab = this.requireTab(tabId);
 		if (tab.busy) throw new BrowserError("busy", "Cannot close a tab while input is active");
-		await this.transport.request({ method: "close", tabId });
-		this.tabs.delete(tabId);
+		tab.busy = true;
+		try {
+			await this.transport.request({ method: "close", tabId });
+			this.tabs.delete(tabId);
+		} finally {
+			tab.busy = false;
+		}
 	}
 
 	private requireTab(tabId: number) {
@@ -119,7 +130,12 @@ export class BrowserSession {
 			title: observation.title,
 			truncated: observation.truncated,
 		};
-		if (full || before === undefined || before.url !== observation.url) {
+		if (
+			full ||
+			before === undefined ||
+			before.url !== observation.url ||
+			before.revision.split(":")[0] !== observation.revision.split(":")[0]
+		) {
 			return { ...base, format: "full" as const, rows: observation.rows };
 		}
 		const old = new Map(before.rows.map((row) => [row.ref, row]));

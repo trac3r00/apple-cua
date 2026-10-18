@@ -20,8 +20,11 @@ Load the unpacked extension once. The local native host pairs an unpaired
 extension automatically, without a browser startup window or copying keys.
 Existing pairings are retained; choose **Connect local service** to explicitly
 resume/reconnect. The owner-local LaunchAgent starts at login and survives
-terminal closure. This registration targets the current Brave extension ID;
-other Chromium brands and other unpacked checkout IDs need separate host
+terminal closure. The public key in the bundled manifest fixes the extension ID
+to `mlnfdbnljbighojpekgblaphpojllkdf` regardless of checkout path. Reload the
+extension and rerun `install` after upgrading from a path-derived ID.
+For a customized identity, set `APPLE_CUA_BROWSER_EXTENSION_ID` during `install`;
+only that exact origin is authorized. Other Chromium brands need separate host
 registration. `uninstall` removes only the service and host, retaining the key
 and logs.
 
@@ -58,7 +61,9 @@ Both expose the same authenticated local CLI endpoint.
 Load `packages/browser/extension` using Developer mode / Load unpacked in
 your browser's extensions page. Open the extension's options, enter the
 port and pairing token printed by that MCP process to stderr, and save.
-Default port: 47953; override with `APPLE_CUA_BROWSER_PORT`.
+Default port: 47953; `APPLE_CUA_BROWSER_PORT` overrides a manual daemon's port.
+The installed LaunchAgent uses the port persisted in `browser-connection.json`;
+setting that variable when running `install` does not override its port.
 The generated pairing key is retained in `~/.apple-cua/browser-connection.json`
 with owner-only permissions, so normal daemon restarts reuse it.
 Do not publish the token or include it in task reports.

@@ -37,9 +37,9 @@ form.addEventListener("submit", (event) => {
 	event.preventDefault();
 	const port = Number(portInput.value);
 	const token = tokenInput.value.trim();
-	if (!Number.isInteger(port) || port < 1 || port > 65535 || !token) {
+	if (!Number.isInteger(port) || port < 1 || port > 65535 || !/^[0-9a-f]{64}$/i.test(token)) {
 		status.dataset.state = "error";
-		status.textContent = "Enter a valid port and token.";
+		status.textContent = "Enter a valid port and a 64-character hexadecimal token.";
 		return;
 	}
 	chrome.storage.local.set({ port, token }, () => {

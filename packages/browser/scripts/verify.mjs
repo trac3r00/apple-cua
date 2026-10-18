@@ -186,7 +186,15 @@ async function cliCall(input) {
 	child.stderr.on("data", (data) => {
 		stderr += data.toString();
 	});
-	const [code] = await timeout(once(child, "exit"), 20000, "CLI call");
+	const closed = once(child, "close");
+	let code;
+	try {
+		[code] = await timeout(closed, 20000, "CLI call");
+	} catch (error) {
+		child.kill("SIGKILL");
+		await closed;
+		throw error;
+	}
 	assert(code === 0, `CLI failed: ${stderr}`);
 	return JSON.parse(stdout);
 }
@@ -336,8 +344,7 @@ try {
 		? `chrome-extension://${loadedExtension.id}`
 		: `chrome-extension://${new URL(worker.url).host}`;
 	if (nativeHostPaths !== undefined) {
-		// Unpacked ids depend on checkout paths. Authorize only this task's
-		// actual extension in the disposable profile's native-host fixture.
+		// Authorize only the actual loaded extension in this disposable profile.
 		const extensionId = new URL(extensionOrigin).host;
 		await writeFile(nativeHostPaths.nativeHostManifest, renderNativeHostManifest(nativeHostPaths, extensionId));
 		await writeFile(
@@ -382,7 +389,7 @@ try {
 		"Runtime.evaluate",
 		{
 			expression: nativePairing
-				? `(async()=>{const response=await chrome.runtime.sendNativeMessage(${JSON.stringify(NATIVE_HOST_NAME)},{method:'connection'});document.querySelector('#connect-local').click();return {port:response.port}})()`
+				? `(async()=>{const response=await chrome.runtime.sendNativeMessage(${JSON.stringify(NATIVE_HOST_NAME)},{method:'connection'});return {port:response.port}})()`
 				: `document.querySelector('#port').value=${bridgePort};document.querySelector('#token').value=${JSON.stringify(bridge.token)};document.querySelector('#settings').requestSubmit()`,
 			awaitPromise: nativePairing,
 			returnByValue: nativePairing,
@@ -682,7 +689,7 @@ try {
 	const pauseResult = await browserCdp.call(
 		"Runtime.evaluate",
 		{
-			expression: `(async()=>{await chrome.runtime.sendMessage({type:'stop'});return (await chrome.storage.local.get('pausedByUser')).pausedByUser})()`,
+			expression: `new Promise((resolve,reject)=>{const cleanup=()=>{clearTimeout(timer);chrome.storage.onChanged.removeListener(changed)};const changed=(changes,area)=>{if(area==='local'&&changes.pausedByUser?.newValue===true){cleanup();resolve(true)}};const timer=setTimeout(()=>{cleanup();reject(Error('Persisted pause deadline'))},3000);chrome.storage.onChanged.addListener(changed);chrome.runtime.sendMessage({type:'stop'}).catch(error=>{cleanup();reject(error)})})`,
 			awaitPromise: true,
 			returnByValue: true,
 		},

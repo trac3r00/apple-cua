@@ -259,7 +259,7 @@ export function defaultSocketTransport(
 			}
 		});
 		socket.on("connect", () => {
-			if (!direct && motion !== undefined && /^set /.test(command)) {
+			if (!direct && motion !== undefined && /^(?:pid \d+ )?set /.test(command)) {
 				socket.setTimeout(2_000, () => socket.destroy(new Error("Cursor overlay state request timed out")));
 				void prepareCursorMotion(socket, command, motion).then(
 					(prepared) => socket.end(prepared),
@@ -308,9 +308,8 @@ export function defaultSocketTransport(
 
 	return {
 		send(command: string, pid?: number, direct = false): void {
-			// PID markers are direct-update lanes: querying state and planning a
-			// trajectory for every drag sample would queue stale positions behind input.
-			const directUpdate = direct || pid !== undefined;
+			// Only already-paced samples bypass motion planning, not ordinary app moves.
+			const directUpdate = direct;
 			const directCommand = directUpdate ? command.replace(/^set /, "set-direct ") : command;
 			const scoped = pid === undefined ? directCommand : `pid ${pid} ${directCommand}`;
 			if (motion === undefined) {

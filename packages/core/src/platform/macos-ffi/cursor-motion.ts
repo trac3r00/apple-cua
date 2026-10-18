@@ -49,10 +49,11 @@ export async function prepareCursorMotion(
 	command: string,
 	motion: CursorMotionConfig,
 ): Promise<string> {
-	const match = /^set (-?\d+) (-?\d+)\n$/.exec(command);
+	const match = /^(pid \d+ )?set (-?\d+) (-?\d+)\n$/.exec(command);
 	if (match === null) {
 		return command;
 	}
+	const scope = match[1] ?? "";
 	const state = await new Promise<CursorState>((resolve, reject) => {
 		let response = "";
 		function cleanup(): void {
@@ -87,7 +88,7 @@ export async function prepareCursorMotion(
 		socket.on("data", onData);
 		socket.once("error", onError);
 		socket.once("end", onEnd);
-		socket.write("state\n");
+		socket.write(`${scope}state\n`);
 	});
-	return cursorMotionCommand({ x: Number(match[1]), y: Number(match[2]) }, state, motion);
+	return `${scope}${cursorMotionCommand({ x: Number(match[2]), y: Number(match[3]) }, state, motion)}`;
 }

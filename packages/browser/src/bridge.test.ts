@@ -1,0 +1,211 @@
+import { once } from "node:events";
+import type { StopStatusSource } from "@apple-cua/core";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { WebSocket } from "ws";
+import { z } from "zod";
+import { BrowserBridge } from "./bridge.js";
+import type { BrowserCommand } from "./protocol.js";
+
+const origin = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+const packetSchema = z.object({
+	id: z.string().optional(),
+	command: z.unknown().optional(),
+	ready: z.boolean().optional(),
+	checkpoint: z.string().optional(),
+	allowed: z.boolean().optional(),
+});
+
+function stopSource(stopped = false): StopStatusSource {
+	return {
+		status: () =>
+			stopped ? { stopped: true, stoppedAt: "2026-10-09", reason: "test stop", source: "api" } : { stopped: false },
+	};
+}
+
+async function connect(port: number, requestOrigin = origin): Promise<WebSocket> {
+	const socket = new WebSocket(`ws://127.0.0.1:${port}`, { headers: { origin: requestOrigin } });
+	await once(socket, "open");
+	return socket;
+}
+
+async function nextJson(socket: WebSocket): Promise<z.infer<typeof packetSchema>> {
+	const [raw] = await once(socket, "message");
+	return packetSchema.parse(JSON.parse(raw.toString()));
+}
+
+describe("BrowserBridge", () => {
+	const bridges: BrowserBridge[] = [];
+	const clients: WebSocket[] = [];
+
+	afterEach(async () => {
+		for (const client of clients.splice(0)) client.terminate();
+		await Promise.all(bridges.splice(0).map((bridge) => bridge.close()));
+		vi.useRealTimers();
+	});
+
+	it("#given a non-extension origin #when pairing #then rejects the websocket upgrade", async () => {
+		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
+		bridges.push(bridge);
+		const port = await bridge.listen(0);
+		const socket = new WebSocket(`ws://127.0.0.1:${port}`, { headers: { origin: "https://example.com" } });
+		const [error] = await once(socket, "error");
+		expect(error).toBeInstanceOf(Error);
+		expect(bridge.connected).toBe(false);
+	});
+
+	it("#given a valid origin #when pairing with wrong auth #then refuses pairing", async () => {
+		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		const closed = once(socket, "close");
+		socket.send(JSON.stringify({ token: "wrong" }));
+		expect(await closed).toBeDefined();
+		expect(bridge.connected).toBe(false);
+	});
+
+	it("#given an authenticated extension #when requesting #then pairs and replies over the wire", async () => {
+		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		expect(await nextJson(socket)).toEqual({ ready: true });
+		const request = bridge.request({ method: "open", url: "https://example.com" });
+		const packet = await nextJson(socket);
+		expect(packet.command).toEqual({ method: "open", url: "https://example.com" });
+		socket.send(JSON.stringify({ id: packet.id, ok: true, value: { tabId: 1 } }));
+		await expect(request).resolves.toEqual({ tabId: 1 });
+	});
+
+	it("#given a pending request #when the extension disconnects #then rejects without replay", async () => {
+		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		await nextJson(socket);
+		const request = bridge.request({
+			method: "run",
+			tabId: 1,
+			revision: "r1",
+			steps: [],
+			expect: undefined,
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+		});
+		expect((await nextJson(socket)).command).toMatchObject({ method: "run" });
+		const rejected = expect(request).rejects.toMatchObject({ code: "disconnected" });
+		socket.terminate();
+		await rejected;
+		expect(socket.readyState).not.toBe(WebSocket.OPEN);
+	});
+
+	it("#given a shared stop state #when opening or running #then refuses but allows observation", async () => {
+		let stopped = false;
+		const bridge = new BrowserBridge({ status: () => stopSource(stopped).status() }, 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		await nextJson(socket);
+		const run: BrowserCommand = {
+			method: "run",
+			tabId: 1,
+			revision: "r1",
+			steps: [],
+			expect: undefined,
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+		};
+		stopped = true;
+		await expect(bridge.request({ method: "open", url: "https://example.com" })).rejects.toMatchObject({
+			code: "stopped",
+		});
+		await expect(bridge.request(run)).rejects.toMatchObject({ code: "stopped" });
+		const observation = bridge.request({
+			method: "observe",
+			tabId: 1,
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+		});
+		const packet = await nextJson(socket);
+		expect(packet.command).toMatchObject({ method: "observe" });
+		socket.send(JSON.stringify({ id: packet.id, ok: true, value: {} }));
+		await expect(observation).resolves.toEqual({});
+	});
+
+	it("#given a shared stop state #when a checkpoint arrives #then denies it", async () => {
+		let stopped = false;
+		const bridge = new BrowserBridge({ status: () => stopSource(stopped).status() }, 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		await nextJson(socket);
+		const run = bridge.request({
+			method: "run",
+			tabId: 1,
+			revision: "r1",
+			steps: [],
+			expect: undefined,
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+		});
+		const packet = await nextJson(socket);
+		stopped = true;
+		socket.send(JSON.stringify({ event: "checkpoint", id: String(packet.id), step: 0 }));
+		expect(await nextJson(socket)).toEqual({ checkpoint: packet.id, allowed: false });
+		socket.send(JSON.stringify({ id: packet.id, ok: true, value: {} }));
+		await expect(run).resolves.toEqual({});
+	});
+
+	it("#given a short command timeout #when a reply never arrives #then rejects and signals stop", async () => {
+		const bridge = new BrowserBridge(stopSource(), 25, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		await nextJson(socket);
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		const incoming = nextJson(socket);
+		const request = bridge.request({
+			method: "observe",
+			tabId: 1,
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+		});
+		const packet = await incoming;
+		const rejected = expect(request).rejects.toMatchObject({ code: "timeout" });
+		const stopPacket = nextJson(socket);
+		await vi.advanceTimersByTimeAsync(25);
+		await rejected;
+		expect((await stopPacket).command).toEqual({ method: "stop" });
+		expect(packet.command).toMatchObject({ method: "observe" });
+	});
+
+	it("#given an active request #when its scope is cancelled #then rejects and denies further input checkpoints", async () => {
+		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		const paired = nextJson(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		await paired;
+		const cancellation = new AbortController();
+		const incoming = nextJson(socket);
+		const request = bridge.withCancellation(cancellation.signal, () =>
+			bridge.request({
+				method: "run",
+				tabId: 1,
+				revision: "r1",
+				steps: [{ action: "click", ref: 1 }],
+				expect: undefined,
+				limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+			}),
+		);
+		const packet = await incoming;
+		const rejected = expect(request).rejects.toMatchObject({ code: "stopped" });
+		cancellation.abort();
+		await rejected;
+		const denied = nextJson(socket);
+		socket.send(JSON.stringify({ event: "checkpoint", id: packet.id, step: 1 }));
+		expect(await denied).toEqual({ checkpoint: packet.id, allowed: false });
+		expect(bridge.paused).toBe(false);
+	});
+});

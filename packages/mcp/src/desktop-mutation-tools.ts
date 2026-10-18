@@ -127,8 +127,9 @@ export function registerDesktopMutationTools(
 			inputSchema: clickTargetSchema,
 			annotations: MUTATION_ANNOTATIONS,
 		},
-		async (input) =>
-			await session.clickTarget(
+		async (input) => {
+			const expect = expectFromInput(input.expect);
+			return await session.clickTarget(
 				{
 					app: input.app,
 					query: elementQueryFromInput(input.query),
@@ -139,23 +140,14 @@ export function registerDesktopMutationTools(
 					...(input.click_count === undefined ? {} : { clickCount: input.click_count }),
 					...(input.mouse_button === undefined ? {} : { mouseButton: input.mouse_button }),
 					...(input.window_id === undefined ? {} : { windowId: input.window_id }),
-					...(input.expect === undefined
-						? {}
-						: {
-								expect: {
-									...(input.expect.checks === undefined ? {} : { checks: input.expect.checks }),
-									...(input.expect.window_title === undefined
-										? {}
-										: { windowTitle: input.expect.window_title }),
-									...(input.expect.timeout_ms === undefined ? {} : { timeoutMs: input.expect.timeout_ms }),
-								},
-							}),
+					...(expect === undefined ? {} : { expect }),
 					fullState: input.full_state === true,
 					includeScreenshot: input.include_screenshot === true,
 				},
 				async (targetPid, observation, target) =>
 					await clickResolvedTarget(resolvedComputer, targetPid, observation, target),
-			),
+			);
+		},
 	);
 
 	server.registerTool(
@@ -265,7 +257,7 @@ export function registerDesktopMutationTools(
 		"drag",
 		{
 			description: mutationDescription(
-				"Drag from one screenshot coordinate to another; modifiers are held for the whole drag, e.g. option-drag to copy.",
+				"Drag between screenshot coordinates, optionally passing through up to 100 screenshot-local waypoints. Select mouse_button (left, right, middle), duration_ms (0-30000), and modifiers held throughout the gesture.",
 			),
 			inputSchema: dragSchema,
 			annotations: MUTATION_ANNOTATIONS,

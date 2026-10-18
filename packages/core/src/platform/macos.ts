@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { classifyContentKind } from "../accessibility/content-kind.js";
 import { diffAxTreeChanges, diffAxTreesByKey } from "../accessibility/diff.js";
 import { normalizeAxTree } from "../accessibility/normalize.js";
-import type { AXTreeElement, AppInfo, AppState, DisplayInfo } from "../accessibility/types.js";
+import type { AXTreeElement, AppInfo, AppState, DisplayInfo, DisplayInventoryEntry } from "../accessibility/types.js";
 import type { OcrTextEntry, WindowInventoryEntry } from "../accessibility/types.js";
 import { resolveAppInstructions } from "../app-instructions/index.js";
 import { resolveDisplayMetadata } from "../computer/display-metadata.js";
@@ -35,8 +35,9 @@ import {
 	elementFrameByIndex,
 	extractAccessibilityTree,
 	focusedElementFrame,
-	focusedWindowIdForPid,
+	focusedWindowIdsForObservationPid,
 	focusedWindowIsModal,
+	focusedWindowShowsFilePanel,
 	isWebElementByIndex,
 	performActionByIndex,
 	pressElementAtScreenPoint,
@@ -53,6 +54,7 @@ import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
 import { createAxEventWaiter, waitForAxQuiet } from "./macos-ffi/ax-observer.js";
 import type { CursorMotionConfig } from "./macos-ffi/cursor-motion-config.js";
 import { NOOP_POINTER_OVERLAY, type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
+import { onlineDisplayInfo } from "./macos-ffi/display-list.js";
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";
 import { readClipboard, writeClipboard } from "./macos-ffi/pasteboard.js";
 import { createDisplaySleepAssertion } from "./macos-ffi/power.js";
@@ -89,7 +91,7 @@ import {
 	pressMenuItem,
 	waitForKeyEquivalentEnabled,
 } from "./macos-menu.js";
-import { openWindowsForTargeting } from "./macos-open-windows.js";
+import { observedWindowForPid, openWindowsForTargeting } from "./macos-open-windows.js";
 import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
 import { resolveTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
@@ -165,7 +167,7 @@ export class MacOSHostComputer extends HostComputer {
 	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
 		this.appApproval = options.appApproval;
-		this.delivery = options.delivery ?? "attended";
+		this.delivery = options.delivery ?? "background";
 		this.urlBlocklist = options.urlBlocklist ?? [];
 		this.overlay =
 			this.delivery === "background"
@@ -267,6 +269,12 @@ export class MacOSHostComputer extends HostComputer {
 		if (this.delivery === "background" && pid !== undefined && commandChordMask(modifiers) !== undefined) {
 			await this.assertBackgroundFinderCommand(pid, { key, modifiers });
 			await this.input.prepareKeyboardTarget();
+			// A file panel owns its shortcuts. Looking up the app menu first turns
+			// Go to Folder into commands such as Keynote's disabled Find Previous.
+			if (focusedWindowShowsFilePanel(pid)) {
+				await this.input.pressKey(key, options);
+				return;
+			}
 			// Select All in a native text field is done on the field itself, which has taken effect when
 			// this returns: text typed next always replaces the selection instead of racing a posted key.
 			if (commandChordMask(modifiers) === 0 && key.toLowerCase() === "a" && this.selectAllInTextField(pid)) {
@@ -317,12 +325,14 @@ export class MacOSHostComputer extends HostComputer {
 			}
 		}
 		const window = this.observedWindow(targetPid);
-		const result =
-			window === undefined
-				? await invokeMenu(targetPid, normalized)
-				: await invokeWindowMenu(targetPid, normalized, (disabled, run) =>
-						this.input.withWindowCommand(targetPid, window, disabled, run),
-					);
+		let result: InvokeMenuResult;
+		if (window === undefined) {
+			result = await invokeMenu(targetPid, normalized);
+		} else {
+			result = await invokeWindowMenu(targetPid, normalized, (disabled, run) =>
+				this.input.withWindowCommand(targetPid, window, disabled, run),
+			);
+		}
 		this.input.noteKeyboardInput(targetPid);
 		return result;
 	}
@@ -388,25 +398,25 @@ export class MacOSHostComputer extends HostComputer {
 		refusal: string | undefined,
 	): Promise<void> {
 		const window = this.observedWindow(pid);
-		const outcome =
-			window === undefined
-				? "not-held"
-				: await this.input.withWindowCommand(
-						pid,
-						window,
-						() => true,
-						async (held): Promise<"pressed" | "not-held" | "still-disabled"> => {
-							if (!held) {
-								return "not-held";
-							}
-							const enabled = await waitForKeyEquivalentEnabled(pid, chord.key, chord.modifiers);
-							if (enabled === undefined) {
-								return "still-disabled";
-							}
-							pressMenuItem(pid, enabled.path);
-							return "pressed";
-						},
-					);
+		let outcome: "pressed" | "not-held" | "still-disabled" = "not-held";
+		if (window !== undefined) {
+			outcome = await this.input.withWindowCommand(
+				pid,
+				window,
+				() => true,
+				async (held): Promise<"pressed" | "not-held" | "still-disabled"> => {
+					if (!held) {
+						return "not-held";
+					}
+					const enabled = await waitForKeyEquivalentEnabled(pid, chord.key, chord.modifiers);
+					if (enabled === undefined) {
+						return "still-disabled";
+					}
+					pressMenuItem(pid, enabled.path);
+					return "pressed";
+				},
+			);
+		}
 		if (outcome === "not-held") {
 			// The app was not told it is active: an item that read enabled is pressed as before, one that read
 			// disabled is refused.
@@ -581,7 +591,13 @@ export class MacOSHostComputer extends HostComputer {
 		if (requestedWindowId !== undefined) {
 			return await this.input.rememberTargetWindow(pid, requestedWindowId, windows);
 		}
-		const focusedWindowId = focusedWindowIdForPid(pid);
+		const { focusedWindowId, sheetOwnerWindowId } = focusedWindowIdsForObservationPid(pid);
+		if (sheetOwnerWindowId !== undefined) {
+			const ownerWindow = await this.input.rememberTargetWindow(pid, sheetOwnerWindowId, windows);
+			if (ownerWindow !== undefined) {
+				return ownerWindow;
+			}
+		}
 		if (focusedWindowId !== undefined) {
 			const focusedWindow = await this.input.rememberTargetWindow(pid, focusedWindowId, windows);
 			if (focusedWindow !== undefined) {
@@ -614,7 +630,17 @@ export class MacOSHostComputer extends HostComputer {
 			throw new Error(`No visible target window available for pid ${app.pid}`);
 		}
 		const windowInventory = await this.describeWindowsForPid(app.pid, windows);
-		const inventoryTitle = windowInventory.find((entry) => entry.id === targetWindow?.id)?.title;
+		const listedTargetTitle = windowInventory.find((entry) => entry.id === targetWindow?.id)?.title;
+		const nativeTargetTitle =
+			targetWindow === undefined || (listedTargetTitle !== undefined && listedTargetTitle.length > 0)
+				? undefined
+				: observedWindowForPid(app.pid, targetWindow.id)?.title;
+		const inventoryTitle =
+			listedTargetTitle !== undefined && listedTargetTitle.length > 0
+				? listedTargetTitle
+				: nativeTargetTitle !== undefined && nativeTargetTitle !== null && nativeTargetTitle.length > 0
+					? nativeTargetTitle
+					: undefined;
 		this.observedAxPids.add(app.pid);
 		const walkOptions = {
 			...(options?.maxElements === undefined ? {} : { maxElements: options.maxElements }),
@@ -644,19 +670,32 @@ export class MacOSHostComputer extends HostComputer {
 		// WindowServer can hide titles without Screen Recording while the matched AX window still
 		// exposes them. Use that observed title, not an unrelated window from an app-wide fallback.
 		const targetWindowTitle = tree?.windowTitle ?? inventoryTitle;
-		const windowCandidates =
-			windowInventory.length > 1
-				? windowInventory.map((window) =>
-						window.id === targetWindow?.id && targetWindowTitle !== undefined
-							? { ...window, title: targetWindowTitle }
-							: window,
-					)
-				: undefined;
+		const displayInventory = onlineDisplayInfo();
+		let windowCandidates: readonly WindowInventoryEntry[] | undefined;
+		if (windowInventory.length > 1) {
+			windowCandidates = windowInventory.map((window) => {
+				let title = window.title;
+				if (window.id === targetWindow?.id && targetWindowTitle !== undefined) {
+					title = targetWindowTitle;
+				}
+				const windowDisplays = displaysForWindow(window.bounds, displayInventory);
+				return {
+					...window,
+					title,
+					...(windowDisplays[0] === undefined ? {} : { displayId: windowDisplays[0].id }),
+					...(windowDisplays.length === 0 ? {} : { displayIds: windowDisplays.map(({ id }) => id) }),
+				};
+			});
+		}
 		const ocrText =
 			tree?.windowContentUnavailable === true && targetWindow !== undefined
 				? await this.readWindowText(screenshot, size, targetWindow)
 				: undefined;
-		const display = resolveDisplayInfo();
+		const displays = displayInventory;
+		const mainDisplayId = getMainDisplayId();
+		const inventoryMainDisplay = displays?.find((candidate) => candidate.isMain === true);
+		const displayMetadata = resolveDisplayInfo(mainDisplayId);
+		const display = { ...displayMetadata, ...inventoryMainDisplay };
 		const appInstructions = resolveAppInstructions(app.name, app.bundleId);
 		const systemPrompts = currentSystemPrompts();
 
@@ -673,7 +712,7 @@ export class MacOSHostComputer extends HostComputer {
 			elements = tree === undefined ? [] : remapElementFramesToScreenshot(tree.elements, viewport);
 			if (!this.highlightedApps.has(app.pid)) {
 				this.highlightedApps.add(app.pid);
-				this.overlay.highlight(viewport.windowBounds);
+				this.overlay.highlight(viewport.windowBounds, app.pid);
 			}
 		} else {
 			this.lastViewportByPid.delete(app.pid);
@@ -692,6 +731,8 @@ export class MacOSHostComputer extends HostComputer {
 				: classifyContentKind(elements, { width: screenshot.width, height: screenshot.height });
 		const diffOnly = options?.diffOnly === true && previousTree !== undefined && tree !== undefined;
 		const observationKey = currentObservationKey(app.pid);
+		const windowDisplays = windowBounds === undefined ? [] : displaysForWindow(windowBounds, displays);
+		const windowDisplayId = windowDisplays[0]?.id;
 
 		const state: AppState = {
 			app: app.name,
@@ -707,6 +748,7 @@ export class MacOSHostComputer extends HostComputer {
 			screenshotHeight: screenshot.height,
 			screenshotMimeType: screenshot.mimeType,
 			display,
+			...(displays === undefined ? {} : { displays }),
 			...(contentKind === undefined ? {} : { contentKind }),
 			...(tree === undefined ? { treeSkipped: true } : {}),
 			...(axChangeSummary !== undefined ? { axChangeSummary } : {}),
@@ -714,6 +756,8 @@ export class MacOSHostComputer extends HostComputer {
 			...(diffOnly ? { treeOmitted: true } : {}),
 			...(appInstructions !== undefined ? { appInstructions } : {}),
 			...(windowBounds !== undefined ? { windowBounds } : {}),
+			...(windowDisplayId === undefined ? {} : { windowDisplayId }),
+			...(windowDisplays.length === 0 ? {} : { windowDisplayIds: windowDisplays.map(({ id }) => id) }),
 			...(targetWindow !== undefined ? { windowId: targetWindow.id } : {}),
 			...(targetWindowTitle !== undefined ? { windowTitle: targetWindowTitle } : {}),
 			...(windowCandidates !== undefined ? { windowCandidates } : {}),
@@ -905,6 +949,10 @@ export class MacOSHostComputer extends HostComputer {
 		}));
 	}
 
+	async listAppIdentitiesForOpen(): Promise<AppInfo[]> {
+		return this.listAppIdentities();
+	}
+
 	async listApps(): Promise<AppInfo[]> {
 		const running = await getRunningMacOSApps();
 		const usage = await collectAppUsage(running.map((app) => app.path).filter((path) => path.length > 0));
@@ -973,7 +1021,7 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async pressAtPosition(targetPid: number, position: Point): Promise<boolean> {
-		this.input.showPointer(position, true);
+		this.input.showPointer(position, true, targetPid);
 		// A press inside a dispatch bound to an observed window only takes an element of that window.
 		const target = currentInputScope()?.target;
 		const windowId = target?.pid === targetPid ? target.windowId : undefined;
@@ -995,9 +1043,9 @@ export class MacOSHostComputer extends HostComputer {
 		if (frame !== undefined && frame.width > 0 && frame.height > 0) {
 			const position = { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 };
 			if (scroll) {
-				this.input.showScrollPointer(position);
+				this.input.showScrollPointer(position, targetPid);
 			} else {
-				this.input.showPointer(position, press);
+				this.input.showPointer(position, press, targetPid);
 			}
 		}
 	}
@@ -1512,7 +1560,7 @@ function remapElementFramesToScreenshot(
 	}));
 }
 
-function resolveDisplayInfo(): DisplayInfo {
+function resolveDisplayInfo(id: number): DisplayInfo {
 	const logical = getMainDisplayLogicalSize();
 	let nativePixel: { width: number; height: number } | undefined;
 	try {
@@ -1520,7 +1568,27 @@ function resolveDisplayInfo(): DisplayInfo {
 	} catch {
 		nativePixel = undefined;
 	}
-	return resolveDisplayMetadata(nativePixel === undefined ? { logical } : { logical, nativePixel });
+	const metadata = resolveDisplayMetadata(nativePixel === undefined ? { logical } : { logical, nativePixel });
+	return { ...metadata, id, isMain: true, x: 0, y: 0 };
+}
+
+function displaysForWindow(
+	window: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+	displays: ReturnType<typeof onlineDisplayInfo>,
+): readonly DisplayInventoryEntry[] {
+	if (displays === undefined) {
+		return [];
+	}
+	return displays
+		.map((display) => {
+			const width = Math.min(window.x + window.width, display.x + display.width) - Math.max(window.x, display.x);
+			const height = Math.min(window.y + window.height, display.y + display.height) - Math.max(window.y, display.y);
+			const intersectionArea = Math.max(0, width) * Math.max(0, height);
+			return { display, intersectionArea };
+		})
+		.filter(({ intersectionArea }) => intersectionArea > 0)
+		.sort((left, right) => right.intersectionArea - left.intersectionArea)
+		.map(({ display }) => display);
 }
 
 function resolveTargetApp(apps: readonly RunningAppInfo[], targetPid: number | undefined): RunningAppInfo {

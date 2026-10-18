@@ -313,8 +313,27 @@ const K_AX_FOCUSED_WINDOW_ATTRIBUTE = "AXFocusedWindow";
  * undefined when the app has no focused window or the private SPI is unavailable.
  */
 export function focusedWindowIdForPid(pid: number): number | undefined {
+	return readFocusedWindowIds(pid, false).focusedWindowId;
+}
+
+/**
+ * Focused window identity for app-state observation. When focus is an AXSheet and AX exposes
+ * its owning AXWindow ancestor, return both ids so a caller can prefer the owner while retaining
+ * the focused sheet as the safe fallback.
+ */
+export function focusedWindowIdsForObservationPid(pid: number): {
+	readonly focusedWindowId: number | undefined;
+	readonly sheetOwnerWindowId: number | undefined;
+} {
+	return readFocusedWindowIds(pid, true);
+}
+
+function readFocusedWindowIds(
+	pid: number,
+	resolveSheetOwner: boolean,
+): { readonly focusedWindowId: number | undefined; readonly sheetOwnerWindowId: number | undefined } {
 	if (!isRunning(pid) || AXUIElementGetWindowSpi === null) {
-		return undefined;
+		return { focusedWindowId: undefined, sheetOwnerWindowId: undefined };
 	}
 	let root: AXUIElementRef | null = null;
 	let focused: CFTypeRef | null = null;
@@ -322,11 +341,35 @@ export function focusedWindowIdForPid(pid: number): number | undefined {
 		root = createApplicationElement(pid);
 		focused = copyOptionalAttributeValue(root, K_AX_FOCUSED_WINDOW_ATTRIBUTE);
 		if (focused === null || !cfGetTypeId(focused)) {
-			return undefined;
+			return { focusedWindowId: undefined, sheetOwnerWindowId: undefined };
 		}
-		return windowIdOf(focused as AXUIElementRef);
+		const focusedElement = focused as AXUIElementRef;
+		const focusedWindowId = windowIdOf(focusedElement);
+		if (!resolveSheetOwner || copyStringAttribute(focusedElement, K_AX_ROLE_ATTRIBUTE) !== "AXSheet") {
+			return { focusedWindowId, sheetOwnerWindowId: undefined };
+		}
+		let ancestor = copyOptionalAttributeValue(focusedElement, "AXParent");
+		try {
+			for (let depth = 0; ancestor !== null && depth < MAX_FILE_PANEL_ANCESTORS; depth += 1) {
+				const ancestorElement = ancestor as AXUIElementRef;
+				if (copyStringAttribute(ancestorElement, K_AX_ROLE_ATTRIBUTE) === "AXWindow") {
+					const sheetOwnerWindowId = windowIdOf(ancestorElement);
+					return {
+						focusedWindowId,
+						sheetOwnerWindowId:
+							sheetOwnerWindowId !== undefined && sheetOwnerWindowId > 0 ? sheetOwnerWindowId : undefined,
+					};
+				}
+				const parent = copyOptionalAttributeValue(ancestorElement, "AXParent");
+				cfRelease(ancestor);
+				ancestor = parent;
+			}
+			return { focusedWindowId, sheetOwnerWindowId: undefined };
+		} finally {
+			cfRelease(ancestor);
+		}
 	} catch {
-		return undefined;
+		return { focusedWindowId: undefined, sheetOwnerWindowId: undefined };
 	} finally {
 		if (focused !== null) {
 			cfRelease(focused);
@@ -730,10 +773,10 @@ export interface AccessibilityTreeOptions {
 	readonly maxDepth?: number;
 	readonly maxElements?: number;
 	/**
-	 * Scope the walk to one window. When the WindowServer window maps to an AX window,
-	 * only that window plus the app's non-window top-level children (sheets, panels) are
-	 * walked, which is what an observation of one app window actually needs. When the id
-	 * cannot be matched the walk falls back to the whole application tree.
+	 * Scope the walk to an exact WindowServer id, including a matching AXWindows or
+	 * AXFocusedWindow root off-Space. A match includes non-window top-level children
+	 * (sheets, panels, popovers); a missing match keeps only app-level popup menus.
+	 * If window identity cannot be read, return no elements, never unrelated windows.
 	 */
 	readonly windowId?: number | undefined;
 	/** Include the menu bar, which is app-level rather than window content. Default false. */
@@ -836,17 +879,22 @@ export function extractAccessibilityTree(pid: number, options: AccessibilityTree
 			});
 			snapshotInstalled = true;
 		}
+		const firstElement = elements[0];
+		let windowTitle: string | undefined;
+		if (
+			scope.descriptor.windowId !== undefined &&
+			scope.descriptor.subtreeOf === undefined &&
+			firstElement?.role === "AXWindow" &&
+			firstElement.label !== null
+		) {
+			windowTitle = firstElement.label;
+		}
 		return {
 			elements,
 			axAvailable: true,
 			truncated: elements.length >= maxElements || walkResult.depthTruncated,
 			walkKey: walkKeyFor(descriptor, maxDepth, maxElements),
-			...(scope.descriptor.windowId !== undefined &&
-			scope.descriptor.subtreeOf === undefined &&
-			elements[0]?.role === "AXWindow" &&
-			elements[0].label !== null
-				? { windowTitle: elements[0].label }
-				: {}),
+			...(windowTitle === undefined ? {} : { windowTitle }),
 			...contentUnavailable,
 		};
 	} finally {
@@ -872,7 +920,7 @@ interface ResolvedWalkScope {
 	readonly roots: readonly AXUIElementRef[];
 	readonly descriptor: AXWalkScope;
 	readonly scoped: boolean;
-	/** Number of direct children the application element exposes, before any scoping. */
+	/** Available app children or an explicitly resolved window root. */
 	readonly appChildren: number;
 	/** Children that were application elements standing in for windows; see windowContentUnavailable. */
 	readonly degenerate: number;
@@ -882,23 +930,57 @@ interface ResolvedWalkScope {
  * Decide what to walk. The scoped case walks the matched AX window first and then the
  * app's non-window top-level children (sheets, panels, popovers, popup menus), because those are
  * visible content of the observation; other windows and the menu bar are not. Any
- * failure to match the requested window returns the full, unscoped application walk.
+ * failure to match the requested window keeps only app-level popup menus, never another window.
  */
 function resolveWalkScope(root: AXUIElementRef, options: AccessibilityTreeOptions): ResolvedWalkScope {
 	const children = copyElementChildren(root);
 	let appChildren = children.length;
 	const includeMenuBar = options.includeMenuBar === true;
 	const windowId = options.windowId;
-	if (windowId === undefined || AXUIElementGetWindowSpi === null) {
+	if (windowId === undefined) {
 		return { roots: children, descriptor: UNMATCHED_WINDOW_SCOPE, scoped: false, appChildren, degenerate: 0 };
 	}
+	const requestedScope: AXWalkScope = {
+		windowId,
+		includeMenuBar,
+		scoped: true,
+		subtreeOf: undefined,
+		visibleOnly: false,
+	};
+	if (AXUIElementGetWindowSpi === null) {
+		for (const child of children) {
+			releaseAXElement(child);
+		}
+		return { roots: [], descriptor: requestedScope, scoped: true, appChildren, degenerate: 0 };
+	}
 
+	const axWindows = copyOptionalAttributeValue(root, "AXWindows");
+	const availableWindows: AXUIElementRef[] = [];
+	if (axWindows !== null && isCFArray(axWindows)) {
+		for (let index = 0; index < cfArrayLength(axWindows); index++) {
+			const window = cfArrayValueAt(axWindows, index);
+			if (window !== null) {
+				availableWindows.push(cfRetain(window));
+			}
+		}
+	}
+	cfRelease(axWindows);
+	const childWindowIds = new Set(children.map((child) => windowIdOf(child)));
+	const windowsFromAttribute = availableWindows.filter((window) => {
+		return !childWindowIds.has(windowIdOf(window));
+	});
+	for (const window of availableWindows) {
+		if (!windowsFromAttribute.includes(window)) {
+			releaseAXElement(window);
+		}
+	}
+	const candidates = [...children, ...windowsFromAttribute];
 	const windows: AXUIElementRef[] = [];
 	const attached: AXUIElementRef[] = [];
 	const otherWindows: AXUIElementRef[] = [];
 	const menus: AXUIElementRef[] = [];
 	const degenerate: AXUIElementRef[] = [];
-	for (const child of children) {
+	for (const child of candidates) {
 		if (windowIdOf(child) === windowId) {
 			windows.push(child);
 			continue;
@@ -914,6 +996,7 @@ function resolveWalkScope(root: AXUIElementRef, options: AccessibilityTreeOption
 			attached.push(child);
 		}
 	}
+	appChildren = Math.max(appChildren, windows.length);
 	// AppKit can omit every application child on another Space while its focused window
 	// remains readable. Only the exact requested WindowServer id can supply that root.
 	if (windows.length === 0) {
@@ -929,21 +1012,21 @@ function resolveWalkScope(root: AXUIElementRef, options: AccessibilityTreeOption
 	// freed elements and release them twice, which crashed the process whenever the window was not
 	// among the AX children (a locked screen, another Space, a window replaced mid-navigation).
 	if (windows.length === 0) {
-		if (menus.length === 0 && degenerate.length === 0) {
-			return { roots: children, descriptor: UNMATCHED_WINDOW_SCOPE, scoped: false, appChildren, degenerate: 0 };
-		}
-		// The window was not found: walk the app's windows and panels, but not its menu bar, which is
-		// hundreds of elements of app chrome the caller did not ask for, nor application elements
-		// standing in for windows, which only lead back to the menu bar.
-		for (const child of [...menus, ...degenerate]) {
-			releaseAXElement(child);
+		const popupMenus = attached.filter((child) => {
+			const role = copyStringAttribute(child, K_AX_ROLE_ATTRIBUTE);
+			return role === "AXMenu" || role === "AXMenuItem";
+		});
+		for (const child of candidates) {
+			if (!popupMenus.includes(child)) {
+				releaseAXElement(child);
+			}
 		}
 		return {
-			roots: [...otherWindows, ...attached],
-			descriptor: UNMATCHED_WINDOW_SCOPE,
+			roots: popupMenus,
+			descriptor: requestedScope,
 			scoped: true,
 			appChildren,
-			degenerate: degenerate.length,
+			degenerate: 0,
 		};
 	}
 	for (const child of [...otherWindows, ...menus, ...degenerate]) {
@@ -952,7 +1035,7 @@ function resolveWalkScope(root: AXUIElementRef, options: AccessibilityTreeOption
 
 	return {
 		roots: [...windows, ...attached],
-		descriptor: { windowId, includeMenuBar, scoped: true, subtreeOf: undefined, visibleOnly: false },
+		descriptor: requestedScope,
 		scoped: true,
 		appChildren,
 		degenerate: degenerate.length,

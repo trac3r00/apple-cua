@@ -1,8 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { currentCursorIdentity } from "../computer/cursor-scope.js";
-import { type InputScope, assertInputMayContinue, currentInputScope } from "../computer/input-scope.js";
+import {
+	InputInterrupted,
+	type InputScope,
+	assertInputMayContinue,
+	currentInputScope,
+} from "../computer/input-scope.js";
 import { assertScreenUnlocked } from "../computer/lock-guard.js";
-import { VirtualPointer } from "../computer/virtual-pointer.js";
+import { type VirtualPointer, VirtualPointerSet } from "../computer/virtual-pointer.js";
 import type { DragOptions, InputDelivery, KeyModifierName, KeyOptions, Point, ScrollOptions } from "../types/index.js";
 import { readRealCursorPosition } from "./macos-cursor.js";
 import {
@@ -244,6 +249,7 @@ interface InputCall {
 export const BACKGROUND_ACTIVATION_IDLE_MILLISECONDS = 2_000;
 
 export class MacOSInputController {
+	private closed = false;
 	/** The app input goes to when no input scope names one: the constructor's, or setTarget's. */
 	private defaultTargetPid: number | undefined;
 	/** The window each app's input last went to (or its observation named), by pid. */
@@ -263,11 +269,12 @@ export class MacOSInputController {
 	};
 	private exitHookRegistered = false;
 	private readonly overlay: PointerOverlay;
-	private readonly processPointer: VirtualPointer;
-	private readonly pointersByIdentity = new Map<string, VirtualPointer>();
+	private readonly processPointers: VirtualPointerSet;
+	private readonly pointersByIdentity = new Map<string, VirtualPointerSet>();
 	private readonly isLocked: () => boolean;
 	private readonly displaySleep: DisplaySleepAssertion;
-	private gestureChain: Promise<void> = Promise.resolve();
+	private globalGestureChain: Promise<void> = Promise.resolve();
+	private readonly appGestureChains = new Map<number, Promise<void>>();
 	private readonly delivery: InputDelivery;
 	/** Whether background delivery may tell an app behind the person's that it is active (see activateBehind). */
 	private readonly backgroundActivation: boolean;
@@ -277,7 +284,7 @@ export class MacOSInputController {
 		overlay: PointerOverlay = NOOP_POINTER_OVERLAY,
 		isLocked: () => boolean = isScreenLocked,
 		displaySleep: DisplaySleepAssertion = NOOP_DISPLAY_SLEEP,
-		delivery: InputDelivery = "attended",
+		delivery: InputDelivery = "background",
 		backgroundActivation: boolean = backgroundActivationEnabled(),
 	) {
 		this.delivery = delivery;
@@ -285,24 +292,25 @@ export class MacOSInputController {
 		this.overlay = overlay;
 		this.isLocked = isLocked;
 		this.displaySleep = displaySleep;
-		this.processPointer = new VirtualPointer(readRealCursorPosition());
+		this.processPointers = new VirtualPointerSet(readRealCursorPosition());
 		this.setTarget(targetPid);
 	}
 
-	private get pointer(): VirtualPointer {
+	private get pointers(): VirtualPointerSet {
 		const identity = currentCursorIdentity();
 		if (identity === undefined) {
-			return this.processPointer;
+			return this.processPointers;
 		}
-		let pointer = this.pointersByIdentity.get(identity);
-		if (pointer === undefined) {
-			pointer = new VirtualPointer(this.processPointer.position());
-			this.pointersByIdentity.set(identity, pointer);
+		let pointers = this.pointersByIdentity.get(identity);
+		if (pointers === undefined) {
+			pointers = new VirtualPointerSet(this.processPointers.forPid(0).position());
+			this.pointersByIdentity.set(identity, pointers);
 		}
-		return pointer;
+		return pointers;
 	}
 
 	private beforeInput(): void {
+		this.assertOpen();
 		assertScreenUnlocked(this.isLocked());
 		this.displaySleep.acquire();
 	}
@@ -332,7 +340,14 @@ export class MacOSInputController {
 
 	/** Stops the call (InputInterrupted) once its scope says input must stop: the stop switch, a client cancel. */
 	private checkpoint(call: InputCall): void {
+		this.assertOpen();
 		assertInputMayContinue(call.scope);
+	}
+
+	private assertOpen(): void {
+		if (this.closed) {
+			throw new InputInterrupted("input controller is closed");
+		}
 	}
 
 	/**
@@ -593,12 +608,24 @@ export class MacOSInputController {
 		);
 	}
 
-	private serialize<T>(run: () => Promise<T>): Promise<T> {
-		const result = this.gestureChain.then(run, run);
-		this.gestureChain = result.then(
+	private serialize<T>(pid: number | undefined, run: () => Promise<T>): Promise<T> {
+		const appLane = this.isBackground && pid !== undefined;
+		const previous = appLane ? (this.appGestureChains.get(pid) ?? Promise.resolve()) : this.globalGestureChain;
+		const result = previous.then(run, run);
+		const next = result.then(
 			() => undefined,
 			() => undefined,
 		);
+		if (appLane) {
+			this.appGestureChains.set(pid, next);
+			void next.then(() => {
+				if (this.appGestureChains.get(pid) === next) {
+					this.appGestureChains.delete(pid);
+				}
+			});
+		} else {
+			this.globalGestureChain = next;
+		}
 		return result;
 	}
 
@@ -632,29 +659,29 @@ export class MacOSInputController {
 
 	async move(position: Point): Promise<void> {
 		const call = this.beginCall("move the pointer");
-		await this.serialize(async () => {
+		await this.serialize(call.pid, async () => {
 			this.beforeInput();
 			const window = await this.pointerWindow(call, position);
 			this.requirePointerWindow(call, window);
-			const previous = this.pointer.position();
+			const previous = this.pointerFor(call.pid).position();
 			// An app-targeted path starts inside that window, never through another app or display.
-			const from =
-				window === undefined
-					? previous
-					: {
-							x: Math.max(window.bounds.x, Math.min(window.bounds.x + window.bounds.width - 1, previous.x)),
-							y: Math.max(window.bounds.y, Math.min(window.bounds.y + window.bounds.height - 1, previous.y)),
-						};
+			let from = previous;
+			if (window !== undefined) {
+				from = {
+					x: Math.max(window.bounds.x, Math.min(window.bounds.x + window.bounds.width - 1, previous.x)),
+					y: Math.max(window.bounds.y, Math.min(window.bounds.y + window.bounds.height - 1, previous.y)),
+				};
+			}
 			const duration = pointerTravelDuration(from, position);
 			const steps = dragSteps(duration);
 			if (this.delivery !== "background") {
-				this.overlay.setMode("pointer");
+				this.overlay.setMode("pointer", call.pid);
 			}
 			for (let step = 1; step <= steps; step += 1) {
 				this.checkpoint(call);
 				const at = interpolatePointEased(from, position, step / steps);
 				await this.mousePost(call)("move", at, "left", undefined, window);
-				this.trackPointer(at);
+				this.trackPointer(at, call.pid);
 				if (step < steps) {
 					await delayMilliseconds(duration / steps);
 				}
@@ -664,7 +691,7 @@ export class MacOSInputController {
 
 	private async postMove(call: InputCall, position: Point): Promise<void> {
 		await this.mousePost(call)("move", position, "left", undefined, await this.pointerWindow(call, position));
-		this.markPointer(position);
+		this.markPointer(position, call.pid);
 	}
 
 	async click(
@@ -673,7 +700,7 @@ export class MacOSInputController {
 		modifiers?: ReadonlyArray<KeyModifierName>,
 	): Promise<void> {
 		const call = this.beginCall("click");
-		await this.serialize(async () => {
+		await this.serialize(call.pid, async () => {
 			this.beforeInput();
 			const targetWindow = await this.pointerWindow(call, position);
 			this.requirePointerWindow(call, targetWindow);
@@ -688,11 +715,11 @@ export class MacOSInputController {
 				} else if (targetWindow !== undefined) {
 					if (this.isBackground) {
 						await postClick(post, position, button, 1, targetWindow, flags);
-						this.showPointer(position, true);
+						this.showPointer(position, true, call.pid);
 						return;
 					}
 					await runFocusLeasedClick(targetWindow, position, button, post, flags);
-					this.showPointer(position, true);
+					this.showPointer(position, true, call.pid);
 				}
 			});
 		});
@@ -700,7 +727,7 @@ export class MacOSInputController {
 
 	async doubleClick(position: Point, modifiers?: ReadonlyArray<KeyModifierName>): Promise<void> {
 		const call = this.beginCall("double click");
-		await this.serialize(async () => {
+		await this.serialize(call.pid, async () => {
 			this.beforeInput();
 			const targetWindow = await this.pointerWindow(call, position);
 			this.requirePointerWindow(call, targetWindow);
@@ -714,11 +741,11 @@ export class MacOSInputController {
 				} else if (targetWindow !== undefined) {
 					if (this.isBackground) {
 						await postDoubleClick(post, position, targetWindow, flags);
-						this.showPointer(position, true);
+						this.showPointer(position, true, call.pid);
 						return;
 					}
 					await runFocusLeasedDoubleClick(targetWindow, position, post, flags);
-					this.showPointer(position, true);
+					this.showPointer(position, true, call.pid);
 				}
 			});
 		});
@@ -845,18 +872,21 @@ export class MacOSInputController {
 		this.beforeInput();
 		const amount = Math.max(0, Math.trunc(Math.abs(options.amount)));
 		const targetWindow = await this.requireSessionWindow(call, "scroll");
-		const position =
-			options.position ??
-			(targetWindow === undefined
-				? this.pointer.position()
-				: {
-						x: targetWindow.bounds.x + targetWindow.bounds.width / 2,
-						y: targetWindow.bounds.y + targetWindow.bounds.height / 2,
-					});
+		let position: Point;
+		if (options.position !== undefined) {
+			position = options.position;
+		} else if (targetWindow !== undefined) {
+			position = {
+				x: targetWindow.bounds.x + targetWindow.bounds.width / 2,
+				y: targetWindow.bounds.y + targetWindow.bounds.height / 2,
+			};
+		} else {
+			position = this.pointerFor(call.pid).position();
+		}
 		if (options.position !== undefined) {
 			await this.pointerWindow(call, position);
 		}
-		this.showScrollPointer(position);
+		this.showScrollPointer(position, call.pid);
 		const unit: Record<ScrollOptions["direction"], [number, number]> = {
 			up: [0, 1],
 			down: [0, -1],
@@ -888,11 +918,20 @@ export class MacOSInputController {
 	}
 
 	async drag(options: DragOptions): Promise<void> {
+		if (options.duration !== undefined) {
+			dragSteps(options.duration);
+		}
 		const call = this.beginCall("drag");
-		await this.serialize(async () => {
+		await this.serialize(call.pid, async () => {
 			this.beforeInput();
 			const targetWindow = await this.pointerWindow(call, options.from);
 			this.requirePointerWindow(call, targetWindow);
+			if (
+				targetWindow !== undefined &&
+				options.waypoints?.some((waypoint) => !containsPoint(targetWindow, waypoint))
+			) {
+				throw new Error("drag waypoint is outside the target window; observe the destination window first");
+			}
 			await this.pointerWindow(call, options.to);
 			if (targetWindow !== undefined && !containsPoint(targetWindow, options.to)) {
 				throw new Error("drag destination is outside the target window; observe the destination window first");
@@ -902,7 +941,7 @@ export class MacOSInputController {
 			const post: MousePost = async (kind, at, button, clickState, window, flags) => {
 				await mousePost(kind, at, button, clickState, window, flags);
 				if (kind === "drag" || kind === "up") {
-					this.trackPointer(at);
+					this.trackPointer(at, call.pid);
 				}
 			};
 			// Read between drag steps; a stopped drag lets go of the button where it is and sends nothing more.
@@ -911,26 +950,27 @@ export class MacOSInputController {
 				if (call.pid === undefined) {
 					await this.postMove(call, options.from);
 					await postDragSequence(post, options, targetWindow, flags, checkpoint);
-					this.markPointer(options.to);
 				} else if (targetWindow !== undefined) {
 					if (this.isBackground) {
-						this.showPointer(options.from, false);
+						this.showPointer(options.from, false, call.pid);
 						await postDragSequence(post, options, targetWindow, flags, checkpoint);
-						this.showPointer(options.to, false);
 						return;
 					}
 					await runFocusLeasedDrag(targetWindow, options, post, flags, checkpoint);
-					this.markPointer(options.to);
 				}
 			});
 		});
 	}
 
 	getCursorPosition(): Point {
-		return this.pointer.position();
+		return this.pointerFor(this.currentTargetPid).position();
 	}
 
 	close(): void {
+		if (this.closed) {
+			return;
+		}
+		this.closed = true;
 		for (const timer of this.activationReleaseTimers.values()) {
 			clearTimeout(timer);
 		}
@@ -942,59 +982,64 @@ export class MacOSInputController {
 		this.overlay.close();
 	}
 
-	private markPointer(position: Point): void {
-		this.pointer.moveTo(position);
+	private markPointer(position: Point, pid = this.currentTargetPid): void {
+		this.pointerFor(pid).moveTo(position);
 		if (!this.isBackground) {
-			this.overlay.set(position);
+			this.overlay.set(position, pid);
 		}
 	}
 
-	private trackPointer(position: Point): void {
-		this.pointer.moveTo(position);
+	private pointerFor(pid: number | undefined): VirtualPointer {
+		return pid === undefined ? this.pointers.forPid(0) : this.pointers.forPid(pid);
+	}
+
+	private trackPointer(position: Point, pid = this.currentTargetPid): void {
+		this.pointerFor(pid).moveTo(position);
 		if (this.isBackground) {
 			return;
 		}
 		if (this.overlay.track === undefined) {
-			this.overlay.set(position);
+			this.overlay.set(position, pid, true);
 		} else {
-			this.overlay.track(position);
+			this.overlay.track(position, pid);
 		}
 	}
 
-	showScrollPointer(position: Point): void {
+	showScrollPointer(position: Point, pid = this.currentTargetPid): void {
 		if (!this.isBackground) {
-			this.overlay.setMode("scroll");
+			this.overlay.setMode("scroll", pid);
 		}
-		this.markPointer(position);
+		this.markPointer(position, pid);
 	}
 
 	/**
 	 * Show where the agent is acting with the drawn overlay dot, and ripple it for a press. Background
 	 * delivery updates only the logical pointer model and never emits overlay feedback.
 	 */
-	showPointer(position: Point, press: boolean): void {
+	showPointer(position: Point, press: boolean, pid = this.currentTargetPid): void {
 		if (this.isBackground) {
-			this.pointer.moveTo(position);
+			this.pointerFor(pid).moveTo(position);
 			return;
 		}
-		this.overlay.setMode("pointer");
-		this.markPointer(position);
+		this.overlay.setMode("pointer", pid);
+		this.markPointer(position, pid);
 		if (press) {
-			this.overlay.setMode("click");
+			this.overlay.setMode("click", pid);
 		}
 	}
 
 	showThinking(): void {
 		if (!this.isBackground) {
-			this.overlay.setMode("thinking");
+			this.overlay.setMode("thinking", this.currentTargetPid);
 		}
 	}
 
 	/** Show attended keyboard activity while background delivery remains visually silent. */
 	showKeyboard(): void {
 		if (!this.isBackground) {
-			this.overlay.setMode("keyboard");
-			this.overlay.set(this.pointer.position());
+			const pid = this.currentTargetPid;
+			this.overlay.setMode("keyboard", pid);
+			this.overlay.set(this.pointerFor(pid).position(), pid);
 		}
 	}
 

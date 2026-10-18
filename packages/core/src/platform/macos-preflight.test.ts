@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { InputInterrupted, runInInputScope } from "../computer/input-scope.js";
 import { setRunningApplicationLookupForTesting } from "./app-list.js";
+import * as coregraphics from "./macos-ffi/coregraphics.js";
+import * as skylight from "./macos-ffi/skylight.js";
 import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
 import type { InputDelivery } from "./macos-input.js";
 import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
@@ -37,9 +40,14 @@ const runtime = vi.hoisted(() => ({
 
 const childProcessMock = vi.hoisted(() => ({ execFile: vi.fn<ExecFileMock>() }));
 const windowMock = vi.hoisted(() => ({ openWindows: vi.fn<() => Promise<readonly TestWindow[]>>() }));
+const windowListMock = vi.hoisted(() => ({ listWindows: vi.fn<() => readonly object[]>() }));
 const accessibilityMock = vi.hoisted(() => ({
 	extractAccessibilityTree: vi.fn(),
 	focusedWindowIdForPid: vi.fn(() => undefined),
+	focusedWindowIdsForObservationPid: vi.fn(() => ({
+		focusedWindowId: undefined,
+		sheetOwnerWindowId: undefined,
+	})),
 	releaseAccessibilitySnapshot: vi.fn(),
 	currentObservationKey: vi.fn(() => "0:test"),
 	performActionByIndex: vi.fn(),
@@ -57,14 +65,14 @@ const screenshotMock = vi.hoisted(() => ({
 
 vi.mock("node:child_process", () => ({ execFile: childProcessMock.execFile }));
 vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
+vi.mock("./macos-ffi/window-list.js", () => ({
+	listWindows: windowListMock.listWindows,
+	listOnscreenWindows: vi.fn(() => []),
+}));
 // The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
 setOpenWindowsSourceForTesting(() => undefined);
 vi.mock("./macos-ffi/accessibility.js", () => accessibilityMock);
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
-vi.mock("./macos-ffi/window-list.js", () => ({
-	listWindows: vi.fn(() => []),
-	listOnscreenWindows: vi.fn(() => []),
-}));
 vi.mock("./macos-ffi/screenshot.js", () => screenshotMock);
 
 import type { InputObservation } from "../computer/guarded-interface.js";
@@ -164,6 +172,10 @@ beforeEach(() => {
 	windowMock.openWindows.mockReset();
 	setOnscreenWindowIdsSourceForTesting(() => [42, 99]);
 	windowMock.openWindows.mockResolvedValue([{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
+	windowListMock.listWindows.mockReset();
+	windowListMock.listWindows.mockImplementation(() => [
+		{ id: 99, ownerPid: TARGET_PID, layer: 0, bounds: WINDOW_BOUNDS },
+	]);
 	accessibilityMock.extractAccessibilityTree.mockReset();
 	accessibilityMock.extractAccessibilityTree.mockReturnValue({
 		axAvailable: true,
@@ -207,6 +219,40 @@ beforeEach(() => {
 });
 
 describe("MacOSHostComputer input observations", () => {
+	it("#given default background drag suspended on window lookup #when closed #then no native input resumes", async () => {
+		const computer = approvedComputer();
+		await observe(computer);
+		const queryStarted = deferred<void>();
+		const windowQuery = deferred<readonly TestWindow[]>();
+		const postMouse = vi.spyOn(coregraphics, "postMouseEvent").mockImplementation(() => undefined);
+		const focusGuard = vi.spyOn(skylight, "focusGuardFor").mockReturnValue(null);
+		windowMock.openWindows.mockImplementationOnce(() => {
+			queryStarted.resolve();
+			return windowQuery.promise;
+		});
+		const drag = runInInputScope({ target: { pid: TARGET_PID, windowId: 99 } }, () =>
+			computer.drag({ from: { x: 150, y: 100 }, to: { x: 200, y: 150 }, duration: 0 }),
+		);
+		const result = drag.then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		try {
+			await queryStarted.promise;
+			await computer.close();
+			windowQuery.resolve([{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
+
+			expect(await result).toBeInstanceOf(InputInterrupted);
+			expect(postMouse).not.toHaveBeenCalled();
+		} finally {
+			windowQuery.resolve([{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
+			await result;
+			await computer.close();
+			postMouse.mockRestore();
+			focusGuard.mockRestore();
+		}
+	});
+
 	it("authorizes the full normalized id set while excluding raw nodes pruned from model output", async () => {
 		const computer = approvedComputer();
 		const firstState = await computer.getAppState(TARGET_PID, { settleMs: 0, requireWindow: true });
@@ -342,7 +388,11 @@ describe("MacOSHostComputer preflightInput", () => {
 
 	it("re-checks approval after the awaited window query before authorizing", async () => {
 		const approval = new AppApprovalStore([BUNDLE_ID]);
-		const computer = new MacOSHostComputer({ appApproval: approval, overlay: NOOP_POINTER_OVERLAY });
+		const computer = new MacOSHostComputer({
+			appApproval: approval,
+			delivery: "attended",
+			overlay: NOOP_POINTER_OVERLAY,
+		});
 		const expected = await observe(computer);
 		const queryStarted = deferred<void>();
 		const windowQuery = deferred<readonly TestWindow[]>();
@@ -360,7 +410,7 @@ describe("MacOSHostComputer preflightInput", () => {
 	});
 
 	it("re-checks generation after the awaited window query before authorizing", async () => {
-		const computer = approvedComputer();
+		const computer = approvedComputer({ delivery: "attended" });
 		const expected = await observe(computer);
 		const queryStarted = deferred<void>();
 		const windowQuery = deferred<readonly TestWindow[]>();
@@ -395,7 +445,7 @@ describe("MacOSHostComputer preflightInput", () => {
 	});
 
 	it("rejects when the observed app is no longer frontmost", async () => {
-		const computer = approvedComputer({});
+		const computer = approvedComputer({ delivery: "attended" });
 		const expected = await observe(computer);
 		runtime.apps = [{ name: "Finder", bundleId: BUNDLE_ID, pid: TARGET_PID, isActive: false }];
 
@@ -431,6 +481,9 @@ describe("MacOSHostComputer preflightInput", () => {
 		windowMock.openWindows.mockResolvedValue([
 			{ id: 99, owner: { processId: TARGET_PID }, bounds: { ...WINDOW_BOUNDS, width: 801 } },
 		]);
+		windowListMock.listWindows.mockImplementation(() => [
+			{ id: 99, ownerPid: TARGET_PID, layer: 0, bounds: { ...WINDOW_BOUNDS, width: 801 } },
+		]);
 
 		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason: "window-bounds-changed" });
 	});
@@ -441,6 +494,9 @@ describe("MacOSHostComputer preflightInput", () => {
 		windowMock.openWindows.mockResolvedValue([
 			{ id: 99, owner: { processId: TARGET_PID }, bounds: { ...WINDOW_BOUNDS, width: 801 } },
 		]);
+		windowListMock.listWindows.mockImplementation(() => [
+			{ id: 99, ownerPid: TARGET_PID, layer: 0, bounds: { ...WINDOW_BOUNDS, width: 801 } },
+		]);
 
 		expect(await computer.preflightInput(expected, { requireSameBounds: false })).toEqual({ ok: true });
 	});
@@ -449,6 +505,9 @@ describe("MacOSHostComputer preflightInput", () => {
 		const computer = approvedComputer({ delivery: "background" });
 		const expected = await observe(computer);
 		windowMock.openWindows.mockResolvedValue([{ id: 100, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
+		windowListMock.listWindows.mockImplementation(() => [
+			{ id: 100, ownerPid: TARGET_PID, layer: 0, bounds: WINDOW_BOUNDS },
+		]);
 
 		expect(await computer.preflightInput(expected, { requireSameBounds: false })).toEqual({
 			ok: false,
@@ -467,6 +526,14 @@ describe("MacOSHostComputer preflightInput", () => {
 		const computer = approvedComputer();
 		const expected = await observe(computer);
 		windowMock.openWindows.mockResolvedValue(windows);
+		windowListMock.listWindows.mockImplementation(() =>
+			windows.map((window) => ({
+				id: window.id,
+				ownerPid: window.owner.processId,
+				layer: 0,
+				bounds: window.bounds,
+			})),
+		);
 
 		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason });
 	});

@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { MenuKeyEquivalent } from "./macos-menu.js";
 
 const selectText = vi.hoisted(() => ({
 	selectAllInFocusedTextElement: vi.fn<(pid: number) => boolean>(() => true),
@@ -13,8 +14,8 @@ const pasteboard = vi.hoisted(() => ({
 const menu = vi.hoisted(() => ({
 	invokeMenu: vi.fn(async (_pid: number, path: readonly string[]) => ({ resolvedPath: path, action: "AXPress" })),
 	normalizeMenuPath: (path: readonly string[]) => path.map((segment) => segment.trim()),
-	commandChordMask: () => undefined,
-	findMenuKeyEquivalent: () => undefined,
+	commandChordMask: vi.fn<() => number | undefined>(() => undefined),
+	findMenuKeyEquivalent: vi.fn<() => MenuKeyEquivalent | undefined>(() => undefined),
 	applicationIsFrontmost: () => true,
 	planBackgroundKeyEquivalent: () => ({ kind: "keys" }),
 	pressMenuItem: vi.fn(),
@@ -23,6 +24,7 @@ const accessibility = vi.hoisted(() => ({
 	extractAccessibilityTree: vi.fn(),
 	focusedWindowIdForPid: vi.fn(() => undefined),
 	focusedWindowIsModal: vi.fn(() => false),
+	focusedWindowShowsFilePanel: vi.fn(() => false),
 	focusedElementFrame: vi.fn(() => undefined),
 	typeIntoFocusedAXElement: vi.fn(() => true),
 	performActionByIndex: vi.fn(),
@@ -45,9 +47,35 @@ vi.mock("./macos-ffi/ax-observer.js", () => ({
 vi.mock("./keyboard-fence.js", () => keyboardFence);
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 
+import { MacOSInputController } from "./macos-input.js";
 import { MacOSHostComputer } from "./macos.js";
 
 const PID = 4242;
+
+afterEach(() => {
+	vi.restoreAllMocks();
+	menu.commandChordMask.mockReturnValue(undefined);
+	menu.findMenuKeyEquivalent.mockReturnValue(undefined);
+	accessibility.focusedWindowShowsFilePanel.mockReturnValue(false);
+});
+
+describe("#given a background Save panel #when its shortcut overlaps the app menu #then the panel receives it", () => {
+	it("routes Go to Folder through native keyboard delivery instead of Find Previous", async () => {
+		menu.commandChordMask.mockReturnValue(1);
+		menu.findMenuKeyEquivalent.mockReturnValue({ path: ["Edit", "Find", "Find Previous"], enabled: false });
+		accessibility.focusedWindowShowsFilePanel.mockReturnValue(true);
+		const prepare = vi.spyOn(MacOSInputController.prototype, "prepareKeyboardTarget").mockResolvedValue();
+		const press = vi.spyOn(MacOSInputController.prototype, "pressKey").mockResolvedValue();
+		const computer = new MacOSHostComputer({ defaultTargetPid: PID, delivery: "background" });
+
+		await computer.key("g", { modifiers: ["command", "shift"] });
+
+		expect(prepare).toHaveBeenCalledOnce();
+		expect(menu.findMenuKeyEquivalent).not.toHaveBeenCalled();
+		expect(press).toHaveBeenCalledWith("g", { modifiers: ["command", "shift"] });
+		await computer.close();
+	});
+});
 
 describe("#given Edit menu commands that AppKit validates only while its menu is shown", () => {
 	beforeEach(() => {

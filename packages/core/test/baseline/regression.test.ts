@@ -41,7 +41,7 @@ describe("#given baseline CGEvent regression suite #when MacOSInputController di
 
 	it("click dispatches move + down + up via postMouseEvent", async () => {
 		const { MacOSInputController } = await import("../../src/platform/macos-input.js");
-		const controller = new MacOSInputController();
+		const controller = new MacOSInputController(undefined, undefined, undefined, undefined, "attended");
 
 		await controller.click({ x: 100, y: 200 });
 
@@ -71,7 +71,7 @@ describe("#given baseline CGEvent regression suite #when MacOSInputController di
 
 	it("type dispatches each character via postUnicodeText", async () => {
 		const { MacOSInputController } = await import("../../src/platform/macos-input.js");
-		const controller = new MacOSInputController();
+		const controller = new MacOSInputController(undefined, undefined, undefined, undefined, "attended");
 
 		await controller.typeText("안녕하세요");
 
@@ -83,7 +83,7 @@ describe("#given baseline CGEvent regression suite #when MacOSInputController di
 
 	it("key with modifiers dispatches via postKeyboardEvent with flags", async () => {
 		const { MacOSInputController } = await import("../../src/platform/macos-input.js");
-		const controller = new MacOSInputController();
+		const controller = new MacOSInputController(undefined, undefined, undefined, undefined, "attended");
 
 		await controller.pressKey("c", { modifiers: ["command"] });
 
@@ -107,7 +107,7 @@ describe("#given baseline CGEvent regression suite #when MacOSInputController di
 
 	it("scroll dispatches via postScrollEvent", async () => {
 		const { MacOSInputController } = await import("../../src/platform/macos-input.js");
-		const controller = new MacOSInputController();
+		const controller = new MacOSInputController(undefined, undefined, undefined, undefined, "attended");
 
 		await controller.scroll({ direction: "down", amount: 3 });
 

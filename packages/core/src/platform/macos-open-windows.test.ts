@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ListedWindow } from "./macos-ffi/window-list.js";
-import { openWindowsForTargeting, setOpenWindowsSourceForTesting, targetableWindows } from "./macos-open-windows.js";
+import * as windowListing from "./macos-ffi/window-list.js";
+import {
+	observedWindowForPid,
+	openWindowsForTargeting,
+	setOpenWindowsSourceForTesting,
+	targetableWindows,
+} from "./macos-open-windows.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
 
 function listed(partial: Partial<ListedWindow> & { id: number }): ListedWindow {
@@ -148,6 +154,36 @@ describe("#given all-Spaces enumeration #when explicitly requested #then the nat
 			),
 		).rejects.toThrow(/all-Spaces WindowServer listing could not be read/);
 		expect(listBinary).not.toHaveBeenCalled();
+	});
+});
+
+describe("#given an explicitly observed hidden window #when validating its owner and id #then only a retained exact window resolves", () => {
+	it("keeps the hidden window and refuses it after destruction", () => {
+		let inventory: readonly MacOSWindowInfo[] = [
+			{ ...window(16205), owner: { processId: 100 } },
+			{ ...window(17182), owner: { processId: 200 } },
+		];
+		setOpenWindowsSourceForTesting(() => inventory);
+		try {
+			expect(observedWindowForPid(100, 16205)?.id).toBe(16205);
+			expect(observedWindowForPid(100, 17182)).toBeUndefined();
+			inventory = [];
+			expect(observedWindowForPid(100, 16205)).toBeUndefined();
+		} finally {
+			setOpenWindowsSourceForTesting(undefined);
+		}
+	});
+
+	it("does not consult host windows when an installed source is unreadable", () => {
+		const native = vi.spyOn(windowListing, "listWindows").mockReturnValue([listed({ id: 16205 })]);
+		setOpenWindowsSourceForTesting(() => undefined);
+		try {
+			expect(observedWindowForPid(100, 16205)).toBeUndefined();
+			expect(native).not.toHaveBeenCalled();
+		} finally {
+			setOpenWindowsSourceForTesting(undefined);
+			native.mockRestore();
+		}
 	});
 });
 

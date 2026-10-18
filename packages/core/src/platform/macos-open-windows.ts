@@ -70,6 +70,13 @@ export function setOpenWindowsSourceForTesting(
 	nativeAllSpacesSourceOverride = allSpacesSource;
 }
 
+/** The full WindowServer listing for read-only validation of an explicitly observed window. */
+export function observedWindowForPid(pid: number, windowId: number): MacOSWindowInfo | undefined {
+	const source = nativeAllSpacesSourceOverride ?? nativeSourceOverride ?? listNativeAllSpacesWindows;
+	const listed = source();
+	return listed?.find((window) => window.id === windowId && window.owner?.processId === pid);
+}
+
 function listNativeWindows(): readonly MacOSWindowInfo[] | undefined {
 	const listed = listWindows();
 	return listed === undefined ? undefined : targetableWindows(listed);

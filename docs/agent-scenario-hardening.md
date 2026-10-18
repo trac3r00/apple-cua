@@ -5,7 +5,12 @@ subsequently authorized committing and pushing the reviewed changes on
 `wip/ios-mirroring-cursor-motion-20261007`. References to no commits describe
 the original test run, not that later publication.
 
-## Current result
+## Latest recorded result (2026-10-09 snapshot)
+
+This is the latest recorded QA checkpoint, not a live status page. Its commands,
+provider availability, registrations, versions and machine-specific timings describe
+the recorded run and can change. The later sections titled "Earlier checkpoint"
+and "Continued Chrome acceptance" preserve the chronology of that same run.
 
 The implemented hardening and tested contracts are verified; this is not a
 certification of every named agent or a claim of universal native-tool superiority.
@@ -150,7 +155,12 @@ existing context-recovery scenario explicitly observes again after moving the
 window, so it does not itself prove rejection of an attempted stale mutation.
 That refusal is tested by the new protocol scenarios.
 
-## Earlier checkpoint and acceptance limits
+## Earlier checkpoint (superseded where noted below) and acceptance limits
+
+This section records the state before the continued Chrome acceptance run below.
+The later Chrome result adds Chrome coverage; it does not resolve the Safari
+fixture limitation. The client-coverage, native-comparison and disturbance limits remain applicable
+to the evidence recorded here.
 
 Retained changes: `client-scenarios.protocol.test.ts` adds three complex MCP SDK
 cases; `client.test.mjs` adds three real-child stdio cases to its existing case.
@@ -179,8 +189,8 @@ At the earlier checkpoint, these acceptance items were unresolved:
 - Focus/pointer disturbance attribution remains open. The successful desktop
   outcomes do not prove the stronger non-disturbance ideal.
 
-The continued work below resolves Chrome browser acceptance and adds a bounded
-native comparison and real client smokes. The unavailable client and Codex-native
+The continued work below records the Chrome browser acceptance, a bounded native
+comparison and real client smokes. The unavailable client and Codex-native
 comparisons remain explicitly unverified; they are not silently certified.
 
 ### Continued Chrome acceptance

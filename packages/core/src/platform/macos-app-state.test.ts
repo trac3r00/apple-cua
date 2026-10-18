@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MacOSInputController, setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
-import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
+import { observedWindowForPid, setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
 
 type ExecFileCallback = (error: Error | null, stdout: string | Buffer, stderr: string) => void;
 type ExecFileMock = (
@@ -43,7 +43,9 @@ vi.mock("./macos-ffi/window-list.js", () => windowListMock);
 
 const accessibilityMock = vi.hoisted(() => ({
 	extractAccessibilityTree: vi.fn(),
-	focusedWindowIdForPid: vi.fn<() => number | undefined>(() => undefined),
+	focusedWindowIdsForObservationPid: vi.fn<
+		() => { readonly focusedWindowId: number | undefined; readonly sheetOwnerWindowId: number | undefined }
+	>(() => ({ focusedWindowId: undefined, sheetOwnerWindowId: undefined })),
 	releaseAccessibilitySnapshot: vi.fn(),
 	currentObservationKey: vi.fn(() => "0:test"),
 	performActionByIndex: vi.fn(),
@@ -68,6 +70,7 @@ vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 import { AppApprovalStore } from "../permission/app-approval.js";
 import { setRunningApplicationLookupForTesting } from "./app-list.js";
 import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
+import * as displayList from "./macos-ffi/display-list.js";
 import { MacOSHostComputer } from "./macos.js";
 import { setSystemPromptWindowSourceForTesting } from "./system-prompts.js";
 
@@ -96,11 +99,18 @@ function fakePng(width: number, height: number): Buffer {
 }
 
 beforeEach(() => {
+	setOpenWindowsSourceForTesting(() => undefined);
+	vi.spyOn(displayList, "onlineDisplayInfo").mockReturnValue([
+		{ id: 2, x: 0, y: 0, width: 2560, height: 1440, scaleFactor: 1, isMain: true },
+	]);
 	setRunningApplicationLookupForTesting(unavailableNativeLookup);
 	childProcessMock.execFile.mockReset();
 	windowMock.openWindows.mockReset();
 	setOnscreenWindowIdsSourceForTesting(() => [42, 99]);
 	accessibilityMock.extractAccessibilityTree.mockReset();
+	accessibilityMock.focusedWindowIdsForObservationPid
+		.mockReset()
+		.mockReturnValue({ focusedWindowId: undefined, sheetOwnerWindowId: undefined });
 	accessibilityMock.performActionByIndex.mockReset();
 	accessibilityMock.releaseAccessibilitySnapshot.mockReset();
 	screenshotMock.captureDisplayImage.mockReset();
@@ -169,6 +179,12 @@ describe("#given one observation #when the driver resolves its target window and
 		windowMock.openWindows.mockClear();
 		windowMock.openWindows.mockResolvedValue([
 			{ id: 99, title: "Documents", owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS },
+			{
+				id: 101,
+				title: "Left display",
+				owner: { processId: TARGET_PID },
+				bounds: { x: -1800, y: 100, width: 1200, height: 700 },
+			},
 		]);
 		const computer = new MacOSHostComputer();
 
@@ -176,6 +192,78 @@ describe("#given one observation #when the driver resolves its target window and
 
 		expect(state.windowId).toBe(99);
 		expect(windowMock.openWindows.mock.calls.length).toBe(1);
+	});
+
+	it("associates a global-bounds window with its display without changing its bounds", async () => {
+		const displayList = await import("./macos-ffi/display-list.js");
+		const display = vi.spyOn(displayList, "onlineDisplayInfo");
+		display.mockReturnValue([
+			{ id: 1, isMain: true, x: 0, y: 0, width: 2500, height: 1080, scaleFactor: 2 },
+			{ id: 2, x: 1500, y: -500, width: 2560, height: 2000, scaleFactor: 1 },
+			{ id: 3, x: -1920, y: 0, width: 1920, height: 1080, scaleFactor: 1 },
+		]);
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, title: "Documents", owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS },
+			{
+				id: 101,
+				title: "Left display",
+				owner: { processId: TARGET_PID },
+				bounds: { x: -1800, y: 100, width: 1200, height: 700 },
+			},
+		]);
+		const originalLogical = screenshotMock.getMainDisplayLogicalSize.getMockImplementation();
+		const originalNative = screenshotMock.getMainDisplayNativePixelSize.getMockImplementation();
+		screenshotMock.getMainDisplayLogicalSize.mockReturnValue({ width: 1920, height: 1080 });
+		screenshotMock.getMainDisplayNativePixelSize.mockReturnValue({ width: 3840, height: 2160 });
+		try {
+			const state = await new MacOSHostComputer({ delivery: "attended" }).getAppState(TARGET_PID, {
+				settleMs: 0,
+				includeScreenshot: false,
+			});
+
+			expect(state.display).toEqual({
+				id: 1,
+				isMain: true,
+				x: 0,
+				y: 0,
+				width: 2500,
+				height: 1080,
+				scaleFactor: 2,
+			});
+			expect(state.displays).toHaveLength(3);
+			expect(state.windowDisplayId).toBe(1);
+			expect(state.windowDisplayIds).toEqual([1, 2]);
+			expect(state.windowBounds).toEqual(WINDOW_BOUNDS);
+			expect(state.display.id).toBe(1);
+			expect(state.displays?.map((entry) => [entry.id, entry.x, entry.y])).toEqual([
+				[1, 0, 0],
+				[2, 1500, -500],
+				[3, -1920, 0],
+			]);
+			const candidates = state.windowCandidates?.map((window) => ({
+				id: window.id,
+				displayId: window.displayId,
+				displayIds: window.displayIds,
+				bounds: window.bounds,
+			}));
+			expect(candidates).toContainEqual({
+				id: 101,
+				displayId: 3,
+				displayIds: [3],
+				bounds: { x: -1800, y: 100, width: 1200, height: 700 },
+			});
+		} finally {
+			display.mockRestore();
+			windowMock.openWindows.mockResolvedValue([
+				{ id: 99, title: "Documents", owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS },
+			]);
+			if (originalLogical !== undefined) {
+				screenshotMock.getMainDisplayLogicalSize.mockImplementation(originalLogical);
+			}
+			if (originalNative !== undefined) {
+				screenshotMock.getMainDisplayNativePixelSize.mockImplementation(originalNative);
+			}
+		}
 	});
 });
 
@@ -228,13 +316,20 @@ describe("#given a locked Mac #when get_app_state is asked for #then it stops wi
 	});
 });
 
+describe("#given default host options #when the host is constructed #then input delivery stays in background", () => {
+	it("allows callers to opt into attended delivery explicitly", () => {
+		expect(new MacOSHostComputer().delivery).toBe("background");
+		expect(new MacOSHostComputer({ delivery: "attended" }).delivery).toBe("attended");
+	});
+});
+
 describe("#given a window that appears just after the first look #when a window is required #then the observation waits for it", () => {
 	it("observes the window once the window server lists it", async () => {
 		windowMock.openWindows.mockReset();
 		windowMock.openWindows
 			.mockResolvedValueOnce([])
 			.mockResolvedValue([{ id: 99, title: "Documents", owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
-		const computer = new MacOSHostComputer();
+		const computer = new MacOSHostComputer({ delivery: "attended" });
 
 		const state = await computer.getAppState(TARGET_PID, { settleMs: 0, requireWindow: true });
 
@@ -292,7 +387,7 @@ describe("#given a macOS permission prompt over the screen #when get_app_state o
 
 describe("#given a target window #when get_app_state captures it #then the screenshot is sized to the window aspect", () => {
 	it("captures the window at full fidelity up to the 2560 long-edge cap, not the full screen", async () => {
-		const computer = new MacOSHostComputer();
+		const computer = new MacOSHostComputer({ delivery: "attended" });
 
 		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
 
@@ -300,6 +395,43 @@ describe("#given a target window #when get_app_state captures it #then the scree
 		expect(state.screenshotWidth).toBe(2560);
 		expect(state.screenshotHeight).toBe(1600);
 		expect(state.windowBounds).toEqual(WINDOW_BOUNDS);
+	});
+});
+
+describe("#given an observed hidden window without an AX root #when its native title is listed #then the observation reports that exact title", () => {
+	it("uses the matched WindowServer title when accessibility has no root", async () => {
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 42, title: "Other window", owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS },
+		]);
+		const hiddenWindows = () => [
+			{
+				id: 99,
+				title: "Untitled",
+				owner: { processId: TARGET_PID },
+				bounds: WINDOW_BOUNDS,
+			},
+		];
+		setOpenWindowsSourceForTesting(hiddenWindows, hiddenWindows);
+		accessibilityMock.extractAccessibilityTree.mockReturnValue({
+			axAvailable: false,
+			truncated: false,
+			walkKey: "hidden-window-99",
+			elements: [],
+		});
+		const computer = new MacOSHostComputer();
+
+		const state = await computer.getAppState(TARGET_PID, {
+			settleMs: 0,
+			includeScreenshot: false,
+			windowId: 99,
+		});
+
+		expect(state.windowId).toBe(99);
+		expect(state.windowTitle).toBe("Untitled");
+		expect(state.axAvailable).toBe(false);
+		expect(state.elements).toEqual([]);
+		expect(observedWindowForPid(TARGET_PID, 99)?.title).toBe("Untitled");
+		setOpenWindowsSourceForTesting(() => undefined);
 	});
 });
 
@@ -314,14 +446,48 @@ describe("#given an app with several windows #when the observation resolves a ta
 				bounds: { x: 0, y: 0, width: 400, height: 300 },
 			},
 		]);
-		accessibilityMock.focusedWindowIdForPid.mockReturnValue(42);
-		const computer = new MacOSHostComputer();
+		accessibilityMock.focusedWindowIdsForObservationPid.mockReturnValue({
+			focusedWindowId: 42,
+			sheetOwnerWindowId: undefined,
+		});
+		const computer = new MacOSHostComputer({ delivery: "attended" });
 
 		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
 
 		expect(state.windowId).toBe(42);
 		expect(state.windowTitle).toBe("Downloads");
 		expect(state.windowCandidates?.map((candidate) => candidate.id)).toEqual([99, 42]);
+		expect(accessibilityMock.focusedWindowIdsForObservationPid).toHaveBeenCalledWith(TARGET_PID);
+	});
+
+	it("uses the focused sheet's listed AXWindow owner for default observation", async () => {
+		windowMock.openWindows.mockResolvedValue([
+			{
+				id: 99,
+				title: "Presentation",
+				owner: { processId: TARGET_PID },
+				bounds: WINDOW_BOUNDS,
+			},
+			{
+				id: 42,
+				title: "Save",
+				owner: { processId: TARGET_PID },
+				bounds: { x: 1333, y: 721, width: 370, height: 182 },
+			},
+		]);
+		accessibilityMock.focusedWindowIdsForObservationPid.mockReturnValue({
+			focusedWindowId: 42,
+			sheetOwnerWindowId: 99,
+		});
+		screenshotMock.captureWindowImage.mockClear();
+		const computer = new MacOSHostComputer({ delivery: "attended" });
+
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
+
+		expect(state.windowId).toBe(99);
+		expect(state.windowBounds).toEqual(WINDOW_BOUNDS);
+		expect(accessibilityMock.extractAccessibilityTree).toHaveBeenCalledWith(TARGET_PID, { windowId: 99 });
+		expect(screenshotMock.captureWindowImage.mock.calls[0]?.[0]).toBe(99);
 	});
 
 	it("names every candidate by the title the app reports when the WindowServer withholds titles", async () => {
@@ -329,14 +495,17 @@ describe("#given an app with several windows #when the observation resolves a ta
 			{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS },
 			{ id: 42, owner: { processId: TARGET_PID }, bounds: { x: 0, y: 0, width: 400, height: 300 } },
 		]);
-		accessibilityMock.focusedWindowIdForPid.mockReturnValue(42);
+		accessibilityMock.focusedWindowIdsForObservationPid.mockReturnValue({
+			focusedWindowId: 42,
+			sheetOwnerWindowId: undefined,
+		});
 		accessibilityMock.windowTitlesForPid.mockReturnValueOnce(
 			new Map([
 				[99, "a.txt"],
 				[42, "b.txt"],
 			]),
 		);
-		const computer = new MacOSHostComputer();
+		const computer = new MacOSHostComputer({ delivery: "attended" });
 
 		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
 
@@ -348,16 +517,26 @@ describe("#given an app with several windows #when the observation resolves a ta
 	});
 
 	it("honors an explicitly requested window id over the focused window", async () => {
-		accessibilityMock.focusedWindowIdForPid.mockReturnValue(42);
-		const computer = new MacOSHostComputer();
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS },
+			{ id: 42, owner: { processId: TARGET_PID }, bounds: { x: 1333, y: 721, width: 370, height: 182 } },
+		]);
+		accessibilityMock.focusedWindowIdsForObservationPid.mockReturnValue({
+			focusedWindowId: 42,
+			sheetOwnerWindowId: 99,
+		});
+		screenshotMock.captureWindowImage.mockClear();
+		const computer = new MacOSHostComputer({ delivery: "attended" });
 
-		const state = await computer.getAppState(TARGET_PID, { settleMs: 0, windowId: 99 });
+		const state = await computer.getAppState(TARGET_PID, { settleMs: 0, windowId: 42 });
 
-		expect(state.windowId).toBe(99);
+		expect(state.windowId).toBe(42);
+		expect(accessibilityMock.focusedWindowIdsForObservationPid).not.toHaveBeenCalled();
+		expect(screenshotMock.captureWindowImage.mock.calls[0]?.[0]).toBe(42);
 	});
 
 	it("reports no candidates when the app has a single window", async () => {
-		const computer = new MacOSHostComputer();
+		const computer = new MacOSHostComputer({ delivery: "attended" });
 
 		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
 
@@ -381,7 +560,7 @@ describe("#given two get_app_state calls #when the second runs #then it reports 
 				callback(null, fakePng(2560, 1600), "");
 			});
 		}
-		const computer = new MacOSHostComputer();
+		const computer = new MacOSHostComputer({ delivery: "attended" });
 
 		const first = await computer.getAppState(TARGET_PID, { settleMs: 0 });
 		const second = await computer.getAppState(TARGET_PID, { settleMs: 0 });
@@ -404,7 +583,7 @@ describe("#given two get_app_state calls #when the second runs #then it reports 
 				callback(null, fakePng(2560, 1600), "");
 			});
 		}
-		const computer = new MacOSHostComputer();
+		const computer = new MacOSHostComputer({ delivery: "attended" });
 
 		await computer.getAppState(TARGET_PID, { settleMs: 0, includeMenuBar: true });
 		const afterScopeChange = await computer.getAppState(TARGET_PID, { settleMs: 0 });
@@ -577,13 +756,13 @@ describe("#given a fresh app session #when get_app_state runs #then it highlight
 				callback(null, fakePng(2560, 1600), ""),
 			);
 		}
-		const computer = new MacOSHostComputer({ overlay });
+		const computer = new MacOSHostComputer({ overlay, delivery: "attended" });
 
 		await computer.getAppState(TARGET_PID, { settleMs: 0 });
 		await computer.getAppState(TARGET_PID, { settleMs: 0 });
 
 		expect(overlay.highlight).toHaveBeenCalledTimes(1);
-		expect(overlay.highlight).toHaveBeenCalledWith(WINDOW_BOUNDS);
+		expect(overlay.highlight).toHaveBeenCalledWith(WINDOW_BOUNDS, TARGET_PID);
 	});
 });
 
@@ -612,7 +791,7 @@ describe("#given a noisy accessibility tree #when get_app_state runs #then non-d
 				},
 			],
 		});
-		const computer = new MacOSHostComputer();
+		const computer = new MacOSHostComputer({ delivery: "attended" });
 
 		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
 
@@ -649,7 +828,7 @@ describe("#given a Retina display #when get_app_state runs #then it reports disp
 
 		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
 
-		expect(state.display).toEqual({ width: 1920, height: 1080, scaleFactor: 2 });
+		expect(state.display).toMatchObject({ width: 2560, height: 1440, scaleFactor: 1, id: 2, isMain: true });
 	});
 });
 
@@ -729,7 +908,7 @@ describe("#given an accessibility tree that stabilizes #when get_app_state settl
 					elements: [stableElement, { ...stableElement, id: 6, label: "Transient" }],
 				})
 				.mockReturnValue({ axAvailable: true, elements: [stableElement] });
-			const computer = new MacOSHostComputer();
+			const computer = new MacOSHostComputer({ delivery: "attended" });
 
 			const statePromise = computer.getAppState(TARGET_PID, { settleMs: 500 });
 			// Let the event-driven settle loop run its (short) poll intervals.
@@ -748,7 +927,7 @@ describe("#given an accessibility tree that stabilizes #when get_app_state settl
 	it("returns immediately once the tree is already stable instead of sleeping the whole cap", async () => {
 		vi.useFakeTimers();
 		try {
-			const computer = new MacOSHostComputer();
+			const computer = new MacOSHostComputer({ delivery: "attended" });
 
 			const statePromise = computer.getAppState(TARGET_PID, { settleMs: 500 });
 			// Advance far less than the 500ms cap; a stable tree settles right away.
@@ -764,7 +943,7 @@ describe("#given an accessibility tree that stabilizes #when get_app_state settl
 
 describe("#given an observed AX app #when the host closes #then its retained accessibility snapshot is released", () => {
 	it("releases each observed pid", async () => {
-		const computer = new MacOSHostComputer();
+		const computer = new MacOSHostComputer({ delivery: "attended" });
 		await computer.getAppState(TARGET_PID, { settleMs: 0 });
 
 		await computer.close();
@@ -858,7 +1037,7 @@ describe("#given a window on a secondary display #when get_app_state remaps fram
 		childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) => {
 			callback(null, fakePng(960, 600), "");
 		});
-		const computer = new MacOSHostComputer();
+		const computer = new MacOSHostComputer({ delivery: "attended" });
 
 		const state = await computer.getAppState(TARGET_PID, { settleMs: 0 });
 

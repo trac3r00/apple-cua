@@ -1,6 +1,9 @@
 import type { Size } from "../types/index.js";
 
 export interface DisplayMetadata {
+	readonly id?: number;
+	readonly x?: number;
+	readonly y?: number;
 	readonly width: number;
 	readonly height: number;
 	readonly scaleFactor: number;
@@ -14,7 +17,11 @@ export interface DisplayMetadataInput {
 export function resolveDisplayMetadata(input: DisplayMetadataInput): DisplayMetadata {
 	const width = Math.round(input.logical.width);
 	const height = Math.round(input.logical.height);
-	return { width, height, scaleFactor: resolveScaleFactor(width, input.nativePixel) };
+	return {
+		width,
+		height,
+		scaleFactor: resolveScaleFactor(width, input.nativePixel),
+	};
 }
 
 function resolveScaleFactor(logicalWidth: number, nativePixel: Size | undefined): number {

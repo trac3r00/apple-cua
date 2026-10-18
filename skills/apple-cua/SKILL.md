@@ -50,6 +50,13 @@ merely to understand the "whole situation." Do not begin by clicking to discover
 
 ## Observe, validate, act, verify
 
+**Background delivery is the default.** `observe_apps` returns a separate
+observation token per app; `run_parallel` binds each batch to that app and its
+observed window, and input is scoped per app. Do not reuse tokens or element IDs
+across apps. Each app has an independent logical pointer and PID-scoped overlay
+marker; same-app input remains serialized. The native hardware cursor remains singular.
+Keep one controller for the desktop.
+
 1. **Discover only as needed.** `list_apps` reports running apps. Listing an app does not
    authorize reading or controlling it. The host must configure its bundle ID in
    `APPLE_CUA_ALLOWED_BUNDLE_IDS`; never edit that policy to approve yourself. When the app the
@@ -58,8 +65,10 @@ merely to understand the "whole situation." Do not begin by clicking to discover
 2. **Observe the chosen app.** Call `get_app_state` and read its screenshot, accessibility
    elements, target metadata and any local app guidance. Identify the relevant field/control,
    blocking dialog, current value and expected next state before choosing an action. Spend
-   observation deliberately: `include_screenshot: false` returns element ids and geometry
-   without the image (the cheapest re-index before an element action), `diff_only: true`
+   observation deliberately: when you know the target, `find_elements` or a guarded
+   action's `target` query avoids fetching a full tree; `include_screenshot: false`
+   returns element ids and geometry without the image (the cheapest re-index before an
+   element action), and `diff_only: true`
    returns only what changed since the previous observation, `max_elements` caps a huge tree
    (the answer then sets `elementsTruncated`, so you know the tree is partial), and
    `include_menu_bar: true` adds application menus only when the task needs them. When you
@@ -87,6 +96,12 @@ merely to understand the "whole situation." Do not begin by clicking to discover
    `click` by ID, or an advertised secondary action). Use coordinates only when visual
    inspection justifies them; they must lie inside the exact screenshot received. Do not
    guess IDs, action names, coordinates, shortcuts or the meaning of an unfamiliar control.
+   Target pointer actions at the observed window and use coordinates in the exact
+   coordinate space stated by that observation. Do not convert between screenshot
+   pixels and global logical points by guesswork. `displays` reports display IDs,
+   global origins, sizes and scales; `windowDisplayId` names the greatest-overlap
+   display and `windowDisplayIds` lists every intersected display. Target the
+   window where it already is; never move it to the main display to operate it.
    When you can describe the control you want instead of naming it, prefer one `click_target`
    call over observe-scan-click-verify: it observes, resolves the description, waits up to
    `timeout_ms` for the element to appear, hovers to it first when `hover_first` is set,
@@ -107,7 +122,11 @@ merely to understand the "whole situation." Do not begin by clicking to discover
    for the screen instead of a guessed sleep. To work in several apps at once, `observe_apps`
    observes them in one call and `run_parallel` runs one batch per app, concurrently under
    background delivery. Pass `element_format: "table"` to `get_app_state`/`observe_apps` to
-   get one tab-separated row per element, about a fifth of the JSON size.
+   get one tab-separated row per element, about a fifth of the JSON size. Keep batches
+   to one coherent subtask and at most 20 steps; split at decisions, external side
+   effects, uncertain transitions, or when the next target depends on unobserved
+   intermediate state. Use `wait_for` rather than fixed sleeps, then inspect the
+   returned failure boundary before deciding whether to continue.
    When the flow needs loops, branches on a value read from the screen, or a computed answer,
    use one `run_script` call: a JavaScript body where `apple.app(name)` returns a handle with
    `observe`, `find`, `verify` and the run_steps actions (`click`, `setValue`, `type`, `press`,
@@ -152,6 +171,15 @@ merely to understand the "whole situation." Do not begin by clicking to discover
    (`app.waitFor({ role: "AXMenuItem", label: chosen }, { gone: true })`), because closing a
    native menu is asynchronous. To dismiss without choosing, use an advertised `AXCancel`
    action on a menu item, then verify that the menu is gone.
+   For drawing or canvas work, inspect the target window and canvas bounds first, then
+   use `drag` with observed endpoints and up to 100 `waypoints: [{x,y}]` in the
+   same screenshot coordinates. `duration_ms` (integer 0..30000) paces the complete
+   path; `mouse_button` selects left, right or middle, and `modifiers` remain held
+   throughout. This supports tool-specific drawing, orbit and pan gestures, not
+   a scene-editing API. Verify the actual mark or view change with AX evidence or
+   a window screenshot. Choose text/shape tools from their observed controls;
+   never guess coordinates, tool shortcuts or tooltip contents. Pressure/tilt,
+   multi-touch and cursor button-state visualization are not provided.
    Under the lean profile (`get_capabilities` reports `server.toolset: "lean"`) the only action
    tool is `run_script`; the individual action tools named above are not registered.
 5. **Inspect the result.** Post-action state is evidence to evaluate, not automatic proof
@@ -345,6 +373,7 @@ access for calls; use the configured Mac Phone/FaceTime service for those.
 | Pi extension / core library | Integrations that implement their own orchestration | Element and coordinate input must follow a `get_app_state` in the same session; the driver refuses input whose observation is no longer the current one, but token, viewport and post-action policy remain the harness's job |
 
 - [Installation and local permissions](references/installation.md)
+- [Background, targeting, observation and drawing patterns](references/workflow-patterns.md)
 - [iPhone Mirroring automation](references/ios-automation.md)
 - [MCP and CLI usage](references/usage.md)
 - [OpenClaw/Hermes configuration](references/harnesses.md)

@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { withCursorIdentity } from "../../computer/cursor-scope.js";
 import { type OverlayTransport, createCursorOverlay } from "./cursor-overlay.js";
 
 function fakeTransport(): OverlayTransport & { sends: string[]; closed: boolean } {
 	const state = { sends: [] as string[], closed: false };
 	return {
-		send(command: string) {
-			state.sends.push(command);
+		send(command: string, pid?: number) {
+			state.sends.push(`${pid === undefined ? "" : `pid ${pid} `}${command}`);
 		},
 		close() {
 			state.closed = true;
@@ -70,6 +71,53 @@ describe("#given paced pointer samples #when tracking a gesture #then native pla
 		overlay.track?.({ x: -100.4, y: 240.6 });
 
 		expect(transport.sends).toEqual(["track -100 241\n"]);
+	});
+
+	it("keeps paced samples and cleanup scoped to their app marker", () => {
+		const transport = fakeTransport();
+		const overlay = createCursorOverlay(() => transport);
+
+		overlay.track?.({ x: 100.4, y: 240.6 }, 321);
+		overlay.close();
+
+		expect(transport.sends).toEqual(["pid 321 track 100 241\n", "pid 321 hide\n"]);
+	});
+});
+
+describe("#given two overlay instances #when one closes #then it hides only the pids it used", () => {
+	it("tracks marker pids across positioning and mode commands", () => {
+		const firstTransport = fakeTransport();
+		const secondTransport = fakeTransport();
+		const first = createCursorOverlay(() => firstTransport);
+		const second = createCursorOverlay(() => secondTransport);
+
+		first.set({ x: 10, y: 20 }, 101);
+		first.setMode("thinking", 101);
+		second.set({ x: 30, y: 40 }, 202);
+		second.setMode("scroll", 202);
+		first.close();
+
+		expect(firstTransport.sends).toEqual(["pid 101 set 10 20\n", "pid 101 mode thinking\n", "pid 101 hide\n"]);
+		expect(secondTransport.sends).toEqual(["pid 202 set 30 40\n", "pid 202 mode scroll\n"]);
+		expect(firstTransport.closed).toBe(true);
+		expect(secondTransport.closed).toBe(false);
+	});
+
+	it("cleans up each worker's pid on its own transport after the identity scope ends", () => {
+		const transports = new Map<string | undefined, ReturnType<typeof fakeTransport>>();
+		const overlay = createCursorOverlay((identity) => {
+			const transport = fakeTransport();
+			transports.set(identity, transport);
+			return transport;
+		});
+
+		withCursorIdentity("first", () => overlay.set({ x: 10, y: 20 }, 101));
+		withCursorIdentity("second", () => overlay.set({ x: 30, y: 40 }, 202));
+		overlay.close();
+
+		expect(transports.get("first")?.sends).toEqual(["pid 101 set 10 20\n", "pid 101 hide\n"]);
+		expect(transports.get("second")?.sends).toEqual(["pid 202 set 30 40\n", "pid 202 hide\n"]);
+		expect([...transports.values()].every((transport) => transport.closed)).toBe(true);
 	});
 });
 

@@ -40,12 +40,13 @@ export function primerPosition(layout: ScreenLayout | undefined): Point | undefi
 	if (!rects.every(isFiniteRect)) {
 		return undefined;
 	}
-	const candidate = rects.some((rect) => covers(rect, PRIMER_USUAL_POSITION))
-		? {
-				x: Math.min(...rects.map((rect) => rect.x)) - 1,
-				y: Math.min(...rects.map((rect) => rect.y)) - 1,
-			}
-		: PRIMER_USUAL_POSITION;
+	let candidate = PRIMER_USUAL_POSITION;
+	if (rects.some((rect) => covers(rect, PRIMER_USUAL_POSITION))) {
+		candidate = {
+			x: Math.min(...rects.map((rect) => rect.x)) - 1,
+			y: Math.min(...rects.map((rect) => rect.y)) - 1,
+		};
+	}
 	// Checked again rather than trusted: past 2^53 subtracting 1 no longer moves a coordinate.
 	return rects.some((rect) => covers(rect, candidate)) ? undefined : candidate;
 }
@@ -108,26 +109,51 @@ export async function postDragSequence(
 	flags?: number,
 	checkpoint: () => void = () => undefined,
 ): Promise<void> {
-	await post("down", options.from, "left", 1, targetWindow, flags);
-	const duration = options.duration ?? pointerTravelDuration(options.from, options.to);
-	const steps = dragSteps(duration);
-	const delay = steps <= 1 ? 0 : duration / steps;
+	const button = options.button ?? "left";
+	const points = [options.from, ...(options.waypoints ?? []), options.to];
+	const distances = points.slice(1).map((point, index) => {
+		const previous = points[index];
+		return previous === undefined ? 0 : Math.hypot(point.x - previous.x, point.y - previous.y);
+	});
+	const totalDistance = distances.reduce((total, distance) => total + distance, 0);
+	const duration = options.duration ?? pointerTravelDuration({ x: 0, y: 0 }, { x: totalDistance, y: 0 });
+	const stepsForDuration = dragSteps(duration);
+	const segmentSteps = distances.map((distance) => {
+		const fraction = totalDistance === 0 ? 1 / distances.length : distance / totalDistance;
+		return Math.max(1, Math.ceil(stepsForDuration * fraction));
+	});
+	const totalSteps = segmentSteps.reduce((total, steps) => total + steps, 0);
+	await post("down", options.from, button, 1, targetWindow, flags);
+	const started = performance.now();
+	let completedSteps = 0;
 	let at = options.from;
 	try {
-		for (let step = 1; step <= steps; step += 1) {
-			checkpoint();
-			const position = interpolatePointEased(options.from, options.to, step / steps);
-			await post("drag", position, "left", 1, targetWindow, flags);
-			at = position;
-			if (delay > 0 && step < steps) {
-				await sleep(delay);
+		for (let segment = 0; segment < segmentSteps.length; segment += 1) {
+			const from = points[segment];
+			const to = points[segment + 1];
+			const steps = segmentSteps[segment];
+			if (from === undefined || to === undefined || steps === undefined) {
+				continue;
+			}
+			for (let step = 1; step <= steps; step += 1) {
+				completedSteps += 1;
+				// Pace against one gesture clock. Sub-ms intervals and native posting time must not
+				// accumulate a minimum 1ms timer for every waypoint or every sample.
+				const remaining = started + (duration * completedSteps) / totalSteps - performance.now();
+				if (remaining > 0) {
+					await sleep(Math.ceil(remaining));
+				}
+				checkpoint();
+				const position = interpolatePointEased(from, to, step / steps);
+				await post("drag", position, button, 1, targetWindow, flags);
+				at = position;
 			}
 		}
 	} catch (error: unknown) {
-		await post("up", at, "left", 1, targetWindow, flags);
+		await post("up", at, button, 1, targetWindow, flags);
 		throw error;
 	}
-	await post("up", options.to, "left", 1, targetWindow, flags);
+	await post("up", options.to, button, 1, targetWindow, flags);
 }
 
 export async function runFocusLeasedClick(

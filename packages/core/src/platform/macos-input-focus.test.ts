@@ -106,7 +106,7 @@ describe("#given focused app targeted input", () => {
 			},
 		]);
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController(1234);
+		const controller = new MacOSInputController(1234, undefined, undefined, undefined, "attended");
 
 		// when
 		await controller.click({ x: 450, y: 340 });
@@ -182,7 +182,7 @@ describe("#given focused app targeted input", () => {
 			},
 		]);
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController(1234);
+		const controller = new MacOSInputController(1234, undefined, undefined, undefined, "attended");
 
 		// when
 		await controller.click({ x: 900, y: 900 });
@@ -218,7 +218,7 @@ describe("#given focused app targeted input", () => {
 			},
 		]);
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController(1234);
+		const controller = new MacOSInputController(1234, undefined, undefined, undefined, "attended");
 
 		// when
 		await controller.doubleClick({ x: 50, y: 70 });
@@ -298,7 +298,7 @@ describe("#given focused app targeted input", () => {
 			},
 		]);
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController(1234);
+		const controller = new MacOSInputController(1234, undefined, undefined, undefined, "attended");
 
 		// when
 		await controller.drag({ from: { x: 50, y: 70 }, to: { x: 90, y: 110 }, duration: 0 });
@@ -369,7 +369,7 @@ describe("#given focused app targeted input", () => {
 			},
 		]);
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController(1234);
+		const controller = new MacOSInputController(1234, undefined, undefined, undefined, "attended");
 		// The lease saves the pointer position, then the human moves the pointer mid-gesture.
 		coreGraphicsMock.getCurrentCursorPosition.mockReturnValueOnce({ x: 1, y: 2 }).mockReturnValue({ x: 640, y: 480 });
 
@@ -392,7 +392,7 @@ describe("#given focused app targeted input", () => {
 			},
 		]);
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController(1234);
+		const controller = new MacOSInputController(1234, undefined, undefined, undefined, "attended");
 		skyLightMock.state.frontProcess = Buffer.alloc(8, 9);
 
 		// when

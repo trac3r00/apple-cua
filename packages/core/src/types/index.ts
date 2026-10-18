@@ -113,6 +113,8 @@ export interface DragOptions extends PointerOptions {
 	from: Point;
 	to: Point;
 	duration?: number;
+	waypoints?: readonly Point[];
+	button?: "left" | "right" | "middle";
 }
 
 export interface ComputerCapabilities {

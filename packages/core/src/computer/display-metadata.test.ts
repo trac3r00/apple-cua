@@ -12,7 +12,6 @@ describe("#given a Retina display #when resolving metadata #then the backing sca
 		expect(metadata).toEqual({ width: 2560, height: 1440, scaleFactor: 2 });
 	});
 });
-
 describe("#given a non-Retina display #when resolving metadata #then the scale factor is one", () => {
 	it("reports scaleFactor 1 when native pixels equal logical points", () => {
 		const metadata = resolveDisplayMetadata({

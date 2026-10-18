@@ -11,7 +11,9 @@ const koffiMock = vi.hoisted(() => {
 		readonly actions?: readonly string[];
 		/** The rows a list shows (AXVisibleRows); absent for elements that do not name them. */
 		readonly visibleRows?: Reference[];
-		readonly parent?: Reference;
+		windows?: Reference[];
+		parent?: Reference | undefined;
+		focusedWindow?: Reference | undefined;
 	};
 
 	const observableState: {
@@ -43,6 +45,40 @@ const koffiMock = vi.hoisted(() => {
 		attributes: { AXRole: "AXWindow", AXTitle: "Fixture", AXWindowId: "42" },
 		children: [textField, targetButton],
 	};
+	const hiddenTextField: Reference = {
+		type: "ax",
+		attributes: { AXRole: "AXTextField", AXTitle: "Hidden Editable" },
+		children: [],
+	};
+	const hiddenButton: Reference = {
+		type: "ax",
+		attributes: { AXRole: "AXButton", AXTitle: "Hidden Target Button" },
+		actions: ["AXPress"],
+		children: [],
+	};
+	const hiddenWindowElement: Reference = {
+		type: "ax",
+		attributes: { AXRole: "AXWindow", AXTitle: "Hidden Fixture", AXWindowId: "17182" },
+		children: [hiddenTextField, hiddenButton],
+	};
+	const sheetAncestor: Reference = {
+		type: "ax",
+		attributes: { AXRole: "AXGroup" },
+		children: [],
+		parent: windowElement,
+	};
+	const sheetElement: Reference = {
+		type: "ax",
+		attributes: { AXRole: "AXSheet", AXTitle: "Save", AXWindowId: "420" },
+		children: [],
+		parent: sheetAncestor,
+	};
+	const dialogElement: Reference = {
+		type: "ax",
+		attributes: { AXRole: "AXDialog", AXTitle: "Alert", AXWindowId: "421" },
+		children: [],
+		parent: windowElement,
+	};
 	const menuBarElement: Reference = {
 		type: "ax",
 		attributes: { AXRole: "AXMenuBar", AXTitle: "Menu Bar" },
@@ -52,8 +88,10 @@ const koffiMock = vi.hoisted(() => {
 		type: "ax",
 		attributes: { AXRole: "AXApplication", AXTitle: "Fixture" },
 		children: [windowElement],
+		windows: [windowElement],
 	};
 	const focus: { window: Reference | null } = { window: null };
+	const capabilities = { windowIdentity: true };
 	const listRows: Reference[] = ["row-0", "row-1", "row-2", "row-3"].map((title) => ({
 		type: "ax",
 		attributes: { AXRole: "AXRow", AXTitle: title },
@@ -139,6 +177,10 @@ const koffiMock = vi.hoisted(() => {
 		}),
 		AXUIElementCopyAttributeValue: vi.fn(
 			(element: Reference, attribute: Reference, outValue: Array<Reference | null>) => {
+				if (attribute.value === "AXFocusedWindow" && element.focusedWindow !== undefined) {
+					outValue[0] = element.focusedWindow;
+					return 0;
+				}
 				if (element === applicationElement && attribute.value === "AXFocusedWindow") {
 					outValue[0] = focus.window;
 					return focus.window === null ? -25205 : 0;
@@ -149,6 +191,10 @@ const koffiMock = vi.hoisted(() => {
 				}
 				if (attribute.value === "AXChildren") {
 					outValue[0] = { type: "array", children: element.children ?? [] };
+					return 0;
+				}
+				if (attribute.value === "AXWindows" && element.windows !== undefined) {
+					outValue[0] = { type: "array", children: element.windows };
 					return 0;
 				}
 				if (attribute.value === "AXVisibleRows" && element.visibleRows !== undefined) {
@@ -212,12 +258,20 @@ const koffiMock = vi.hoisted(() => {
 		targetButton,
 		textField,
 		windowElement,
+		hiddenWindowElement,
+		capabilities,
+		sheetAncestor,
+		sheetElement,
+		dialogElement,
 		module: {
 			load: vi.fn((path: string) => ({
 				func: vi.fn((name: string | number) => {
 					const source = String(name);
 					const prototypeMatch = source.match(/\s([A-Za-z_][A-Za-z0-9_]*)\(/);
 					const functionName = prototypeMatch?.[1] ?? source;
+					if (functionName === "_AXUIElementGetWindow" && !capabilities.windowIdentity) {
+						throw new Error("window identity SPI unavailable");
+					}
 					const library = libraryFor(path);
 					const nativeFunction = library[functionName as keyof typeof library];
 					if (nativeFunction === undefined) throw new Error(`Unexpected native function: ${functionName}`);
@@ -236,7 +290,12 @@ vi.mock("koffi", () => koffiMock.module);
 beforeEach(() => {
 	koffiMock.focus.window = null;
 	koffiMock.applicationElement.children = [koffiMock.windowElement];
+	koffiMock.applicationElement.windows = [koffiMock.windowElement];
+	koffiMock.applicationElement.focusedWindow = undefined;
 	koffiMock.windowElement.children = [koffiMock.textField, koffiMock.targetButton];
+	koffiMock.windowElement.parent = undefined;
+	koffiMock.sheetAncestor.parent = koffiMock.windowElement;
+	koffiMock.sheetElement.parent = koffiMock.sheetAncestor;
 	koffiMock.observableState.fieldValue = "initial";
 	koffiMock.observableState.pressCount = 0;
 	koffiMock.observableState.pressedTitles.length = 0;
@@ -257,10 +316,58 @@ afterEach(async () => {
 	releaseAccessibilitySnapshot(process.pid);
 });
 
+describe("#given an app with a focused window", () => {
+	it("#when focus is a sheet with an AXWindow ancestor #then observation resolves to its owner", async () => {
+		const { focusedWindowIdsForObservationPid } = await import("./accessibility.js");
+		koffiMock.applicationElement.focusedWindow = koffiMock.sheetElement;
+
+		const focused = focusedWindowIdsForObservationPid(process.pid);
+
+		expect(focused).toEqual({ focusedWindowId: 420, sheetOwnerWindowId: 42 });
+		expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledWith(koffiMock.sheetElement);
+		expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledWith(koffiMock.sheetAncestor);
+		expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledWith(koffiMock.windowElement);
+	});
+
+	it("#when the sheet has no AXWindow ancestor #then its focused id remains available", async () => {
+		const { focusedWindowIdsForObservationPid } = await import("./accessibility.js");
+		koffiMock.applicationElement.focusedWindow = koffiMock.sheetElement;
+		koffiMock.sheetElement.parent = undefined;
+
+		const focused = focusedWindowIdsForObservationPid(process.pid);
+
+		expect(focused).toEqual({ focusedWindowId: 420, sheetOwnerWindowId: undefined });
+		expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledWith(koffiMock.sheetElement);
+	});
+
+	it("#when the legacy focused-window lookup sees a sheet #then it keeps returning the sheet id", async () => {
+		const { focusedWindowIdForPid } = await import("./accessibility.js");
+		koffiMock.applicationElement.focusedWindow = koffiMock.sheetElement;
+
+		const focusedWindowId = focusedWindowIdForPid(process.pid);
+
+		expect(focusedWindowId).toBe(420);
+		expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledWith(koffiMock.sheetElement);
+		expect(koffiMock.coreFoundationFunctions.CFRelease).not.toHaveBeenCalledWith(koffiMock.windowElement);
+	});
+
+	it("#when focus is a dialog #then observation keeps the focused dialog", async () => {
+		const { focusedWindowIdsForObservationPid } = await import("./accessibility.js");
+		koffiMock.applicationElement.focusedWindow = koffiMock.dialogElement;
+
+		const focused = focusedWindowIdsForObservationPid(process.pid);
+
+		expect(focused).toEqual({ focusedWindowId: 421, sheetOwnerWindowId: undefined });
+		expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledWith(koffiMock.dialogElement);
+		expect(koffiMock.coreFoundationFunctions.CFRelease).not.toHaveBeenCalledWith(koffiMock.windowElement);
+	});
+});
+
 describe("#given a window-scoped accessibility walk", () => {
 	it("#when an off-Space window is exposed only as AXFocusedWindow #then its controls remain observed and actionable", async () => {
 		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
 		koffiMock.applicationElement.children = [];
+		koffiMock.applicationElement.windows = [];
 		koffiMock.focus.window = koffiMock.windowElement;
 
 		const state = extractAccessibilityTree(process.pid, { windowId: 42 });
@@ -320,13 +427,82 @@ describe("#given a window-scoped accessibility walk", () => {
 		expect(scoped).toHaveProperty("windowTitle", "Fixture");
 	});
 
-	it("#when the requested window is absent #then another window's title is not attributed to it", async () => {
+	it("#when the requested window is absent #then the app's other window is not walked", async () => {
 		const { extractAccessibilityTree } = await import("./accessibility.js");
 		koffiMock.applicationElement.children = [koffiMock.windowElement, koffiMock.menuBarElement];
 
-		const fallback = extractAccessibilityTree(process.pid, { windowId: 999 });
+		const unavailable = extractAccessibilityTree(process.pid, { windowId: 999 });
 
-		expect(fallback).not.toHaveProperty("windowTitle");
+		expect(unavailable.elements).toEqual([]);
+		expect(unavailable.axAvailable).toBe(false);
+		expect(unavailable).not.toHaveProperty("windowTitle");
+	});
+
+	it("#when AXWindows supplies a hidden root #then its exact window and controls are walked", async () => {
+		const { extractAccessibilityTree, performActionByIndex } = await import("./accessibility.js");
+		koffiMock.applicationElement.children = [koffiMock.windowElement];
+		koffiMock.applicationElement.windows = [koffiMock.windowElement, koffiMock.hiddenWindowElement];
+
+		const scoped = extractAccessibilityTree(process.pid, { windowId: 17182 });
+
+		expect(scoped.elements.map((element) => element.role)).toEqual(["AXWindow", "AXTextField", "AXButton"]);
+		expect(scoped).toHaveProperty("windowTitle", "Hidden Fixture");
+		expect(scoped.elements.map((element) => element.label)).toEqual([
+			"Hidden Fixture",
+			"Hidden Editable",
+			"Hidden Target Button",
+		]);
+		const button = scoped.elements.find((element) => element.label === "Hidden Target Button");
+		if (button === undefined) throw new Error("hidden window button was not observed");
+		performActionByIndex(process.pid, button.id, "AXPress");
+		expect(koffiMock.observableState.pressedTitles).toEqual(["Hidden Target Button"]);
+		expect(koffiMock.observableState.pressCount).toBe(0);
+	});
+
+	it("#when the window identity SPI is absent #then exact scope stays empty while an explicit unscoped walk works", async () => {
+		vi.resetModules();
+		koffiMock.capabilities.windowIdentity = false;
+		try {
+			const { extractAccessibilityTree, releaseAccessibilitySnapshot } = await import("./accessibility.js");
+			const scoped = extractAccessibilityTree(process.pid, { windowId: 42 });
+			expect(scoped.elements).toEqual([]);
+			expect(scoped.axAvailable).toBe(false);
+			expect(scoped.windowTitle).toBeUndefined();
+
+			const unscoped = extractAccessibilityTree(process.pid);
+			expect(unscoped.elements.some((element) => element.label === "Target Button")).toBe(true);
+			releaseAccessibilitySnapshot(process.pid);
+		} finally {
+			koffiMock.capabilities.windowIdentity = true;
+			vi.resetModules();
+		}
+	});
+
+	it("#when AXWindows misses the requested ID #then no different window is chosen", async () => {
+		const { extractAccessibilityTree } = await import("./accessibility.js");
+		koffiMock.applicationElement.children = [koffiMock.menuBarElement];
+		koffiMock.applicationElement.windows = [koffiMock.hiddenWindowElement];
+
+		const unavailable = extractAccessibilityTree(process.pid, { windowId: 999 });
+
+		expect(unavailable.elements).toEqual([]);
+		expect(unavailable.axAvailable).toBe(false);
+		expect(unavailable).not.toHaveProperty("windowTitle");
+	});
+
+	it("#when AXWindows supplies a hidden root #then its retained reference is released with the snapshot", async () => {
+		const { extractAccessibilityTree, releaseAccessibilitySnapshot } = await import("./accessibility.js");
+		koffiMock.applicationElement.children = [koffiMock.menuBarElement];
+		koffiMock.applicationElement.windows = [koffiMock.hiddenWindowElement];
+		const { CFRetain, CFRelease } = koffiMock.coreFoundationFunctions;
+		const balance = (element: unknown): number =>
+			CFRetain.mock.calls.filter(([reference]) => reference === element).length -
+			CFRelease.mock.calls.filter(([reference]) => reference === element).length;
+
+		extractAccessibilityTree(process.pid, { windowId: 17182 });
+		releaseAccessibilitySnapshot(process.pid);
+
+		expect(balance(koffiMock.hiddenWindowElement)).toBe(0);
 	});
 
 	it("#when the window id matches #then the walk covers that window without the app element or the menu bar", async () => {
@@ -341,28 +517,24 @@ describe("#given a window-scoped accessibility walk", () => {
 		expect(scoped.elements.some((element) => element.role === "AXMenuBar")).toBe(false);
 	});
 
-	it("#when the window id does not match #then the walk falls back to the app's windows without the menu bar", async () => {
+	it("#when the window id does not match #then the walk is unavailable", async () => {
 		const { extractAccessibilityTree } = await import("./accessibility.js");
 		koffiMock.applicationElement.children = [koffiMock.windowElement, koffiMock.menuBarElement];
 
-		const fallback = extractAccessibilityTree(process.pid, { windowId: 999 });
+		const unavailable = extractAccessibilityTree(process.pid, { windowId: 999 });
 
-		expect(fallback.elements.map((element) => element.role)).toEqual(["AXWindow", "AXTextField", "AXButton"]);
+		expect(unavailable.elements).toEqual([]);
+		expect(unavailable.axAvailable).toBe(false);
 	});
 
-	it("#when the window id does not match and the menu bar is requested #then the whole application tree is walked", async () => {
+	it("#when the window id does not match and the menu bar is requested #then the walk remains unavailable", async () => {
 		const { extractAccessibilityTree } = await import("./accessibility.js");
 		koffiMock.applicationElement.children = [koffiMock.windowElement, koffiMock.menuBarElement];
 
-		const unscoped = extractAccessibilityTree(process.pid, { windowId: 999, includeMenuBar: true });
+		const unavailable = extractAccessibilityTree(process.pid, { windowId: 999, includeMenuBar: true });
 
-		expect(unscoped.elements.map((element) => element.role)).toEqual([
-			"AXApplication",
-			"AXWindow",
-			"AXTextField",
-			"AXButton",
-			"AXMenuBar",
-		]);
+		expect(unavailable.elements).toEqual([]);
+		expect(unavailable.axAvailable).toBe(false);
 	});
 
 	it.each([

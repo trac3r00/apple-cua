@@ -148,13 +148,20 @@ describe("#given configured motion over a real socket #when commands arrive toge
 		const events = new EventEmitter();
 		const commands: string[] = [];
 		server = createServer((socket) => {
+			let buffer = "";
 			socket.on("data", (chunk: Buffer) => {
-				const command = chunk.toString("utf8");
-				commands.push(command);
-				if (command === "state\n") {
-					socket.write('{"x":"invalid","y":180,"shown":true,"reducedMotion":false}\n');
-				} else if (command === "hide\n") {
-					events.emit("hidden");
+				buffer += chunk.toString("utf8");
+				let end = buffer.indexOf("\n");
+				while (end >= 0) {
+					const command = buffer.slice(0, end + 1);
+					buffer = buffer.slice(end + 1);
+					commands.push(command);
+					if (command === "state\n") {
+						socket.write('{"x":"invalid","y":180,"shown":true,"reducedMotion":false}\n');
+					} else if (command === "hide\n") {
+						events.emit("hidden");
+					}
+					end = buffer.indexOf("\n");
 				}
 			});
 		});
@@ -170,5 +177,91 @@ describe("#given configured motion over a real socket #when commands arrive toge
 
 		expect(commands).toEqual(["state\n", "hide\n"]);
 		expect(stderr).toHaveBeenCalledTimes(1);
+	});
+
+	it.each(["magnetic", "adaptive"] as const)("plans %s motion from the selected pid marker's state", async (style) => {
+		directory = await mkdtemp(join(tmpdir(), "apple-cua-motion-test-"));
+		endpoint.path = join(directory, "overlay.sock");
+		const events = new EventEmitter();
+		const commands: string[] = [];
+		server = createServer((socket) => {
+			let buffer = "";
+			socket.on("data", (chunk: Buffer) => {
+				buffer += chunk.toString("utf8");
+				let end = buffer.indexOf("\n");
+				while (end >= 0) {
+					const command = buffer.slice(0, end + 1);
+					buffer = buffer.slice(end + 1);
+					commands.push(command);
+					if (command === "pid 321 state\n") {
+						socket.write('{"x":120,"y":180,"shown":true,"reducedMotion":false}\n');
+					}
+					if (command === "pid 321 mode thinking\n") {
+						events.emit("complete");
+					}
+					end = buffer.indexOf("\n");
+				}
+			});
+		});
+		const listening = once(server, "listening", { signal: AbortSignal.timeout(5_000) });
+		server.listen(endpoint.path);
+		await listening;
+		const complete = once(events, "complete", { signal: AbortSignal.timeout(5_000) });
+		const transport = defaultSocketTransport(Date.now, undefined, { style });
+
+		transport.send("set 640 360\n", 321);
+		transport.send("mode thinking\n", 321);
+		await complete;
+
+		expect(commands).toHaveLength(3);
+		expect(commands[0]).toBe("pid 321 state\n");
+		expect(commands[2]).toBe("pid 321 mode thinking\n");
+		const trajectory = commands[1];
+		if (trajectory === undefined) throw new Error("missing pid trajectory");
+		expect(trajectory.startsWith("pid 321 trajectory ")).toBe(true);
+		const payload: unknown = JSON.parse(trajectory.slice("pid 321 trajectory ".length));
+		expect(payload).toMatchObject({
+			style,
+			samples: expect.arrayContaining([
+				[0, 120, 180, Math.PI / 4],
+				[expect.any(Number), 640, 360, Math.PI / 4],
+			]),
+		});
+	});
+
+	it("sends direct pid samples without querying state or planning motion", async () => {
+		directory = await mkdtemp(join(tmpdir(), "apple-cua-motion-test-"));
+		endpoint.path = join(directory, "overlay.sock");
+		const events = new EventEmitter();
+		const commands: string[] = [];
+		server = createServer((socket) => {
+			let buffer = "";
+			socket.on("data", (chunk: Buffer) => {
+				buffer += chunk.toString("utf8");
+				let end = buffer.indexOf("\n");
+				while (end >= 0) {
+					commands.push(buffer.slice(0, end + 1));
+					buffer = buffer.slice(end + 1);
+					if (commands.length === 3) events.emit("complete");
+					end = buffer.indexOf("\n");
+				}
+			});
+		});
+		const listening = once(server, "listening", { signal: AbortSignal.timeout(5_000) });
+		server.listen(endpoint.path);
+		await listening;
+		const complete = once(events, "complete", { signal: AbortSignal.timeout(5_000) });
+		const transport = defaultSocketTransport(Date.now, undefined, { style: "magnetic" });
+
+		transport.send("set 10 20\n", 321, true);
+		transport.send("set 30 40\n", 321, true);
+		transport.send("set 50 60\n", 321, true);
+		await complete;
+
+		expect(commands).toEqual([
+			"pid 321 set-direct 10 20\n",
+			"pid 321 set-direct 30 40\n",
+			"pid 321 set-direct 50 60\n",
+		]);
 	});
 });

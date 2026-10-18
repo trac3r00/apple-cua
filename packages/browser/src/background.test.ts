@@ -1,0 +1,374 @@
+import { readFile } from "node:fs/promises";
+import { Script } from "node:vm";
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import { observationSchema } from "./protocol.js";
+
+const harnessSchema = z.object({
+	dispatch: z.function({ input: z.tuple([z.unknown()]), output: z.promise(z.unknown()) }),
+	stats: z.function({
+		input: z.tuple([]),
+		output: z.object({
+			foreground: z.number(),
+			userTab: z.number(),
+			windowState: z.string(),
+			removed: z.array(z.number()),
+			inputs: z.number(),
+			tabWindow: z.number(),
+			created: z.number(),
+		}),
+	}),
+	move: z.function({ input: z.tuple([]), output: z.void() }),
+	reveal: z.function({ input: z.tuple([]), output: z.void() }),
+});
+
+async function harness(
+	options: {
+		navigateAfterClick?: boolean;
+		frameAfterClick?: "child" | "main";
+		stopAfterPrepare?: "stop" | "cancel" | "refuse";
+	} = {},
+) {
+	const source = await readFile(new URL("../extension/background.js", import.meta.url), "utf8");
+	// Chrome is the external boundary. Execute the shipped worker, substituting
+	// only its SDK and page-runtime import; authentication is tested by bridge tests.
+	const script = new Script(`
+		const pageRuntime = () => {};
+		const options=${JSON.stringify(options)};
+		let foreground=50, userTab=70, tabWindow=50, inputs=0, created=0;
+		let contextId=0, debuggerListener, checkpointAllowed=true;
+		const removed=[];
+		const window={id:10,focused:false,state:'minimized',tabs:[{id:99}]};
+		const event={addListener(){},removeListener(){}};
+		const chrome={
+			storage:{local:{get:async()=>({}),set:async()=>{}},session:{set:async()=>{}},onChanged:event},
+			runtime:{sendNativeMessage:async()=>{throw Error('No host')},onMessage:event},
+			alarms:{create(){},onAlarm:event},
+			windows:{
+				create:async(options)=>{window.state=options.state;if(options.focused)foreground=10;return window;},
+				get:async()=>window,update:async(_id,options)=>{window.state=options.state;return window},
+				remove:async()=>{},onRemoved:event,onFocusChanged:event,onBoundsChanged:event
+			},
+			tabs:{
+				create:async(options)=>{
+					created++;
+					tabWindow=options.windowId??50;
+					if(options.active&&tabWindow===50)userTab=100;
+					return {id:100,windowId:tabWindow,url:options.url};
+				},
+				get:async()=>({id:100,windowId:tabWindow,status:'complete'}),
+				remove:async(id)=>{removed.push(id)},
+				update:async()=>{},onUpdated:event,onRemoved:event,onAttached:event
+			},
+			debugger:{
+				attach:async()=>{},
+				sendCommand:async(_target,method,params)=>{
+					if(method.startsWith('Input.'))inputs++;
+					if(method==='Input.dispatchMouseEvent'&&params.type==='mouseReleased'){
+						if(options.navigateAfterClick)debuggerListener({tabId:100},'Runtime.executionContextsCleared');
+						if(options.frameAfterClick)debuggerListener({tabId:100},'Page.frameNavigated',{
+							frame:options.frameAfterClick==='child'?{id:'child',parentId:'frame'}:{id:'frame'}
+						});
+					}
+					if(method==='Page.getLayoutMetrics')return {cssVisualViewport:{clientWidth:100,clientHeight:100}};
+					if(method==='Page.getFrameTree')return {frameTree:{frame:{id:'frame'}}};
+					if(method==='Page.createIsolatedWorld'){contextId++;return {executionContextId:1};}
+					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"observe"'))
+						return {result:{value:{revision:'document'+contextId,rows:[]}}};
+					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"target"'))
+						return {result:{value:{x:10,y:10}}};
+					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"prepareScroll"')){
+						if(options.stopAfterPrepare==='stop')stopLocally();
+						if(options.stopAfterPrepare==='cancel')tabsOwned.get(100).cancelled=true;
+						if(options.stopAfterPrepare==='refuse')checkpointAllowed=false;
+						return {result:{value:{ok:true,needed:true}}};
+					}
+					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"scrollComplete"'))
+						return {result:{value:{ok:true}}};
+					return {};
+				},
+				onEvent:{addListener(listener){debuggerListener=listener}},onDetach:event
+			}
+		};
+		const WebSocket={OPEN:1};
+		${source.replace(/^import .*$/m, "")}
+		ready=true;stopped=false;socket={readyState:1,send(raw){
+			const packet=JSON.parse(raw);
+			if(packet.event==='checkpoint'){
+				const waiter=checkpoints.get(packet.id);
+				clearTimeout(waiter.timer);
+				checkpoints.delete(packet.id);
+				waiter.resolve(checkpointAllowed);
+			}
+		}};
+		({
+			dispatch,
+			stats:()=>({foreground,userTab,windowState:window.state,removed,inputs,tabWindow,created}),
+			move:()=>{tabWindow=50},
+			reveal:()=>{window.focused=true;window.state='normal'}
+		})
+	`);
+	const value: unknown = script.runInNewContext({ setTimeout, clearTimeout, setInterval, clearInterval, URL });
+	return harnessSchema.parse(value);
+}
+
+describe("background worker ownership", () => {
+	it("#given a user window #when opening a page #then keeps the user window and tab unchanged", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		expect(worker.stats()).toMatchObject({
+			foreground: 50,
+			userTab: 70,
+			tabWindow: 10,
+			windowState: "minimized",
+			removed: [],
+		});
+	});
+
+	it("#given a tab moved into a user window #when closing #then refuses to remove it", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		worker.move();
+		await expect(worker.dispatch({ command: "close", tabId: 100 })).rejects.toBeDefined();
+		expect(worker.stats().removed).toEqual([]);
+	});
+
+	it("#given a revealed agent window #when running input #then refuses before dispatch", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		worker.reveal();
+		await expect(worker.dispatch({ command: "run", tabId: 100 })).rejects.toBeDefined();
+		expect(worker.stats().inputs).toBe(0);
+	});
+
+	it("#given a revealed owned window #when opening another tab #then refuses before creation", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		worker.reveal();
+		await expect(worker.dispatch({ command: "open", url: "https://example.com/next" })).rejects.toBeDefined();
+		expect(worker.stats().created).toBe(1);
+	});
+
+	it("#given navigation during a batch #when continuing #then refuses refs from the previous document", async () => {
+		const worker = await harness({ navigateAfterClick: true });
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		await expect(
+			worker.dispatch({
+				command: "run",
+				id: "navigation",
+				tabId: 100,
+				revision: "document1",
+				limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+				steps: [
+					{ action: "click", ref: 1 },
+					{ action: "click", ref: 1 },
+				],
+			}),
+		).rejects.toBeDefined();
+		expect(worker.stats().inputs).toBe(2);
+	});
+
+	it("#given one document #when running a batch #then completes both grounded clicks", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		await expect(
+			worker.dispatch({
+				command: "run",
+				id: "same-document",
+				tabId: 100,
+				revision: "document1",
+				limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+				steps: [
+					{ action: "click", ref: 1 },
+					{ action: "click", ref: 1 },
+				],
+			}),
+		).resolves.toMatchObject({ completedSteps: 2 });
+		expect(worker.stats().inputs).toBe(4);
+	});
+
+	it.each(["stop", "cancel", "refuse"] as const)(
+		"#given %s after scroll preparation #when dispatching wheel input #then stops before input",
+		async (stopAfterPrepare) => {
+			const worker = await harness({ stopAfterPrepare });
+			await worker.dispatch({ command: "open", url: "https://example.com" });
+			await expect(
+				worker.dispatch({
+					command: "run",
+					id: "scroll",
+					tabId: 100,
+					revision: "document1",
+					limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+					steps: [{ action: "scroll", deltaY: 100 }],
+				}),
+			).rejects.toBeDefined();
+			expect(worker.stats().inputs).toBe(0);
+		},
+	);
+
+	it.each(["child", "main"] as const)(
+		"#given %s frame navigation #when continuing a batch #then preserves only the current main context",
+		async (frameAfterClick) => {
+			const worker = await harness({ frameAfterClick });
+			await worker.dispatch({ command: "open", url: "https://example.com" });
+			const running = worker.dispatch({
+				command: "run",
+				id: "frames",
+				tabId: 100,
+				revision: "document1",
+				limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+				steps: [
+					{ action: "click", ref: 1 },
+					{ action: "click", ref: 1 },
+				],
+			});
+			if (frameAfterClick === "child") {
+				await expect(running).resolves.toMatchObject({ completedSteps: 2 });
+				expect(worker.stats().inputs).toBe(4);
+			} else {
+				await expect(running).rejects.toBeDefined();
+				expect(worker.stats().inputs).toBe(2);
+			}
+		},
+	);
+});
+
+describe("page runtime shadow targeting", () => {
+	it.each(["host", "ancestor", "inner", "obscured"])(
+		"#given a role-bearing shadow host #when targeting %s #then recognizes containment before descending",
+		async (target) => {
+			const source = await readFile(new URL("../extension/page-runtime.js", import.meta.url), "utf8");
+			const script = new Script(`
+				${source.replace("export function", "function")}
+				class Element {
+					isConnected=true; tagName='BUTTON'; innerText='Continue';
+					getAttribute(){return null} hasAttribute(){return false} matches(){return false}
+					getBoundingClientRect(){return {left:0,top:0,width:20,height:20,bottom:20,right:20}}
+					scrollIntoView(){}
+					contains(other){return this===ancestor && other===host}
+				}
+				class HTMLInputElement extends Element {}
+				class HTMLTextAreaElement extends Element {}
+				const ancestor=new Element(), host=new Element(), inner=new Element(), overlay=new Element();
+				host.shadowRoot={elementFromPoint:()=>inner};
+				const document={
+					title:'Example',
+					createTreeWalker(root){
+						const elements=root===document?[ancestor,host]:[inner];
+						let index=0;return {nextNode:()=>elements[index++]??null};
+					},
+					elementFromPoint:()=>${target === "obscured" ? "overlay" : "host"}
+				};
+				const location={href:'https://user:secret@example.com/path?token=secret#secret',origin:'https://example.com',pathname:'/path'};
+				const MutationObserver=class{observe(){}};
+				const NodeFilter={SHOW_ELEMENT:1};
+				const getComputedStyle=()=>({display:'block',visibility:'visible',opacity:'1'});
+				const innerHeight=100,innerWidth=100;
+				const observation=pageRuntime({method:'observe'});
+				const ref=observation.rows[${target === "ancestor" ? 0 : target === "inner" ? 2 : 1}].ref;
+				({observation,result:pageRuntime({method:'target',revision:observation.revision,ref})})
+			`);
+			const result: unknown = script.runInNewContext();
+			if (target === "obscured") expect(result).toMatchObject({ result: { error: "target center is obscured" } });
+			else expect(result).toMatchObject({ result: { x: 10, y: 10 } });
+			expect(result).toMatchObject({ observation: { url: "https://example.com/path" } });
+		},
+	);
+});
+
+async function pageScenario(scenario: string): Promise<unknown> {
+	const source = await readFile(new URL("../extension/page-runtime.js", import.meta.url), "utf8");
+	return await new Script(`
+		${source.replace("export function", "function")}
+		const observers=[], timers=new Map(); let nextTimer=0;
+		const setTimeout=(callback)=>{timers.set(++nextTimer,callback);return nextTimer};
+		const clearTimeout=(id)=>timers.delete(id);
+		class Element {
+			isConnected=true; tagName='BUTTON'; innerText='Continue'; hidden=false; value=''; readOnly=false;
+			listeners=new Map();
+			getAttribute(name){return name==='aria-label'?'Control':name==='hidden'&&this.hidden?'':null}
+			hasAttribute(){return false} matches(){return false} contains(other){return other===this}
+			getBoundingClientRect(){return {left:0,top:0,width:20,height:20,bottom:20,right:20}}
+			scrollIntoView(){} focus(){} select(){}
+			addEventListener(name,listener){this.listeners.set(name,listener)}
+			removeEventListener(name){this.listeners.delete(name)}
+		}
+		class HTMLInputElement extends Element {tagName='INPUT';type='text'}
+		class HTMLTextAreaElement extends Element {}
+		const control=new HTMLInputElement(), host=new Element(), nestedHost=new Element();
+		const message=new Element(); message.innerText='Waiting';
+		const nestedRoot={children:[message],querySelectorAll:()=>[message]};
+		nestedHost.shadowRoot=nestedRoot;
+		const shadow={children:[nestedHost],querySelectorAll:()=>[nestedHost]};
+		host.shadowRoot=shadow;
+		let elements=[control,host];
+		const document={
+			title:'Example',body:{innerText:'Waiting'},
+			querySelectorAll:()=>elements,
+			createTreeWalker(root){
+				const nodes=root===document?elements:root.querySelectorAll('*');
+				let index=0;return {nextNode:()=>nodes[index++]??null}
+			}
+		};
+		const location={href:'https://user:secret@example.com/path?token=secret#secret',origin:'https://example.com',pathname:'/path'};
+		class MutationObserver {
+			roots=new Set();constructor(callback){this.callback=callback;observers.push(this)}
+			observe(root){this.roots.add(root)} disconnect(){this.roots.clear()}
+		}
+		const NodeFilter={SHOW_ELEMENT:1};
+		const getComputedStyle=()=>({display:'block',visibility:'visible',opacity:'1'});
+		const innerHeight=100,innerWidth=100;
+		(async()=>{${scenario}})()
+	`).runInNewContext();
+}
+
+describe("page runtime verification and privacy", () => {
+	it("#given pending verification #when nested shadow text changes #then observes and verifies it", async () => {
+		const result = await pageScenario(`
+			const pending=pageRuntime({method:'verify',text:'Ready',timeoutMs:1000});
+			message.innerText='Ready';
+			for(const observer of observers)if(observer.roots.has(nestedRoot))observer.callback();
+			for(const callback of timers.values())callback();
+			return await pending;
+		`);
+		expect(result).toEqual({ ok: true });
+	});
+
+	it("#given a range input #when observing #then does not advertise an editable textbox", async () => {
+		const result = await pageScenario(`
+			control.type='range';elements=[control];
+			return pageRuntime({method:'observe'});
+		`);
+		expect(result).toMatchObject({ rows: [] });
+	});
+
+	it.each(["hidden", "detached"])(
+		"#given a filled control that becomes %s #when completing fill #then refuses success",
+		async (state) => {
+			const result = await pageScenario(`
+				elements=[control];
+				const observation=pageRuntime({method:'observe'});
+				pageRuntime({method:'focus',revision:observation.revision,ref:observation.rows[0].ref,selectAll:true,text:'Done'});
+				control.value='Done';
+				${state === "hidden" ? "control.hidden=true" : "control.isConnected=false"};
+				const result=pageRuntime({method:'fillComplete'});
+				for(const callback of timers.values())callback();
+				return await result;
+			`);
+			expect(result).not.toEqual({ ok: true });
+		},
+	);
+
+	it("#given a huge credentialed URL #when observing #then bounds only its sanitized URL", async () => {
+		const result = observationSchema.parse(
+			await pageScenario(`
+			location.pathname='/'+ 'a'.repeat(9000);
+			location.href='https://user:secret@example.com'+location.pathname+'?token=secret#secret';
+			return pageRuntime({method:'observe'});
+		`),
+		);
+		expect(result.url).toHaveLength(8192);
+		expect(result.url).toBe(`https://example.com/${"a".repeat(8192 - "https://example.com/".length)}`);
+		expect(observationSchema.safeParse({ ...result, url: `${result.url}a` }).success).toBe(false);
+	});
+});

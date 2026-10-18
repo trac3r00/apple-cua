@@ -40,7 +40,7 @@ describe("#given MacOSInputController keyboard input", () => {
 		// given
 		vi.useFakeTimers();
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController();
+		const controller = new MacOSInputController(undefined, undefined, undefined, undefined, "attended");
 
 		// when
 		const pressing = controller.pressKey("t", { holdMilliseconds: 250 });
@@ -75,24 +75,24 @@ describe("#given MacOSInputController keyboard input", () => {
 
 	it("#when typing one character #then shows keyboard feedback at the virtual cursor", async () => {
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController(undefined, overlayMock);
+		const controller = new MacOSInputController(undefined, overlayMock, undefined, undefined, "attended");
 
 		await controller.typeText("x");
 
-		expect(overlayMock.setMode).toHaveBeenCalledWith("keyboard");
-		expect(overlayMock.set).toHaveBeenCalledWith({ x: 1, y: 2 });
+		expect(overlayMock.setMode).toHaveBeenCalledWith("keyboard", undefined);
+		expect(overlayMock.set).toHaveBeenCalledWith({ x: 1, y: 2 }, undefined);
 		expect(coreGraphicsMock.warpCursorPosition).not.toHaveBeenCalled();
 		controller.close();
 	});
 
 	it("#when pressing a key chord #then shows keyboard feedback at the virtual cursor", async () => {
 		const { MacOSInputController } = await import("./macos-input.js");
-		const controller = new MacOSInputController(undefined, overlayMock);
+		const controller = new MacOSInputController(undefined, overlayMock, undefined, undefined, "attended");
 
 		await controller.pressKey("a", { modifiers: ["cmd"] });
 
-		expect(overlayMock.setMode).toHaveBeenCalledWith("keyboard");
-		expect(overlayMock.set).toHaveBeenCalledWith({ x: 1, y: 2 });
+		expect(overlayMock.setMode).toHaveBeenCalledWith("keyboard", undefined);
+		expect(overlayMock.set).toHaveBeenCalledWith({ x: 1, y: 2 }, undefined);
 		expect(coreGraphicsMock.warpCursorPosition).not.toHaveBeenCalled();
 		controller.close();
 	});
@@ -229,7 +229,7 @@ describe("#given MacOSInputController keyboard input", () => {
 		// given
 		const { MacOSInputController, setKeyboardWindowFocuserForTesting, setOnscreenWindowIdsSourceForTesting } =
 			await import("./macos-input.js");
-		setKeyboardWindowFocuserForTesting(async () => {});
+		setKeyboardWindowFocuserForTesting(async () => undefined);
 		setOnscreenWindowIdsSourceForTesting(() => [21]);
 		const controller = new MacOSInputController(77);
 		await controller.rememberTargetWindow(77, 21, [

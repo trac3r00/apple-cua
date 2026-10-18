@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const accessibilityMock = vi.hoisted(() => ({ pressElementAtScreenPoint: vi.fn(() => false) }));
 
@@ -9,7 +9,24 @@ import { runInInputScope } from "../computer/input-scope.js";
 import { NOOP_POINTER_OVERLAY } from "./macos-ffi/cursor-overlay.js";
 import { MacOSHostComputer } from "./macos.js";
 
+beforeEach(() => accessibilityMock.pressElementAtScreenPoint.mockClear());
+
 describe("#given an accessibility press at a screen point #when it runs inside a dispatch #then it is held to that dispatch's window", () => {
+	it("#given a different default app #when pressing an explicit pid #then feedback belongs to that pid", async () => {
+		const set = vi.fn();
+		const computer = new MacOSHostComputer({
+			defaultTargetPid: 5678,
+			overlay: { ...NOOP_POINTER_OVERLAY, set },
+			delivery: "attended",
+		});
+		try {
+			await computer.pressAtPosition(1234, { x: 5, y: 6 });
+			expect(set).toHaveBeenCalledWith({ x: 5, y: 6 }, 1234);
+		} finally {
+			await computer.close();
+		}
+	});
+
 	it("#when the dispatch is bound to an observed window of the app #then only an element of that window may be pressed", async () => {
 		// given
 		const computer = new MacOSHostComputer({ overlay: NOOP_POINTER_OVERLAY, delivery: "background" });

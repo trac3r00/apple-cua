@@ -934,112 +934,109 @@ interface ResolvedWalkScope {
  */
 function resolveWalkScope(root: AXUIElementRef, options: AccessibilityTreeOptions): ResolvedWalkScope {
 	const children = copyElementChildren(root);
-	let appChildren = children.length;
-	const includeMenuBar = options.includeMenuBar === true;
-	const windowId = options.windowId;
-	if (windowId === undefined) {
-		return { roots: children, descriptor: UNMATCHED_WINDOW_SCOPE, scoped: false, appChildren, degenerate: 0 };
-	}
-	const requestedScope: AXWalkScope = {
-		windowId,
-		includeMenuBar,
-		scoped: true,
-		subtreeOf: undefined,
-		visibleOnly: false,
-	};
-	if (AXUIElementGetWindowSpi === null) {
-		for (const child of children) {
-			releaseAXElement(child);
+	// Keep ownership until the scope is returned: an AX timeout can interrupt discovery.
+	const owned = [...children];
+	let transferred: readonly AXUIElementRef[] = [];
+	try {
+		let appChildren = children.length;
+		const includeMenuBar = options.includeMenuBar === true;
+		const windowId = options.windowId;
+		if (windowId === undefined) {
+			transferred = children;
+			return { roots: children, descriptor: UNMATCHED_WINDOW_SCOPE, scoped: false, appChildren, degenerate: 0 };
 		}
-		return { roots: [], descriptor: requestedScope, scoped: true, appChildren, degenerate: 0 };
-	}
+		const requestedScope: AXWalkScope = {
+			windowId,
+			includeMenuBar,
+			scoped: true,
+			subtreeOf: undefined,
+			visibleOnly: false,
+		};
+		if (AXUIElementGetWindowSpi === null) {
+			return { roots: [], descriptor: requestedScope, scoped: true, appChildren, degenerate: 0 };
+		}
 
-	const axWindows = copyOptionalAttributeValue(root, "AXWindows");
-	const availableWindows: AXUIElementRef[] = [];
-	if (axWindows !== null && isCFArray(axWindows)) {
-		for (let index = 0; index < cfArrayLength(axWindows); index++) {
-			const window = cfArrayValueAt(axWindows, index);
-			if (window !== null) {
-				availableWindows.push(cfRetain(window));
+		const axWindows = copyOptionalAttributeValue(root, "AXWindows");
+		const availableWindows: AXUIElementRef[] = [];
+		if (axWindows !== null && isCFArray(axWindows)) {
+			for (let index = 0; index < cfArrayLength(axWindows); index++) {
+				const window = cfArrayValueAt(axWindows, index);
+				if (window !== null) {
+					const retained = cfRetain(window);
+					availableWindows.push(retained);
+					owned.push(retained);
+				}
 			}
 		}
-	}
-	cfRelease(axWindows);
-	const childWindowIds = new Set(children.map((child) => windowIdOf(child)));
-	const windowsFromAttribute = availableWindows.filter((window) => {
-		return !childWindowIds.has(windowIdOf(window));
-	});
-	for (const window of availableWindows) {
-		if (!windowsFromAttribute.includes(window)) {
-			releaseAXElement(window);
-		}
-	}
-	const candidates = [...children, ...windowsFromAttribute];
-	const windows: AXUIElementRef[] = [];
-	const attached: AXUIElementRef[] = [];
-	const otherWindows: AXUIElementRef[] = [];
-	const menus: AXUIElementRef[] = [];
-	const degenerate: AXUIElementRef[] = [];
-	for (const child of candidates) {
-		if (windowIdOf(child) === windowId) {
-			windows.push(child);
-			continue;
-		}
-		const role = copyStringAttribute(child, K_AX_ROLE_ATTRIBUTE) ?? "";
-		if (role === "AXApplication") {
-			degenerate.push(child);
-		} else if (!includeMenuBar && (role === "AXMenuBar" || role === "AXMenuBarItem")) {
-			menus.push(child);
-		} else if (WINDOW_ROLES.has(role)) {
-			otherWindows.push(child);
-		} else {
-			attached.push(child);
-		}
-	}
-	appChildren = Math.max(appChildren, windows.length);
-	// AppKit can omit every application child on another Space while its focused window
-	// remains readable. Only the exact requested WindowServer id can supply that root.
-	if (windows.length === 0) {
-		const focused = copyFocusedWindowForId(root, windowId);
-		if (focused !== null) {
-			windows.push(focused);
-			appChildren = Math.max(appChildren, 1);
-		}
-	}
-
-	// Every child handed back as a root is released by the caller, so a child may be released here
-	// only when it is left out of the roots. Releasing one and still returning it made the walk read
-	// freed elements and release them twice, which crashed the process whenever the window was not
-	// among the AX children (a locked screen, another Space, a window replaced mid-navigation).
-	if (windows.length === 0) {
-		const popupMenus = attached.filter((child) => {
-			const role = copyStringAttribute(child, K_AX_ROLE_ATTRIBUTE);
-			return role === "AXMenu" || role === "AXMenuItem";
+		cfRelease(axWindows);
+		const childWindowIds = new Set(children.map((child) => windowIdOf(child)));
+		const windowsFromAttribute = availableWindows.filter((window) => {
+			return !childWindowIds.has(windowIdOf(window));
 		});
+		const candidates = [...children, ...windowsFromAttribute];
+		const windows: AXUIElementRef[] = [];
+		const attached: AXUIElementRef[] = [];
+		const degenerate: AXUIElementRef[] = [];
 		for (const child of candidates) {
-			if (!popupMenus.includes(child)) {
-				releaseAXElement(child);
+			if (windowIdOf(child) === windowId) {
+				windows.push(child);
+				continue;
+			}
+			const role = copyStringAttribute(child, K_AX_ROLE_ATTRIBUTE) ?? "";
+			if (role === "AXApplication") {
+				degenerate.push(child);
+			} else if (!WINDOW_ROLES.has(role) && (includeMenuBar || (role !== "AXMenuBar" && role !== "AXMenuBarItem"))) {
+				attached.push(child);
 			}
 		}
+		appChildren = Math.max(appChildren, windows.length);
+		// AppKit can omit every application child on another Space while its focused window
+		// remains readable. Only the exact requested WindowServer id can supply that root.
+		if (windows.length === 0) {
+			const focused = copyFocusedWindowForId(root, windowId);
+			if (focused !== null) {
+				windows.push(focused);
+				owned.push(focused);
+				appChildren = Math.max(appChildren, 1);
+			}
+		}
+
+		// Every child handed back as a root is released by the caller, so a child may be released here
+		// only when it is left out of the roots. Releasing one and still returning it made the walk read
+		// freed elements and release them twice, which crashed the process whenever the window was not
+		// among the AX children (a locked screen, another Space, a window replaced mid-navigation).
+		if (windows.length === 0) {
+			const popupMenus = attached.filter((child) => {
+				const role = copyStringAttribute(child, K_AX_ROLE_ATTRIBUTE);
+				return role === "AXMenu" || role === "AXMenuItem";
+			});
+			transferred = popupMenus;
+			return {
+				roots: popupMenus,
+				descriptor: requestedScope,
+				scoped: true,
+				appChildren,
+				degenerate: 0,
+			};
+		}
+		transferred = [...windows, ...attached];
 		return {
-			roots: popupMenus,
+			roots: transferred,
 			descriptor: requestedScope,
 			scoped: true,
 			appChildren,
-			degenerate: 0,
+			degenerate: degenerate.length,
 		};
+	} finally {
+		// Transfer each owned retain once, including when multiple references name one element.
+		for (const element of transferred) {
+			const index = owned.indexOf(element);
+			if (index !== -1) owned.splice(index, 1);
+		}
+		for (const element of owned) {
+			releaseAXElement(element);
+		}
 	}
-	for (const child of [...otherWindows, ...menus, ...degenerate]) {
-		releaseAXElement(child);
-	}
-
-	return {
-		roots: [...windows, ...attached],
-		descriptor: requestedScope,
-		scoped: true,
-		appChildren,
-		degenerate: degenerate.length,
-	};
 }
 
 function resolveSubtreeWalkScope(pid: number, subtreeOf: number, options: AccessibilityTreeOptions): ResolvedWalkScope {
@@ -1291,25 +1288,29 @@ function scrollOnePageWithScrollBar(element: AXUIElementRef, action: string): bo
 
 function selfOrAncestorWithRole(element: AXUIElementRef, role: string): AXUIElementRef | null {
 	let current: AXUIElementRef | null = cfRetain(element) as AXUIElementRef;
-	for (let depth = 0; current !== null && depth <= MAX_SCROLL_AREA_ANCESTORS; depth++) {
-		if (copyStringAttribute(current, K_AX_ROLE_ATTRIBUTE) === role) {
-			return current;
+	try {
+		for (let depth = 0; current !== null && depth <= MAX_SCROLL_AREA_ANCESTORS; depth++) {
+			if (copyStringAttribute(current, K_AX_ROLE_ATTRIBUTE) === role) {
+				const matched = current;
+				current = null;
+				return matched;
+			}
+			const parent = copyOptionalAttributeValue(current, "AXParent") as AXUIElementRef | null;
+			releaseAXElement(current);
+			current = parent;
 		}
-		const parent = copyOptionalAttributeValue(current, "AXParent") as AXUIElementRef | null;
-		releaseAXElement(current);
-		current = parent;
-	}
-	if (current !== null) {
+		return null;
+	} finally {
 		releaseAXElement(current);
 	}
-	return null;
 }
 
 /** The frame of the scrolled content: the largest child of the scroll area that is not a scroll bar. */
 function largestContentFrame(scrollArea: AXUIElementRef): AXElementFrame | null {
 	let largest: AXElementFrame | null = null;
-	for (const child of copyElementChildren(scrollArea)) {
-		try {
+	const children = copyElementChildren(scrollArea);
+	try {
+		for (const child of children) {
 			if (copyStringAttribute(child, K_AX_ROLE_ATTRIBUTE) === "AXScrollBar") {
 				continue;
 			}
@@ -1317,11 +1318,13 @@ function largestContentFrame(scrollArea: AXUIElementRef): AXElementFrame | null 
 			if (frame !== undefined && (largest === null || frame.width * frame.height > largest.width * largest.height)) {
 				largest = frame;
 			}
-		} finally {
+		}
+		return largest;
+	} finally {
+		for (const child of children) {
 			releaseAXElement(child);
 		}
 	}
-	return largest;
 }
 
 const MAX_WEB_AREA_ANCESTORS = 40;
@@ -1368,11 +1371,19 @@ export function focusedTextEntryElement(pid: number): AXUIElementRef | null {
 		if (focused === null) {
 			return null;
 		}
-		if (TEXT_ENTRY_ROLES.has(copyStringAttribute(focused, K_AX_ROLE_ATTRIBUTE) ?? "") && !isInsideWebArea(focused)) {
-			return focused;
+		let transferred = false;
+		try {
+			if (
+				TEXT_ENTRY_ROLES.has(copyStringAttribute(focused, K_AX_ROLE_ATTRIBUTE) ?? "") &&
+				!isInsideWebArea(focused)
+			) {
+				transferred = true;
+				return focused;
+			}
+			return null;
+		} finally {
+			if (!transferred) releaseAXElement(focused);
 		}
-		releaseAXElement(focused);
-		return null;
 	} finally {
 		releaseAXElement(app);
 	}
@@ -1659,21 +1670,21 @@ function appendAXElement(
 		return undefined;
 	}
 	const children = walkChildren(element, facts, state.visibleOnly);
-	const id = elements.length;
-	snapshotElements.push(cfRetain(element));
-	elements.push({
-		id,
-		role: facts.role,
-		label: facts.label,
-		value: facts.value,
-		frame: facts.frame,
-		actions: copyActionsForRole(element, facts.role),
-		children: [],
-	});
+	try {
+		const id = elements.length;
+		snapshotElements.push(cfRetain(element));
+		elements.push({
+			id,
+			role: facts.role,
+			label: facts.label,
+			value: facts.value,
+			frame: facts.frame,
+			actions: copyActionsForRole(element, facts.role),
+			children: [],
+		});
 
-	const childIds: number[] = [];
-	if (depth < maxDepth) {
-		try {
+		const childIds: number[] = [];
+		if (depth < maxDepth) {
 			for (const child of children) {
 				if (elements.length >= maxElements) {
 					break;
@@ -1683,24 +1694,21 @@ function appendAXElement(
 					childIds.push(childId);
 				}
 			}
-		} finally {
-			for (const child of children) {
-				releaseAXElement(child);
-			}
+		} else {
+			state.depthTruncated ||= children.length > 0;
 		}
-	} else {
-		state.depthTruncated ||= children.length > 0;
+
+		const current = elements[id];
+		if (current === undefined) {
+			throw new Error(`AX tree cursor lost element ${id}`);
+		}
+		elements[id] = { ...current, children: childIds };
+		return id;
+	} finally {
 		for (const child of children) {
 			releaseAXElement(child);
 		}
 	}
-
-	const current = elements[id];
-	if (current === undefined) {
-		throw new Error(`AX tree cursor lost element ${id}`);
-	}
-	elements[id] = { ...current, children: childIds };
-	return id;
 }
 
 /**
@@ -1708,8 +1716,8 @@ function appendAXElement(
  *
  * `AXUIElementCopyMultipleAttributeValues` returns the requested attributes in one
  * round trip (measured ~5x cheaper than six single reads), which dominates walk cost
- * for large applications. If it fails once, the walk keeps going on the single-read
- * path so unsupported applications still produce a tree.
+ * for large applications. Unsupported calls fall back to single reads; a messaging timeout
+ * aborts instead of multiplying the same unresponsive-app wait across every attribute.
  */
 function copyElementFacts(element: AXUIElementRef, state: WalkState): AXElementFacts {
 	if (!state.useMultipleAttributes) {
@@ -1722,6 +1730,9 @@ function copyElementFacts(element: AXUIElementRef, state: WalkState): AXElementF
 		facts = withCFArray(attributeReferences, (attributes) => {
 			const outValues: Array<CFArrayRef | null> = [null];
 			const error = AXUIElementCopyMultipleAttributeValues(element, attributes, 0, outValues);
+			if (error === AX_ERROR_CANNOT_COMPLETE) {
+				assertAXSuccess("AXUIElementCopyMultipleAttributeValues", error);
+			}
 			const values = outValues[0];
 			if (error !== AX_SUCCESS || values === undefined || values === null) {
 				return undefined;
@@ -2044,7 +2055,15 @@ function walkChildren(element: AXUIElementRef, facts: AXElementFacts, visibleOnl
 	if (!visibleOnly) {
 		return facts.children;
 	}
-	const visible = copyVisibleChildren(element, facts.role);
+	let visible: AXUIElementRef[] | undefined;
+	try {
+		visible = copyVisibleChildren(element, facts.role);
+	} catch (error) {
+		for (const child of facts.children) {
+			releaseAXElement(child);
+		}
+		throw error;
+	}
 	if (visible === undefined) {
 		return facts.children;
 	}
@@ -2068,6 +2087,9 @@ function copyWalkChildren(element: AXUIElementRef, visibleOnly: boolean): AXUIEl
 function copyActionNames(element: AXUIElementRef): string[] {
 	const outActions: Array<CFArrayRef | null> = [null];
 	const error = AXUIElementCopyActionNames(element, outActions);
+	if (error === AX_ERROR_CANNOT_COMPLETE) {
+		assertAXSuccess("AXUIElementCopyActionNames", error);
+	}
 	if (error !== AX_SUCCESS) {
 		return [];
 	}
@@ -2090,7 +2112,8 @@ function copyActionNames(element: AXUIElementRef): string[] {
 }
 
 /**
- * Attribute read that answers "not there" instead of throwing. Prefer {@link copyAttributeValue}
+ * Attribute read that answers "not there" for unavailable attributes, but propagates messaging
+ * timeouts so a walk cannot turn one stalled app into hundreds of waits. Prefer {@link copyAttributeValue}
  * where the attribute is part of the contract, and this one where its absence is simply how a
  * leaf element looks — AXChildren on a text label, for instance.
  */
@@ -2098,6 +2121,9 @@ export function copyOptionalAttributeValue(element: AXUIElementRef, attribute: s
 	return withCFString(attribute, (attributeReference) => {
 		const outValue: Array<CFTypeRef | null> = [null];
 		const error = AXUIElementCopyAttributeValue(element, attributeReference, outValue);
+		if (error === AX_ERROR_CANNOT_COMPLETE) {
+			assertAXSuccess("AXUIElementCopyAttributeValue", error);
+		}
 		if (error !== AX_SUCCESS) {
 			return null;
 		}

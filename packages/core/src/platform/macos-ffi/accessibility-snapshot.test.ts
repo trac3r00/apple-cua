@@ -92,6 +92,7 @@ const koffiMock = vi.hoisted(() => {
 	};
 	const focus: { window: Reference | null } = { window: null };
 	const capabilities = { windowIdentity: true };
+	const timeout = { operation: "", count: 0 };
 	const listRows: Reference[] = ["row-0", "row-1", "row-2", "row-3"].map((title) => ({
 		type: "ax",
 		attributes: { AXRole: "AXRow", AXTitle: title },
@@ -177,6 +178,14 @@ const koffiMock = vi.hoisted(() => {
 		}),
 		AXUIElementCopyAttributeValue: vi.fn(
 			(element: Reference, attribute: Reference, outValue: Array<Reference | null>) => {
+				if (
+					(timeout.operation === "scope" && attribute.value === "AXWindows") ||
+					(timeout.operation === "single" && element === textField) ||
+					(timeout.operation === "visible" && attribute.value === "AXVisibleRows")
+				) {
+					timeout.count += 1;
+					return -25204;
+				}
 				if (attribute.value === "AXFocusedWindow" && element.focusedWindow !== undefined) {
 					outValue[0] = element.focusedWindow;
 					return 0;
@@ -208,6 +217,10 @@ const koffiMock = vi.hoisted(() => {
 			},
 		),
 		AXUIElementCopyActionNames: vi.fn((element: Reference, outActions: Array<Reference | null>) => {
+			if (timeout.operation === "actions" && element === textField) {
+				timeout.count += 1;
+				return -25204;
+			}
 			outActions[0] = {
 				type: "array",
 				children: element.actions?.map((value) => ({ type: "string", value })) ?? [],
@@ -216,6 +229,13 @@ const koffiMock = vi.hoisted(() => {
 		}),
 		AXUIElementCopyMultipleAttributeValues: vi.fn(
 			(element: Reference, attributes: Reference, _options: number, outValues: Array<Reference | null>) => {
+				if (element === textField) {
+					if (timeout.operation === "batch") {
+						timeout.count += 1;
+						return -25204;
+					}
+					if (timeout.operation === "single") return -25205;
+				}
 				const requested = attributes.children ?? [];
 				outValues[0] = {
 					type: "array",
@@ -260,6 +280,7 @@ const koffiMock = vi.hoisted(() => {
 		windowElement,
 		hiddenWindowElement,
 		capabilities,
+		timeout,
 		sheetAncestor,
 		sheetElement,
 		dialogElement,
@@ -288,11 +309,14 @@ const koffiMock = vi.hoisted(() => {
 vi.mock("koffi", () => koffiMock.module);
 
 beforeEach(() => {
+	koffiMock.timeout.operation = "";
+	koffiMock.timeout.count = 0;
 	koffiMock.focus.window = null;
 	koffiMock.applicationElement.children = [koffiMock.windowElement];
 	koffiMock.applicationElement.windows = [koffiMock.windowElement];
 	koffiMock.applicationElement.focusedWindow = undefined;
 	koffiMock.windowElement.children = [koffiMock.textField, koffiMock.targetButton];
+	koffiMock.textField.children = [];
 	koffiMock.windowElement.parent = undefined;
 	koffiMock.sheetAncestor.parent = koffiMock.windowElement;
 	koffiMock.sheetElement.parent = koffiMock.sheetAncestor;
@@ -314,6 +338,38 @@ beforeEach(() => {
 afterEach(async () => {
 	const { releaseAccessibilitySnapshot } = await import("./accessibility.js");
 	releaseAccessibilitySnapshot(process.pid);
+});
+
+describe("#given an app that stops answering after its root probe", () => {
+	it.each(["batch", "single", "scope", "actions", "visible"])(
+		"#when a %s read times out #then the walk fails on the first timeout and releases its references",
+		async (operation) => {
+			const { extractAccessibilityTree } = await import("./accessibility.js");
+			koffiMock.timeout.operation = operation;
+			// Action enumeration happens after these children have already been retained.
+			koffiMock.textField.children = operation === "visible" ? [koffiMock.outlineElement] : [koffiMock.targetButton];
+
+			expect(() => extractAccessibilityTree(process.pid, { windowId: 42, visibleOnly: true })).toThrow(
+				/messaging timeout/,
+			);
+			expect(koffiMock.timeout.count).toBe(1);
+			for (const element of [
+				koffiMock.windowElement,
+				koffiMock.textField,
+				koffiMock.targetButton,
+				koffiMock.outlineElement,
+				...(koffiMock.outlineElement.children ?? []),
+			]) {
+				const retained = koffiMock.coreFoundationFunctions.CFRetain.mock.calls.filter(
+					([reference]) => reference === element,
+				).length;
+				const released = koffiMock.coreFoundationFunctions.CFRelease.mock.calls.filter(
+					([reference]) => reference === element,
+				).length;
+				expect(released).toBe(retained);
+			}
+		},
+	);
 });
 
 describe("#given an app with a focused window", () => {

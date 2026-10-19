@@ -100,6 +100,8 @@ const STRICT_DIFF_STATE_OPTIONS = { diffOnly: true, requireWindow: true } as con
 const FIELD_VERIFY_STATE_OPTIONS = { requireWindow: true, settleMs: 80, includeScreenshot: false } as const;
 
 export interface MutationOptions {
+	/** Read back a single field from the post-action tree, without another accessibility walk. */
+	readonly valueCheck?: { readonly elementIndex: number; readonly value: string };
 	/** Return the whole accessibility tree in the post-action observation instead of only the diff. */
 	readonly fullState?: boolean;
 	/**
@@ -749,7 +751,7 @@ export class GuardedSession {
 				throw error;
 			}
 			try {
-				const outcome = await this.readOutcome(expected.pid, expected.observation, options);
+				const outcome = await this.readOutcome(expected.pid, expected.observation, options, expected.elements);
 				const windowEvents = await this.describeWindowSideEffects(beforeAction, expected.pid);
 				return observedActionResult(
 					outcome.state,
@@ -757,6 +759,7 @@ export class GuardedSession {
 					outcome.nextToken,
 					windowEvents,
 					dispatch === undefined ? undefined : dispatch,
+					outcome.setValue === undefined ? {} : { setValue: outcome.setValue },
 				);
 			} catch (error: unknown) {
 				this.clearTokenFor(expected.pid);
@@ -1529,15 +1532,22 @@ export class GuardedSession {
 		targetPid: number,
 		expected: InputObservation,
 		options: MutationOptions,
+		observedElements?: ObservedElementIdentity,
 	): Promise<{
 		readonly state: AppState;
 		readonly contextUnchanged: boolean;
 		readonly nextToken: string | undefined;
+		readonly setValue?: {
+			readonly element_index: number;
+			readonly requested_value: string;
+			readonly observed_value: string | null;
+			readonly verified: boolean;
+		};
 	}> {
 		this.assertOpen();
 		// A retained read asks for the whole tree and answers with the same diff-only state the walk would
 		// have produced on its own.
-		const retain = options.retainTree === true && options.fullState !== true;
+		const retain = (options.retainTree === true || options.valueCheck !== undefined) && options.fullState !== true;
 		const bound = await this.boundWindowOption(targetPid);
 		const read = await timed("readOutcome.getAppState", () =>
 			this.computer.getAppState(targetPid, {
@@ -1567,7 +1577,29 @@ export class GuardedSession {
 		if (nextToken !== undefined) {
 			this.rememberRead(targetPid, current, read);
 		}
-		return { state, contextUnchanged, nextToken };
+		const check = options.valueCheck;
+		const element =
+			check === undefined ? undefined : read.elements.find((candidate) => candidate.id === check.elementIndex);
+		const identity = check === undefined ? undefined : observedElements?.get(check.elementIndex);
+		return {
+			state,
+			contextUnchanged,
+			nextToken,
+			...(check === undefined
+				? {}
+				: {
+						setValue: {
+							element_index: check.elementIndex,
+							requested_value: check.value,
+							observed_value: element?.value ?? null,
+							verified:
+								contextUnchanged &&
+								element !== undefined &&
+								(identity === undefined || sameElementIdentity(identity, element)) &&
+								element.value === check.value,
+						},
+					}),
+		};
 	}
 
 	private async readFieldBaseline(targetPid: number): Promise<{
@@ -1774,7 +1806,18 @@ export class GuardedSession {
 				this.assertOpen();
 				return await operation();
 			})
-			.catch((error: unknown) => lockRefusalResult(error) ?? Promise.reject(error));
+			.catch((error: unknown) => {
+				const refusal = lockRefusalResult(error);
+				if (refusal !== undefined) {
+					return refusal;
+				}
+				const message = error instanceof Error ? error.message : String(error);
+				throw message.trim().length === 0
+					? new Error("Computer operation failed without error details; observe the app before retrying.", {
+							cause: error,
+						})
+					: error;
+			});
 		const settled = result.then(
 			() => undefined,
 			() => undefined,

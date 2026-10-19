@@ -178,7 +178,7 @@ export function registerDesktopMutationTools(
 		"set_value",
 		{
 			description: mutationDescription(
-				"Set the value of an observed editable accessibility element. Use set_fields to change several fields in one verified call.",
+				"Set the value of an observed editable accessibility element. Answers setValue with requested_value, observed_value and verified from a fresh read; input dispatch alone is not confirmation. Use set_fields to change several fields in one verified call.",
 			),
 			inputSchema: setValueSchema,
 			annotations: MUTATION_ANNOTATIONS,
@@ -193,7 +193,7 @@ export function registerDesktopMutationTools(
 					await resolvedComputer.setValue(targetPid, index(), input.value);
 					return { route: "accessibility", delivery: "background" } as const;
 				},
-				outcomeOptions(input),
+				{ ...outcomeOptions(input), valueCheck: { elementIndex: index(), value: input.value } },
 			);
 		},
 	);

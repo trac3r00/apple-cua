@@ -323,6 +323,11 @@ export function observedActionResult(
 		dispatch,
 		observationStatus,
 		windowEvents,
+		readbackConfirmed:
+			typeof extra["setValue"] === "object" &&
+			extra["setValue"] !== null &&
+			"verified" in extra["setValue"] &&
+			extra["setValue"].verified === true,
 	});
 	return stateToolResult(
 		state,
@@ -490,6 +495,7 @@ export function observedRunStepsResult(
 }
 
 export function postActionErrorResult(error: unknown, partial?: Record<string, unknown>): ToolResult {
+	const message = error instanceof Error ? error.message : String(error);
 	return textResult(
 		JSON.stringify(
 			{
@@ -498,7 +504,10 @@ export function postActionErrorResult(error: unknown, partial?: Record<string, u
 				paused: true,
 				needsExplicitObservation: true,
 				...(partial === undefined ? {} : partial),
-				error: error instanceof Error ? error.message : String(error),
+				error:
+					message.trim().length === 0
+						? "Post-action observation failed without error details; observe the app before sending more input."
+						: message,
 			},
 			null,
 			2,

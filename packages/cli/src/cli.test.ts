@@ -32,7 +32,11 @@ function runCliAllowingFailure(args: string[]) {
 }
 
 // Each test spawns its own CLI process and shares no state, so a describe's tests run concurrently.
-describe.concurrent("apple-cua CLI", () => {
+// A cold CLI start strips types at load and measures 3.5-5.3 s on CI's Intel macOS 26 runner under concurrent load,
+// so the 5 s default would fail a correct run; every subprocess suite here gets one realistic budget.
+const cliProcessTimeout = { timeout: 30_000 };
+
+describe.concurrent("apple-cua CLI", cliProcessTimeout, () => {
 	it("#given package metadata #when --version runs #then it prints the package version", async () => {
 		// given
 		const expectedVersion = packageJson.version;
@@ -153,7 +157,7 @@ describe.concurrent("apple-cua CLI", () => {
 	}, 60_000);
 });
 
-describe.concurrent("apple-cua CLI iOS commands", () => {
+describe.concurrent("apple-cua CLI iOS commands", cliProcessTimeout, () => {
 	it("#given the iOS command group #when help runs #then every iPhone command is listed", async () => {
 		// given
 		const expectedCommands = [
@@ -220,7 +224,7 @@ describe.concurrent("apple-cua CLI iOS commands", () => {
 	});
 });
 
-describe.concurrent("apple-cua CLI screenshot capture options", () => {
+describe.concurrent("apple-cua CLI screenshot capture options", cliProcessTimeout, () => {
 	it("#given the screenshot command #when help runs #then region and display selection are documented", async () => {
 		// when
 		const result = await runCli(["screenshot", "--help"]);

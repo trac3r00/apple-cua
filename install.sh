@@ -6,7 +6,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash -s -- --add-to-path
 #
 # Options go to scripts/setup.sh: --add-to-path (append the line that puts ~/.local/bin on PATH to your shell
-# startup file, backed up first), --register omo|claude|codex|json, --allow <apps>, --yes, ...
+# startup file, backed up first), --register omo|claude|codex|gemini|cursor|hermes|openclaw|pi|json, --allow <apps>,
+# --yes, ...
 #
 #   APPLE_CUA_HOME     where apple-cua keeps its state, and the checkout in app/ (default ~/.apple-cua)
 #   APPLE_CUA_REPO     the git repository to clone (default https://github.com/trac3r00/apple-cua.git)
@@ -48,9 +49,12 @@ command into ~/.local/bin (APPLE_CUA_BIN_DIR). APPLE_CUA_REPO and APPLE_CUA_REF 
 
 Options are passed to scripts/setup.sh, for example:
   --add-to-path         append the line that puts ~/.local/bin on PATH to your shell startup file (backed up first)
-  --register <client>   register the MCP server with omo, claude, codex or json
-  --allow <apps>        the apps agents may observe and drive, by name or bundle id (e.g. TextEdit)
+  --register <client>   register the MCP server with omo, claude, codex, gemini, cursor, hermes, openclaw, pi, or
+                        json (prints a block to paste); repeatable or comma-separated
+  --allow <apps>        optionally restrict agents to these apps, by name or bundle id (e.g. TextEdit)
   -y, --yes             do not ask; download Node.js when needed
+
+See scripts/setup.sh --help for every option.
 EOF
 }
 

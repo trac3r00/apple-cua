@@ -1,4 +1,4 @@
-import type { GuardedComputerInterface } from "@apple-cua/core";
+import { type GuardedComputerInterface, resolveAppPid } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { GuardedSession } from "./guarded-session.js";
 import { createRunStepDriver, expectFromInput } from "./step-actions.js";
@@ -9,6 +9,14 @@ interface AppOutcome {
 	readonly app: string;
 	readonly result?: ToolResult;
 	readonly error?: string;
+}
+
+async function assertDistinctTargets(computer: GuardedComputerInterface, apps: readonly string[]): Promise<void> {
+	const targets = await Promise.allSettled(apps.map((app) => resolveAppPid(computer, app)));
+	const pids = targets.flatMap((target) => (target.status === "fulfilled" ? [target.value] : []));
+	if (new Set(pids).size !== pids.length) {
+		throw new Error("each entry must target a different app process; app aliases cannot share a parallel call");
+	}
 }
 
 async function settle(app: string, run: () => Promise<ToolResult>): Promise<AppOutcome> {
@@ -74,8 +82,9 @@ export function registerParallelTools(
 			inputSchema: observeAppsSchema,
 			annotations: { readOnlyHint: true, destructiveHint: false },
 		},
-		async (input) =>
-			combine(
+		async (input) => {
+			await assertDistinctTargets(computer, input.apps);
+			return combine(
 				"apps",
 				await Promise.all(
 					input.apps.map((app) =>
@@ -90,7 +99,8 @@ export function registerParallelTools(
 						),
 					),
 				),
-			),
+			);
+		},
 	);
 
 	server.registerTool(
@@ -106,6 +116,10 @@ export function registerParallelTools(
 				...batch,
 				steps: parseRunSteps(batch.steps, "run_parallel", `batches[${index}].steps`),
 			}));
+			await assertDistinctTargets(
+				computer,
+				batches.map((batch) => batch.app),
+			);
 			const driver = createRunStepDriver(computer);
 			const options = { fullState: input.full_state === true, includeScreenshot: input.include_screenshot === true };
 			const runBatch = (batch: (typeof batches)[number]): Promise<AppOutcome> =>

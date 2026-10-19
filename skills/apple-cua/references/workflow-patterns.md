@@ -13,6 +13,69 @@ the native hardware cursor remains singular. Keep one desktop controller,
 never transfer tokens or element IDs between apps, and target each action using
 that app's own newest observation.
 
+## Planners and app-owning workers
+
+The host runtime creates subagents and chooses their models. apple-cua supplies
+guarded app execution, not model spawning or a reasoning scheduler. Use one
+coordinator and one shared MCP session; if the host cannot share that session,
+keep all tool calls in the coordinator and delegate only planning and review.
+Do not start independent MCP servers as a substitute.
+
+- **Planners/reviewers:** receive the user's goal, constraints and supplied
+  observations or completed-work receipts. Return an approach, draft content,
+  competing hypotheses or an evidence-based critique. They need no live token
+  and make no desktop calls. Parallel thinking is useful even for a single app.
+- **App-owning workers:** receive one `worker_id`, one assigned app, its full
+  attributed observation (including indexed image blocks when present), its
+  current token, a bounded subtask and explicit completion checks. They refresh
+  only through `manage_workers {op: "observe", worker_id: ...}` and mutate only
+  through `run_worker`. A worker ID is attribution, not authentication.
+- **Coordinator:** resolves planner proposals, assigns non-overlapping app
+  processes, routes observations to their owners, combines results and handles
+  user decisions. It does not observe or act on an owned app while its worker
+  is active. App names, bundle IDs and PID aliases may name the same process;
+  separate windows do not create separate owners.
+
+For example, to draft in two already-approved, running apps:
+
+1. Ask host-created planners to prepare the content and review the plan without
+   desktop input. Agree on end-state checks before delegation.
+2. Call `manage_workers` with `op: "assign"` and assignments such as
+   `{worker_id: "notes-draft", task: "Prepare the agreed note draft", app: "com.apple.Notes"}`
+   and `{worker_id: "mail-draft", task: "Prepare the agreed email draft without sending", app: "com.apple.mail"}`.
+   This observes the apps and returns each worker's own context and token; it
+   does not launch agents. Pass each assignment only to its matching host worker.
+3. Let each worker submit coherent `run_worker` steps with an `expect` block.
+   Read the returned state before using its successor token once. Missing tokens,
+   refusals or changed context require a worker-scoped refresh, not replay.
+   Use bounded `wait_for` steps at UI transitions instead of fixed sleeps.
+4. Have workers return their app/worker identity, completed and skipped steps,
+   verification evidence, unresolved blockers and whether user confirmation is
+   needed. Do not equate a dispatched input or an idle worker with completion.
+5. Join all runs before releasing owners with `manage_workers {op: "release",
+   worker_id: ...}`. The coordinator can then observe and verify the combined
+   result. A restarted app requires release and reassignment.
+
+Assignment batches publish only after every app has usable context; on failure,
+ownership remains reserved until all in-flight assignment reads finish, then the
+batch rolls back. Do not retry while that assignment call is pending.
+`manage_workers {op: "status"}` reports compact ownership and busy state, not
+the full observation or proof of task completion.
+
+For independent known batches without host workers, use `observe_apps` followed
+by `run_parallel` instead. Entries must resolve to different app processes,
+including aliases. Inspect every `apps[]`/`batches[]` entry: after validation,
+the top-level call is an error only when all entries fail, so it may contain
+failed work. Each entry's `images` indexes address the image blocks in the
+combined response, not image bytes embedded in JSON. Never retry successful
+entries when recovering failed ones.
+
+Background app lanes can run concurrently; attended worker input is serialized.
+Cursor identities distinguish feedback, not independent native mice. The OS
+cursor, shared clipboard, menus and human input remain shared constraints.
+For workflows that exchange data between apps, finish and release the producer
+before handing the dependent step to its next owner.
+
 ## Window and coordinate targeting
 
 Aim pointer actions only at the exact observed window and its returned screenshot.

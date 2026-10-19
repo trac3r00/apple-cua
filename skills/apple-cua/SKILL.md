@@ -58,8 +58,9 @@ marker; same-app input remains serialized. The native hardware cursor remains si
 Keep one controller for the desktop.
 
 1. **Discover only as needed.** `list_apps` reports running apps. Listing an app does not
-   authorize reading or controlling it. The host must configure its bundle ID in
-   `APPLE_CUA_ALLOWED_BUNDLE_IDS`; never edit that policy to approve yourself. When the app the
+   authorize reading or controlling it. Explicitly name the app needed for the user's task;
+   no manual whitelist is required by default. If the host sets `APPLE_CUA_ALLOWED_BUNDLE_IDS`,
+   respect that restriction and never widen it yourself. When the app the
    task needs is not running, `open_app` activates it in place or launches it and waits until it
    is observable — opening an app is not authorization either, so observe it before acting.
 2. **Observe the chosen app.** Call `get_app_state` and read its screenshot, accessibility
@@ -335,10 +336,11 @@ its own bundle ID and window ID. Known system helpers are:
 
 Notification Center and these helpers are discoverable despite their background
 activation policy. Their notification-layer windows are targetable only when
-AppKit identifies the expected bundle at its system path. Each host/helper requires
-its own explicit approval; approving `com.apple.FaceTime` or `com.apple.mobilephone`
-does not approve Notification Center or a helper. Ask the user to approve the host through setup/config and reload the server when
-needed. Never change the allowlist to approve yourself.
+AppKit identifies the expected bundle at its system path. Explicitly target the host/helper.
+If the host configured an app restriction, each helper needs its own exact bundle ID;
+allowing `com.apple.FaceTime` or `com.apple.mobilephone` does not include Notification Center
+or a helper. Ask the user to update their restriction and reload the server when needed.
+Never change the allowlist to approve yourself.
 
 Read the banner's recipient and obtain confirmation for that recipient before
 pressing Call through `run_script`. A hosted banner may expose only the

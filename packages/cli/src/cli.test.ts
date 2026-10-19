@@ -37,6 +37,64 @@ function runCliAllowingFailure(args: string[]) {
 const cliProcessTimeout = { timeout: 30_000 };
 
 describe.concurrent("apple-cua CLI", cliProcessTimeout, () => {
+	it("#given default app access #when config registers a client #then its environment omits the app restriction", async () => {
+		const home = mkdtempSync(join(tmpdir(), "apple-cua-default-registration-"));
+		try {
+			const result = await execa(
+				process.execPath,
+				["--experimental-strip-types", cliPath, "config", "--register", "omo"],
+				{
+					cwd: workspaceRoot,
+					env: {
+						...process.env,
+						HOME: home,
+						APPLE_CUA_HOME: join(home, ".apple-cua"),
+						FORCE_COLOR: "0",
+					},
+				},
+			);
+			const registered: {
+				mcpServers: Record<string, { env: Record<string, string> }>;
+			} = JSON.parse(readFileSync(join(home, ".omo/agent/mcp.json"), "utf8"));
+			const settings: {
+				allowedApps: string[];
+			} = JSON.parse(readFileSync(join(home, ".apple-cua/config.json"), "utf8"));
+
+			expect(result.exitCode).toBe(0);
+			expect(settings.allowedApps).toEqual([]);
+			expect(registered.mcpServers["apple-cua"]?.env).not.toHaveProperty("APPLE_CUA_ALLOWED_BUNDLE_IDS");
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	it.each([
+		["click", "10", "20"],
+		["right-click", "10", "20"],
+		["middle-click", "10", "20"],
+		["double-click", "10", "20"],
+		["move", "10", "20"],
+		["drag", "10", "20", "30", "40"],
+		["scroll", "--direction", "down"],
+		["type", "must not reach the frontmost app"],
+		["key", "Return"],
+		["keypress", "Return"],
+	])("#given no explicit target #when %j runs #then input is refused", async (...args) => {
+		const stateDir = mkdtempSync(join(tmpdir(), "apple-cua-target-required-"));
+		try {
+			const result = await execa(process.execPath, ["--experimental-strip-types", cliPath, ...args], {
+				cwd: workspaceRoot,
+				env: { ...process.env, APPLE_CUA_STATE_DIR: stateDir, FORCE_COLOR: "0" },
+				reject: false,
+			});
+
+			expect(result.exitCode).toBe(1);
+			expect(result.stderr).toContain("app-target-required");
+		} finally {
+			rmSync(stateDir, { recursive: true, force: true });
+		}
+	});
+
 	it("#given package metadata #when --version runs #then it prints the package version", async () => {
 		// given
 		const expectedVersion = packageJson.version;

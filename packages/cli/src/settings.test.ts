@@ -201,6 +201,15 @@ describe("#given settings #when a change is applied #then apps resolve by name a
 });
 
 describe("#given the server's environment variables #when settings are mapped to them #then the server's own rules apply", () => {
+	it("#given default settings #when registration is generated #then no app restriction is persisted", () => {
+		const path = join(home, ".apple-cua/config.json");
+		saveSettings(path, DEFAULT_SETTINGS);
+		const loaded = loadSettings(path).settings;
+
+		expect(loaded.allowedApps).toEqual([]);
+		expect(envForSettings(loaded)["APPLE_CUA_ALLOWED_BUNDLE_IDS"]).toBeUndefined();
+	});
+
 	it("writes every managed variable and reads defaults like the server", () => {
 		const settings = { ...DEFAULT_SETTINGS, allowedApps: ["com.apple.TextEdit"] };
 

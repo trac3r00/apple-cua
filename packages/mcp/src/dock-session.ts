@@ -14,7 +14,7 @@ interface DockToken {
 }
 
 export interface DockGuardOptions {
-	readonly allowedBundleIds: readonly string[];
+	readonly allowedBundleIds: readonly string[] | undefined;
 	readonly delivery: "background" | "attended";
 	readonly probeHost: () => HostCapabilities;
 	readonly stopSwitch?: StopStatusSource;
@@ -179,7 +179,10 @@ export class DockGuardSession {
 		if (this.stopped) return refusalResult("dock-session-closed");
 		const stop = this.options.stopSwitch?.status();
 		if (stop?.stopped === true) return refusalResult("user-stopped", describeUserStop(stop));
-		if (!this.options.allowedBundleIds.includes(DOCK_BUNDLE_ID))
+		if (
+			this.options.allowedBundleIds !== undefined &&
+			!this.options.allowedBundleIds.some((bundleId) => bundleId.toLowerCase() === DOCK_BUNDLE_ID)
+		)
 			return refusalResult("dock-not-approved", "Dock observation requires com.apple.dock approval.");
 		const host = this.options.probeHost();
 		if (!host.permissions.accessibility) return refusalResult("accessibility-permission-required");

@@ -58,6 +58,17 @@ afterEach(() => {
 });
 
 describe("#given a fully permitted console session #when get_capabilities is called #then it reports ready with no advice", () => {
+	it("#given no app restriction #when capabilities are read #then approval is unrestricted without a blocker", async () => {
+		const body = await report({
+			delivery: "background",
+			probeHost: () => GRANTED_HOST,
+			allowedBundleIds: undefined,
+		});
+
+		expect(body.approval).toEqual({ allowedBundleIds: null });
+		expect(body.advice).toEqual([]);
+	});
+
 	it("reports permissions, console mode, delivery and approval", async () => {
 		const body = await report({
 			delivery: "background",

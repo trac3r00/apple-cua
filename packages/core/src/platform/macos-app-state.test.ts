@@ -681,7 +681,7 @@ describe("#given an app-approval store #when an app is not approved #then get_ap
 		childProcessMock.execFile.mockImplementationOnce((_file, _args, _options, callback) =>
 			callback(null, fakePng(2560, 1600), ""),
 		);
-		const approval = new AppApprovalStore();
+		const approval = new AppApprovalStore([]);
 		const computer = new MacOSHostComputer({ appApproval: approval });
 
 		await expect(computer.getAppState(TARGET_PID, { settleMs: 0 })).rejects.toThrow(/needs your approval/);

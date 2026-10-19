@@ -15,7 +15,7 @@ export const DEFAULT_SKILL_DIR = fileURLToPath(new URL("../../../skills/apple-cu
 export interface CapabilitySources {
 	readonly delivery: InputDelivery | undefined;
 	readonly probeHost: () => HostCapabilities;
-	readonly allowedBundleIds: readonly string[];
+	readonly allowedBundleIds: readonly string[] | undefined;
 	readonly stop?: StopStatusSource | undefined;
 	/** The registered toolset profile; defaults to the full desktop set. */
 	readonly toolset?: ToolsetProfile | undefined;
@@ -38,7 +38,7 @@ function sessionMode(host: HostCapabilities): SessionMode {
 function adviceFor(
 	host: HostCapabilities,
 	mode: SessionMode,
-	allowed: readonly string[],
+	allowed: readonly string[] | undefined,
 	stop: StopStatus | undefined,
 ): string[] {
 	const advice: string[] = [];
@@ -57,7 +57,7 @@ function adviceFor(
 			"Screen Recording is not granted: screenshots are unavailable, but accessibility observation and element actions still work.",
 		);
 	}
-	if (allowed.length === 0) {
+	if (allowed?.length === 0) {
 		advice.push("No app is approved for observation or input. The user sets APPLE_CUA_ALLOWED_BUNDLE_IDS.");
 	}
 	if (mode === "locked") {
@@ -97,7 +97,7 @@ export function capabilityReport(sources: CapabilitySources): Record<string, unk
 					? "input goes to the target window; the front app, its focused window and the pointer are left alone and restored if the target takes front"
 					: "input may bring the target app forward",
 		},
-		approval: { allowedBundleIds: sources.allowedBundleIds },
+		approval: { allowedBundleIds: sources.allowedBundleIds ?? null },
 		stop: {
 			...(stop ?? { stopped: false }),
 			armed: sources.stop !== undefined,

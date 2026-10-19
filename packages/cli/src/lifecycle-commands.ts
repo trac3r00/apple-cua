@@ -361,8 +361,8 @@ export async function askForChanges(
 	say: Say,
 	installed: readonly ClientName[] = [],
 ): Promise<SettingsChange> {
-	say(`Apps agents may observe and drive: ${settings.allowedApps.join(", ") || "none yet"}`);
-	const allow = (await ask("  Add apps (names like TextEdit, or bundle ids; comma-separated; Enter skips): ")).trim();
+	say(`App restriction: ${settings.allowedApps.join(", ") || "none (any explicitly named app)"}`);
+	const allow = (await ask("  Restrict to apps (names or bundle ids; comma-separated; Enter skips): ")).trim();
 	const disallow =
 		settings.allowedApps.length === 0
 			? ""
@@ -410,7 +410,7 @@ function formatSettings(
 			: " (not saved yet: the defaults)";
 	const lines = [
 		`apple-cua settings in ${show(layout.configPath)}${origin}`,
-		`  apps       ${settings.allowedApps.join(", ") || "none (agents can list apps but not observe or drive them)"}`,
+		`  apps       ${settings.allowedApps.join(", ") || "any explicitly named app (no restriction)"}`,
 		`  delivery   ${settings.delivery}`,
 		`  toolset    ${settings.toolset}`,
 		`  iphone     ${settings.iphone ? "on" : "off"}`,
@@ -631,10 +631,6 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 	if (next.clients.length === 0) {
 		print(
 			`No MCP client is registered yet. Register one with: apple-cua config --register ${CLIENT_NAMES.join("|")}`,
-		);
-	} else if (next.allowedApps.length === 0) {
-		print(
-			"note: no app is approved yet, so agents can list apps but not observe or drive them; approve one with: apple-cua config --allow TextEdit",
 		);
 	}
 	if (changes.some((item) => item.action === "added" || item.action === "updated" || item.action === "removed")) {
@@ -1004,10 +1000,10 @@ export function registerLifecycleCommands(program: Command, options: LifecycleCo
 		)
 		.option(
 			"--allow <apps>",
-			"approve apps by name or bundle id, comma-separated and repeatable (e.g. TextEdit,com.apple.finder)",
+			"restrict to apps by name or bundle id, comma-separated and repeatable (e.g. TextEdit,com.apple.finder)",
 			collect,
 		)
-		.option("--disallow <apps>", 'withdraw apps by name or bundle id; "all" empties the list', collect)
+		.option("--disallow <apps>", 'remove apps from the restriction; "all" clears the restriction', collect)
 		.option("--delivery <mode>", "background (default) or attended", parseDelivery)
 		.option("--toolset <profile>", "full (default) or lean", parseToolset)
 		.option("--iphone", "register the iPhone Mirroring tools")

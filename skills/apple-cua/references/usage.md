@@ -12,10 +12,11 @@ Build core and MCP, then let the harness own the stdio process:
 
 ```bash
 pnpm --filter @apple-cua/core --filter @apple-cua/mcp build
-APPLE_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit node packages/mcp/dist/server.js
+node packages/mcp/dist/server.js
 ```
 
-The app allowlist is host-controlled. Missing/empty approval denies inspection/input; see
+Explicitly name the target app; no whitelist is required by default. The optional app restriction
+is host-controlled: unset permits named apps, while explicitly empty denies inspection/input; see
 [harness configuration](harnesses.md). Do not send debugging text to stdout when launching
 an MCP server: stdout carries its protocol.
 

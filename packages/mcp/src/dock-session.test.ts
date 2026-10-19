@@ -66,7 +66,7 @@ function setup(
 	const act = vi.fn(async () => undefined);
 	const source = overrides.source ?? { read, act };
 	const session = new DockGuardSession(source, {
-		allowedBundleIds: overrides.allowedBundleIds ?? ["com.apple.dock"],
+		allowedBundleIds: overrides.allowedBundleIds,
 		delivery: overrides.delivery ?? "attended",
 		probeHost: () => overrides.host ?? HOST,
 		...(overrides.stopSwitch === undefined ? {} : { stopSwitch: overrides.stopSwitch }),
@@ -103,6 +103,24 @@ describe("DockGuardSession", () => {
 		const { session, read } = setup({ allowedBundleIds: [] });
 		const result = await session.observe();
 		expect(result.isError).toBe(true);
+		expect(read).not.toHaveBeenCalled();
+	});
+
+	it.each([undefined, ["COM.APPLE.DOCK"]])(
+		"#given unrestricted or exact Dock authorization %j #when observing #then it issues a token",
+		async (allowedBundleIds) => {
+			const session = new DockGuardSession(
+				{ read: async () => SNAPSHOT, act: async () => undefined },
+				{ allowedBundleIds, delivery: "background", probeHost: () => HOST },
+			);
+			expect(await observeToken(session)).toEqual(expect.any(String));
+		},
+	);
+
+	it("#given a restriction excluding Dock #when observing #then no native read occurs", async () => {
+		const { session, read } = setup({ allowedBundleIds: ["com.apple.finder"] });
+
+		expect((await session.observe()).isError).toBe(true);
 		expect(read).not.toHaveBeenCalled();
 	});
 

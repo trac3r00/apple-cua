@@ -78,7 +78,9 @@ export class WorkerCoordinator {
 	constructor(
 		private readonly session: GuardedSession,
 		private readonly computer: GuardedComputerInterface,
-	) {}
+	) {
+		// The shared session owns token validation and per-app mutation queues.
+	}
 
 	async assign(assignments: readonly WorkerAssignmentInput[]): Promise<readonly WorkerAssignment[]> {
 		this.assertOpen();
@@ -117,9 +119,16 @@ export class WorkerCoordinator {
 			return worker;
 		});
 		try {
-			const observations = await Promise.all(
+			const settled = await Promise.allSettled(
 				provisional.map(async (worker) => ({ worker, observed: await this.observeState(worker, {}) })),
 			);
+			// Keep every app claimed until all sibling reads finish, even when one fails.
+			const observations = settled.map((outcome) => {
+				if (outcome.status === "rejected") {
+					throw outcome.reason;
+				}
+				return outcome.value;
+			});
 			this.assertOpen();
 			for (const { worker, observed } of observations) {
 				if (observed.observation_token === undefined) {
@@ -177,22 +186,23 @@ export class WorkerCoordinator {
 	}
 
 	status(): readonly WorkerStatus[] {
-		return [...this.workers.values()].flatMap(({ assignment, busy }) =>
-			assignment.observation === undefined
-				? []
-				: [
-						{
-							worker_id: assignment.worker_id,
-							task: assignment.task,
-							app: assignment.app,
-							cursor_id: assignment.cursor_id,
-							...(assignment.observation_token === undefined
-								? {}
-								: { observation_token: assignment.observation_token }),
-							busy,
-						},
-					],
-		);
+		return [...this.workers.values()].flatMap(({ assignment, busy }) => {
+			if (assignment.observation === undefined) {
+				return [];
+			}
+			return [
+				{
+					worker_id: assignment.worker_id,
+					task: assignment.task,
+					app: assignment.app,
+					cursor_id: assignment.cursor_id,
+					...(assignment.observation_token === undefined
+						? {}
+						: { observation_token: assignment.observation_token }),
+					busy,
+				},
+			];
+		});
 	}
 
 	release(workerId: string): void {

@@ -277,6 +277,17 @@ that worker's context after a stale token or changed window. Do not use an
 unscoped observation to replace its token. A restarted app needs release and
 reassignment because ownership is pinned to the original process.
 
+Separate parallel thinking from parallel input. Planners can compare approaches,
+draft content, or review supplied observations concurrently without owning apps
+or receiving live tokens. Give each app-owning worker one disjoint app and a
+verifiable outcome; do not split two windows of one app between workers.
+Only that worker should observe or mutate its assigned app until it returns.
+The coordinator must not also use `get_app_state`, `observe_apps`, `run_parallel`
+or `run_script` on that app: a new observation replaces its live token.
+Worker ownership coordinates cooperative agents, not access control between
+host clients. See [the delegation workflow](references/workflow-patterns.md#planners-and-app-owning-workers)
+for handoff, reporting and recovery.
+
 Read `visual_context` with the screenshot. Window-scoped AX frames are already
 in screenshot pixels; OCR frames are global logical screen points.
 `image_to_screen` supplies origin and scale only when an image is present.

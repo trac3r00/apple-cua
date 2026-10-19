@@ -1,11 +1,48 @@
 import { currentCursorIdentity, currentInputScope } from "@apple-cua/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { GuardedSession } from "./guarded-session.js";
-import { FakeGuardedComputer } from "./protocol-test-harness.js";
+import { Deferred, FakeGuardedComputer } from "./protocol-test-harness.js";
 import type { RunStep } from "./tool-schemas.js";
 import { WorkerCoordinator } from "./worker-coordinator.js";
 
 const steps: readonly RunStep[] = [{ type: "set_value", element_index: "20", value: "worker" }];
+
+describe("WorkerCoordinator #given a failed assignment #when sibling reads remain pending #then ownership stays reserved", () => {
+	it("waits for all observations before rolling back the assignment batch", async () => {
+		const computer = new FakeGuardedComputer();
+		computer.delivery = "background";
+		const session = new GuardedSession(computer);
+		const coordinator = new WorkerCoordinator(session, computer);
+		const reading = new Deferred<void>();
+		const finish = new Deferred<void>();
+		const observe = session.observe.bind(session);
+		vi.spyOn(session, "observe").mockImplementation(async (request) => {
+			if (request.app === "1234") {
+				throw new Error("first app unavailable");
+			}
+			reading.resolve();
+			await finish.promise;
+			return observe(request);
+		});
+		const assignment = coordinator.assign([
+			{ worker_id: "one", task: "first", app: "Finder" },
+			{ worker_id: "two", task: "second", app: "Other" },
+		]);
+		const failure = expect(assignment).rejects.toThrow("first app unavailable");
+		try {
+			await reading.promise;
+			await expect(coordinator.assign([{ worker_id: "three", task: "overlapping", app: "Other" }])).rejects.toThrow(
+				/already owned/,
+			);
+			expect(() => coordinator.release("two")).toThrow(/busy/);
+		} finally {
+			finish.resolve();
+			await failure;
+			expect(coordinator.status()).toEqual([]);
+			await coordinator.close();
+		}
+	});
+});
 
 class CursorObservationComputer extends FakeGuardedComputer {
 	readonly observedCursors: (string | undefined)[] = [];

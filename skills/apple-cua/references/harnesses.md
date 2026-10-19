@@ -28,15 +28,15 @@ The actual launcher/process chain needs macOS Screen Recording, Accessibility an
 Automation permissions. A terminal's grants may not apply to a service launched another way.
 Grant permissions through the human-operated System Settings interface.
 
-## Host-controlled app approval
+## Optional host-controlled app restriction
 
 `APPLE_CUA_ALLOWED_BUNDLE_IDS` is a comma-separated list of exact bundle IDs. IDs are trimmed
 and compared case-insensitively. For example, `com.apple.TextEdit` permits TextEdit; it does
 not permit every app or every action inside TextEdit.
 
-**Missing/empty means no app is approved.** Inventory via `list_apps` can help the human
-identify the bundle ID, but inspection and input are denied until the host owner configures
-approval. There is no agent-callable approval tool. Restart the MCP process after changing
+**Unset permits any explicitly named app; explicitly empty permits none.** No manual whitelist
+is needed by default, and tools never implicitly select the frontmost app. Inventory via
+`list_apps` can identify the target. There is no agent-callable approval tool. Restart the MCP process after changing
 its environment. Keep host policy outside the agent's writable task workspace where possible;
 MCP cannot protect configuration or binaries the harness independently permits the model to edit.
 Do not let a model silently expand its own allowlist.

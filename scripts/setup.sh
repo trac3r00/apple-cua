@@ -19,7 +19,7 @@
 # identity, and macOS then asks for Screen Recording and Accessibility again.
 #
 # In a terminal (and without --yes) setup asks what only a person can answer: whether to put apple-cua on PATH, on a
-# first run which apps agents may use and which MCP clients to register with, and then it walks through macOS's
+# first run whether to restrict apps and which MCP clients to register with, and then it walks through macOS's
 # permission dialogs for "apple-cua-mcp" (Accessibility, Screen Recording, Automation), opening System Settings and
 # waiting until each switch is on. Without a terminal it skips the questions and the closing doctor run lists what
 # is left.
@@ -81,8 +81,8 @@ Installs, builds and checks apple-cua in this checkout, and puts the apple-cua c
   --register <client>     add apple-cua to codex, claude, omo, gemini, cursor, hermes, openclaw, pi, or json (prints
                           a block for any other client); repeatable or
                           comma-separated; shortcut for: apple-cua config --register <client>
-  --allow <apps>          the apps the server may observe and drive, by name or bundle id (e.g. TextEdit); replaces
-                          the saved list
+  --allow <apps>          optionally restrict apps by name or bundle id (e.g. TextEdit); replaces the saved list.
+                          Without a restriction, any explicitly named app is available
   --delivery <mode>       background (default) or attended
   --toolset <profile>     full (default) or lean
   --rebuild-native        rebuild packages/core/native (default: use the committed universal binaries, rebuilt only
@@ -668,7 +668,7 @@ if ((allow_given)); then config_arguments+=(--disallow all --allow "$allow"); fi
 if [[ -n "$delivery" ]]; then config_arguments+=(--delivery "$delivery"); fi
 if [[ -n "$toolset" ]]; then config_arguments+=(--toolset "$toolset"); fi
 if ((${#config_arguments[@]} == 0)) && [[ ! -e "$apple_cua_home/config.json" ]] && can_ask; then
-	info "first run: choose the apps agents may use and the MCP clients to register with"
+	info "first run: optionally restrict apps and choose the MCP clients to register with"
 	# Its questions must reach the terminal, so its output is not piped through sed like the other steps'.
 	node "$cli_js" config ||
 		fail "apple-cua config did not complete" "read the messages above, then run: $cua config"
@@ -727,7 +727,7 @@ if ! node "$cli_js" doctor; then
 fi
 
 printf '\nNext:\n'
-printf '  %-28s %s\n' "$cua config" "choose the apps agents may use and the MCP clients to register with" \
+printf '  %-28s %s\n' "$cua config" "optionally restrict apps and choose the MCP clients to register with" \
 	"$cua permissions grant" "walk through the macOS permissions of \"apple-cua-mcp\"" \
 	"$cua doctor --fix" "check the installation and repair what is safe to repair" \
 	"$cua update" "update this checkout and everything setup built" \

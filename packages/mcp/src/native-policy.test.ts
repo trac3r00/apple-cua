@@ -1,4 +1,4 @@
-import { listTopLevelWindows } from "@apple-cua/core";
+import { AppApprovalStore, listTopLevelWindows } from "@apple-cua/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	allowedBundleIdsFromProcessEnvironment,
@@ -43,10 +43,20 @@ describe("#given the allowlist variable #when the process environment is read #t
 		expect(allowedBundleIdsFromProcessEnvironment()).toEqual(["com.apple.TextEdit", "com.apple.Finder"]);
 	});
 
-	it("stays deny-by-default when it is not set", () => {
+	it("allows any explicitly named app when it is not set", () => {
 		vi.stubEnv("APPLE_CUA_ALLOWED_BUNDLE_IDS", undefined);
 
-		expect(allowedBundleIdsFromProcessEnvironment()).toEqual([]);
+		const allowed = allowedBundleIdsFromProcessEnvironment();
+		expect(allowed).toBeUndefined();
+		expect(new AppApprovalStore(allowed).decide("com.example.unlisted")).toBe("approved");
+	});
+
+	it.each(["", " ,  , "])("keeps an explicitly empty restriction closed: %j", (value) => {
+		vi.stubEnv("APPLE_CUA_ALLOWED_BUNDLE_IDS", value);
+
+		const allowed = allowedBundleIdsFromProcessEnvironment();
+		expect(allowed).toEqual([]);
+		expect(new AppApprovalStore(allowed).decide("com.example.unlisted")).toBe("needs-approval");
 	});
 });
 

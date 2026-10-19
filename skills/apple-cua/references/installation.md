@@ -3,7 +3,7 @@
 apple-cua runs on the Mac being controlled, in its logged-in graphical session: macOS 15 (Sequoia)
 or macOS 26 (Tahoe), on Apple Silicon or Intel. Older macOS versions are not supported; setup and the
 doctor refuse them. Autonomous harnesses should use the guarded MCP server. See
-[harness configuration](harnesses.md) for OpenClaw/Hermes examples and the required local app
+[harness configuration](harnesses.md) for OpenClaw/Hermes examples and the optional local app
 allowlist.
 
 ## Install with one command
@@ -143,9 +143,10 @@ apple-cua --json apps list
 
 ## Configure MCP app approval
 
-The host owner sets `APPLE_CUA_ALLOWED_BUNDLE_IDS` to exact approved bundle IDs; `apple-cua config
---allow` writes it into every registration. Empty or unset defaults to no approved apps. The server
-does not expose an approval tool to the model. Example for a host-authorized TextEdit task:
+Any explicitly named app is available by default. The host owner can restrict access with
+`APPLE_CUA_ALLOWED_BUNDLE_IDS`; `apple-cua config --allow` writes exact bundle IDs into every
+registration. Unset permits named apps; explicitly empty permits none. The server does not
+expose an approval tool to the model. Example of an optional TextEdit-only restriction:
 
 ```bash
 APPLE_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit node packages/mcp/dist/server.js

@@ -15,10 +15,15 @@ forward or launches it.
 
 ```bash
 pnpm --filter @apple-cua/core --filter @apple-cua/mcp build
-APPLE_CUA_ALLOWED_BUNDLE_IDS=com.apple.TextEdit node packages/mcp/dist/server.js
+node packages/mcp/dist/server.js
 # or, with its own TCC identity (Screen Recording + Accessibility attach to the bundle):
 scripts/build-tcc-helper.sh
 ```
+
+Explicitly name the app to observe or control; no manual whitelist or implicit frontmost target is used.
+Optionally set `APPLE_CUA_ALLOWED_BUNDLE_IDS` to exact, case-insensitive bundle IDs to restrict access.
+Unset means unrestricted named apps; an explicitly empty value denies all apps. Observation tokens,
+window preflight, and the stop switch still guard input.
 
 The helper bundles a self-contained `node` built for this Mac's CPU (Homebrew's build links
 `libnode.dylib` and cannot be copied into a bundle); set `APPLE_CUA_NODE` to choose one,

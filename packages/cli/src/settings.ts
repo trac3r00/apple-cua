@@ -31,7 +31,7 @@ export type Delivery = "background" | "attended";
 export type Toolset = "full" | "lean";
 
 export interface Settings {
-	/** Bundle ids of the apps the server may observe and drive. */
+	/** Optional app restriction; an empty list omits the environment restriction. */
 	readonly allowedApps: readonly string[];
 	readonly delivery: Delivery;
 	readonly toolset: Toolset;

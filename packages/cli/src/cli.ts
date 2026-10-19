@@ -6,6 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
+	AppApprovalStore,
 	MacOSHostComputer,
 	NOOP_POINTER_OVERLAY,
 	StopSwitch,
@@ -25,7 +26,7 @@ import { Command } from "commander";
 import { registerIosCommands } from "./ios.js";
 import { resolveLayout } from "./layout.js";
 import { registerLifecycleCommands, resolveCursorMotion } from "./lifecycle-commands.js";
-import { commandPathOf, stopRefusalFor } from "./stop-gate.js";
+import { commandPathOf, isInputCommand, stopRefusalFor } from "./stop-gate.js";
 
 type PackageJson = {
 	version: string;
@@ -537,9 +538,19 @@ registerLifecycleCommands(program, { isJsonOutput });
 
 // Refuse input commands while the stop switch is on, before any command code can send input.
 program.hook("preAction", (_program, actionCommand) => {
-	const refusal = stopRefusalFor(commandPathOf(actionCommand), new StopSwitch());
+	const commandPath = commandPathOf(actionCommand);
+	const refusal = stopRefusalFor(commandPath, new StopSwitch());
 	if (refusal !== undefined) {
 		throw new Error(refusal);
+	}
+	const options = program.opts<GlobalOptions>();
+	if (
+		isInputCommand(commandPath) &&
+		!commandPath.includes(" ") &&
+		options.targetPid === undefined &&
+		options.targetBundleId === undefined
+	) {
+		throw new Error("app-target-required: pass --target-pid or --target-bundle-id before sending input");
 	}
 });
 
@@ -588,6 +599,12 @@ async function withComputer(
 	const showCursor = program.opts<GlobalOptions>().cursor !== false && agentCursorEnabled();
 	const background = program.opts<GlobalOptions>().background === true;
 	const computer = new MacOSHostComputer({
+		appApproval: new AppApprovalStore(
+			process.env["APPLE_CUA_ALLOWED_BUNDLE_IDS"]
+				?.split(",")
+				.map((bundleId) => bundleId.trim())
+				.filter((bundleId) => bundleId.length > 0),
+		),
 		delivery: background ? "background" : "attended",
 		...(showCursor ? { cursorMotion: resolveCursorMotion(resolveLayout().configPath) } : {}),
 		...hostOptions,

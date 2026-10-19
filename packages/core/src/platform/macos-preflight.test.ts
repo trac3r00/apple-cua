@@ -370,6 +370,27 @@ describe("MacOSHostComputer input observations", () => {
 });
 
 describe("MacOSHostComputer preflightInput", () => {
+	it("#given no app restriction #when observing a named app #then preflight authorizes its observed context", async () => {
+		const computer = new MacOSHostComputer({
+			appApproval: new AppApprovalStore(),
+			overlay: NOOP_POINTER_OVERLAY,
+		});
+		const expected = await observe(computer);
+
+		expect(await computer.preflightInput(expected)).toEqual({ ok: true });
+	});
+
+	it("#given default app authorization #when observation is replaced #then stale context remains refused", async () => {
+		const computer = new MacOSHostComputer({
+			appApproval: new AppApprovalStore(),
+			overlay: NOOP_POINTER_OVERLAY,
+		});
+		const expected = await observe(computer);
+		await observe(computer);
+
+		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason: "observation-replaced" });
+	});
+
 	it("approves an unchanged, approved current context using read-only queries", async () => {
 		const computer = approvedComputer();
 		const expected = await observe(computer);

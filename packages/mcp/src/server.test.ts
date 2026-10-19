@@ -56,14 +56,14 @@ describe("MCP metadata #given a connected client #when initialized #then the con
 	});
 });
 
-describe("native allowlist #given host configuration #when defaults are built #then approval is exact and default-deny", () => {
-	it("denies an unset allowlist and normalizes configured comma-separated bundle ids", () => {
+describe("native allowlist #given host configuration #when defaults are built #then restrictions are optional and exact", () => {
+	it("allows an unset restriction and normalizes configured comma-separated bundle ids", () => {
 		const emptyStore = new AppApprovalStore(allowedBundleIdsFromEnvironment(undefined));
 		const configuredStore = new AppApprovalStore(
 			allowedBundleIdsFromEnvironment(" com.apple.Finder, ,COM.EXAMPLE.Editor "),
 		);
 
-		expect(emptyStore.decide("com.apple.finder")).toBe("needs-approval");
+		expect(emptyStore.decide("com.apple.finder")).toBe("approved");
 		expect(configuredStore.decide("COM.APPLE.FINDER")).toBe("approved");
 		expect(configuredStore.decide("com.example.editor")).toBe("approved");
 		expect(configuredStore.decide("com.example.other")).toBe("needs-approval");

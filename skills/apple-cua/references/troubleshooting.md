@@ -6,7 +6,8 @@ expand your own approval policy or switch to raw input to evade a guarded MCP de
 
 ## App not approved
 
-The host's `APPLE_CUA_ALLOWED_BUNDLE_IDS` is empty or does not contain the exact bundle ID.
+The host explicitly set `APPLE_CUA_ALLOWED_BUNDLE_IDS` to an empty value or a list that does
+not contain the exact bundle ID. An unset variable permits any explicitly named app.
 `list_apps` can show IDs for human setup; listing is not approval. Ask the host owner to
 configure the intended app and restart the server. An observation token cannot override
 approval and an app allowlist does not replace consent for irreversible actions.

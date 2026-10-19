@@ -62,5 +62,5 @@ const LEAN_INSTRUCTIONS = `Set a goal, then observe with get_app_state (or find_
 
 /** Server instructions that name only tools the profile registers. */
 export function serverInstructionsFor(toolset: ToolsetProfile): string {
-	return toolset === "lean" ? LEAN_INSTRUCTIONS : FULL_INSTRUCTIONS;
+	return `Name the target app explicitly by name, bundle ID or PID; never assume the frontmost app. No whitelist is required by default; host-configured app restrictions still apply. ${toolset === "lean" ? LEAN_INSTRUCTIONS : FULL_INSTRUCTIONS}`;
 }

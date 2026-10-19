@@ -1,9 +1,9 @@
 import { AppApprovalStore, MacOSHostComputer, listTopLevelWindows } from "@apple-cua/core";
 import type { GuardedComputerInterface, InputDelivery, WindowProbe } from "@apple-cua/core";
 
-export function allowedBundleIdsFromEnvironment(value: string | undefined): readonly string[] {
-	return (value ?? "")
-		.split(",")
+export function allowedBundleIdsFromEnvironment(value: string | undefined): readonly string[] | undefined {
+	return value
+		?.split(",")
 		.map((bundleId) => bundleId.trim())
 		.filter((bundleId) => bundleId.length > 0);
 }
@@ -17,8 +17,8 @@ function deliveryFromEnvironment(value: string | undefined): InputDelivery {
 	return value?.trim().toLowerCase() === "attended" ? "attended" : "background";
 }
 
-/** Approved bundle IDs from the host environment. */
-export function allowedBundleIdsFromProcessEnvironment(): readonly string[] {
+/** Optional exact restriction: unset permits named apps; explicitly empty permits none. */
+export function allowedBundleIdsFromProcessEnvironment(): readonly string[] | undefined {
 	return allowedBundleIdsFromEnvironment(process.env["APPLE_CUA_ALLOWED_BUNDLE_IDS"]);
 }
 

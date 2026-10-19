@@ -4,9 +4,12 @@ export class AppApprovalStore {
 	private readonly sessionApproved = new Set<string>();
 	private readonly persistentApproved = new Set<string>();
 	private readonly denied = new Set<string>();
+	private readonly unrestricted: boolean;
 
-	constructor(persistentApproved: Iterable<string> = []) {
-		for (const bundleId of persistentApproved) {
+	/** Omit the restriction to allow any explicitly targeted app; an empty iterable allows none. */
+	constructor(persistentApproved?: Iterable<string>) {
+		this.unrestricted = persistentApproved === undefined;
+		for (const bundleId of persistentApproved ?? []) {
 			this.persistentApproved.add(bundleId.toLowerCase());
 		}
 	}
@@ -16,7 +19,10 @@ export class AppApprovalStore {
 		if (this.denied.has(key)) {
 			return "denied";
 		}
-		if (this.sessionApproved.has(key) || this.persistentApproved.has(key)) {
+		if (key.trim().length === 0) {
+			return "needs-approval";
+		}
+		if (this.unrestricted || this.sessionApproved.has(key) || this.persistentApproved.has(key)) {
 			return "approved";
 		}
 		return "needs-approval";

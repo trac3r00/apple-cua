@@ -70,6 +70,8 @@ export const BROWSER_TOOL_NAMES = [
 	"browser_run",
 	"browser_close",
 	"browser_finish",
+	"browser_handoff",
+	"browser_wait_control",
 ] as const;
 
 export function registerBrowserTools(server: McpServer, controller: BrowserControllerLike): void {

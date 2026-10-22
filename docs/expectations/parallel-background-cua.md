@@ -3,6 +3,11 @@
 Status: active (2026-10-22). Source: user request in OmO session 01a1619b
 (prompt-builder + loe + fdd + preflight), items 1-4.
 
+## Base
+
+Reviewed against `main` at 8880d25 (after PR #11 unified the browser tools and added
+`skills/apple-cua/references/subagents.md`). Per-host spawn guidance lives there.
+
 ## Outcome and intended users
 
 - **Host agents** (OmO/senpi, Codex, Claude Code, Pi, OpenClaw, Hermes) that drive

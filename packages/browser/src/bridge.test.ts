@@ -103,13 +103,13 @@ describe("BrowserBridge", () => {
 				revision: "r1",
 				steps: [],
 				expect: undefined,
-				limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+				limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
 			}),
 		).rejects.toMatchObject({ code: "human_control" });
 		const observed = bridge.request({
 			method: "observe",
 			tabId: 1,
-			limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
 		});
 		const packet = await nextJson(socket);
 		expect(packet.command).toMatchObject({ method: "observe" });
@@ -134,7 +134,7 @@ describe("BrowserBridge", () => {
 			revision: "r1",
 			steps: [],
 			expect: undefined,
-			limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
 		});
 		await nextJson(socket);
 		const rejected = expect(request).rejects.toMatchObject({ code: "human_control" });
@@ -168,6 +168,8 @@ describe("BrowserBridge", () => {
 					maxChars: 6000,
 					maxElements: 80,
 					fullPage: false,
+					profile: "interactive",
+					maxNameChars: 120,
 				},
 			}),
 		).rejects.toMatchObject({ code: "human_control" });
@@ -194,7 +196,7 @@ describe("BrowserBridge", () => {
 			revision: "r1",
 			steps: [],
 			expect: undefined,
-			limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
 		});
 		const packet = await nextJson(socket);
 		socket.send(JSON.stringify({ id: packet.id, ok: true, value: {} }));

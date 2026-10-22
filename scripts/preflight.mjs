@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Release base the scope review was made against. */
-export const BASE = "75eaa4d";
+export const BASE = "8880d25";
 
 /**
  * Authoritative intent sources and the SHA-256 of their bytes when the map below was derived. A change means the map
@@ -32,9 +32,9 @@ export const BASE = "75eaa4d";
  * that was absent at review time; its appearance is itself a change to reconcile.
  */
 export const SOURCES = {
-	"docs/expectations/parallel-background-cua.md": "c7077aab8d575c14ebb4f72e98a8f18e67afd3e36ff00e1402c30c45ed5284ec",
+	"docs/expectations/parallel-background-cua.md": "38c506548959949162b527f989418bdc7036ae00971f0ef0d7d1d11ae5ad934c",
 	"AGENTS.md": "a85dbbd04d0778b58d207e9a52a0c84826ac8a6440b73ae616320d67941ccf53",
-	"README.md": "c520ee08cca6b60f50c7cf5111d7ce065a5c95faa621d6098815c8eb02b578b0",
+	"README.md": "e0c950d899a3af6f600544b0e4ddf9596d37357b2b1aca49f293435127a23401",
 	"package.json": "da53bd76e546b956cc3588812d516d762032c914c75e956e833ace059a365350",
 	".github/workflows/ci.yml": "1a95756e6508b82e0aa14352585295daf4e7d7fb5ea7c6ccb8706c7ac322e329",
 	"Rules.md": null,
@@ -46,31 +46,31 @@ export const SOURCES = {
  * Any other changed file since BASE, or a different hash here, blocks until the inventory is reconciled.
  */
 export const REVIEWED = {
-	"docs/expectations/parallel-background-cua.md": "c7077aab8d575c14ebb4f72e98a8f18e67afd3e36ff00e1402c30c45ed5284ec",
+	"docs/expectations/parallel-background-cua.md": "38c506548959949162b527f989418bdc7036ae00971f0ef0d7d1d11ae5ad934c",
 	"package.json": "da53bd76e546b956cc3588812d516d762032c914c75e956e833ace059a365350",
 	"packages/browser/extension/DESIGN.md": "548fba1c6c57072519db6e4750e66fa8fce39184aa4d8fc98b3f8d989ed21725",
-	"packages/browser/extension/background.js": "b56fd385dd65a27dc039d13ea780b6fc0a8b027e308e061d42ac28270d4a735b",
+	"packages/browser/extension/background.js": "1850a1accf05dba5cc61601037a2c2c0bffb6cd501e7655d3087e6295266c598",
 	"packages/browser/extension/manifest.json": "2f72c9562b550f8b0cb8abf2ae216f9eab69293abbdcdcd2661a373f926d678c",
 	"packages/browser/extension/options.html": "db25d68d5290b7caab7762459869aa5d40952cadbb8eae9530f7ede9b025ca42",
 	"packages/browser/extension/options.js": "d22b2ba8323cba46e68f244405952e3def7f044b6128d28f9bd8958074f64987",
 	"packages/browser/extension/popup.html": "ef31a4973bcdba5769e650e63e8f717933dd778396a926f90f8db936065db64d",
 	"packages/browser/extension/popup.js": "c2408cf48b2b62da81ec035a7417ca458135d957b0b2b956253b13d3ce1e2882",
-	"packages/browser/src/background.test.ts": "cffc768cc5df24af9357fef501e0009b9e6c1f359615ecf8cdab3862d38c4e78",
-	"packages/browser/src/bridge.test.ts": "11ca684ed5e13b36811cf9d73b1c82d6e7a43d8c954ad9f2c65b67dee3edb1dc",
-	"packages/browser/src/bridge.ts": "637f2920be6b090957b3c5ca322d914ea50fb2464e5d6c19ce514ca773485bfc",
+	"packages/browser/src/background.test.ts": "4b68a05917b7a0e4e3b88083bab262ffe043c5737c5b05bbecfefdf5fba75b79",
+	"packages/browser/src/bridge.test.ts": "c881058b1c684030f86fa0c29b505f4a6c5a842bba4a2ecaa71dc8eb4affd403",
+	"packages/browser/src/bridge.ts": "2b452de55400479e6dff9c2ee343ec1d941944a0cb5cff7d083b83c53f88905d",
 	"packages/browser/src/connection-options.test.ts":
 		"a8305eefc068ec07f55db699de4abf2b9bc4f2ec9733c51b31a1a44922b8f5a7",
-	"packages/browser/src/controller.test.ts": "f6371d3e680e5b7bcd1ee2a6559206027d78b4d2c264c05104042b6ba925ef0e",
-	"packages/browser/src/controller.ts": "4ae324891e547618c0b20716e6530e39c78be21d8a62aa9ce82a5f40bd37d69a",
-	"packages/browser/src/protocol.ts": "a1ad4d590478f87889813b20c3bf0773caa977f92d2841242fe28c0875ffa42b",
-	"packages/browser/src/server.test.ts": "620aabccbe54296d972eb02a835b2ba466c11413116506774961684a7fa4530b",
-	"packages/browser/src/server.ts": "12c49b087cdb9dc1f22f6d0288fea44cb08f77a1ffc6bd010e8f23c7f7debdeb",
+	"packages/browser/src/controller.test.ts": "96312bced9018355c7379fdd41e62194a2deee7c6361c621626fc77eb179fc3e",
+	"packages/browser/src/controller.ts": "94a06144acabadb5007105344bd71833c4d693d7f09439c8d78c338f91219672",
+	"packages/browser/src/protocol.ts": "4a6b138915ded8e31b2b14cba3a375836e2e5afedbd49bf13d90da616fc20230",
+	"packages/browser/src/server.test.ts": "43b1418cac3923f8c64a6201bb5f569ecfe29d3aa5c58328c5a50fa58e1482ad",
+	"packages/browser/src/server.ts": "1a1d468a49e4923f255ef92889d70a4f617dd37a0f9df445453e3cb4ef41b6fe",
 	"packages/core/src/platform/macos-open-app.test.ts":
 		"485afbce64f5305298ef2693ed273552da153a457482434dff8c6d074847457b",
 	"packages/core/src/platform/macos-open-app.ts": "112501e5a151b0ac69c907ac9d42332a9c4da93010c7e8ef8a30bc12f8aa0a79",
 	"packages/mcp/src/capability-tools.ts": "f3dacaf3bf4e217c4b91569756f8bb885a543bf28ea1b62a62001a69433eea1d",
 	"packages/mcp/src/compact-schema.protocol.test.ts":
-		"def31b835e442f6b09054a73fe3f5c255a50771c3e190f0aef493837e46efa68",
+		"e7788ba715922bfda3a040abacb3d891ffb8ec28c76420d7388f94cc82d65e5e",
 	"packages/mcp/src/desktop-mutation-tools.ts": "c87adc9015eb30d637aa906061c9bae16d1446089006692acc008010a290ee84",
 	"packages/mcp/src/host-awareness.protocol.test.ts":
 		"9eb8a589f9d41c1bc86ce24cdb53786fd939325e294b18cae0bfe0de5a623cfd",
@@ -81,21 +81,20 @@ export const REVIEWED = {
 	"packages/mcp/src/power-tools.ts": "2327ccbc90c88c462732bdbd0939c4029624bcef215c56bdd772b1ce25cdd806",
 	"packages/mcp/src/protocol-client-harness.ts": "cd356aa5a4b0c2ba5e04bb3f71fe1aa48c74aacbe8fb76ccc12557c96927dd19",
 	"packages/mcp/src/script-tools.ts": "bba06094500e0d127bd761c901026873ec175ce5d635c85a3f81f9006faf7160",
-	"packages/mcp/src/server.ts": "69dda61f50b8ef346576f264234fd4e5837cdc4a0e0b7699d9360504bc122875",
+	"packages/mcp/src/server.ts": "eb703204a31760a8c3353ca16e9ba75487785a7181b03cf08130d89bc723f90b",
 	"packages/mcp/src/supervisor-framing.property.test.ts":
 		"bc6864edc61e2554aa9685fdef1135cd3b9d306c4874239c47aeb168c9b11c6b",
 	"packages/mcp/src/supervisor.test.ts": "fffa1d65aee5895d544cc44422356010139c59321d9fd7274b12d183cf6cd8d8",
 	"packages/mcp/src/supervisor.ts": "ae9cd0f72ad535342fea7e563c730e4437edfe556a3c9a46c071822095284140",
-	"packages/mcp/src/tool-schemas.ts": "4babd152f791d1e1cdd9e0d7f1f4621fdff8ef8558e6c0ce23de2351518bf919",
+	"packages/mcp/src/tool-schemas.ts": "c733e8b5ce48fbe41720ecd8e589fed5c6a115db2c88c61a73dac60ae907b9f9",
 	"packages/mcp/src/visual-tools.ts": "8317b0c4568c3096105512aa9ad3eae5563c69ec6f888bd9d1dcbd1ffb32b7e6",
 	"packages/mcp/src/worker-coordinator.test.ts": "e5c4d31e3c6fca79dbcf428022a7b4e957d209fe59964d9009de0ddd0fcb5020",
 	"packages/mcp/src/worker-coordinator.ts": "1f54bb061c39ed40c66ad476ef18f61f7c99d3c655be1f507a3e4d371d00fd59",
 	"packages/mcp/src/worker-tools.protocol.test.ts": "b8b85cacbacf0a47279c34781a8745073cd491976292d006de46692b343ddafc",
 	"packages/mcp/src/worker-tools.ts": "11f9f785365c619da91d6691dab3e3d3e2489af0f6193410b38083a51179759c",
-	"skills/apple-cua-browser/SKILL.md": "d1ac6edea3a76f00de07ac67a640f8652d50836cd1b058101e19d9ed47547959",
-	"skills/apple-cua/SKILL.md": "0ed488c936614efef05f9298f41e7c7c6680238b296dd78a51c54aa3bb3bdddb",
-	"skills/apple-cua/references/workflow-patterns.md":
-		"c1a96763ed1009484fb51ff7b4863a4439067fad183ae6e63037d10d38475200",
+	"skills/apple-cua-browser/SKILL.md": "1b765ed1a51d01202fc2d9a733d5b4553586b940f44d05254bdcf4c4c873445c",
+	"skills/apple-cua/SKILL.md": "64b05c6c68d0eff7eb30c8ecb2e6c3472685c84eaa6f7db81e9e7f2edaccfefa",
+	"skills/apple-cua/references/subagents.md": "818b945ebf5e739f32da81d34a396f8828dd2b4d7fefead887d5de1a114fbfd8",
 };
 
 /** Generated outputs the gate itself produces or the build writes; excluded from scope and candidate digests. */

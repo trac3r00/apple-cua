@@ -298,7 +298,7 @@ Each worker receives its `worker_id` and assignment `observation_token`, acts
 only through `run_worker`, and returns an outcome for the main agent to verify.
 The assign answer's `spawn` (also `get_capabilities` `host.workers`) names the
 connected harness and its spawn mechanism; launch every worker in one round. See
-[spawning workers in each harness](references/workflow-patterns.md#spawning-workers-in-each-harness).
+[host examples](references/subagents.md#host-examples).
 Worker observations omit screenshots unless `include_screenshot: true`.
 The MCP server does not contain an LLM scheduler or spawn agents. Background
 delivery remains invisible. Attended cursor identities are isolated visual

@@ -56,6 +56,19 @@ document.querySelector("#stop").addEventListener("click", () => {
 	});
 });
 
+for (const type of ["take-over", "give-back"]) {
+	document.querySelector(`#${type}`).addEventListener("click", () => {
+		chrome.runtime.sendMessage({ type }, (response) => {
+			status.dataset.state = response?.ok ? type : "error";
+			status.textContent = response?.ok
+				? type === "take-over"
+					? "You have control."
+					: "Control returned to the agent."
+				: (response?.error ?? "Unable to change control.");
+		});
+	});
+}
+
 document.querySelector("#connect-local").addEventListener("click", () => {
 	status.dataset.state = "connecting";
 	status.textContent = "Connecting to the local service…";

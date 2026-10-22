@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { z } from "zod";
 import { BrowserBridge } from "./bridge.js";
-import { BrowserController } from "./controller.js";
+import { BrowserController, controllerRequestSchema } from "./controller.js";
 
 describe("browser task-space RPC", () => {
 	const cleanup: (() => Promise<void>)[] = [];
@@ -14,7 +14,7 @@ describe("browser task-space RPC", () => {
 		const controller = new BrowserController(bridge);
 		await controller.dispatch({ action: "open", url: "https://example.test" });
 		request.mockResolvedValue({ tabId: 8 });
-		let release = (_value: unknown) => {};
+		let release: (_value: unknown) => void = (_value) => undefined;
 		request.mockImplementationOnce(
 			() =>
 				new Promise((resolve) => {
@@ -36,7 +36,7 @@ describe("browser task-space RPC", () => {
 
 	it("#given an opening space #when finishing concurrently #then retains ownership until open settles", async () => {
 		const bridge = new BrowserBridge({ status: () => ({ stopped: false }) });
-		let release = (_value: unknown) => {};
+		let release: (_value: unknown) => void = (_value) => undefined;
 		const request = vi.spyOn(bridge, "request").mockImplementation(
 			() =>
 				new Promise((resolve) => {
@@ -58,6 +58,75 @@ describe("browser task-space RPC", () => {
 
 	afterEach(async () => {
 		for (const close of cleanup.splice(0)) await close();
+	});
+
+	it("#given wait control inputs #when parsing timeout bounds #then rejects zero and oversized values", () => {
+		expect(() => controllerRequestSchema.parse({ action: "wait_control", timeoutMs: 0 })).toThrow();
+		expect(() => controllerRequestSchema.parse({ action: "wait_control", timeoutMs: 120001 })).toThrow();
+	});
+
+	it("#given the controller #when status is read #then no controller action grants agent control", async () => {
+		const { bridge, controller, socket } = await harness();
+		const changed = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "human", reason: "taken_over" }));
+		await changed;
+		expect(await controller.dispatch({ action: "status" })).toMatchObject({
+			control: "human",
+			control_reason: "taken_over",
+			handoff_requested: null,
+		});
+		await controller.dispatch({ action: "handoff", reason: "Please complete sign-in" });
+		await expect(controller.dispatch({ action: "wait_control", timeoutMs: 20 })).resolves.toMatchObject({
+			control: "human",
+		});
+		expect(bridge.control).toBe("human");
+	});
+
+	it("#given an extension #when controller requests handoff #then status records it until give-back", async () => {
+		const { bridge, controller, socket } = await harness();
+		const handoff = controller.dispatch({ action: "handoff", reason: "Please complete sign-in" });
+		const message = await once(socket, "message");
+		const packet = z.object({ id: z.string(), command: z.unknown() }).parse(JSON.parse(message[0].toString()));
+		expect(packet.command).toEqual({ method: "handoff", reason: "Please complete sign-in" });
+		socket.send(JSON.stringify({ id: packet.id, ok: true, value: null }));
+		const requested = await handoff;
+		expect(requested).toMatchObject({
+			control: "agent",
+			handoff_requested: { reason: "Please complete sign-in", requested_at: expect.any(String) },
+		});
+		expect(await controller.dispatch({ action: "status" })).toMatchObject({
+			handoff_requested: { reason: "Please complete sign-in" },
+		});
+		const takenOver = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "human", reason: "taken_over" }));
+		await takenOver;
+		const returned = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "agent" }));
+		await returned;
+		expect(bridge.control).toBe("agent");
+		expect(await controller.dispatch({ action: "status" })).toMatchObject({ handoff_requested: null });
+	});
+
+	it("#given human control #when controller waits #then resolves after extension give-back", async () => {
+		const { bridge, controller, socket } = await harness();
+		const takenOver = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "human" }));
+		await takenOver;
+		const waiting = controller.dispatch({ action: "wait_control", timeoutMs: 1000 });
+		const returned = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "agent" }));
+		await returned;
+		await expect(waiting).resolves.toMatchObject({ control: "agent" });
+	});
+
+	it("#given human control #when controller waits to timeout #then reports current owner", async () => {
+		const { bridge, controller, socket } = await harness();
+		const takenOver = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "human" }));
+		await takenOver;
+		await expect(controller.dispatch({ action: "wait_control", timeoutMs: 20 })).resolves.toMatchObject({
+			control: "human",
+		});
 	});
 
 	async function harness(holdOpen = false) {

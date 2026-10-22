@@ -4,6 +4,7 @@ import type { BrowserBridge } from "./bridge.js";
 import { BrowserError, expectSchema, httpUrl, limitsSchema, stepSchema, targetQuerySchema } from "./protocol.js";
 import { BrowserSession } from "./session.js";
 
+const handoffReasonSchema = z.string().min(1).max(300);
 const spaceSchema = z
 	.string()
 	.regex(/^[a-zA-Z0-9_.-]{1,64}$/)
@@ -13,6 +14,11 @@ const pageSchema = z.string().regex(/^p[1-9][0-9]*$/);
 
 export const controllerRequestSchema = z.discriminatedUnion("action", [
 	z.object({ action: z.literal("status") }),
+	z.object({ action: z.literal("handoff"), reason: handoffReasonSchema }),
+	z.object({
+		action: z.literal("wait_control"),
+		timeoutMs: z.number().int().min(1).max(120000).default(30000),
+	}),
 	z.object({ action: z.literal("create"), space: spaceSchema, worker_id: workerSchema.optional() }),
 	z.object({
 		action: z.literal("open"),
@@ -95,13 +101,18 @@ export class BrowserController {
 
 	async dispatch(value: unknown, signal?: AbortSignal): Promise<unknown> {
 		const input = controllerRequestSchema.parse(value);
-		if (signal !== undefined && input.action !== "open")
+		if (signal !== undefined && input.action !== "open" && input.action !== "wait_control")
 			return this.bridge.withCancellation(signal, () => this.dispatch(value));
 		switch (input.action) {
-			case "status":
+			case "status": {
+				const handoff = this.bridge.handoffRequest;
 				return {
 					connected: this.bridge.connected,
 					stopped: this.bridge.paused,
+					control: this.bridge.control,
+					control_reason: this.bridge.controlReason ?? null,
+					handoff_requested:
+						handoff === undefined ? null : { reason: handoff.reason, requested_at: handoff.requestedAt },
 					spaces: [...this.spaces].map(([space, state]) => ({
 						space,
 						pages: [...state.pages.keys()],
@@ -109,6 +120,22 @@ export class BrowserController {
 						cursor_id: state.cursorId,
 					})),
 				};
+			}
+			case "handoff": {
+				const handoff = await this.bridge.requestHandoff(input.reason);
+				return {
+					handoff_requested: { reason: handoff.reason, requested_at: handoff.requestedAt },
+					control: this.bridge.control,
+				};
+			}
+			case "wait_control": {
+				const started = Date.now();
+				const agentHasControl = await this.bridge.waitForAgentControl(input.timeoutMs, signal);
+				return {
+					control: agentHasControl ? "agent" : this.bridge.control,
+					waited_ms: Date.now() - started,
+				};
+			}
 			case "create": {
 				const state = this.create(input.space, input.worker_id);
 				return {

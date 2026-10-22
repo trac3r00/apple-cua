@@ -17,10 +17,17 @@ const harnessSchema = z.object({
 			observes: z.number(),
 			tabWindow: z.number(),
 			created: z.number(),
+			sent: z.array(z.unknown()),
+			windowUpdates: z.array(z.unknown()),
+			badge: z.string(),
+			handoff: z.unknown(),
 		}),
 	}),
 	move: z.function({ input: z.tuple([]), output: z.void() }),
 	reveal: z.function({ input: z.tuple([]), output: z.void() }),
+	focus: z.function({ input: z.tuple([]), output: z.promise(z.void()) }),
+	message: z.function({ input: z.tuple([z.string()]), output: z.promise(z.unknown()) }),
+	handoff: z.function({ input: z.tuple([z.string()]), output: z.promise(z.void()) }),
 });
 
 async function harness(
@@ -38,17 +45,24 @@ async function harness(
 		const options=${JSON.stringify(options)};
 		let foreground=50, userTab=70, tabWindow=50, inputs=0, created=0, observes=0;
 		let contextId=0, debuggerListener, checkpointAllowed=true;
-		const removed=[];
+		const removed=[], sent=[], windowUpdates=[];
+		const session={};
+		let badge='';
+		let runtimeListener;
+		const focusListeners=[];
 		const window={id:10,focused:false,state:'minimized',tabs:[{id:99}]};
 		const event={addListener(){},removeListener(){}};
+		const runtimeEvent={addListener(listener){runtimeListener=listener},removeListener(){}};
+		const focusEvent={addListener(listener){focusListeners.push(listener)},removeListener(){}};
 		const chrome={
-			storage:{local:{get:async()=>({}),set:async()=>{}},session:{set:async()=>{}},onChanged:event},
-			runtime:{sendNativeMessage:async()=>{throw Error('No host')},onMessage:event},
+			storage:{local:{get:async()=>({}),set:async()=>{}},session:{set:async(value)=>Object.assign(session,value),remove:async(key)=>delete session[key]},onChanged:event},
+			action:{setBadgeText:async({text})=>{badge=text},setTitle:async()=>{}},
+			runtime:{sendNativeMessage:async()=>{throw Error('No host')},onMessage:runtimeEvent},
 			alarms:{create(){},onAlarm:event},
 			windows:{
 				create:async(options)=>{window.state=options.state;if(options.focused)foreground=10;return window;},
-				get:async()=>window,update:async(_id,options)=>{window.state=options.state;return window},
-				remove:async()=>{},onRemoved:event,onFocusChanged:event,onBoundsChanged:event
+				get:async()=>window,update:async(_id,options)=>{windowUpdates.push(options);window.state=options.state;window.focused=options.focused===true;return window},
+				remove:async()=>{},onRemoved:event,onFocusChanged:focusEvent,onBoundsChanged:event
 			},
 			tabs:{
 				create:async(options)=>{
@@ -104,6 +118,7 @@ async function harness(
 		${source.replace(/^import .*$/m, "")}
 		ready=true;stopped=false;socket={readyState:1,send(raw){
 			const packet=JSON.parse(raw);
+			sent.push(packet);
 			if(packet.event==='checkpoint'){
 				const waiter=checkpoints.get(packet.id);
 				clearTimeout(waiter.timer);
@@ -113,9 +128,13 @@ async function harness(
 		}};
 		({
 			dispatch,
-			stats:()=>({foreground,userTab,windowState:window.state,removed,inputs,observes,tabWindow,created}),
+			sent,
+			stats:()=>({foreground,userTab,windowState:window.state,removed,inputs,observes,tabWindow,created,sent:sent.slice(),windowUpdates:windowUpdates.slice(1),badge,handoff:session.handoffRequest}),
 			move:()=>{tabWindow=50},
-			reveal:()=>{window.focused=true;window.state='normal'}
+			reveal:()=>{window.focused=true;window.state='normal'},
+			message:async(type)=>new Promise(resolve=>runtimeListener({type},null,resolve)),
+			handoff:async(reason)=>handleCommand({id:'handoff-test',command:'handoff',reason}),
+			focus:async()=>{window.focused=true;window.state='normal';for(const listener of focusListeners)await listener(10)}
 		})
 	`);
 	const value: unknown = script.runInNewContext({ setTimeout, clearTimeout, setInterval, clearInterval, URL });
@@ -133,6 +152,48 @@ describe("background worker ownership", () => {
 			windowState: "minimized",
 			removed: [],
 		});
+	});
+
+	it("#given a background agent #when taking over #then pauses and reveals it", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		expect(await worker.message("take-over")).toMatchObject({ ok: true });
+		expect(worker.stats().windowState).toBe("normal");
+		expect(worker.stats().windowUpdates).toContainEqual({ state: "normal", focused: true });
+		expect(worker.stats().sent).toContainEqual({ event: "control", owner: "human", reason: "taken_over" });
+	});
+
+	it("#given a minimized agent window #when focused #then reports human control", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		await worker.focus();
+		expect(worker.stats().sent).toContainEqual({ event: "control", owner: "human", reason: "window_revealed" });
+	});
+
+	it("#given human control #when giving back #then minimizes and resumes without re-pausing", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		await worker.message("take-over");
+		expect(await worker.message("give-back")).toMatchObject({ ok: true });
+		expect(worker.stats().windowState).toBe("minimized");
+		expect(worker.stats().sent).toContainEqual({ event: "control", owner: "agent" });
+		expect(worker.stats().sent).toHaveLength(2);
+	});
+
+	it("#given a connected agent #when handoff arrives #then badges without revealing a window", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		await worker.handoff("Please review");
+		expect(worker.stats().badge).toBe("!");
+		expect(worker.stats().handoff).toMatchObject({ reason: "Please review" });
+		expect(worker.stats().windowUpdates).toEqual([]);
+		expect(worker.stats().created).toBe(1);
+	});
+
+	it("#given an explicit stop #when stopping #then sends the stop event", async () => {
+		const worker = await harness();
+		await worker.message("stop");
+		expect(worker.stats().sent).toContainEqual({ event: "stop" });
 	});
 
 	it("#given a tab moved into a user window #when closing #then refuses to remove it", async () => {

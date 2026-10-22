@@ -16,6 +16,7 @@ let heartbeat;
 let connecting = false;
 let reconnectRequested = false;
 let pausedByUser = false;
+let givingBack = false;
 const checkpoints = new Map();
 
 function send(value) {
@@ -106,7 +107,10 @@ async function connect() {
 				bridgeStopped: stopped,
 				bridgePausedByUser: pausedByUser,
 			});
-			if (stopped) send({ event: "stop" });
+			if (stopped) {
+				send({ event: "stop" });
+				if (pausedByUser) sendControl("human", "taken_over");
+			}
 			clearInterval(heartbeat);
 			heartbeat = setInterval(() => send({ event: "heartbeat" }), 20000);
 			return;
@@ -198,6 +202,8 @@ function validStep(step) {
 function validCommand(command) {
 	if (typeof command.id !== "string" || command.id.length < 1 || command.id.length > 128) return false;
 	if (command.command === "stop") return true;
+	if (command.command === "handoff")
+		return typeof command.reason === "string" && command.reason.length >= 1 && command.reason.length <= 300;
 	if (command.command === "open")
 		return typeof command.url === "string" && command.url.length <= 8192 && /^https?:\/\//i.test(command.url);
 	if (command.command === "close" || command.command === "observe") {
@@ -284,6 +290,12 @@ async function handleCommand(message) {
 }
 
 async function dispatch(command) {
+	if (command.command === "handoff") {
+		await chrome.storage.session.set({ handoffRequest: { reason: command.reason, at: Date.now() } });
+		await chrome.action.setBadgeText({ text: "!" });
+		await chrome.action.setTitle({ title: `Agent asks: ${command.reason}` });
+		return null;
+	}
 	if (command.command === "stop") {
 		stopLocally();
 		return null;
@@ -337,6 +349,40 @@ async function dispatch(command) {
 				throw new Error("Unsupported command");
 		}
 	});
+}
+
+function sendControl(owner, reason) {
+	void chrome.storage.session.set({ bridgeControl: owner });
+	send({ event: "control", owner, ...(reason ? { reason } : {}) });
+}
+
+async function takeOver() {
+	pausedByUser = true;
+	await chrome.storage.local.set({ pausedByUser: true });
+	stopLocally();
+	sendControl("human", "taken_over");
+	if (agentWindowId !== undefined) await chrome.windows.update(agentWindowId, { state: "normal", focused: true });
+}
+
+async function giveBack() {
+	givingBack = true;
+	try {
+		if (agentWindowId !== undefined) {
+			await chrome.windows.update(agentWindowId, { state: "minimized" });
+			const window = await chrome.windows.get(agentWindowId);
+			if (window.state !== "minimized" || window.focused)
+				throw new Error("Could not return the agent window to the background");
+		}
+		await chrome.action.setBadgeText({ text: "" });
+		await chrome.storage.session.remove("handoffRequest");
+		pausedByUser = false;
+		await chrome.storage.local.set({ pausedByUser: false });
+		stopped = !(ready && socket?.readyState === WebSocket.OPEN);
+		await chrome.storage.session.set({ bridgeStopped: stopped, bridgePausedByUser: false });
+		sendControl("agent");
+	} finally {
+		givingBack = false;
+	}
 }
 
 async function openTab(url) {
@@ -710,23 +756,23 @@ chrome.windows.onRemoved.addListener((windowId) => {
 });
 
 chrome.windows.onFocusChanged.addListener(async (windowId) => {
-	if (windowId !== agentWindowId) return;
+	if (windowId !== agentWindowId || givingBack) return;
 	const window = await chrome.windows.get(windowId);
 	if (!window.focused) return;
 	pausedByUser = true;
 	await chrome.storage.local.set({ pausedByUser: true });
 	stopLocally();
-	send({ event: "stop" });
+	sendControl("human", "window_revealed");
 });
 
 chrome.windows.onBoundsChanged.addListener(async (window) => {
-	if (window.id !== agentWindowId || window.state === "minimized") return;
+	if (window.id !== agentWindowId || window.state === "minimized" || givingBack) return;
 	const current = await chrome.windows.get(window.id);
 	if (current.state === "minimized" && !current.focused) return;
 	pausedByUser = true;
 	await chrome.storage.local.set({ pausedByUser: true });
 	stopLocally();
-	send({ event: "stop" });
+	sendControl("human", "window_revealed");
 });
 
 chrome.tabs.onAttached.addListener((tabId, info) => {
@@ -735,7 +781,7 @@ chrome.tabs.onAttached.addListener((tabId, info) => {
 	pausedByUser = true;
 	chrome.storage.local.set({ pausedByUser: true });
 	stopLocally();
-	send({ event: "stop" });
+	sendControl("human", "window_revealed");
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -771,6 +817,19 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
 		stopLocally();
 		send({ event: "stop" });
 		respond({ ok: true });
+		return;
+	}
+	if (message?.type === "take-over") {
+		takeOver()
+			.then(() => respond({ ok: true }))
+			.catch((error) => respond({ ok: false, error: error instanceof Error ? error.message : "Take over failed" }));
+		return true;
+	}
+	if (message?.type === "give-back") {
+		giveBack()
+			.then(() => respond({ ok: true }))
+			.catch((error) => respond({ ok: false, error: error instanceof Error ? error.message : "Give back failed" }));
+		return true;
 	}
 	if (message?.type === "connect") {
 		chrome.storage.local.set({ pausedByUser: false }).then(() => {

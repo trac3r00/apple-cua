@@ -24,13 +24,14 @@ describe("browser MCP contract", () => {
 		const listen = BrowserBridge.prototype.listen;
 		const closeBridge = vi.spyOn(BrowserBridge.prototype, "close");
 		let port = 0;
-		vi.spyOn(BrowserBridge.prototype, "listen").mockImplementation(async function (this: BrowserBridge) {
+		async function listenWithTrackedPort(this: BrowserBridge): Promise<number> {
 			cleanups.push(async () => {
 				if (!closeBridge.mock.contexts.includes(this)) await this.close();
 			});
 			port = await listen.call(this, 0);
 			return port;
-		});
+		}
+		vi.spyOn(BrowserBridge.prototype, "listen").mockImplementation(listenWithTrackedPort);
 		const closeServer = vi.spyOn(McpServer.prototype, "close");
 		const closeTransport = vi.spyOn(StdioServerTransport.prototype, "close");
 		await expect(main()).rejects.toBe(failure);
@@ -69,6 +70,7 @@ describe("browser MCP contract", () => {
 			"browser_close",
 			"browser_find",
 			"browser_finish",
+			"browser_handoff",
 			"browser_observe",
 			"browser_open",
 			"browser_read",
@@ -77,6 +79,7 @@ describe("browser MCP contract", () => {
 			"browser_space",
 			"browser_status",
 			"browser_wait",
+			"browser_wait_control",
 		]);
 	});
 
@@ -91,10 +94,41 @@ describe("browser MCP contract", () => {
 			.object({
 				connected: z.boolean(),
 				stopped: z.boolean(),
+				control: z.enum(["agent", "human"]),
+				control_reason: z.string().nullable(),
+				handoff_requested: z.object({ reason: z.string(), requested_at: z.string() }).nullable(),
 				spaces: z.array(z.object({ space: z.string(), pages: z.array(z.string()) })),
 			})
 			.parse(JSON.parse(item.text));
-		expect(status).toEqual({ connected: false, stopped: false, spaces: [{ space: "shared-test", pages: [] }] });
+		expect(status).toEqual({
+			connected: false,
+			stopped: false,
+			control: "agent",
+			control_reason: null,
+			handoff_requested: null,
+			spaces: [{ space: "shared-test", pages: [] }],
+		});
+	});
+
+	it("#given browser handoff tools #when handing off and waiting #then records request and reports control", async () => {
+		const bridge = new BrowserBridge({ status: () => ({ stopped: false }) }, 1000, "a".repeat(64));
+		await bridge.listen(0);
+		const server = createBrowserMcpServer(bridge);
+		const client = new Client({ name: "browser-test", version: "1" });
+		const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+		await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+		cleanups.push(async () => {
+			await client.close();
+			await server.close();
+			await bridge.close();
+		});
+		const tools = await client.listTools();
+		expect(tools.tools.find((tool) => tool.name === "browser_handoff")?.description).toContain(
+			"never reveals or focuses windows",
+		);
+		expect(tools.tools.find((tool) => tool.name === "browser_wait_control")?.description).toContain(
+			"never resume it yourself",
+		);
 	});
 
 	it("#given an unowned tab #when requesting observation #then returns a stale error through MCP", async () => {

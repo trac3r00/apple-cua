@@ -6,12 +6,17 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { StopStatusSource } from "@apple-cua/core";
 import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
-import { type BrowserCommand, BrowserError, replySchema } from "./protocol.js";
+import { type BrowserCommand, BrowserError, type HandoffRequest, replySchema } from "./protocol.js";
 
 const helloSchema = z.object({ token: z.string().max(128) });
 const eventSchema = z.discriminatedUnion("event", [
 	z.object({ event: z.literal("heartbeat") }),
 	z.object({ event: z.literal("stop") }),
+	z.object({
+		event: z.literal("control"),
+		owner: z.enum(["human", "agent"]),
+		reason: z.enum(["taken_over", "window_revealed", "stopped"]).optional(),
+	}),
 	z.object({ event: z.literal("checkpoint"), id: z.string(), step: z.number().int().nonnegative() }),
 ]);
 
@@ -31,6 +36,9 @@ export class BrowserBridge extends EventEmitter implements BrowserTransport {
 	private readonly wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
 	private socket: WebSocket | undefined;
 	private stopped = false;
+	private controlOwner: "agent" | "human" = "agent";
+	private reason: "taken_over" | "window_revealed" | "stopped" | undefined;
+	private handoff: HandoffRequest | undefined;
 	private epoch = 0;
 	private readonly pending = new Map<
 		string,
@@ -73,8 +81,20 @@ export class BrowserBridge extends EventEmitter implements BrowserTransport {
 		return this.socket?.readyState === WebSocket.OPEN;
 	}
 
+	get control(): "agent" | "human" {
+		return this.controlOwner;
+	}
+
+	get controlReason(): "taken_over" | "window_revealed" | "stopped" | undefined {
+		return this.reason;
+	}
+
+	get handoffRequest(): HandoffRequest | undefined {
+		return this.handoff;
+	}
+
 	get paused(): boolean {
-		return this.stopped || this.stopSource.status().stopped;
+		return this.controlOwner === "human" || this.stopped || this.stopSource.status().stopped;
 	}
 
 	setRpcHandler(handler: (value: unknown, signal: AbortSignal) => Promise<unknown>): void {
@@ -176,6 +196,9 @@ export class BrowserBridge extends EventEmitter implements BrowserTransport {
 				authenticated = true;
 				this.socket = ws;
 				this.stopped = false;
+				this.controlOwner = "agent";
+				this.reason = undefined;
+				this.handoff = undefined;
 				this.epoch++;
 				ws.send(JSON.stringify({ ready: true }));
 				this.emit("connected");
@@ -187,10 +210,17 @@ export class BrowserBridge extends EventEmitter implements BrowserTransport {
 					case "heartbeat":
 						return;
 					case "stop":
-						this.stopped = true;
-						this.failPending(
-							new BrowserError("stopped", "Browser control was stopped. Re-observe after human resume."),
-						);
+						this.setHumanControl("stopped");
+						return;
+					case "control":
+						if (event.data.owner === "human") this.setHumanControl(event.data.reason);
+						else {
+							this.stopped = false;
+							this.controlOwner = "agent";
+							this.reason = undefined;
+							this.handoff = undefined;
+							this.emit("control");
+						}
 						return;
 					case "checkpoint": {
 						const pending = this.pending.get(event.data.id);
@@ -238,7 +268,13 @@ export class BrowserBridge extends EventEmitter implements BrowserTransport {
 		if (socket === undefined || socket.readyState !== WebSocket.OPEN) {
 			return Promise.reject(new BrowserError("disconnected", "Pair the apple-cua browser extension first."));
 		}
-		if ((command.method === "open" || command.method === "run") && this.paused) {
+		if ((command.method === "open" || command.method === "run") && this.controlOwner === "human") {
+			return Promise.reject(this.humanControlError());
+		}
+		if (
+			(command.method === "open" || command.method === "run") &&
+			(this.stopped || this.stopSource.status().stopped)
+		) {
 			return Promise.reject(
 				new BrowserError("stopped", "The user stopped apple-cua. Do not retry or resume it yourself."),
 			);
@@ -284,6 +320,56 @@ export class BrowserBridge extends EventEmitter implements BrowserTransport {
 			}
 			socket.send(JSON.stringify({ id, command }));
 		});
+	}
+
+	async requestHandoff(reason: string): Promise<HandoffRequest> {
+		await this.request({ method: "handoff", reason });
+		const handoffRequest = { reason, requestedAt: new Date().toISOString() };
+		this.handoff = handoffRequest;
+		return handoffRequest;
+	}
+
+	waitForAgentControl(timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+		if (this.connected && this.controlOwner === "agent" && !this.stopSource.status().stopped) {
+			return Promise.resolve(true);
+		}
+		if (signal?.aborted) return Promise.resolve(false);
+		return new Promise((resolve) => {
+			let settled = false;
+			const cleanup = () => {
+				clearTimeout(timer);
+				this.removeListener("control", onControl);
+				signal?.removeEventListener("abort", onAbort);
+			};
+			const finish = (result: boolean) => {
+				if (settled) return;
+				settled = true;
+				cleanup();
+				resolve(result);
+			};
+			const onControl = () => {
+				if (this.controlOwner === "agent") finish(true);
+			};
+			const onAbort = () => finish(false);
+			const timer = setTimeout(() => finish(false), timeoutMs);
+			this.on("control", onControl);
+			signal?.addEventListener("abort", onAbort, { once: true });
+		});
+	}
+
+	private humanControlError(): BrowserError {
+		return new BrowserError(
+			"human_control",
+			"The person has taken over the browser. Call browser_wait_control or ask them; never resume it yourself.",
+		);
+	}
+
+	private setHumanControl(reason: "taken_over" | "window_revealed" | "stopped" | undefined): void {
+		this.controlOwner = "human";
+		this.reason = reason;
+		this.stopped = true;
+		this.failPending(this.humanControlError());
+		this.emit("control");
 	}
 
 	private failPending(error: BrowserError): void {

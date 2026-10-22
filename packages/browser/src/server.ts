@@ -78,11 +78,31 @@ export function registerBrowserTools(server: McpServer, controller: BrowserContr
 		"browser_status",
 		{
 			description:
-				"Read pairing, stop state, named browser spaces, and each space's worker_id/cursor_id. Reads stay available while actions are stopped.",
+				"Read pairing, stop state, browser control owner (agent or human, with any handoff request), named browser spaces, and each space's worker_id/cursor_id. Reads stay available while actions are stopped.",
 			inputSchema: {},
 			annotations: { readOnlyHint: true },
 		},
 		async (_input, extra) => call({ action: "status" }, extra.signal),
+	);
+	server.registerTool(
+		"browser_handoff",
+		{
+			description:
+				"Ask the person to take over the agent's browser window, for example for login or CAPTCHA. " +
+				"Shows a badge only; never reveals or focuses windows.",
+			inputSchema: { reason: z.string().min(1).max(300) },
+			annotations: { readOnlyHint: false, destructiveHint: false },
+		},
+		async ({ reason }, extra) => call({ action: "handoff", reason }, extra.signal),
+	);
+	server.registerTool(
+		"browser_wait_control",
+		{
+			description: "Wait for the person to give control back. Read-only; never resume it yourself.",
+			inputSchema: { timeout_ms: z.number().int().min(1).max(120000).optional() },
+			annotations: { readOnlyHint: true },
+		},
+		async ({ timeout_ms }, extra) => call({ action: "wait_control", timeoutMs: timeout_ms }, extra.signal),
 	);
 	server.registerTool(
 		"browser_space",

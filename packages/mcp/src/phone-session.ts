@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import type { IPhoneMirroring, MirroringObservation } from "@apple-cua/core";
 import type { StopStatusSource } from "@apple-cua/core";
 import {
@@ -12,6 +13,7 @@ import { phoneFailureResult, projectPhoneObservation, projectPhoneSearch } from 
 import { findPhoneText } from "./phone-search.js";
 import type { PhoneSearchInput } from "./phone-search.js";
 import { type ToolResult, refusalResult, textResult } from "./tool-result.js";
+import type { IosRunStep } from "./tool-schemas.js";
 
 export type PhoneToolSource = Pick<
 	IPhoneMirroring,
@@ -136,6 +138,122 @@ export class PhoneGuardSession {
 				...(dispatched ? { actionDispatched: true } : {}),
 			});
 		}
+	}
+
+	async run(input: {
+		readonly observation_token: string;
+		readonly steps: readonly IosRunStep[];
+		readonly expect: { readonly text: string; readonly timeout_ms: number };
+	}): Promise<ToolResult> {
+		return this.serial(async () => this.runBatch(input));
+	}
+
+	private async runBatch(input: {
+		readonly observation_token: string;
+		readonly steps: readonly IosRunStep[];
+		readonly expect: { readonly text: string; readonly timeout_ms: number };
+	}): Promise<ToolResult> {
+		const initial = await this.preflight(input.observation_token, {});
+		if ("reason" in initial) return refusalResult(initial.reason, initial.message);
+		let latest = initial;
+		let completed = 0;
+		try {
+			for (const step of input.steps) {
+				const stop = this.stopSwitch?.status();
+				if (stop?.stopped === true) {
+					throw new Error(describeUserStop(stop));
+				}
+				switch (step.action) {
+					case "tap_text": {
+						const matches = findTexts(latest.texts, step.query, step.exact === true);
+						const hit = matches[step.index ?? 0];
+						if (hit === undefined) {
+							const visible = latest.texts.slice(0, 30).map((text) => text.text);
+							throw new Error(
+								`no visible text matches ${JSON.stringify(step.query)}; saw: ${JSON.stringify(visible)}`,
+							);
+						}
+						await this.source.tap(hit.x + hit.width / 2, hit.y + hit.height / 2);
+						break;
+					}
+					case "tap":
+						if (!inside(latest, step.x, step.y))
+							throw new Error("coordinates must lie inside the observed iPhone Mirroring window");
+						await this.source.tap(step.x, step.y);
+						break;
+					case "swipe":
+						await this.source.swipe(step.direction, {
+							...(step.distance === undefined ? {} : { distance: step.distance }),
+							...(step.kind === undefined ? {} : { kind: step.kind }),
+							...(step.at === undefined ? {} : { at: step.at }),
+						});
+						break;
+					case "scroll":
+						await this.source.scroll(step.direction, {
+							...(step.amount === undefined ? {} : { amount: step.amount }),
+							...(step.at === undefined ? {} : { at: step.at }),
+							...(step.borrow_pointer === undefined ? {} : { borrowPointer: step.borrow_pointer }),
+						});
+						break;
+					case "type_text":
+						await this.source.typeText(step.text, step.mode === undefined ? {} : { mode: step.mode });
+						break;
+					case "press_keys":
+						await this.source.pressKeys(step.combo);
+						break;
+					case "home":
+						await this.source.home();
+						break;
+					case "app_switcher":
+						await this.source.appSwitcher();
+						break;
+					case "wait":
+						latest = await this.waitForText(latest, step.text, step.timeout_ms);
+						break;
+				}
+				completed++;
+			}
+			const fresh = await this.source.observe();
+			const failure = phoneContextFailure(initial, fresh, this.stopSwitch?.status());
+			if (failure !== undefined)
+				return phoneFailureResult({ ...failure, actionDispatched: true, stepsCompleted: completed });
+			const verified = fresh.texts.some((text) => text.text.includes(input.expect.text));
+			return textResult(
+				JSON.stringify({
+					actionDispatched: true,
+					stepsCompleted: completed,
+					verified,
+					...projectPhoneObservation(fresh),
+					observation_token: this.issue(fresh),
+				}),
+			);
+		} catch (error) {
+			return phoneFailureResult({
+				reason: this.interruptedReason(error) ?? "phone-batch-failed",
+				message: error instanceof Error ? error.message : String(error),
+				inputAttempted: true,
+				...(completed === 0 ? {} : { actionDispatched: true }),
+				stepsCompleted: completed,
+			});
+		}
+	}
+
+	private async waitForText(
+		initial: MirroringObservation,
+		text: string,
+		timeoutMs: number,
+	): Promise<MirroringObservation> {
+		const deadline = this.now() + timeoutMs;
+		let current = initial;
+		while (!current.texts.some((candidate) => candidate.text.includes(text))) {
+			if (this.now() >= deadline) throw new Error(`timed out waiting for ${JSON.stringify(text)}`);
+			const stop = this.stopSwitch?.status();
+			if (stop?.stopped === true) throw new Error(describeUserStop(stop));
+			await sleep(200);
+			current = await this.source.observe();
+			if (current.state !== "ready") throw new Error(describeMirroringState(current.state));
+		}
+		return current;
 	}
 
 	async findText(input: PhoneSearchInput): Promise<ToolResult> {

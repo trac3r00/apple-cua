@@ -68,6 +68,50 @@ export const iosHomeSchema = z.object({ ...phoneToken });
 export const iosAppSwitcherSchema = z.object({ ...phoneToken });
 export const iosOpenAppSchema = z.object({ ...phoneToken, name: z.string().min(1) });
 
+const iosRunStepSchema = z.discriminatedUnion("action", [
+	z.object({
+		action: z.literal("tap_text"),
+		query: z.string().min(1),
+		index: z.number().int().nonnegative().optional(),
+		exact: z.boolean().optional(),
+	}),
+	z.object({ action: z.literal("tap"), ...phonePoint }),
+	z.object({
+		action: z.literal("swipe"),
+		direction: directions,
+		distance: z.number().positive().optional(),
+		kind: z.enum(["flick", "drag"]).optional(),
+		...at,
+	}),
+	z.object({
+		action: z.literal("scroll"),
+		direction: directions,
+		amount: z.number().positive().optional(),
+		borrow_pointer: z.boolean().optional(),
+		...at,
+	}),
+	z.object({ action: z.literal("type_text"), text: z.string(), mode: z.enum(["paste", "keystrokes"]).optional() }),
+	z.object({ action: z.literal("press_keys"), combo: z.string().min(1) }),
+	z.object({ action: z.literal("home") }),
+	z.object({ action: z.literal("app_switcher") }),
+	z.object({
+		action: z.literal("wait"),
+		text: z.string().min(1),
+		timeout_ms: z.number().int().min(1).max(10_000).default(3000),
+	}),
+]);
+
+export type IosRunStep = z.infer<typeof iosRunStepSchema>;
+
+export const iosRunSchema = z.object({
+	...phoneToken,
+	steps: z.array(iosRunStepSchema).min(1).max(8),
+	expect: z.object({
+		text: z.string().min(1).max(500),
+		timeout_ms: z.number().int().min(1).max(10_000).default(3000),
+	}),
+});
+
 const MAX_VERIFY_CHECKS = 10;
 
 const verifyCheckFields = {
@@ -116,6 +160,7 @@ export const verifyStateSchema = z.object({
 
 export const getAppStateSchema = z.object({
 	app: appSchema,
+	profile: z.enum(["fast", "full", "visual"]).optional(),
 	diff_only: z.boolean().optional(),
 	include_screenshot: z.boolean().optional(),
 	include_accessibility_tree: z.boolean().optional(),

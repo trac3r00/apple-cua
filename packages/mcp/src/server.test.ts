@@ -1,5 +1,5 @@
 import { AppApprovalStore } from "@apple-cua/core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { allowedBundleIdsFromEnvironment } from "./native-policy.js";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import type { FakeGuardedComputer } from "./protocol-test-harness.js";
@@ -24,7 +24,12 @@ const MUTATION_NAMES = [
 
 let closeHarness: (() => Promise<void>) | undefined;
 
+beforeEach(() => {
+	vi.stubEnv("APPLE_CUA_BROWSER", "off");
+});
+
 afterEach(async () => {
+	vi.unstubAllEnvs();
 	if (closeHarness !== undefined) {
 		await closeHarness();
 		closeHarness = undefined;

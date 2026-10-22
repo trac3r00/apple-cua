@@ -10,6 +10,7 @@ import {
 	iosObserveSchema,
 	iosOpenAppSchema,
 	iosPressKeysSchema,
+	iosRunSchema,
 	iosScreenshotSchema,
 	iosScrollSchema,
 	iosSwipeSchema,
@@ -50,6 +51,15 @@ export function registerPhoneTools(server: McpServer, guard: PhoneGuardSession, 
 			annotations: READ_ONLY_ANNOTATIONS,
 		},
 		async ({ path }) => guard.screenshot(path),
+	);
+	server.registerTool(
+		"ios_run",
+		{
+			description: `Run up to 8 bounded iPhone steps with one token and one final observation: tap_text, tap, swipe, scroll, type_text, press_keys, home, app_switcher, wait. Batch only sequences already proven on the same screen; a screen change mid-batch is not re-observed per step. expect.text is required and verified against the final OCR. ${TOKEN}`,
+			inputSchema: iosRunSchema,
+			annotations: MUTATION_ANNOTATIONS,
+		},
+		async (input) => guard.run(input),
 	);
 	server.registerTool(
 		"ios_tap",

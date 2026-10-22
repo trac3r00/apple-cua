@@ -68,4 +68,37 @@ describe("capture-only observation #given a caller that already holds the tree #
 			settleMs: 0,
 		});
 	});
+
+	it("resolves profile fast to a screenshot-free, unsettled, capped semantic observation", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
+
+		const result = await harness.client.callTool({
+			name: "get_app_state",
+			arguments: { app: "Finder", profile: "fast" },
+		});
+
+		expect(imageBlocks(result)).toHaveLength(0);
+		expect(harness.computer.stateOptions.at(-1)).toMatchObject({
+			includeScreenshot: false,
+			settleMs: 0,
+			maxElements: 250,
+		});
+	});
+
+	it("resolves profile visual to an image-only observation", async () => {
+		const harness = await createHarness();
+		closeHarness = harness.close;
+
+		const result = await harness.client.callTool({
+			name: "get_app_state",
+			arguments: { app: "Finder", profile: "visual" },
+		});
+
+		expect(imageBlocks(result)).toHaveLength(1);
+		expect(harness.computer.stateOptions.at(-1)).toMatchObject({
+			includeScreenshot: true,
+			includeAccessibilityTree: false,
+		});
+	});
 });

@@ -6,6 +6,7 @@ export interface PhoneContextFailure {
 	readonly message: string;
 	readonly inputAttempted?: boolean;
 	readonly actionDispatched?: boolean;
+	readonly stepsCompleted?: number;
 }
 
 /** The same context check applies before input and before issuing continuation authority. */

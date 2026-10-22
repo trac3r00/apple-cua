@@ -23,6 +23,7 @@ import type {
 	ScrollOptions,
 } from "@apple-cua/core";
 import { Command } from "commander";
+import { registerBrowserCommands } from "./browser-commands.js";
 import { registerIosCommands } from "./ios.js";
 import { resolveLayout } from "./layout.js";
 import { registerLifecycleCommands, resolveCursorMotion } from "./lifecycle-commands.js";
@@ -534,6 +535,7 @@ program
 	});
 
 registerIosCommands(program, { isJsonOutput });
+registerBrowserCommands(program, { isJsonOutput });
 registerLifecycleCommands(program, { isJsonOutput });
 
 // Refuse input commands while the stop switch is on, before any command code can send input.

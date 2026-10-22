@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHarness, observe } from "./protocol-client-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
 import { compactStepSchema, runStepSchema } from "./tool-schemas.js";
@@ -9,7 +9,12 @@ const FULL_BUDGET_BYTES = 40_000;
 
 let closeHarness: (() => Promise<void>) | undefined;
 
+beforeEach(() => {
+	vi.stubEnv("APPLE_CUA_BROWSER", "off");
+});
+
 afterEach(async () => {
+	vi.unstubAllEnvs();
 	if (closeHarness !== undefined) {
 		await closeHarness();
 		closeHarness = undefined;

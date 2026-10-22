@@ -28,7 +28,7 @@ export class BrowserBridge extends EventEmitter implements BrowserTransport {
 	});
 	private rpcHandler: ((value: unknown, signal: AbortSignal) => Promise<unknown>) | undefined;
 	private readonly cancellation = new AsyncLocalStorage<AbortSignal>();
-	private readonly wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+	private readonly wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
 	private socket: WebSocket | undefined;
 	private stopped = false;
 	private epoch = 0;
@@ -257,16 +257,31 @@ export class BrowserBridge extends EventEmitter implements BrowserTransport {
 					),
 				);
 			}, this.timeoutMs);
+			let stopMonitor: NodeJS.Timeout | undefined;
+			const cleanup = () => {
+				signal?.removeEventListener("abort", cancelled);
+				if (stopMonitor !== undefined) clearInterval(stopMonitor);
+			};
 			const cancelled = () => {
 				clearTimeout(timer);
 				this.pending.delete(id);
+				cleanup();
 				reject(
 					new BrowserError("stopped", "Browser request was cancelled; input may have occurred. Do not replay it."),
 				);
 			};
-			const cleanup = () => signal?.removeEventListener("abort", cancelled);
 			signal?.addEventListener("abort", cancelled, { once: true });
 			this.pending.set(id, { command, resolve, reject, timer, cleanup });
+			if (command.method === "run") {
+				stopMonitor = setInterval(() => {
+					if (!this.paused) return;
+					this.stopped = true;
+					if (stopMonitor !== undefined) clearInterval(stopMonitor);
+					if (socket.readyState === WebSocket.OPEN)
+						socket.send(JSON.stringify({ id: randomUUID(), command: { method: "stop" } }));
+				}, 25);
+				stopMonitor.unref();
+			}
 			socket.send(JSON.stringify({ id, command }));
 		});
 	}

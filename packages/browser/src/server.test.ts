@@ -67,12 +67,16 @@ describe("browser MCP contract", () => {
 		const tools = await client.listTools();
 		expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
 			"browser_close",
+			"browser_find",
 			"browser_finish",
 			"browser_observe",
 			"browser_open",
+			"browser_read",
 			"browser_run",
+			"browser_screenshot",
 			"browser_space",
 			"browser_status",
+			"browser_wait",
 		]);
 	});
 

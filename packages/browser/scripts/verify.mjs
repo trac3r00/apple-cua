@@ -211,8 +211,19 @@ try {
 	const stopSwitch = new StopSwitch(stopDir);
 	cliStateDir = stopDir;
 
-	fixture = createServer((_request, response) => {
+	fixture = createServer((request, response) => {
 		response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+		if (request.url?.startsWith("/large")) {
+			response.end(`<!doctype html><title>Large browser QA fixture</title>
+				<input id="query"><button id="search" onclick="document.getElementById('status').textContent='Searched'">Search</button>
+				<p role="status" id="status">Ready</p>
+				<main>${Array.from(
+					{ length: 220 },
+					(_, index) =>
+						`<section><h2>Item ${index}</h2><p>Description for item ${index} with enough text to exercise bounded observation.</p><button>Open ${index}</button><a href="#item-${index}">Details ${index}</a></section>`,
+				).join("")}</main>`);
+			return;
+		}
 		response.end(`<!doctype html><title>Browser QA fixture</title>
 			<label>Value <input id="value" value="old"></label>
 			<input id="secret" type="password" value="synthetic-secret-never-observe">
@@ -522,6 +533,99 @@ try {
 		"Shadow click returned wrong status",
 	);
 
+	let bench;
+	if (process.env.APPLE_CUA_BROWSER_QA_BENCH === "1") {
+		const benchTabs = [];
+		const observeMs = [];
+		const fullBytes = [];
+		const limits = { maxChars: 12000, maxElements: 200, fullPage: true };
+		for (let index = 0; index < 4; index++) {
+			const opened = await session.open(`${fixtureUrl}large?case=${index}`);
+			ownedTabs.add(opened.tabId);
+			const started = performance.now();
+			const observed = await session.observe(opened.tabId, limits, true);
+			observeMs.push(performance.now() - started);
+			fullBytes.push(Buffer.byteLength(JSON.stringify(observed)));
+			const search = observed.rows.find((row) => row.role === "button" && row.name === "Search");
+			assert(search, `Large fixture ${index} lacks the Search button`);
+			benchTabs.push({ tabId: opened.tabId, token: observed.observation_token, ref: search.ref });
+		}
+		const parallelRunMs = [];
+		for (let round = 0; round < 5; round++) {
+			const prepared = [];
+			for (const tab of benchTabs) {
+				const observed = await session.observe(tab.tabId, limits, true);
+				const search = observed.rows.find((row) => row.role === "button" && row.name === "Search");
+				assert(search, `Large fixture round ${round} lacks the Search button`);
+				prepared.push({ tabId: tab.tabId, token: observed.observation_token, ref: search.ref });
+			}
+			const parallelStarted = performance.now();
+			const results = await Promise.all(
+				prepared.map(async (tab) =>
+					session.run(tab.tabId, tab.token, [{ action: "click", ref: tab.ref }], {
+						text: "Searched",
+						timeoutMs: 3000,
+					}),
+				),
+			);
+			parallelRunMs.push(performance.now() - parallelStarted);
+			assert(
+				results.every((result) => result.verified === true),
+				"Large fixture parallel run did not verify",
+			);
+		}
+		const batchRunMs = [];
+		for (let round = 0; round < 5; round++) {
+			const batchObservation = await session.observe(benchTabs[0].tabId, limits, true);
+			const batchSearch = batchObservation.rows.find((row) => row.role === "button" && row.name === "Search");
+			assert(batchSearch, "Large fixture batch lacks the Search button");
+			const batchStarted = performance.now();
+			const batchResult = await session.run(
+				benchTabs[0].tabId,
+				batchObservation.observation_token,
+				Array.from({ length: 8 }, () => ({ action: "click", ref: batchSearch.ref })),
+				{ text: "Searched", timeoutMs: 3000 },
+			);
+			batchRunMs.push(performance.now() - batchStarted);
+			assert(batchResult.verified === true, "Large fixture 8-step batch did not verify");
+		}
+		const found =
+			typeof session.find === "function"
+				? await session.find(benchTabs[0].tabId, { role: "button", name: "Search" }, 5)
+				: undefined;
+		const findBytes = found === undefined ? null : Buffer.byteLength(JSON.stringify(found));
+		const read = typeof session.read === "function" ? await session.read(benchTabs[0].tabId, 8000, false) : undefined;
+		const readBytes = read === undefined ? null : Buffer.byteLength(JSON.stringify(read));
+		const warmStarted = performance.now();
+		await session.observe(benchTabs[0].tabId, limits, false);
+		const warmObserveMs = performance.now() - warmStarted;
+		bench = {
+			observeMs,
+			fullBytes,
+			findBytes,
+			readBytes,
+			warmObserveMs,
+			parallelRunMs,
+			batchRunMs,
+			batchSteps: 8,
+			tabs: benchTabs.length,
+			verified: true,
+		};
+	}
+
+	const found = await session.find(shadowTab, { role: "button", name: "Apply" });
+	assert(
+		found.matches.some((row) => row.name === "Apply"),
+		"Described-target find missed Apply",
+	);
+	const read = await session.read(shadowTab, 4000, true);
+	assert(read.text.includes("Bottom marker"), "Bounded read missed the visible page text");
+	assert(Array.isArray(read.links), "Bounded read did not return link refs");
+	const waited = await session.wait(shadowTab, { text: "Shadow applied", timeoutMs: 1000 });
+	assert(waited.matched === true, "Text wait did not match the current page");
+	const shot = await session.screenshot(shadowTab, false);
+	assert(shot.data.length > 0 && shot.mimeType === "image/jpeg", "Screenshot returned no JPEG image");
+
 	const stoppedTab = [...ownedTabs][1];
 	const stopObservation = await session.observe(stoppedTab, undefined, true);
 	stopSwitch.stop("Browser QA stop-gate check", "api");
@@ -650,11 +754,10 @@ try {
 	);
 	const keyboardFocus = [];
 	for (const expected of ["stop", "SUMMARY", "port", "token", "BUTTON"]) {
-		const nextFocus = browserCdp.call(
+		await browserCdp.call(
 			"Runtime.evaluate",
 			{
-				expression: `new Promise((resolve,reject)=>{const timer=setTimeout(()=>{document.removeEventListener('focusin',onFocus);reject(Error('Focus deadline'))},3000);function onFocus(event){clearTimeout(timer);document.removeEventListener('focusin',onFocus);resolve(event.target.id||event.target.tagName)}document.addEventListener('focusin',onFocus)})`,
-				awaitPromise: true,
+				expression: `globalThis.__qaFocusWait=new Promise(resolve=>{const timer=setTimeout(()=>resolve('TIMEOUT'),2000);document.addEventListener('focusin',event=>{clearTimeout(timer);resolve(event.target.id||event.target.tagName)},{once:true})});'installed'`,
 				returnByValue: true,
 			},
 			optionsAttached.sessionId,
@@ -669,8 +772,12 @@ try {
 			{ type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
 			optionsAttached.sessionId,
 		);
-		const focus = await nextFocus;
-		assert(focus.result.value === expected, `Options keyboard focus mismatch: ${focus.result.value}`);
+		const focus = await browserCdp.call(
+			"Runtime.evaluate",
+			{ expression: "globalThis.__qaFocusWait", awaitPromise: true, returnByValue: true },
+			optionsAttached.sessionId,
+		);
+		assert(focus.result.value === expected, `Options keyboard focus mismatch: ${JSON.stringify(focus.result.value)}`);
 		keyboardFocus.push(focus.result.value);
 		if (expected === "SUMMARY") {
 			await browserCdp.call(
@@ -800,6 +907,7 @@ try {
 	const report = {
 		browser: browserVersion.product,
 		observations: rows,
+		...(bench === undefined ? {} : { bench }),
 		screenshots,
 		cliVerified: true,
 		backgroundVerified: true,

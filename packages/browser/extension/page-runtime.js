@@ -11,9 +11,15 @@ export function pageRuntime(input) {
 			refs: new Map(),
 			elementRefs: new WeakMap(),
 			observer: null,
+			cache: undefined,
+			fillTarget: undefined,
+			fillText: undefined,
+			fillWait: undefined,
+			scrollWait: undefined,
 		};
 		state.observer = new MutationObserver(() => {
 			state.generation += 1;
+			state.cache = undefined;
 		});
 		state.observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
 		globalThis[stateKey] = state;
@@ -60,114 +66,276 @@ export function pageRuntime(input) {
 		if (tag === "input" && ["checkbox", "radio"].includes(element.type)) return element.type;
 		if (tag === "input") return editable(element) ? "textbox" : "";
 		if (element.isContentEditable) return "textbox";
-		if (tag === "p") return "paragraph";
+		if (tag === "p" || tag === "li") return tag === "p" ? "paragraph" : "listitem";
 		if (tag === "progress") return "progressbar";
 		if (tag === "output" || element.getAttribute("aria-live")) return "status";
 		return "";
 	};
-	const nameFor = (element) => {
+	const contentRole = (role) => role === "heading" || role === "paragraph" || role === "listitem";
+	const included = (role, profile) => {
+		if (profile === "content") return contentRole(role);
+		return role !== "";
+	};
+	const nameFor = (element, maxNameChars, allowText) => {
 		if (redactControl(element)) return "[redacted]";
 		const label =
 			element.getAttribute("aria-label") ||
 			element.labels?.[0]?.innerText ||
-			(!editable(element) && element.innerText) ||
 			element.getAttribute("alt") ||
 			element.getAttribute("title") ||
+			element.getAttribute("placeholder") ||
 			"";
-		return label.replace(/\s+/g, " ").trim().slice(0, 500);
+		const text = label || (allowText ? element.innerText || element.textContent || "" : "");
+		return text.replace(/\s+/g, " ").trim().slice(0, maxNameChars);
 	};
 	const fail = (message) => ({ error: message });
-	const checkRevision = (revision) => {
+	const revision = () => `${state.prefix}:${state.generation}`;
+	const checkRevision = (expected) => {
 		if (state.url !== location.href) return false;
-		if (state.document !== document || revision !== `${state.prefix}:${state.generation}`) return false;
+		if (state.document !== document || expected !== revision()) return false;
 		return true;
 	};
-	const resolve = (revision, ref) => {
-		if (!checkRevision(revision)) return { error: "stale" };
+	const refFor = (element) => {
+		let ref = state.elementRefs.get(element);
+		if (ref === undefined) {
+			ref = state.nextRef++;
+			state.elementRefs.set(element, ref);
+		}
+		return ref;
+	};
+	const resolve = (expected, ref, allowStaleRevision = false) => {
+		if (allowStaleRevision) {
+			if (state.url !== location.href || state.document !== document) return { error: "stale" };
+		} else if (!checkRevision(expected)) return { error: "stale" };
 		const element = state.refs.get(ref);
 		if (!element || !element.isConnected || !visible(element)) return { error: "target unavailable" };
 		if (element.matches(":disabled") || element.getAttribute("aria-disabled") === "true")
 			return { error: "target disabled" };
 		return { element };
 	};
+	const inViewport = (element, fullPage) => {
+		if (fullPage) return true;
+		const rect = element.getBoundingClientRect();
+		return rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
+	};
+	const visit = (root, callback) => {
+		const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+		let visited = 0;
+		for (let element = walker.nextNode(); element; element = walker.nextNode()) {
+			visited++;
+			if (visited > 20000) return false;
+			if (!callback(element)) return true;
+			if (element.shadowRoot) {
+				state.observer.observe(element.shadowRoot, {
+					subtree: true,
+					childList: true,
+					attributes: true,
+					characterData: true,
+				});
+				if (visit(element.shadowRoot, callback) === false) return false;
+			}
+		}
+		return true;
+	};
+	const matchesQuery = (role, name, element, query) => {
+		if (query.role !== undefined && role.toLowerCase() !== query.role.toLowerCase()) return false;
+		if (query.name !== undefined && !name.toLowerCase().includes(query.name.toLowerCase())) return false;
+		if (query.text !== undefined) {
+			const text = `${name} ${element.innerText || element.textContent || ""}`.toLowerCase().replace(/\s+/g, " ");
+			if (!text.includes(query.text.toLowerCase().replace(/\s+/g, " "))) return false;
+		}
+		return true;
+	};
+
+	if (input.method === "revision") return revision();
 
 	if (input.method === "observe") {
 		const limits = input.limits || {};
 		const maxChars = limits.maxChars ?? 6000;
 		const maxElements = limits.maxElements ?? 80;
+		const maxNameChars = limits.maxNameChars ?? 120;
 		const fullPage = limits.fullPage ?? false;
-		const rows = [];
-		let chars = 0;
-		let visited = 0;
-		let truncated = false;
-		state.refs = new Map();
+		const profile = limits.profile ?? "interactive";
+		const query = limits.query;
+		const key = JSON.stringify([revision(), maxChars, maxElements, maxNameChars, fullPage, profile, query]);
+		if (state.cache?.key === key) return { ...state.cache.result, cached: true };
 		if (state.url !== location.href) {
 			state.generation++;
 			state.url = location.href;
 		}
-		const inViewport = (element) => {
-			if (fullPage) return true;
-			const rect = element.getBoundingClientRect();
-			return rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
-		};
-		const visit = (root) => {
-			const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-			for (let element = walker.nextNode(); element; element = walker.nextNode()) {
-				visited++;
-				if (rows.length >= maxElements || chars >= maxChars || visited > 10000) {
-					truncated = true;
-					return;
-				}
-				if (!visible(element) || !inViewport(element)) continue;
-				const role = roleFor(element);
-				if (role) {
-					const name = nameFor(element);
-					if (name) {
-						let ref = state.elementRefs.get(element);
-						if (ref === undefined) {
-							ref = state.nextRef++;
-							state.elementRefs.set(element, ref);
-						}
-						const row = { ref, role, name };
-						const size = JSON.stringify(row).length;
-						if (chars + size > maxChars) {
-							truncated = true;
-							return;
-						}
-						state.refs.set(ref, element);
-						rows.push(row);
-						chars += size;
-					}
-				}
-				if (element.shadowRoot) {
-					state.observer.observe(element.shadowRoot, {
-						subtree: true,
-						childList: true,
-						attributes: true,
-						characterData: true,
-					});
-					visit(element.shadowRoot);
-				}
+		const rows = [];
+		let chars = 0;
+		let truncated = false;
+		state.refs = new Map();
+		visit(document, (element) => {
+			const role = roleFor(element);
+			if (role === "" || !included(role, profile) || !inViewport(element, fullPage) || !visible(element))
+				return true;
+			const name = nameFor(
+				element,
+				profile === "interactive" && contentRole(role) ? Math.min(maxNameChars, 160) : maxNameChars,
+				contentRole(role) || role === "button" || role === "link" || role === "status",
+			);
+			if (
+				!name ||
+				(query !== undefined &&
+					!matchesQuery(role, name, element, { role: undefined, name: query, text: undefined }))
+			)
+				return true;
+			const row = { ref: refFor(element), role, name };
+			const size = JSON.stringify(row).length;
+			if (rows.length >= maxElements || chars + size > maxChars) {
+				truncated = true;
+				return false;
 			}
+			state.refs.set(row.ref, element);
+			rows.push(row);
+			chars += size;
+			return true;
+		});
+		const result = {
+			url: `${location.origin}${location.pathname}`.slice(0, 8192),
+			title: document.title.slice(0, 500),
+			revision: revision(),
+			rows,
+			truncated,
 		};
-		visit(document);
+		state.cache = { key, result };
+		return result;
+	}
+
+	if (input.method === "find") {
+		const query = input.query || {};
+		const limit = input.limit ?? 10;
+		const matches = [];
+		let truncated = false;
+		visit(document, (element) => {
+			const role = roleFor(element);
+			if (role === "" || !visible(element) || !inViewport(element, false)) return true;
+			const name = nameFor(element, 500, true);
+			if (!name || !matchesQuery(role, name, element, query)) return true;
+			const ref = refFor(element);
+			state.refs.set(ref, element);
+			if (matches.length >= limit) {
+				truncated = true;
+				return false;
+			}
+			matches.push({ ref, role, name });
+			return true;
+		});
 		return {
 			url: `${location.origin}${location.pathname}`.slice(0, 8192),
 			title: document.title.slice(0, 500),
-			revision: `${state.prefix}:${state.generation}`,
-			rows,
+			revision: revision(),
+			matches,
 			truncated,
 		};
 	}
 
-	if (input.method === "target" || input.method === "focus") {
-		const result = resolve(input.revision, input.ref);
+	if (input.method === "read") {
+		const maxChars = input.maxChars ?? 8000;
+		const root = document.querySelector("main, article, [role=main]") || document.body;
+		const raw = root ? root.innerText || root.textContent || "" : "";
+		const text = raw
+			.replace(/[ \t]+/g, " ")
+			.replace(/\n{3,}/g, "\n\n")
+			.trim();
+		const links = [];
+		if (input.includeLinks) {
+			for (const element of document.querySelectorAll("a[href]")) {
+				if (!visible(element) || !inViewport(element, true)) continue;
+				const name = nameFor(element, 200, true);
+				if (!name) continue;
+				const ref = refFor(element);
+				state.refs.set(ref, element);
+				links.push({ ref, name });
+				if (links.length >= 100) break;
+			}
+		}
+		return {
+			url: `${location.origin}${location.pathname}`.slice(0, 8192),
+			title: document.title.slice(0, 500),
+			revision: revision(),
+			text: text.slice(0, maxChars),
+			...(input.includeLinks ? { links } : {}),
+			truncated: text.length > maxChars,
+		};
+	}
+
+	if (input.method === "wait") {
+		const timeoutMs = input.timeoutMs ?? 3000;
+		const text = input.text;
+		const selector = input.selector;
+		const observeRoots = () => {
+			const roots = [document];
+			for (const root of roots) {
+				for (const element of root.querySelectorAll("*")) {
+					if (element.shadowRoot) roots.push(element.shadowRoot);
+				}
+			}
+			return roots;
+		};
+		const textPresent = () => {
+			if (text === undefined) return true;
+			return observeRoots().some((root) =>
+				root === document
+					? document.body?.innerText.includes(text)
+					: Array.from(root.children).some((element) => element.innerText?.includes(text)),
+			);
+		};
+		const selectorPresent = () => {
+			if (selector === undefined) return true;
+			if (document.querySelector(selector) !== null) return true;
+			return observeRoots().some((root) => root !== document && root.querySelector(selector) !== null);
+		};
+		const ready = () => textPresent() && selectorPresent();
+		if (ready()) return { matched: true, reason: "matched", revision: revision() };
+		return new Promise((resolveWait) => {
+			const observer = new MutationObserver(() => {
+				if (ready()) finish(true);
+			});
+			const finish = (matched) => {
+				observer.disconnect();
+				clearTimeout(timer);
+				resolveWait({ matched, reason: matched ? "matched" : "timeout", revision: revision() });
+			};
+			for (const root of observeRoots()) {
+				observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true });
+			}
+			const timer = setTimeout(() => finish(false), timeoutMs);
+			observer.takeRecords();
+		});
+	}
+
+	if (input.method === "resolveTarget") {
+		const matches = [];
+		visit(document, (element) => {
+			const role = roleFor(element);
+			if (role === "" || !visible(element) || !inViewport(element, true)) return true;
+			const name = nameFor(element, 500, true);
+			if (!name || !matchesQuery(role, name, element, input.query || {})) return true;
+			const ref = refFor(element);
+			state.refs.set(ref, element);
+			matches.push({ ref, role, name });
+			return matches.length < 20;
+		});
+		const match = matches[0];
+		if (!match) return fail("no visible target matches the query");
+		return { ok: true, ...match };
+	}
+
+	if (input.method === "target" || input.method === "focus" || input.method === "prepareFill") {
+		state.cache = undefined;
+		const result = resolve(input.revision, input.ref, input.allowStaleRevision === true);
 		if (result.error) return fail(result.error);
 		const element = result.element;
-		if (input.method === "focus") {
+		if (input.method === "prepareFill") {
+			if (!editable(element) || redactControl(element)) return fail("target is not a permitted editable field");
+		}
+		if (input.method === "focus" || input.method === "prepareFill") {
 			if (redactControl(element)) return fail("sensitive control");
 			element.focus();
-			if (input.selectAll) {
+			if (input.selectAll || input.method === "prepareFill") {
 				state.fillTarget = element;
 				state.fillText = input.text;
 				if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) element.select();
@@ -222,6 +390,7 @@ export function pageRuntime(input) {
 	}
 
 	if (input.method === "prepareScroll") {
+		state.cache = undefined;
 		const scroller = document.scrollingElement;
 		if (!scroller) return fail("no scroll container");
 		const before = scroller.scrollTop;

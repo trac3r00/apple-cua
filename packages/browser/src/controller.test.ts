@@ -124,9 +124,9 @@ describe("browser task-space RPC", () => {
 		const first = await rpc({ action: "open", space: "alpha", url: "https://example.test" });
 		const second = await rpc({ action: "open", space: "alpha", url: "https://example.test" });
 		const other = await rpc({ action: "open", space: "beta", url: "https://example.test" });
-		expect(await first.json()).toEqual({ space: "alpha", page: "p1" });
-		expect(await second.json()).toEqual({ space: "alpha", page: "p2" });
-		expect(await other.json()).toEqual({ space: "beta", page: "p1" });
+		expect(await first.json()).toMatchObject({ space: "alpha", page: "p1", cursor_id: expect.any(String) });
+		expect(await second.json()).toMatchObject({ space: "alpha", page: "p2", cursor_id: expect.any(String) });
+		expect(await other.json()).toMatchObject({ space: "beta", page: "p1", cursor_id: expect.any(String) });
 		const status = await rpc({ action: "status" });
 		expect(await status.json()).toMatchObject({
 			spaces: [
@@ -134,6 +134,47 @@ describe("browser task-space RPC", () => {
 				{ space: "beta", pages: ["p1"] },
 			],
 		});
+	});
+
+	it("#given a worker bound to one space #when assigning it another #then refuses without creating a second cursor", async () => {
+		const opened = z.object({
+			space: z.string(),
+			page: z.string(),
+			cursor_id: z.string(),
+			worker_id: z.string().optional(),
+		});
+		const { rpc } = await harness();
+		const first = opened.parse(
+			await (
+				await rpc({
+					action: "open",
+					space: "alpha",
+					url: "https://example.test",
+					worker_id: "research",
+				})
+			).json(),
+		);
+		const other = opened.parse(
+			await (
+				await rpc({
+					action: "open",
+					space: "beta",
+					url: "https://example.test",
+					worker_id: "verify",
+				})
+			).json(),
+		);
+		expect(first.worker_id).toBe("research");
+		expect(other.worker_id).toBe("verify");
+		expect(first.cursor_id).not.toBe(other.cursor_id);
+		const conflict = await rpc({
+			action: "open",
+			space: "gamma",
+			url: "https://example.test",
+			worker_id: "research",
+		});
+		expect(conflict.status).toBe(400);
+		expect(await conflict.json()).toMatchObject({ error: "busy" });
 	});
 
 	it("#given an authenticated web origin #when calling RPC #then denies the browser-page request", async () => {
@@ -155,7 +196,7 @@ describe("browser task-space RPC", () => {
 		await rpc({ action: "open", space: "alpha", url: "https://example.test" });
 		await rpc({ action: "open", space: "beta", url: "https://example.test" });
 		const response = await rpc({ action: "finish", space: "alpha" });
-		expect(await response.json()).toEqual({ finished: "alpha" });
+		expect(await response.json()).toMatchObject({ finished: "alpha", cursor_id: expect.any(String) });
 		expect(requests).toEqual([
 			{ method: "open", url: "https://example.test" },
 			{ method: "open", url: "https://example.test" },
@@ -180,7 +221,11 @@ describe("browser task-space RPC", () => {
 		socket.terminate();
 		await disconnected;
 		const response = await rpc({ action: "finish", space: "alpha" });
-		expect(await response.json()).toEqual({ finished: "alpha", abandoned: ["p1"] });
+		expect(await response.json()).toMatchObject({
+			finished: "alpha",
+			abandoned: ["p1"],
+			cursor_id: expect.any(String),
+		});
 		expect(requests).toEqual([{ method: "open", url: "https://example.test" }]);
 	});
 
@@ -191,7 +236,7 @@ describe("browser task-space RPC", () => {
 		await openingReceived;
 		cancellation.abort();
 		releaseOpen();
-		await expect(opening).resolves.toEqual({ space: "default", page: "p1" });
+		await expect(opening).resolves.toMatchObject({ space: "default", page: "p1", cursor_id: expect.any(String) });
 		expect(await controller.dispatch({ action: "status" })).toMatchObject({
 			spaces: [{ space: "default", pages: ["p1"] }],
 		});

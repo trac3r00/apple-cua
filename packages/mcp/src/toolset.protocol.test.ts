@@ -1,9 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import { IPHONE_TOOL_NAMES, LEAN_TOOL_NAMES, TOOL_NAMES, toolNamesFor } from "./tool-names.js";
 import type { McpServerOptions } from "./toolset.js";
 
 let closeHarness: (() => Promise<void>) | undefined;
+
+beforeEach(() => {
+	vi.stubEnv("APPLE_CUA_BROWSER", "off");
+});
 
 afterEach(async () => {
 	vi.unstubAllEnvs();
@@ -62,6 +66,19 @@ describe("full toolset #given the default #when tools are listed #then desktop t
 		for (const name of mentionedTools(harness.client.getInstructions() ?? "")) {
 			expect(names).toContain(name);
 		}
+		const report = jsonPayload(await harness.client.callTool({ name: "get_capabilities", arguments: {} }));
+		expect(report["server"]).toMatchObject({ toolset: "full", tools: names.length });
+	});
+});
+
+describe("browser bridge #given APPLE_CUA_BROWSER=1 #when tools are listed #then the browser surface is registered", () => {
+	it("registers the browser tools and counts them in get_capabilities", async () => {
+		vi.stubEnv("APPLE_CUA_BROWSER", "1");
+		const { harness, names } = await connect({ toolset: "full", iphone: false });
+
+		expect(names).toEqual([...toolNamesFor("full", false, true)].sort());
+		expect(names).toContain("browser_find");
+		expect(names).toContain("browser_screenshot");
 		const report = jsonPayload(await harness.client.callTool({ name: "get_capabilities", arguments: {} }));
 		expect(report["server"]).toMatchObject({ toolset: "full", tools: names.length });
 	});

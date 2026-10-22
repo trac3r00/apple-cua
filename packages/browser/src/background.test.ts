@@ -14,6 +14,7 @@ const harnessSchema = z.object({
 			windowState: z.string(),
 			removed: z.array(z.number()),
 			inputs: z.number(),
+			observes: z.number(),
 			tabWindow: z.number(),
 			created: z.number(),
 		}),
@@ -26,7 +27,7 @@ async function harness(
 	options: {
 		navigateAfterClick?: boolean;
 		frameAfterClick?: "child" | "main";
-		stopAfterPrepare?: "stop" | "cancel" | "refuse";
+		stopAfterPrepare?: "stop" | "cancel";
 	} = {},
 ) {
 	const source = await readFile(new URL("../extension/background.js", import.meta.url), "utf8");
@@ -35,7 +36,7 @@ async function harness(
 	const script = new Script(`
 		const pageRuntime = () => {};
 		const options=${JSON.stringify(options)};
-		let foreground=50, userTab=70, tabWindow=50, inputs=0, created=0;
+		let foreground=50, userTab=70, tabWindow=50, inputs=0, created=0, observes=0;
 		let contextId=0, debuggerListener, checkpointAllowed=true;
 		const removed=[];
 		const window={id:10,focused:false,state:'minimized',tabs:[{id:99}]};
@@ -74,13 +75,22 @@ async function harness(
 					if(method==='Page.getFrameTree')return {frameTree:{frame:{id:'frame'}}};
 					if(method==='Page.createIsolatedWorld'){contextId++;return {executionContextId:1};}
 					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"observe"'))
-						return {result:{value:{revision:'document'+contextId,rows:[]}}};
+						{ observes++; return {result:{value:{revision:'document'+contextId,rows:[]}}}; }
 					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"target"'))
 						return {result:{value:{x:10,y:10}}};
+					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"prepareFill"'))
+						return {result:{value:{ok:true,editable:true}}};
+					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"fillComplete"'))
+						return {result:{value:{ok:true}}};
+					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"resolveTarget"'))
+						return {result:{value:{ok:true,ref:1,role:'button',name:'Apply'}}};
+					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"revision"'))
+						return {result:{value:'document'+contextId}};
+					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"wait"'))
+						return {result:{value:{matched:true,reason:'matched',revision:'document'+contextId}}};
 					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"prepareScroll"')){
 						if(options.stopAfterPrepare==='stop')stopLocally();
 						if(options.stopAfterPrepare==='cancel')tabsOwned.get(100).cancelled=true;
-						if(options.stopAfterPrepare==='refuse')checkpointAllowed=false;
 						return {result:{value:{ok:true,needed:true}}};
 					}
 					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"scrollComplete"'))
@@ -103,7 +113,7 @@ async function harness(
 		}};
 		({
 			dispatch,
-			stats:()=>({foreground,userTab,windowState:window.state,removed,inputs,tabWindow,created}),
+			stats:()=>({foreground,userTab,windowState:window.state,removed,inputs,observes,tabWindow,created}),
 			move:()=>{tabWindow=50},
 			reveal:()=>{window.focused=true;window.state='normal'}
 		})
@@ -187,7 +197,55 @@ describe("background worker ownership", () => {
 		expect(worker.stats().inputs).toBe(4);
 	});
 
-	it.each(["stop", "cancel", "refuse"] as const)(
+	it("#given a token observation #when running a batch #then walks the page only for the final result", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		await expect(
+			worker.dispatch({
+				command: "run",
+				id: "no-initial-observe",
+				tabId: 100,
+				revision: "document1",
+				limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+				steps: [{ action: "click", ref: 1 }],
+			}),
+		).resolves.toMatchObject({ completedSteps: 1 });
+		expect(worker.stats().observes).toBe(1);
+	});
+
+	it("#given a described target #when running a batch #then resolves it inside the page without a separate observe", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		await expect(
+			worker.dispatch({
+				command: "run",
+				id: "described-target",
+				tabId: 100,
+				revision: "document1",
+				limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+				steps: [{ action: "click", target: { role: "button", name: "Apply" } }],
+			}),
+		).resolves.toMatchObject({ completedSteps: 1 });
+		expect(worker.stats().inputs).toBe(2);
+	});
+
+	it("#given a wait step #when the text is present #then continues the batch without input", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		await expect(
+			worker.dispatch({
+				command: "run",
+				id: "wait-step",
+				tabId: 100,
+				revision: "document1",
+				limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+				steps: [{ action: "wait", text: "Ready", timeoutMs: 100 }],
+			}),
+		).resolves.toMatchObject({ completedSteps: 1 });
+		expect(worker.stats().inputs).toBe(0);
+	});
+
+	it.each(["stop", "cancel"] as const)(
 		"#given %s after scroll preparation #when dispatching wheel input #then stops before input",
 		async (stopAfterPrepare) => {
 			const worker = await harness({ stopAfterPrepare });

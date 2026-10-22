@@ -30,7 +30,7 @@ set -Eeuo pipefail
 readonly MIN_MACOS="15.0"
 readonly MIN_MACOS_NAME="Sequoia"
 readonly MIN_NODE_MAJOR=20
-readonly TOTAL_STEPS=12
+readonly TOTAL_STEPS=13
 readonly LAUNCHER_MARKER="# apple-cua-launcher checkout="
 readonly PATH_LINE_MARKER="# added by apple-cua"
 
@@ -581,8 +581,8 @@ ok "libsckit.dylib ($(lipo -archs "$native_dir/libsckit.dylib")), cursor-overlay
 
 step "TypeScript build"
 run_pnpm --filter @apple-cua/core run build:ts
-run_pnpm --filter @apple-cua/mcp --filter @apple-cua/cli --filter @apple-cua/pi-extension --filter @apple-cua/agent run build
-ok "built core, mcp, cli, pi-extension and agent"
+run_pnpm --filter @apple-cua/mcp --filter @apple-cua/cli --filter @apple-cua/pi-extension --filter @apple-cua/agent --filter @apple-cua/browser run build
+ok "built core, mcp, cli, pi-extension, agent and browser"
 
 # --- 8. Signed helper app ----------------------------------------------------------------------------------------
 
@@ -657,7 +657,20 @@ else
 	esac
 fi
 
-# --- 10. MCP client registration ---------------------------------------------------------------------------------
+# --- 10. Background browser bridge --------------------------------------------------------------------------------
+
+step "background browser bridge"
+if [[ "${APPLE_CUA_BROWSER:-on}" == "off" ]]; then
+	ok "skipped: APPLE_CUA_BROWSER=off"
+else
+	if node "$cli_js" browser setup --no-wait --no-open 2>&1 | sed 's/^/          /'; then
+		ok "browser service installed; load the unpacked extension once when convenient"
+	else
+		warn "browser setup did not finish; retry with: $cua browser setup"
+	fi
+fi
+
+# --- 11. MCP client registration ---------------------------------------------------------------------------------
 
 step "MCP client registration"
 config_arguments=()
@@ -687,7 +700,7 @@ else
 	ok "apple-cua config ${config_arguments[*]}"
 fi
 
-# --- 11. Permissions -----------------------------------------------------------------------------------------------
+# --- 12. Permissions -----------------------------------------------------------------------------------------------
 
 step "permissions of \"apple-cua-mcp\" (Accessibility, Screen Recording, Automation)"
 if ((assume_yes)); then
@@ -705,7 +718,7 @@ else
 	fi
 fi
 
-# --- 12. Doctor --------------------------------------------------------------------------------------------------
+# --- 13. Doctor --------------------------------------------------------------------------------------------------
 
 step "doctor"
 if ((!run_doctor)); then
@@ -728,6 +741,7 @@ fi
 
 printf '\nNext:\n'
 printf '  %-28s %s\n' "$cua config" "optionally restrict apps and choose the MCP clients to register with" \
+	"$cua browser setup" "load the unpacked browser extension once and verify the connection" \
 	"$cua permissions grant" "walk through the macOS permissions of \"apple-cua-mcp\"" \
 	"$cua doctor --fix" "check the installation and repair what is safe to repair" \
 	"$cua update" "update this checkout and everything setup built" \

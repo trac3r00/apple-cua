@@ -84,6 +84,11 @@ On macOS 26 a vertical touch-drag is dropped, so lists move with `scroll` (the w
    still needs an explicit `borrow_pointer: true`. Two unchanged screens stop it as `no_progress`;
    treat that as a stall, not a cue to raise the limits. After a partial failure (`interrupted`,
    `actionDispatched: true`) re-observe before deciding; do not replay the search blindly.
+5. **Batch only a proven same-screen sequence.** `ios_run` takes one token, up to eight steps
+   (`tap_text`, `tap`, `swipe`, `scroll`, `type_text`, `press_keys`, `home`, `app_switcher`, `wait`),
+   and one final observation; `expect.text` is required and checked against the final OCR. It does
+   not re-observe between steps, so a screen change mid-batch is a failure, not a silent retarget.
+   Use it for a sequence you have already watched work, not for exploration.
 5. **Isolate a failure** instead of re-running the batch. `tap_text` fails loudly with the text
    that IS visible, so the next step is informed.
 6. Prefer `waitForSettle` (or a bounded re-observe) over a fixed sleep: a screen that settles
@@ -99,7 +104,7 @@ invitation to clear it for them.
 
 ## Surfaces
 
-- MCP: `ios_observe`, `ios_find_text`, `ios_screenshot`, `ios_tap`, `ios_tap_text`, `ios_long_press`,
+- MCP: `ios_observe`, `ios_find_text`, `ios_run`, `ios_screenshot`, `ios_tap`, `ios_tap_text`, `ios_long_press`,
   `ios_swipe`, `ios_scroll`, `ios_type_text`, `ios_press_keys`, `ios_home`, `ios_app_switcher`,
   `ios_open_app`. Every mutation requires an `observation_token` from the newest `ios_observe`,
   the token is single-use, and the answer carries a fresh observation so a follow-up decision
@@ -114,4 +119,5 @@ The MCP server registers these tools only with `APPLE_CUA_IPHONE=1`.
 Delivery defaults to background: the phone is driven without taking focus or the pointer. A scroll
 would have to borrow the pointer (macOS routes wheel events by pointer position), so in background
 `ios_scroll` refuses unless you pass `borrow_pointer: true`; prefer `ios_swipe` while the person is
-working. `ios_press_keys` briefly makes the phone window key and then returns focus.
+working. `ios_press_keys` briefly makes the phone window key and then returns focus. If another
+window covers the phone, background scroll refuses instead of raising the phone.

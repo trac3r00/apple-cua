@@ -116,6 +116,29 @@ apple-cua doctor --fix  # repair what is safe, ask before the rest
 
 Restart the agent client, and ask it to use an app by name.
 
+### Browser and iPhone
+
+The same agent registration exposes the background browser tools once the browser bridge is
+installed. One command installs it, opens the extensions page in the background, and copies the
+unpacked-extension folder path:
+
+```bash
+apple-cua browser setup     # one human step: Developer mode -> Load unpacked
+apple-cua browser status
+```
+
+Agent pages stay in a minimized background window; they are never raised or moved into your
+Space. For the phone, enable the iPhone Mirroring tools once (the phone must be paired by hand,
+and the screen unlocked while the agent works):
+
+```bash
+apple-cua config --iphone
+apple-cua ios status
+```
+
+Use the `apple-cua-browser` skill for web pages and the `apple-cua` skill for native apps and the
+phone. Both skills explain the one-cursor-per-subagent workflow and the non-disruption rules.
+
 <p align="center">
   <img src="./docs/assets/doctor.svg" alt="apple-cua doctor output: every check reports ok, ending in 'Ready: apple-cua is installed and holds its permissions.'" width="760" />
   <br />

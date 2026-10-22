@@ -103,6 +103,30 @@ describe("guarded iPhone Mirroring protocol", () => {
 		expect(phone.calls).toHaveLength(0);
 	});
 
+	it("#given a known two-step batch #when running #then consumes one token and verifies the final screen", async () => {
+		const phone = source();
+		const guard = new PhoneGuardSession(phone);
+		const token = tokenFrom(await guard.observe());
+
+		const result = payload(
+			await guard.run({
+				observation_token: token,
+				steps: [
+					{ action: "tap_text", query: "Open" },
+					{ action: "tap", x: 150, y: 250 },
+				],
+				expect: { text: "Open", timeout_ms: 100 },
+			}),
+		);
+
+		expect(phone.calls).toEqual([
+			{ x: 160, y: 260 },
+			{ x: 150, y: 250 },
+		]);
+		expect(result).toMatchObject({ actionDispatched: true, stepsCompleted: 2, verified: true });
+		expect(result["observation_token"]).toEqual(expect.any(String));
+	});
+
 	it("#given a completed tap and failed readback #when reporting #then never claims no input was dispatched", async () => {
 		const phone = source();
 		const guard = new PhoneGuardSession(phone);

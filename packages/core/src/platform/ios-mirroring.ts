@@ -699,13 +699,22 @@ async function observeMirroringWithDetail(
 }
 
 /**
- * Refuse to fire a gesture at a point another window covers. The phone window is raised first,
- * and if it still does not own the point the gesture is not sent at all: it would land in that
- * other app, silently and possibly destructively.
+ * Refuse to fire a gesture at a point another window covers. Attended delivery raises the phone
+ * first; background delivery never raises it and refuses instead, because the gesture would land
+ * in the covering app.
  */
-export async function requireMirroringWindowAt(pid: number, point: Point): Promise<void> {
+export async function requireMirroringWindowAt(
+	pid: number,
+	point: Point,
+	options: { readonly allowActivation?: boolean } = {},
+): Promise<void> {
 	if (windowOwnsPoint(await listTopLevelWindows(), pid, point.x, point.y)) {
 		return;
+	}
+	if (options.allowActivation === false) {
+		throw new Error(
+			`another window covers (${Math.round(point.x)}, ${Math.round(point.y)}) — background delivery refuses to raise ${IPHONE_MIRRORING_APP_NAME}. Move or minimise the covering window, or use attended delivery.`,
+		);
 	}
 	await activateMirroring().catch((error: unknown) => {
 		if (error instanceof InputInterrupted) throw error;
@@ -872,7 +881,7 @@ export class IPhoneMirroring {
 		const at = options.at ?? { x: window.x + window.width / 2, y: window.y + window.height / 2 };
 		const focusBefore = frontmostApplicationPid();
 		try {
-			await requireMirroringWindowAt(target.pid, at);
+			await requireMirroringWindowAt(target.pid, at, { allowActivation: this.delivery === "attended" });
 			await scrollMirroring(target, {
 				at,
 				borrowPointer: options.borrowPointer === true,

@@ -1,0 +1,105 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const browser = vi.hoisted(() => ({
+	doctorBrowserService: vi.fn(),
+	installBrowserService: vi.fn(),
+	uninstallBrowserService: vi.fn(),
+	readConnection: vi.fn(),
+}));
+
+vi.mock("@apple-cua/browser", () => ({
+	doctorBrowserService: browser.doctorBrowserService,
+	installBrowserService: browser.installBrowserService,
+	uninstallBrowserService: browser.uninstallBrowserService,
+	readConnection: browser.readConnection,
+}));
+vi.mock("node:child_process", () => ({
+	execFile: vi.fn((_command: string, _args: readonly string[], callback?: (error: Error | null) => void) => {
+		callback?.(null);
+		return { stdin: { end: vi.fn() } };
+	}),
+}));
+
+import { browserSetupInstructions, setupBrowser } from "./browser-commands.js";
+
+const paths = {
+	launchAgent: "/tmp/agent.plist",
+	nativeHostManifest: "/tmp/host.json",
+	nativeHostProgram: "/tmp/native-host.js",
+	nativeHostLauncher: "/tmp/launcher",
+	stateDirectory: "/tmp/state",
+	cliProgram: "/tmp/cli.js",
+	logDirectory: "/tmp/logs",
+	stdoutLog: "/tmp/stdout",
+	stderrLog: "/tmp/stderr",
+};
+
+beforeEach(() => {
+	browser.doctorBrowserService.mockResolvedValue({
+		installed: true,
+		running: true,
+		connectionReady: true,
+		launchAgent: paths.launchAgent,
+		nativeHostManifest: paths.nativeHostManifest,
+	});
+	browser.installBrowserService.mockResolvedValue(paths);
+	browser.readConnection.mockResolvedValue({ port: 47953, token: "a".repeat(64) });
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async () => ({
+			ok: true,
+			json: async () => ({ connected: false, stopped: false, spaces: [] }),
+		})),
+	);
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+	vi.clearAllMocks();
+});
+
+describe("#given an installed but unpaired browser service #when setup runs #then it prints the one human step without restarting the daemon", () => {
+	it("does not reinstall a healthy daemon and returns the Load unpacked instructions", async () => {
+		const lines: string[] = [];
+
+		const result = await setupBrowser({ wait: false, open: false }, (line) => lines.push(line));
+
+		expect(browser.installBrowserService).not.toHaveBeenCalled();
+		expect(result.status.connected).toBe(false);
+		expect(result.clipboard).toBe(true);
+		expect(result.instructions).toContain("Load unpacked");
+		expect(lines.join("\n")).toContain("Load unpacked");
+	});
+});
+
+describe("#given a missing browser service #when setup runs #then it installs once and reports the remaining connection", () => {
+	it("installs, copies the extension path, and does not wait without a terminal", async () => {
+		browser.doctorBrowserService.mockResolvedValue({
+			installed: false,
+			running: false,
+			connectionReady: false,
+			launchAgent: paths.launchAgent,
+			nativeHostManifest: paths.nativeHostManifest,
+		});
+
+		const result = await setupBrowser({ wait: false, open: false });
+
+		expect(browser.installBrowserService).toHaveBeenCalledTimes(1);
+		expect(result.status.connected).toBe(false);
+		expect(result.extensionPath).toContain("packages/browser/extension");
+	});
+});
+
+describe("#given a browser setup page #when instructions are rendered #then the human step names the browser, URL, and exact folder", () => {
+	it("keeps the manual step to Developer mode and Load unpacked", () => {
+		const instructions = browserSetupInstructions(
+			{ name: "Brave", appPath: "/Applications/Brave Browser.app", extensionsUrl: "brave://extensions" },
+			"/checkout/packages/browser/extension",
+		);
+
+		expect(instructions).toContain("brave://extensions");
+		expect(instructions).toContain("Developer mode");
+		expect(instructions).toContain("Load unpacked");
+		expect(instructions).toContain("/checkout/packages/browser/extension");
+	});
+});

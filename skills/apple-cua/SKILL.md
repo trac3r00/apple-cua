@@ -15,6 +15,34 @@ embedded model, extra agent framework, cloud service, or API key is required by 
 The MCP server must run on the Mac being controlled, in a logged-in graphical session.
 The harness supplies the model, task reasoning and user-confirmation channel.
 
+## Fast path
+
+Use the cheapest observation that can support the next decision:
+
+| Goal | Start with |
+|---|---|
+| A control you can describe | `find_elements`, then `click_target`, `set_value`, or one `run_steps` with a `target` query |
+| A known sequence on one screen | one `run_steps` (up to 20 steps) with `pace: "fast"` and `expect` |
+| A field or a few fields | `set_value` or `set_fields`; do not fetch the tree again |
+| A whole flow with reads and branches | one `run_script` |
+| Pixels matter | `get_app_state` with `profile: "visual"` or `analyze_screen` |
+| Semantic context on a large window | `get_app_state` with `profile: "fast"` (no screenshot, no settle wait, table rows, 250 elements) |
+
+`profile: "fast"` is the recommended first observation when the target is not already described.
+It is roughly the capped accessibility walk rather than a screenshot plus full settle, so it is
+much cheaper than the default full observation. Explicit options override the profile. The
+fast path is not a blind path: use `find_elements` when you know the control, and request pixels
+when the task depends on layout, icons, canvas, or visual verification.
+
+## How to use the fast path
+
+1. Prefer a described target over buying the tree, and a single verified batch over one call
+   per action.
+2. Keep one observation token alive through that batch; do not interleave another observation.
+3. Verify the exact visible result with `expect`, `verify_state`, or a fresh read before claiming
+   completion.
+4. Use the native browser skill for web pages; use this skill for the desktop and the phone.
+
 ## Two targets: macOS apps and the phone
 
 The server drives two kinds of thing, and they are not interchangeable:
@@ -287,7 +315,8 @@ The coordinator must not also use `get_app_state`, `observe_apps`, `run_parallel
 or `run_script` on that app: a new observation replaces its live token.
 Worker ownership coordinates cooperative agents, not access control between
 host clients. See [the delegation workflow](references/workflow-patterns.md#planners-and-app-owning-workers)
-for handoff, reporting and recovery.
+for handoff, reporting and recovery, and [subagents](references/subagents.md) for
+host-specific spawning prompts, browser spaces, and phone ownership.
 
 Read `visual_context` with the screenshot. Window-scoped AX frames are already
 in screenshot pixels; OCR frames are global logical screen points.

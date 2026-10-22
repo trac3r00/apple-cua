@@ -33,8 +33,7 @@ import {
 } from "./tool-schemas.js";
 
 /** The fuller contract (full_state, include_screenshot, the no-token case) is stated once in the server instructions. */
-const MUTATION_CONTRACT =
-	"Needs the one-use observation_token from the latest observation or mutation; answers with the fresh observation and the next token.";
+const MUTATION_CONTRACT = "Needs the latest one-use observation_token; returns fresh state and the next token.";
 
 export function elementQueryFromInput(input: {
 	readonly role?: string | undefined;
@@ -94,7 +93,7 @@ export function registerDesktopMutationTools(
 		"click",
 		{
 			description: mutationDescription(
-				"Click an observed element id (semantic path) or screenshot coordinates x,y (last resort); click_count for a double click, mouse_button for right/middle. A single unmodified right click uses advertised AXShowMenu, otherwise pointer input, never AXPress. modifiers (command, shift, option, control) are held during the click, e.g. command-click to add to a selection; an element id with modifiers is clicked at its centre through the pointer route instead of AXPress.",
+				"Click an observed element id or screenshot coordinates x,y. click_count repeats; mouse_button selects left/right/middle. A single unmodified right click uses advertised AXShowMenu or pointer input, never AXPress. modifiers are held during the click; modified element clicks use the pointer at the element centre, not AXPress.",
 			),
 			inputSchema: clickSchema,
 			annotations: MUTATION_ANNOTATIONS,
@@ -122,7 +121,7 @@ export function registerDesktopMutationTools(
 		"click_target",
 		{
 			description: mutationDescription(
-				"Act on a described element in one call: observe, resolve the query, wait up to timeout_ms for it, hover first if hover_first, then left-press via AXPress when advertised, else click its centre. A single right click uses advertised AXShowMenu unless press=pointer, and never AXPress. Answers with the resolved target, alternatives not clicked, route and delivery used, and with expect whether the outcome verified. found=false: nothing matched in time, no input was dispatched, near misses are listed and the token for the ids seen is still returned.",
+				"Observe and resolve a described element, optionally wait up to timeout_ms and hover first, then use AXPress when advertised or click its centre. A single right click uses AXShowMenu unless press=pointer, never AXPress. Returns target, alternatives, route, delivery, and expect verification. found=false means no input; near misses and the token are returned.",
 			),
 			inputSchema: clickTargetSchema,
 			annotations: MUTATION_ANNOTATIONS,
@@ -202,7 +201,7 @@ export function registerDesktopMutationTools(
 		"set_fields",
 		{
 			description: mutationDescription(
-				"Set several observed element values in one call (up to 10 updates, applied in order). Each update is checked against a fresh observation before dispatch and read back after: per-field status verified, unverified or skipped with a reason, plus requested/inputDispatched/verified counts. Stops at the first field it cannot verify and reports progress so far.",
+				"Set up to 10 observed fields in order. Each is checked before dispatch and read back; returns per-field status and counts. Stops at the first unverifiable field.",
 			),
 			inputSchema: setFieldsSchema,
 			annotations: MUTATION_ANNOTATIONS,
@@ -215,7 +214,7 @@ export function registerDesktopMutationTools(
 		"run_steps",
 		{
 			description: mutationDescription(
-				"Run a whole flow in one call (up to 20 steps), e.g. fill-then-submit or open-menu-then-choose. Each step is a flat object; type picks the kind (its description lists the fields per type). An element is named by element_index (re-checked against a fresh read before dispatch) or by target (resolved right before the step, so it can act on UI an earlier step created). wait_for pauses until the screen shows (gone=true: stops showing) target and/or window_title. Every step is validated before any is dispatched. The batch stops at the first step that fails, finds no match or times out, reporting per-step dispatched/satisfied/skipped/failed with a reason, the element each target resolved to and any route fallback. Cancellable between steps; progress notifications with a progressToken. expect verifies the outcome in the same call, like verify_state. pace=fast runs a person-like chain back to back.",
+				"Run up to 20 ordered steps; type selects fields. Use element_index (rechecked) or target (resolved before action, including newly created UI). wait_for pauses for target/window_title; gone=true waits for disappearance. All steps validate before dispatch; stops at first failure, no match, or timeout with step status and reason. Cancellable between steps; progress needs progressToken. expect verifies outcome; pace=fast uses cheap guards between actions.",
 			),
 			inputSchema: runStepsSchema,
 			annotations: MUTATION_ANNOTATIONS,

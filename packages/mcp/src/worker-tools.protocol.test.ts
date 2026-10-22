@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createHarness, jsonText } from "./protocol-client-harness.js";
+import { Deferred } from "./protocol-test-harness.js";
 
 type Worker = {
 	readonly worker_id: string;
@@ -120,11 +121,15 @@ describe("registered worker tools #given two app assignments #when workers execu
 			const assignedPayload: unknown = JSON.parse(assignedText);
 			const assignedEntries = Array.isArray(assignedPayload) ? assignedPayload.map(objectValue) : [];
 			expect(assignedEntries).toHaveLength(2);
-			expect(assignedEntries.map((entry) => entry["images"])).toEqual([[0], [1]]);
+			expect(assignedEntries.map((entry) => entry["images"])).toEqual([undefined, undefined]);
 			expect(assignedEntries.every((entry) => entry["observation_token"] !== undefined)).toBe(true);
 			expect(assignedEntries.every((entry) => entry["observation"] === undefined)).toBe(true);
 			expect(assignedText).not.toContain(Buffer.from("png-bytes").toString("base64"));
-			expect(imageBlocks(assignedResult)).toHaveLength(2);
+			expect(imageBlocks(assignedResult)).toHaveLength(0);
+			expect(harness.computer.stateOptions.slice(0, 2).map((options) => options?.includeScreenshot)).toEqual([
+				false,
+				false,
+			]);
 			const decoded = workerList(assignedPayload);
 			expect(new Set(decoded.map((worker) => worker.cursor_id)).size).toBe(2);
 
@@ -246,6 +251,157 @@ describe("registered worker tools #given two app assignments #when workers execu
 			}
 		} finally {
 			await harness.close();
+		}
+	});
+});
+
+describe("registered worker tools #given omitted screenshot options #when assigning or observing #then images are not returned", () => {
+	it("defaults assignment and observe to screenshot-free observations", async () => {
+		const harness = await createHarness();
+		try {
+			const assigned = await harness.client.callTool({
+				name: "manage_workers",
+				arguments: {
+					op: "assign",
+					assignments: [{ worker_id: "one", task: "edit note", app: "Finder" }],
+				},
+			});
+			expect(imageBlocks(assigned)).toHaveLength(0);
+			expect(harness.computer.stateOptions.at(-1)?.includeScreenshot).toBe(false);
+
+			const worker = workerList(JSON.parse(jsonText(assigned)))[0];
+			if (worker === undefined) throw new Error("missing worker");
+			const observed = await harness.client.callTool({
+				name: "manage_workers",
+				arguments: { op: "observe", worker_id: worker.worker_id },
+			});
+			expect(imageBlocks(observed)).toHaveLength(0);
+			expect(harness.computer.stateOptions.at(-1)?.includeScreenshot).toBe(false);
+		} finally {
+			await harness.close();
+		}
+	});
+
+	it("returns an image when observe explicitly requests screenshots", async () => {
+		const harness = await createHarness();
+		try {
+			const assigned = await harness.client.callTool({
+				name: "manage_workers",
+				arguments: {
+					op: "assign",
+					assignments: [{ worker_id: "one", task: "edit note", app: "Finder" }],
+				},
+			});
+			const worker = workerList(JSON.parse(jsonText(assigned)))[0];
+			if (worker === undefined) throw new Error("missing worker");
+			const observed = await harness.client.callTool({
+				name: "manage_workers",
+				arguments: { op: "observe", worker_id: worker.worker_id, include_screenshot: true },
+			});
+			expect(imageBlocks(observed)).toHaveLength(1);
+			expect(harness.computer.stateOptions.at(-1)?.includeScreenshot).toBe(true);
+		} finally {
+			await harness.close();
+		}
+	});
+});
+
+describe("registered worker tools #given background workers on distinct apps #when one preflight blocks #then the other dispatches independently", () => {
+	it("dispatches background runs concurrently and serializes attended runs", async () => {
+		const background = await createHarness();
+		const gate = new Deferred<import("@apple-cua/core").PreflightResult>();
+		const entered = new Deferred<void>();
+		let gateResolved = false;
+		try {
+			background.computer.delivery = "background";
+			const assignments = await background.client.callTool({
+				name: "manage_workers",
+				arguments: {
+					op: "assign",
+					assignments: [
+						{ worker_id: "one", task: "first", app: "Finder" },
+						{ worker_id: "two", task: "second", app: "Other" },
+					],
+				},
+			});
+			const [one, two] = workerList(JSON.parse(jsonText(assignments)));
+			if (one === undefined || two === undefined) throw new Error("missing worker assignments");
+			background.computer.preflightGate = gate;
+			background.computer.preflightEntered = entered;
+			const firstRun = background.client.callTool({
+				name: "run_worker",
+				arguments: {
+					worker_id: one.worker_id,
+					observation_token: one.observation_token,
+					steps: [{ type: "type_text", text: "first" }],
+				},
+			});
+			await entered.promise;
+			const secondRun = await background.client.callTool({
+				name: "run_worker",
+				arguments: {
+					worker_id: two.worker_id,
+					observation_token: two.observation_token,
+					steps: [{ type: "type_text", text: "second" }],
+				},
+			});
+			expect(secondRun.isError).not.toBe(true);
+			expect(background.computer.effects.some((effect) => effect.kind === "type" && effect.text === "second")).toBe(
+				true,
+			);
+			gate.resolve({ ok: true });
+			gateResolved = true;
+			expect((await firstRun).isError).not.toBe(true);
+		} finally {
+			if (!gateResolved) gate.resolve({ ok: true });
+			await background.close();
+		}
+
+		const attended = await createHarness();
+		const attendedGate = new Deferred<import("@apple-cua/core").PreflightResult>();
+		const attendedEntered = new Deferred<void>();
+		let attendedGateResolved = false;
+		try {
+			const assignments = await attended.client.callTool({
+				name: "manage_workers",
+				arguments: {
+					op: "assign",
+					assignments: [
+						{ worker_id: "one", task: "first", app: "Finder" },
+						{ worker_id: "two", task: "second", app: "Other" },
+					],
+				},
+			});
+			const [one, two] = workerList(JSON.parse(jsonText(assignments)));
+			if (one === undefined || two === undefined) throw new Error("missing worker assignments");
+			attended.computer.preflightGate = attendedGate;
+			attended.computer.preflightEntered = attendedEntered;
+			const firstRun = attended.client.callTool({
+				name: "run_worker",
+				arguments: {
+					worker_id: one.worker_id,
+					observation_token: one.observation_token,
+					steps: [{ type: "type_text", text: "first" }],
+				},
+			});
+			await attendedEntered.promise;
+			const secondRun = attended.client.callTool({
+				name: "run_worker",
+				arguments: {
+					worker_id: two.worker_id,
+					observation_token: two.observation_token,
+					steps: [{ type: "type_text", text: "second" }],
+				},
+			});
+			expect(attended.computer.preflightExpected).toHaveLength(1);
+			attendedGate.resolve({ ok: true });
+			attendedGateResolved = true;
+			expect((await firstRun).isError).not.toBe(true);
+			expect((await secondRun).isError).not.toBe(true);
+			expect(attended.computer.preflightExpected).toHaveLength(2);
+		} finally {
+			if (!attendedGateResolved) attendedGate.resolve({ ok: true });
+			await attended.close();
 		}
 	});
 });

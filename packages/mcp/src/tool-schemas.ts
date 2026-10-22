@@ -180,9 +180,7 @@ const modifiersSchema = z
 	.array(z.enum(["command", "shift", "option", "control", "cmd", "opt", "alt", "ctrl"]))
 	.max(4)
 	.optional()
-	.describe(
-		"Keys held during the gesture: command, shift, option, control (aliases cmd, opt, alt, ctrl); delivered to the app, not the real keyboard.",
-	);
+	.describe("Held during gesture; aliases cmd/opt/alt/ctrl. Sent to app, not real keyboard.");
 const modifierFields = { modifiers: modifiersSchema };
 
 const clickFields = {
@@ -397,9 +395,7 @@ const findSchema = z
 				"auto (default): accessibility, then window-capture OCR when it has no match; off: accessibility only; only: OCR only. OCR needs Screen Recording and a text-bearing target (skipped with the reason otherwise); OCR hits can only be clicked.",
 			),
 	})
-	.describe(
-		"Scroll-until-found: page the scroll area until the target shows. The answer reports found_by (accessibility|vision), pages scrolled, scrolled_into_view.",
-	);
+	.describe("Page-scroll until target appears; returns found_by, pages, and scrolled_into_view.");
 
 const stepTargetFields = {
 	target: elementQuerySchema.optional(),
@@ -463,7 +459,7 @@ const paceSchema = z
 	.enum(["verified", "fast"])
 	.optional()
 	.describe(
-		"verified (default) reads the UI before every element step; fast resolves known targets against one read and runs only cheap guards between steps (person-like chain); unknown targets and wait_for still read. Intermediate states are not read.",
+		"verified (default) reads before each element step; fast resolves known targets from one read, with cheap guards between steps. Unknown targets and wait_for still read; intermediate states are not read.",
 	);
 
 /** Published shape of `find`: field names and enums only; the strict {@link findSchema} does the real validation. */
@@ -472,7 +468,7 @@ const compactFindSchema = z
 		scroll_within: z
 			.union([elementIndexSchema, z.record(z.string(), z.string())])
 			.optional()
-			.describe("Scrollable area: element_index or a target-style query (default: the largest scroll area)."),
+			.describe("Scrollable area (default largest): element_index or query."),
 		direction: directions.optional().describe("default down"),
 		max_pages: z
 			.number()
@@ -484,10 +480,10 @@ const compactFindSchema = z
 			.enum(["auto", "off", "only"])
 			.optional()
 			.describe(
-				"auto (default): accessibility then OCR; off: accessibility only; only: OCR only. OCR needs Screen Recording; OCR hits can only be clicked.",
+				"auto: accessibility then OCR; off: accessibility only; only: OCR only. OCR needs Screen Recording; hits can only be clicked.",
 			),
 	})
-	.describe("Scroll-until-found: page the scroll area until target shows. Answers found_by, pages scrolled.");
+	.describe("Scroll until target appears; returns found_by and pages scrolled.");
 
 const compactQuerySchema = z
 	.object({
@@ -497,7 +493,7 @@ const compactQuerySchema = z
 		value_contains: z.string().optional(),
 		text: z.string().optional(),
 	})
-	.describe("Described element: at least one field; every field given must hold.");
+	.describe("At least one field; all fields must match.");
 
 const STEP_TYPES = [
 	"click",
@@ -524,18 +520,18 @@ export const compactStepSchema = z.object({
 	type: z
 		.enum(STEP_TYPES)
 		.describe(
-			"Use element_index or target, not both; target resolves before dispatch. click may use x/y. drag: from_x/from_y/to_x/to_y; optional waypoints, duration, mouse_button, modifiers. reveal scrolls target into view. wait_for: target and/or window_title, gone, timeout_ms<=10000. clipboard_write: exactly one of text, image_path, file_path.",
+			"Element steps use element_index or target, not both; target resolves before dispatch. reveal only scrolls.",
 		),
 	element_index: elementIndexSchema.optional(),
 	target: compactQuerySchema.optional(),
-	target_index: z.number().int().nonnegative().optional().describe("Nth match of target (default 0)."),
+	target_index: z.number().int().nonnegative().optional(),
 	find: compactFindSchema.optional(),
 	x: coordinateSchema.optional().describe("click: screenshot x; set_window_frame: window x."),
 	y: coordinateSchema.optional(),
 	click_count: z.number().int().positive().optional(),
 	mouse_button: z.enum(["left", "right", "middle"]).optional(),
 	modifiers: modifiersSchema,
-	action: z.string().optional().describe("e.g. AXShowMenu"),
+	action: z.string().optional(),
 	value: z.string().optional(),
 	text: z.string().optional(),
 	prefix: z.string().optional(),
@@ -550,16 +546,16 @@ export const compactStepSchema = z.object({
 		.array(z.object({ x: z.number().finite(), y: z.number().finite() }).strict())
 		.max(MAX_DRAG_WAYPOINTS)
 		.optional()
-		.describe("drag: screenshot-local waypoints."),
+		.describe("Screenshot-local drag waypoints."),
 	direction: directions.optional(),
 	pages: z.number().positive().optional(),
-	gone: z.boolean().optional().describe("wait_for: wait for the target to disappear."),
+	gone: z.boolean().optional(),
 	window_title: z.string().optional(),
 	timeout_ms: z.number().int().positive().optional(),
 	keys: z.array(keySequenceEntrySchema).optional(),
 	hold_seconds: z.number().nonnegative().optional(),
 	interval_seconds: z.number().nonnegative().optional(),
-	path: z.array(z.string()).optional().describe('invoke_menu: menu path, e.g. ["File","New Tab"].'),
+	path: z.array(z.string()).optional().describe('Menu path, e.g. ["File","New Tab"].'),
 	width: z.number().optional(),
 	height: z.number().optional(),
 	image_path: z.string().optional(),
@@ -569,11 +565,7 @@ export const compactStepSchema = z.object({
 export type CompactStep = z.infer<typeof compactStepSchema>;
 
 export const compactStepsSchema = z.array(compactStepSchema).min(1).max(MAX_RUN_STEPS);
-const workerStepsSchema = z
-	.array(z.unknown())
-	.min(1)
-	.max(MAX_RUN_STEPS)
-	.describe("Steps use the run_steps schema. Every step is strictly validated before any input.");
+const workerStepsSchema = z.array(z.unknown()).min(1).max(MAX_RUN_STEPS);
 
 /**
  * Validate every step of a batch against the strict per-type schema, before anything is dispatched. A bad step
@@ -665,7 +657,9 @@ export const runParallelSchema = z.object({
 			z.object({
 				app: appSchema,
 				observation_token: observationTokenSchema,
-				steps: compactStepsSchema,
+				// The step shape is published once, on run_steps; every batch step is still checked strictly before any
+				// batch runs (parseRunSteps), exactly as run_worker does, so the list does not carry it twice.
+				steps: workerStepsSchema.describe("Same step objects as run_steps.steps."),
 				expect: verifyExpectSchema.optional(),
 			}),
 		)

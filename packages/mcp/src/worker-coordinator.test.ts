@@ -192,10 +192,10 @@ describe("WorkerCoordinator #given approved apps #when workers are assigned #the
 				{ worker_id: "one", task: "edit note", app: "Finder" },
 				{ worker_id: "two", task: "edit other", app: "Other" },
 			]);
-			expect(firstAssignment.observation.content.some((content) => content.type === "image")).toBe(true);
+			expect(firstAssignment.observation.content.some((content) => content.type === "image")).toBe(false);
 			expect(computer.stateOptions[0]).toMatchObject({
 				includeAccessibilityTree: true,
-				includeScreenshot: true,
+				includeScreenshot: false,
 			});
 			expect(coordinator.status().every(({ busy }) => !busy)).toBe(true);
 		} finally {

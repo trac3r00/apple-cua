@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { SpawnGuidance } from "./host-detection.js";
 import { expectFromInput } from "./step-actions.js";
 import type { ToolContent, ToolResult } from "./tool-result.js";
 import { manageWorkersSchema, parseRunSteps, runWorkerSchema, workerManagementRequestSchema } from "./tool-schemas.js";
@@ -53,19 +54,31 @@ function attributedResult(
 	};
 }
 
-function assignedResult(assignments: readonly WorkerAssignment[]): ToolResult {
+function assignedResult(assignments: readonly WorkerAssignment[], spawn: SpawnGuidance | undefined): ToolResult {
 	const images: ToolContent[] = [];
 	const entries = assignments.map(({ observation, ...assignment }) =>
 		observation === undefined ? assignment : attributedEntry(assignment, observation, images),
 	);
-	return { content: [{ type: "text", text: JSON.stringify(entries, null, 2) }, ...images] };
+	return {
+		content: [
+			// Guidance first: clients that read the last text block still find the worker list there.
+			...(spawn === undefined ? [] : [{ type: "text" as const, text: JSON.stringify({ spawn }) }]),
+			{ type: "text", text: JSON.stringify(entries, null, 2) },
+			...images,
+		],
+	};
 }
 
 function objectResult(value: unknown): ToolResult {
 	return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
 }
 
-export function registerWorkerTools(server: McpServer, coordinator: WorkerCoordinator): void {
+/** `spawn` names how the connected harness starts one subagent per assigned worker; it rides on every assign answer. */
+export function registerWorkerTools(
+	server: McpServer,
+	coordinator: WorkerCoordinator,
+	spawn?: () => SpawnGuidance,
+): void {
 	server.registerTool(
 		"manage_workers",
 		{
@@ -78,7 +91,7 @@ export function registerWorkerTools(server: McpServer, coordinator: WorkerCoordi
 			const request = workerManagementRequestSchema.parse(input);
 			switch (request.op) {
 				case "assign":
-					return assignedResult(await coordinator.assign(request.assignments));
+					return assignedResult(await coordinator.assign(request.assignments), spawn?.());
 				case "status":
 					return objectResult(coordinator.status());
 				case "observe": {

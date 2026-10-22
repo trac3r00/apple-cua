@@ -303,7 +303,7 @@ export class WorkerCoordinator {
 				app: String(worker.pid),
 				diffOnly: false,
 				includeAccessibilityTree: true,
-				includeScreenshot: options.includeScreenshot ?? true,
+				includeScreenshot: options.includeScreenshot ?? false,
 			}),
 		);
 		const previous = worker.assignment.observation;

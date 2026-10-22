@@ -22,7 +22,7 @@ export function registerHumanTools(server: McpServer, session: GuardedSession): 
 		"ask_user",
 		{
 			description:
-				"Ask the human when the task is blocked, ambiguous, needs a value or confirmation, or requires a handoff. Uses client elicitation when available; otherwise returns a question the agent must relay. An accepted handoff or screen unlock with app returns a fresh observation.",
+				"Ask when blocked, ambiguous, missing a value or confirmation, or needing handoff. Uses client elicitation when available; otherwise returns a question to relay. Accepted handoff or screen unlock with app returns a fresh observation.",
 			inputSchema: askUserSchema,
 			annotations: { readOnlyHint: true, destructiveHint: false },
 		},

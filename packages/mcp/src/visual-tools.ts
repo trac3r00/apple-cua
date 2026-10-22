@@ -26,7 +26,7 @@ export function registerVisualTools(server: McpServer, session: GuardedSession):
 		"analyze_screen",
 		{
 			description:
-				"Read-only visual description of an approved app window using the connected MCP client's image sampling. Pixel regions are visual estimates, never accessibility ids or executable actions. Returns the original observation and token for a separately guarded action.",
+				"Describe an approved app window using client image sampling. Pixel regions are estimates, not accessibility ids or actions. Returns the observation and token for a separately guarded action.",
 			inputSchema: analyzeScreenSchema,
 			annotations: { readOnlyHint: true, destructiveHint: false },
 		},

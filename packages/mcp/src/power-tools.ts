@@ -103,7 +103,7 @@ export function registerPowerTools(
 		"invoke_menu",
 		{
 			description:
-				"Resolve an exact live native application-menu path and invoke it without pixel fallback. Missing, ambiguous, disabled, or unsupported hops fail closed. Requires a one-use observation_token for the target app and window.",
+				"Invoke an exact live native menu path; no pixel fallback. Missing, ambiguous, disabled, or unsupported hops fail closed. Requires the target app/window's one-use observation_token.",
 			inputSchema: invokeMenuSchema,
 			annotations: MUTATION_ANNOTATIONS,
 		},
@@ -127,7 +127,7 @@ export function registerPowerTools(
 		"set_window_frame",
 		{
 			description:
-				"Set the observed top-level window's exact desktop geometry, then independently verify the applied frame through WindowServer within 2 points. Requires a one-use observation_token.",
+				"Set an observed top-level window's desktop geometry and verify through WindowServer within 2 points. Requires a one-use observation_token.",
 			inputSchema: setWindowFrameSchema,
 			annotations: MUTATION_ANNOTATIONS,
 		},
@@ -152,7 +152,7 @@ export function registerPowerTools(
 		"clipboard_read",
 		{
 			description:
-				"Read the system clipboard's available pasteboard types and any plain text, image data, or file URL content. Clipboard content is privacy-sensitive.",
+				"Read available clipboard types and plain text, image, or file URL content. Clipboard data is sensitive.",
 			inputSchema: clipboardReadSchema,
 			annotations: READ_ONLY_ANNOTATIONS,
 		},
@@ -163,7 +163,7 @@ export function registerPowerTools(
 		"clipboard_write",
 		{
 			description:
-				"Overwrite the user's system clipboard with exactly one plain-text value, image from an absolute existing path, or file URL from an absolute existing path. Requires a one-use observation_token and returns fresh target-app state.",
+				"Replace clipboard with one plain-text value, image at an absolute existing path, or file URL at an absolute existing path. Requires a one-use observation_token; returns fresh app state.",
 			inputSchema: clipboardWriteSchema,
 			annotations: MUTATION_ANNOTATIONS,
 		},

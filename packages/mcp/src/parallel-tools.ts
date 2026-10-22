@@ -78,7 +78,7 @@ export function registerParallelTools(
 		"observe_apps",
 		{
 			description:
-				"Read-only: observe several approved apps concurrently in one call. Each app answers as get_app_state would (elements with ids, its own one-use observation_token) under its name in apps[]. Text-only by default (include_screenshot=true adds each window image, indexed in images[]), elements as tab-separated element_rows (element_format=json for objects); diff_only and max_elements apply to every app. One app failing (not running, locked out, not approved) is reported in its entry and does not fail the others.",
+				"Observe approved apps concurrently. apps[] contains each get_app_state answer and token. Text-only by default; include_screenshot adds indexed images. Elements are tab-separated unless element_format=json. diff_only and max_elements apply to all. A failed app is reported without failing others.",
 			inputSchema: observeAppsSchema,
 			annotations: { readOnlyHint: true, destructiveHint: false },
 		},
@@ -107,7 +107,7 @@ export function registerParallelTools(
 		"run_parallel",
 		{
 			description:
-				"Drive several different apps in one call: each batch is a run_steps batch (same steps and expect block) for one app, with that app's own observation_token. Every step of every batch is validated before anything is dispatched. Under background delivery the batches run concurrently (each app has its own input lane); under attended delivery they run one after another (they would share the keyboard and pointer). Answers batches[] with each app's run_steps answer, including its next observation_token. A failing batch is reported in its entry and does not stop the others. pace=\"fast\" applies to every batch, as in run_steps.",
+				"Run a validated step batch per distinct app. Background runs concurrently; attended serializes. Returns each result and next token; failures do not stop others.",
 			inputSchema: runParallelSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true },
 		},

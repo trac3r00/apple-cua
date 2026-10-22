@@ -228,10 +228,10 @@ export function checkScope(root, changed, reviewed) {
 	return problems.length === 0
 		? { status: "PASS", evidence: `${changed.filter(isScopeFile).length} changed files match the reviewed inventory` }
 		: {
-			status: "BLOCKED",
-			evidence: problems.slice(0, 8).join("; "),
-			reason: "implementation changed since scope review",
-		};
+				status: "BLOCKED",
+				evidence: problems.slice(0, 8).join("; "),
+				reason: "implementation changed since scope review",
+			};
 }
 
 /** Run argv with a deadline; the child's process group is killed on timeout or on our own termination. */
@@ -247,7 +247,7 @@ export function run(argv, { cwd = REPO, timeoutMs, env = process.env } = {}) {
 		const kill = () => {
 			try {
 				process.kill(-child.pid, "SIGKILL");
-			} catch { }
+			} catch {}
 		};
 		owned.add(kill);
 		let timedOut = false;

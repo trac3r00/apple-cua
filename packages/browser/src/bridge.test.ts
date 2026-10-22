@@ -91,7 +91,7 @@ describe("BrowserBridge", () => {
 			revision: "r1",
 			steps: [],
 			expect: undefined,
-			limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
 		});
 		expect((await nextJson(socket)).command).toMatchObject({ method: "run" });
 		const rejected = expect(request).rejects.toMatchObject({ code: "disconnected" });
@@ -114,7 +114,7 @@ describe("BrowserBridge", () => {
 			revision: "r1",
 			steps: [],
 			expect: undefined,
-			limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
 		};
 		stopped = true;
 		await expect(bridge.request({ method: "open", url: "https://example.com" })).rejects.toMatchObject({
@@ -124,7 +124,7 @@ describe("BrowserBridge", () => {
 		const observation = bridge.request({
 			method: "observe",
 			tabId: 1,
-			limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
 		});
 		const packet = await nextJson(socket);
 		expect(packet.command).toMatchObject({ method: "observe" });
@@ -146,7 +146,7 @@ describe("BrowserBridge", () => {
 			revision: "r1",
 			steps: [],
 			expect: undefined,
-			limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
 		});
 		const packet = await nextJson(socket);
 		stopped = true;
@@ -168,7 +168,7 @@ describe("BrowserBridge", () => {
 		const request = bridge.request({
 			method: "observe",
 			tabId: 1,
-			limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
 		});
 		const packet = await incoming;
 		const rejected = expect(request).rejects.toMatchObject({ code: "timeout" });
@@ -196,7 +196,7 @@ describe("BrowserBridge", () => {
 				revision: "r1",
 				steps: [{ action: "click", ref: 1 }],
 				expect: undefined,
-				limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+				limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
 			}),
 		);
 		const packet = await incoming;

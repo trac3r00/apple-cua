@@ -235,6 +235,11 @@ export async function installBrowserService(options: ServiceOptions = {}): Promi
 	if (previous.code === 0) {
 		const unloaded = await context.launchctl(["bootout", context.serviceTarget]);
 		if (unloaded.code !== 0) throw new Error(`Could not restart the browser LaunchAgent: ${unloaded.stderr}`);
+		const releaseDeadline = Date.now() + 2000;
+		while (await context.checkPort(connection.port)) {
+			if (Date.now() >= releaseDeadline) break;
+			await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+		}
 	} else if (previous.code !== 113) {
 		throw new Error(`Could not inspect the browser LaunchAgent: ${previous.stderr}`);
 	}

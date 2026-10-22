@@ -100,6 +100,79 @@ describe("BrowserSession", () => {
 		).rejects.toMatchObject({ code: "stale" });
 	});
 
+	it("#given a described control #when finding then running #then one token authorizes the action", async () => {
+		const transport = new MemoryTransport();
+		const session = new BrowserSession(transport);
+		await session.open("https://example.com");
+		transport.response = {
+			url: "https://example.com",
+			title: "Example",
+			revision: "r1",
+			matches: [{ ref: 4, role: "button", name: "Save" }],
+			truncated: false,
+		};
+		const found = await session.find(7, { role: "button", name: "Save" });
+		expect(found).toMatchObject({ matches: [{ ref: 4, role: "button", name: "Save" }] });
+		expect(found.observation_token).toEqual(expect.any(String));
+		transport.response = { observation: observation("r1"), verified: true, completedSteps: 1 };
+		await session.run(7, found.observation_token, [{ action: "click", ref: 4 }], undefined);
+		expect(transport.commands.at(-1)).toMatchObject({ method: "run", revision: "r1" });
+	});
+
+	it("#given a text-heavy page #when reading with links #then returns bounded text and link refs", async () => {
+		const transport = new MemoryTransport();
+		const session = new BrowserSession(transport);
+		await session.open("https://example.com");
+		transport.response = {
+			url: "https://example.com",
+			title: "Example",
+			revision: "r1",
+			text: "A long article",
+			links: [{ ref: 3, name: "Docs" }],
+			truncated: false,
+		};
+		const read = await session.read(7, 4000, true);
+		expect(read).toMatchObject({ text: "A long article", links: [{ ref: 3, name: "Docs" }] });
+		expect(read.observation_token).toEqual(expect.any(String));
+		expect(transport.commands.at(-1)).toMatchObject({ method: "read", maxChars: 4000, includeLinks: true });
+	});
+
+	it("#given a wait for text #when it appears #then returns a matched observation and token", async () => {
+		const commands: BrowserCommand[] = [];
+		const responses: unknown[] = [
+			{ tabId: 7 },
+			{ matched: true, reason: "matched", revision: "r1" },
+			observation("r1"),
+		];
+		const transport: BrowserTransport = {
+			generation: 1,
+			request: async (command) => {
+				commands.push(command);
+				return responses.shift();
+			},
+		};
+		const session = new BrowserSession(transport);
+		await session.open("https://example.com");
+		const waited = await session.wait(7, { text: "Ready", timeoutMs: 500 });
+		expect(waited).toMatchObject({ matched: true, reason: "matched", format: "full" });
+		expect(waited.observation_token).toEqual(expect.any(String));
+		expect(commands.map((command) => command.method)).toEqual(["open", "wait", "observe"]);
+	});
+
+	it("#given a visual page #when screenshotting #then returns the image without consuming a token", async () => {
+		const transport = new MemoryTransport();
+		const session = new BrowserSession(transport);
+		await session.open("https://example.com");
+		transport.response = { data: "image-data", mimeType: "image/jpeg", width: 100, height: 80 };
+		await expect(session.screenshot(7, true)).resolves.toEqual({
+			data: "image-data",
+			mimeType: "image/jpeg",
+			width: 100,
+			height: 80,
+		});
+		expect(transport.commands.at(-1)).toEqual({ method: "screenshot", tabId: 7, fullPage: true });
+	});
+
 	it("#given an extension reconnect #when using old tab ownership #then rejects the generation", async () => {
 		const transport = new MemoryTransport();
 		const session = new BrowserSession(transport);

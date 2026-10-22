@@ -1,5 +1,5 @@
 const DEFAULT_PORT = 47953;
-const MAX_MESSAGE = 256_000;
+const MAX_MESSAGE = 4_000_000;
 const CHECKPOINT_TIMEOUT_MS = 10_000;
 import { pageRuntime } from "./page-runtime.js";
 
@@ -155,17 +155,42 @@ function validLimits(value) {
 		Number.isInteger(value.maxElements) &&
 		value.maxElements >= 1 &&
 		value.maxElements <= 200 &&
-		typeof value.fullPage === "boolean"
+		typeof value.fullPage === "boolean" &&
+		(value.profile === undefined || ["interactive", "content", "all"].includes(value.profile)) &&
+		(value.maxNameChars === undefined ||
+			(Number.isInteger(value.maxNameChars) && value.maxNameChars >= 40 && value.maxNameChars <= 500)) &&
+		(value.query === undefined || (typeof value.query === "string" && value.query.length <= 200))
+	);
+}
+
+function validTargetQuery(value) {
+	return (
+		isRecord(value) &&
+		(value.role === undefined || (typeof value.role === "string" && value.role.length <= 60)) &&
+		(value.name === undefined || (typeof value.name === "string" && value.name.length <= 500)) &&
+		(value.text === undefined || (typeof value.text === "string" && value.text.length <= 500)) &&
+		(value.role !== undefined || value.name !== undefined || value.text !== undefined)
 	);
 }
 
 function validStep(step) {
-	if (!isRecord(step) || !Number.isInteger(step.ref) || step.ref <= 0) {
+	if (!isRecord(step)) return false;
+	if (step.action === "scroll") return Number.isFinite(step.deltaY) && Math.abs(step.deltaY) <= 5000;
+	if (step.action === "wait")
 		return (
-			isRecord(step) && step.action === "scroll" && Number.isFinite(step.deltaY) && Math.abs(step.deltaY) <= 5000
+			(step.text === undefined ||
+				(typeof step.text === "string" && step.text.length >= 1 && step.text.length <= 500)) &&
+			(step.selector === undefined ||
+				(typeof step.selector === "string" && step.selector.length >= 1 && step.selector.length <= 500)) &&
+			(step.text !== undefined || step.selector !== undefined) &&
+			Number.isInteger(step.timeoutMs) &&
+			step.timeoutMs >= 1 &&
+			step.timeoutMs <= 10_000
 		);
-	}
-	if (step.action === "click") return Object.keys(step).length === 2;
+	const hasRef = Number.isInteger(step.ref) && step.ref > 0;
+	const hasTarget = validTargetQuery(step.target);
+	if (!hasRef && !hasTarget) return false;
+	if (step.action === "click") return true;
 	if (step.action === "fill") return typeof step.text === "string" && step.text.length <= 10_000;
 	return step.action === "press" && ["Enter", "Tab", "Escape", "ArrowDown", "ArrowUp"].includes(step.key);
 }
@@ -182,6 +207,37 @@ function validCommand(command) {
 			(command.command === "close" || validLimits(command.limits))
 		);
 	}
+	if (command.command === "find")
+		return (
+			Number.isInteger(command.tabId) &&
+			command.tabId > 0 &&
+			validTargetQuery(command.query) &&
+			Number.isInteger(command.limit) &&
+			command.limit >= 1 &&
+			command.limit <= 50
+		);
+	if (command.command === "read")
+		return (
+			Number.isInteger(command.tabId) &&
+			command.tabId > 0 &&
+			Number.isInteger(command.maxChars) &&
+			command.maxChars >= 200 &&
+			command.maxChars <= 40_000 &&
+			typeof command.includeLinks === "boolean"
+		);
+	if (command.command === "wait")
+		return (
+			Number.isInteger(command.tabId) &&
+			command.tabId > 0 &&
+			(command.text === undefined || (typeof command.text === "string" && command.text.length <= 500)) &&
+			(command.selector === undefined || (typeof command.selector === "string" && command.selector.length <= 500)) &&
+			(command.text !== undefined || command.selector !== undefined) &&
+			Number.isInteger(command.timeoutMs) &&
+			command.timeoutMs >= 1 &&
+			command.timeoutMs <= 10_000
+		);
+	if (command.command === "screenshot")
+		return Number.isInteger(command.tabId) && command.tabId > 0 && typeof command.fullPage === "boolean";
 	return (
 		command.command === "run" &&
 		Number.isInteger(command.tabId) &&
@@ -190,7 +246,7 @@ function validCommand(command) {
 		command.revision.length <= 256 &&
 		Array.isArray(command.steps) &&
 		command.steps.length >= 1 &&
-		command.steps.length <= 12 &&
+		command.steps.length <= 20 &&
 		command.steps.every(validStep) &&
 		validLimits(command.limits) &&
 		(command.expect === undefined ||
@@ -232,8 +288,8 @@ async function dispatch(command) {
 		stopLocally();
 		return null;
 	}
-	if (!ready || (stopped && command.command !== "observe" && command.command !== "close"))
-		throw new Error("Actions stopped");
+	const readOnly = ["observe", "close", "find", "read", "wait", "screenshot"].includes(command.command);
+	if (!ready || (stopped && !readOnly)) throw new Error("Actions stopped");
 	if (command.command === "open") return openTab(command.url);
 	if (command.command === "close") {
 		const state = tabsOwned.get(command.tabId);
@@ -257,8 +313,29 @@ async function dispatch(command) {
 	}
 	return enqueue(command.tabId, async () => {
 		const state = requireOwned(command.tabId);
-		if (command.command === "observe") return observe(state, command.limits);
-		return enqueue(`window:${state.windowId}`, () => runSteps(state, command));
+		switch (command.command) {
+			case "observe":
+				return observe(state, command.limits);
+			case "find":
+				return evaluate(state, "find", { query: command.query, limit: command.limit });
+			case "read":
+				return evaluate(state, "read", {
+					maxChars: command.maxChars,
+					includeLinks: command.includeLinks,
+				});
+			case "wait":
+				return evaluate(state, "wait", {
+					text: command.text,
+					selector: command.selector,
+					timeoutMs: command.timeoutMs,
+				});
+			case "screenshot":
+				return screenshot(state, command.fullPage);
+			case "run":
+				return runSteps(state, command);
+			default:
+				throw new Error("Unsupported command");
+		}
 	});
 }
 
@@ -417,6 +494,32 @@ function checkpoint(commandId, step) {
 	});
 }
 
+function pageFailure(result, fallback) {
+	if (isRecord(result) && typeof result.error === "string") {
+		if (result.error === "stale") return new Error("Stale observation revision");
+		return new Error(result.error);
+	}
+	return new Error(fallback);
+}
+
+async function screenshot(state, fullPage) {
+	const metrics = await chrome.debugger.sendCommand({ tabId: state.tabId }, "Page.getLayoutMetrics");
+	const viewport = metrics?.cssVisualViewport ?? metrics?.cssLayoutViewport;
+	const content = metrics?.cssContentSize;
+	const width = Math.max(1, Math.min(Math.ceil(content?.width ?? viewport?.clientWidth ?? 1), 2000));
+	const height = Math.max(1, Math.min(Math.ceil(content?.height ?? viewport?.clientHeight ?? 1), 8000));
+	const clip = fullPage ? { x: 0, y: 0, width, height, scale: 1 } : undefined;
+	const image = await chrome.debugger.sendCommand({ tabId: state.tabId }, "Page.captureScreenshot", {
+		format: "jpeg",
+		quality: 60,
+		fromSurface: true,
+		...(clip === undefined ? {} : { captureBeyondViewport: true, clip }),
+	});
+	if (!isRecord(image) || typeof image.data !== "string" || image.data.length === 0)
+		throw new Error("Screenshot capture returned no image");
+	return { data: image.data, mimeType: "image/jpeg", width, height };
+}
+
 async function runSteps(state, command) {
 	const tab = await chrome.tabs.get(state.tabId);
 	if (tab.windowId !== state.windowId || state.windowId !== agentWindowId)
@@ -424,74 +527,90 @@ async function runSteps(state, command) {
 	const window = await chrome.windows.get(state.windowId);
 	if (window.focused || window.state !== "minimized")
 		throw new Error("Background agent window was revealed. Stop and return it to the background before continuing.");
-	// CDP emulates renderer focus. Selecting a tab can restore a native minimized
-	// window, so agent pages remain inactive and no window focus update occurs.
-	let observation = await observe(state, command.limits);
-	if (observation.revision !== command.revision) throw new Error("Stale observation revision");
+	const initialRevision = await evaluate(state, "revision");
+	if (initialRevision !== command.revision) throw new Error("Stale observation revision");
 	const contextGeneration = state.contextGeneration;
 	let completedSteps = 0;
 	for (let index = 0; index < command.steps.length; index++) {
 		if (stopped || state.cancelled) throw new Error("Actions stopped");
-		if (!(await checkpoint(command.id, index))) throw new Error("Shared stop switch refused remaining steps");
-		if (stopped || state.cancelled) throw new Error("Actions stopped");
 		const step = command.steps[index];
+		if (step.action === "wait") {
+			const waited = await evaluate(state, "wait", {
+				text: step.text,
+				selector: step.selector,
+				timeoutMs: step.timeoutMs,
+			});
+			if (!isRecord(waited) || waited.matched !== true) throw new Error("Wait timed out");
+			completedSteps++;
+			continue;
+		}
 		if (step.action === "scroll") {
 			const prepared = await evaluate(state, "prepareScroll", { deltaY: step.deltaY });
 			if (prepared?.ok !== true) throw new Error("Scroll preparation failed");
 			if (prepared.needed) {
-				if (!(await checkpoint(command.id, index)) || stopped || state.cancelled)
-					throw new Error("Actions stopped");
+				if (stopped || state.cancelled) throw new Error("Actions stopped");
 				await trustedScroll(state, step.deltaY);
 			}
 			const scrolled = await evaluate(state, "scrollComplete");
 			if (scrolled?.ok !== true) throw new Error("Document scroll was not verified");
 		} else {
-			const target = await evaluate(state, "target", { revision: observation.revision, ref: step.ref });
-			if (!isRecord(target) || !Number.isFinite(target.x) || !Number.isFinite(target.y)) {
-				throw new Error("Stale or missing element reference");
+			let ref = step.ref;
+			if (ref === undefined) {
+				const resolved = await evaluate(state, "resolveTarget", { query: step.target });
+				if (!isRecord(resolved) || resolved.ok !== true || !Number.isInteger(resolved.ref))
+					throw new Error("Target query did not resolve to a visible control");
+				ref = resolved.ref;
 			}
-			if (!(await checkpoint(command.id, index)) || stopped || state.cancelled) throw new Error("Actions stopped");
-			if (step.action === "click") {
-				try {
-					await mouse(state, "mousePressed", target.x, target.y);
-				} finally {
-					await mouse(state, "mouseReleased", target.x, target.y);
-				}
-			} else if (step.action === "fill") {
-				if (target.editable !== true || target.password === true)
-					throw new Error("Target is not a permitted editable field");
-				const focus = await evaluate(state, "focus", {
-					revision: observation.revision,
-					ref: step.ref,
-					selectAll: true,
+			if (step.action === "fill") {
+				const prepared = await evaluate(state, "prepareFill", {
+					revision: command.revision,
+					ref,
 					text: step.text,
+					allowStaleRevision: true,
 				});
-				if (focus?.ok !== true) throw new Error("Focus refused");
-				if (!(await checkpoint(command.id, index)) || stopped || state.cancelled)
-					throw new Error("Actions stopped");
+				if (prepared?.ok !== true) throw pageFailure(prepared, "Fill target is not a permitted editable field");
+				if (stopped || state.cancelled) throw new Error("Actions stopped");
 				if (step.text === "") await pressKey(state, "Backspace");
 				else await chrome.debugger.sendCommand({ tabId: state.tabId }, "Input.insertText", { text: step.text });
 				const filled = await evaluate(state, "fillComplete");
 				if (filled?.ok !== true) throw new Error("Filled value did not match the requested text");
 			} else {
-				const focus = await evaluate(state, "focus", { revision: observation.revision, ref: step.ref });
-				if (focus?.ok !== true) throw new Error("Focus refused");
-				if (!(await checkpoint(command.id, index)) || stopped || state.cancelled)
-					throw new Error("Actions stopped");
-				await pressKey(state, step.key);
+				const target = await evaluate(state, "target", {
+					revision: command.revision,
+					ref,
+					allowStaleRevision: true,
+				});
+				if (isRecord(target) && target.error !== undefined)
+					throw pageFailure(target, "Stale or missing element reference");
+				if (!isRecord(target) || !Number.isFinite(target.x) || !Number.isFinite(target.y))
+					throw new Error("Stale or missing element reference");
+				if (stopped || state.cancelled) throw new Error("Actions stopped");
+				if (step.action === "click") {
+					try {
+						await mouse(state, "mousePressed", target.x, target.y);
+					} finally {
+						await mouse(state, "mouseReleased", target.x, target.y);
+					}
+				} else {
+					const focus = await evaluate(state, "focus", {
+						revision: command.revision,
+						ref,
+						allowStaleRevision: true,
+					});
+					if (focus?.ok !== true) throw pageFailure(focus, "Focus refused");
+					if (stopped || state.cancelled) throw new Error("Actions stopped");
+					await pressKey(state, step.key);
+				}
 			}
 		}
 		completedSteps++;
-		if (index < command.steps.length - 1) {
-			observation = await observe(state, command.limits);
-			if (state.contextGeneration !== contextGeneration)
-				throw new Error("Document changed during batch; observe before continuing");
-		}
+		if (state.contextId === undefined || state.frameId === undefined || state.contextGeneration !== contextGeneration)
+			throw new Error("Document changed during batch; observe before continuing");
 	}
 	const verification = command.expect
 		? await evaluate(state, "verify", { text: command.expect.text, timeoutMs: command.expect.timeoutMs })
 		: null;
-	observation = await observe(state, command.limits);
+	const observation = await observe(state, command.limits);
 	return { observation, verified: verification === null ? null : verification?.ok === true, completedSteps };
 }
 

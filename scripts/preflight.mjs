@@ -228,10 +228,10 @@ export function checkScope(root, changed, reviewed) {
 	return problems.length === 0
 		? { status: "PASS", evidence: `${changed.filter(isScopeFile).length} changed files match the reviewed inventory` }
 		: {
-				status: "BLOCKED",
-				evidence: problems.slice(0, 8).join("; "),
-				reason: "implementation changed since scope review",
-			};
+			status: "BLOCKED",
+			evidence: problems.slice(0, 8).join("; "),
+			reason: "implementation changed since scope review",
+		};
 }
 
 /** Run argv with a deadline; the child's process group is killed on timeout or on our own termination. */
@@ -247,7 +247,7 @@ export function run(argv, { cwd = REPO, timeoutMs, env = process.env } = {}) {
 		const kill = () => {
 			try {
 				process.kill(-child.pid, "SIGKILL");
-			} catch {}
+			} catch { }
 		};
 		owned.add(kill);
 		let timedOut = false;
@@ -409,7 +409,11 @@ async function checkNative(timeoutMs) {
 async function evaluate(check, options, inventory) {
 	if (check.builtin === "tools") return checkTools();
 	if (check.builtin === "sources") return checkSources(REPO);
-	if (check.builtin === "scope") return checkScope(REPO, inventory, REVIEWED);
+	if (check.builtin === "scope") {
+		return inventory === undefined
+			? { status: "BLOCKED", evidence: `base ${BASE}`, reason: "changed files unknown without the release base" }
+			: checkScope(REPO, inventory, REVIEWED);
+	}
 	if (check.builtin === "native") {
 		return options.native
 			? checkNative(check.timeoutMs)
@@ -447,17 +451,30 @@ async function main() {
 		process.stdout.write("SUMMARY plan only: readiness NOT CHECKED\n");
 		process.exit(2);
 	}
-	const start = await candidateDigest();
-	const inventory = await changedFiles();
-	process.stdout.write(`CANDIDATE head=${start.head} digest=${start.digest} base=${BASE}\n`);
 	const results = [];
+	let start;
+	let inventory;
+	try {
+		start = await candidateDigest();
+		inventory = await changedFiles();
+		process.stdout.write(`CANDIDATE head=${start.head} digest=${start.digest} base=${BASE}\n`);
+	} catch (error) {
+		// A shallow clone or a missing base cannot identify the candidate: block, never crash or pass.
+		const result = {
+			status: "BLOCKED",
+			evidence: error instanceof Error ? error.message.split("\n")[0] : String(error),
+			reason: `release base ${BASE} not in local history; fetch full history to identify the candidate`,
+		};
+		print("INT-CANDIDATE", result);
+		results.push(result);
+	}
 	for (const check of selected) {
 		const result = await evaluate(check, options, inventory);
 		print(check.id, result);
 		results.push(result);
 	}
-	const end = await candidateDigest();
-	if (end.digest !== start.digest) {
+	const end = start === undefined ? undefined : await candidateDigest();
+	if (start !== undefined && end !== undefined && end.digest !== start.digest) {
 		const result = {
 			status: "FAIL",
 			evidence: `${start.digest} -> ${end.digest}`,

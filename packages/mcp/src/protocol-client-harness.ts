@@ -49,6 +49,8 @@ export async function createHarness(
 		readonly phoneSource?: PhoneToolSource;
 		/** Toolset profile and iPhone opt-in; omitted fields come from the environment. */
 		readonly serverOptions?: McpServerOptions;
+		/** The clientInfo the test client sends in initialize. */
+		readonly clientInfo?: { readonly name: string; readonly version: string };
 	},
 ) {
 	const server = createMcpServer(
@@ -61,7 +63,7 @@ export async function createHarness(
 		clientOptions?.serverOptions,
 	);
 	const client = new Client(
-		{ name: "context-first-test", version: "0.1.0" },
+		clientOptions?.clientInfo ?? { name: "context-first-test", version: "0.1.0" },
 		clientOptions?.capabilities === undefined ? {} : { capabilities: clientOptions.capabilities },
 	);
 	if (clientOptions?.onElicit !== undefined) {

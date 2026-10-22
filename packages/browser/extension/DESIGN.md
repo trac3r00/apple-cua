@@ -39,6 +39,9 @@ Keep the stop control always visible. No color-only states, no hidden labels,
 no password display, no motion or loading animation. Native controls retain
 focus, hover and pressed states. The only JavaScript manages connection state.
 
+The toolbar popup exposes take-over, give-back and stop controls and displays
+agent handoff requests without opening or focusing an agent window.
+
 ## Verification
 
 Capture collapsed and expanded manual settings at 390, 1440 and 1920 pixels in

@@ -27,13 +27,31 @@ Chromium-family browser, say so and stop; do not install a different one silentl
 - Agent pages live in one **minimized background Chromium window**. Keep it that way.
 - Never reveal, restore, focus, activate, or move that window. Never move a page into a user
   window. Never switch the user's Space or select one of their tabs.
-- If the user reveals the window or moves an agent page, input pauses. Stop, report what
-  happened, and ask the user to return it and explicitly resume. Never resume it yourself.
+- If the user reveals the window or moves an agent page, input pauses (that counts as taking
+  over). Stop, report what happened, and wait for them to give it back. Never resume it yourself.
 - The daemon checks apple-cua's shared stop gate before input and between steps. During a batch
   the bridge polls the gate and pushes a stop; each step checks the local flag before dispatch.
   Reads and owned-page cleanup remain available while actions are stopped.
 - A page that opens a native popup can still activate the browser. Report that limitation; do
   not work around it with a visible window.
+
+## Take over and give back
+
+The person owns the agent's browser whenever they want it. The extension's toolbar popup (and
+options page) offers **Take over** (pauses the agent and shows them the agent window), **Give
+back** (re-minimizes it and returns control) and **Stop**.
+
+- `browser_status` reports `control` (`agent` or `human`), `control_reason` (`taken_over`,
+  `window_revealed`, `stopped`) and `handoff_requested`.
+- While `control` is `human`, open/run fail with `human_control` and send nothing; reads and
+  close still work. Stop acting and do not work around it.
+- When the person must do something (login, CAPTCHA, a choice), call `browser_handoff` with a
+  short reason. It only shows a badge and the reason in the popup; it never opens, reveals or
+  focuses a window.
+- Then call `browser_wait_control` (timeout up to 120000 ms). It returns `control: agent` the
+  moment they give it back, or `control: human` at timeout; tell the person you are waiting
+  rather than polling in a loop.
+- No tool can give control back to the agent. After give-back, observe again before acting.
 
 ## Decision table
 
@@ -44,6 +62,7 @@ Chromium-family browser, say so and stop; do not install a different one silentl
 | Need structure or several candidate controls | `browser_observe` with the default `interactive` profile (controls and short text); use `all` for full-length names |
 | Need pixel context (canvas, layout, image-heavy page) | `browser_screenshot` |
 | Wait for a result instead of sleeping | `browser_wait` |
+| The person must log in, solve a CAPTCHA, or choose | `browser_handoff`, then `browser_wait_control` |
 | Fill and submit a known form | one `browser_run` with refs or target queries and `expect` |
 | Several independent pages | one named space per page or subagent |
 | Native dialog, canvas, cross-origin frame, or iPhone | fresh native `apple-cua` observation |

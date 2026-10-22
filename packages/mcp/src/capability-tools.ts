@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { HostCapabilities, InputDelivery, StopStatus, StopStatusSource } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
+import { type HostInfo, detectHost, spawnGuidance } from "./host-detection.js";
 import { SERVER_INFO } from "./server-info.js";
 import { toolNamesFor } from "./tool-names.js";
 import { textResult } from "./tool-result.js";
@@ -21,6 +22,8 @@ export interface CapabilitySources {
 	readonly toolset?: ToolsetProfile | undefined;
 	/** Names of the tools this server registered; defaults to the full desktop set. */
 	readonly toolNames?: readonly string[] | undefined;
+	/** Which agent harness is connected, from the client's initialize clientInfo or its environment. */
+	readonly host?: (() => HostInfo) | undefined;
 }
 
 type SessionMode = "console" | "remote" | "locked" | "unknown";
@@ -77,6 +80,7 @@ export function capabilityReport(sources: CapabilitySources): Record<string, unk
 	const stop = sources.stop?.status();
 	const delivery = sources.delivery ?? "attended";
 	const toolNames = sources.toolNames ?? toolNamesFor("full", false);
+	const agentHost = sources.host?.() ?? detectHost(undefined, process.env);
 	return {
 		server: {
 			name: SERVER_INFO.name,
@@ -84,6 +88,7 @@ export function capabilityReport(sources: CapabilitySources): Record<string, unk
 			toolset: sources.toolset ?? "full",
 			tools: toolNames.length,
 		},
+		host: { ...agentHost, workers: spawnGuidance(agentHost.name, delivery) },
 		platform: process.platform,
 		backend: "macos-native",
 		permissions: host.permissions,

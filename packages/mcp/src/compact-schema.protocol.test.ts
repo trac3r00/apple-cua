@@ -4,8 +4,8 @@ import type { Effect } from "./protocol-test-harness.js";
 import { compactStepSchema, runStepSchema } from "./tool-schemas.js";
 
 /** Budgets for the serialized tools/list answer, so tool-list bloat cannot creep back. */
-const LEAN_BUDGET_BYTES = 12_000;
-const FULL_BUDGET_BYTES = 40_000;
+const LEAN_BUDGET_BYTES = 10_500;
+const FULL_BUDGET_BYTES = 32_000;
 
 let closeHarness: (() => Promise<void>) | undefined;
 
@@ -75,8 +75,10 @@ describe("compact step schema #given the published run_steps and run_parallel sc
 		const stepsSchema = tools.get("run_steps")?.inputSchema.properties?.["steps"];
 		expect(JSON.stringify(stepsSchema)).not.toContain("oneOf");
 		expect(JSON.stringify(stepsSchema)).not.toContain('anyOf":[{"type":"object"');
-		const batches = tools.get("run_parallel")?.inputSchema.properties?.["batches"];
-		expect(JSON.stringify(batches).split('"click_count":{').length - 1).toBe(1);
+		// The step shape is published once, on run_steps: run_parallel and run_worker refer to it.
+		expect(JSON.stringify(stepsSchema).split('"click_count":{').length - 1).toBe(1);
+		expect(JSON.stringify(tools.get("run_parallel")?.inputSchema)).not.toContain('"click_count"');
+		expect(JSON.stringify(tools.get("run_worker")?.inputSchema)).not.toContain('"click_count"');
 	});
 });
 

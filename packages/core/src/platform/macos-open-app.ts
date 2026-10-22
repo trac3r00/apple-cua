@@ -1,12 +1,18 @@
 import { spawn } from "node:child_process";
 import type { AppInfo } from "../accessibility/types.js";
 import { findMatchingApp } from "../computer/actions.js";
+import { activateApplication } from "./macos-ffi/workspace.js";
 
 /** Launches or activates an application by name or bundle id. */
 export interface AppOpenLauncher {
 	launch(target: string): Promise<void>;
 	/** True when launching leaves the app in the background instead of bringing it forward. */
 	readonly background?: boolean;
+	/**
+	 * Bring the app the person had in front back, after a background launch took the foreground anyway (some apps
+	 * activate themselves on launch despite open -g). Answers whether the app is in front again.
+	 */
+	restoreFrontmost?(pid: number): boolean;
 }
 
 export interface AppLister {
@@ -29,6 +35,8 @@ export interface OpenApplicationResult {
 	readonly launched: boolean;
 	/** True when an already running app was brought forward instead of launched. */
 	readonly activated: boolean;
+	/** True when the opened app took the foreground during a background open and the person's app was put back. */
+	readonly frontmostRestored?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MILLISECONDS = 10_000;
@@ -43,10 +51,13 @@ export function openArguments(target: string, background = true): readonly strin
 	return [...(background ? ["-g"] : []), ...(BUNDLE_ID_SHAPE.test(target) ? ["-b", target] : ["-a", target])];
 }
 
-export function spawnOpenLauncher(options: { readonly background?: boolean } = {}): AppOpenLauncher {
+export function spawnOpenLauncher(
+	options: { readonly background?: boolean; readonly restoreFrontmost?: (pid: number) => boolean } = {},
+): AppOpenLauncher {
 	const background = options.background !== false;
 	return {
 		background,
+		...(background ? { restoreFrontmost: options.restoreFrontmost ?? activateApplication } : {}),
 		async launch(target: string): Promise<void> {
 			const args = [...openArguments(target, background)];
 			await new Promise<void>((resolve, reject) => {
@@ -89,27 +100,45 @@ export async function openApplication(
 	const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MILLISECONDS;
 	const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MILLISECONDS;
 	const listApps = lister.listAppIdentities?.bind(lister) ?? lister.listApps.bind(lister);
-	const running = findMatchingApp(await listApps(), name);
+	const before = await listApps();
+	const running = findMatchingApp(before, name);
+	const frontBefore = before.find((app) => app.isFrontmost === true)?.pid;
+	// Background opens never leave the opened app in front of the person: if it took the foreground anyway, the app
+	// that was in front before is brought back, once, as soon as the theft is seen.
+	const restoreIfStolen = async (openedPid: number): Promise<boolean | undefined> => {
+		if (launcher.background !== true || launcher.restoreFrontmost === undefined || frontBefore === undefined) {
+			return undefined;
+		}
+		if (frontBefore === openedPid) {
+			return undefined;
+		}
+		const frontNow = (await listApps()).find((app) => app.isFrontmost === true)?.pid;
+		return frontNow === openedPid ? launcher.restoreFrontmost(frontBefore) : undefined;
+	};
 	await launcher.launch(running?.bundleId ?? name);
 	if (running !== undefined) {
+		const restored = await restoreIfStolen(running.pid);
 		return {
 			name: running.name,
 			bundleId: running.bundleId,
 			pid: running.pid,
 			launched: false,
 			activated: launcher.background !== true,
+			...(restored === undefined ? {} : { frontmostRestored: restored }),
 		};
 	}
 	const deadline = Date.now() + timeoutMs;
 	while (true) {
 		const appeared = findMatchingApp(await listApps(), name);
 		if (appeared !== undefined) {
+			const restored = await restoreIfStolen(appeared.pid);
 			return {
 				name: appeared.name,
 				bundleId: appeared.bundleId,
 				pid: appeared.pid,
 				launched: true,
 				activated: false,
+				...(restored === undefined ? {} : { frontmostRestored: restored }),
 			};
 		}
 		if (Date.now() >= deadline) {

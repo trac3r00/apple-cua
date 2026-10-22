@@ -48,15 +48,14 @@ const runScriptSchema = z.object({
 	include_screenshot: z.boolean().optional(),
 });
 
-const RUN_SCRIPT_DESCRIPTION = `Run a trusted async JavaScript body with token, approval, preflight and outcome guards. No persistent state or require/process/import; NOT a security sandbox.
-const app=apple.app("Finder",{window:"title or observed id"}); await apple.apps(); await apple.windows("App"). Window titles must match uniquely.
-app.observe({diffOnly?,maxElements?,includeScreenshot?,includeMenuBar?,subtreeOf?,visibleOnly?,elementFormat?}); app.find(query).
-Targets: observed id or unique query {role,label,label_contains,value_contains,text,index}. IDs/coordinates need prior observe/find; queries and keyboard/menu actions observe for themselves.
-app.click(target,{clickCount?,mouseButton?,modifiers?}); app.setValue(target,value); app.type(text); app.press(keys); app.selectText(target,text,{prefix?,suffix?,selection?}); app.secondaryAction(target,action); app.menu(path); app.scroll(target,direction,pages); app.drag(from,to,{durationMs?,modifiers?}). Scroll modifiers are refused.
-app.waitFor(target|{window_title},{gone?,timeoutMs?}); app.verify(checks,{windowTitle?,timeoutMs?}); app.step(run_steps_step); app.batch(steps,{pace?,expect?}); app.chain(steps). apple.steps.* use app-method arguments. chain is fast; batch verifies intermediate targets by default.
-app.reveal(query,findOptions) only scrolls. find options: scrollWithin,maxPages,vision,direction. OCR fallback needs Screen Recording and can locate clicks, not AX value writes.
-const dock=apple.dock(); await dock.observe(); dock.click/showMenu/cancel(target). Dock actions require explicit approval and attended console delivery.
-Refusals throw catchable ScriptActionError {kind,refused,payload}. read_only forbids mutations. timeout_ms/cancellation stop further input. Different apps overlap only in background; attended actions serialize. Answers {ok,value,log,actions}; log(...values), sleep(ms), JSON, Math, Date are available. Images require top-level include_screenshot plus the observation request.`;
+const RUN_SCRIPT_DESCRIPTION = `Run trusted async JavaScript with guarded actions; no persistent state or require/process/import (not a security sandbox).
+const app=apple.app("Finder",{window:"title or id"}); await apple.apps(); await apple.windows("App"). Window title must match uniquely.
+app.observe(options); app.find(query); app.click(target,options); app.setValue(target,value); app.type(text); app.press(keys); app.selectText(target,text,options); app.secondaryAction(target,action); app.menu(path); app.scroll(target,direction,pages); app.drag(from,to,options).
+Targets are observed ids or unique queries {role,label,label_contains,value_contains,text,index}. IDs/coordinates need observe/find first; queries and keyboard/menu actions observe themselves. Scroll modifiers are refused.
+app.waitFor(target|{window_title},options); app.verify(checks,options); app.step(step); app.batch(steps,options); app.chain(steps) (fast; batch verifies intermediate targets by default); app.reveal(query,findOptions) only scrolls.
+Find options: scrollWithin,maxPages,vision,direction. OCR needs Screen Recording and finds click targets, not AX values.
+const dock=apple.dock(); await dock.observe(); dock.click/showMenu/cancel(target). Dock actions need explicit approval and attended delivery.
+Refusals throw ScriptActionError {kind,refused,payload}; read_only forbids mutations. timeout_ms/cancellation stop input. Apps overlap only in background; attended actions serialize. Returns {ok,value,log,actions}; log(...), sleep(ms), JSON, Math, Date are available. Images need top-level and observation include_screenshot.`;
 
 class ScriptActionError extends Error {
 	readonly kind: string;

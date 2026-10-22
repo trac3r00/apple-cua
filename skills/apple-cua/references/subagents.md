@@ -38,13 +38,20 @@ value or visible result, not a claim that the action was dispatched.
 
 ### Host examples
 
-- OmO: call `manage_workers`, then spawn a `task`/`agent` child with the prompt above; join
-  the children, verify, then release.
-- Claude Code: call `manage_workers`, then spawn one `Task` per assignment with the prompt;
-  collect results, verify, then release.
-- Codex: call `manage_workers`, then use its subagent/worker facility with the prompt; keep one
-  MCP session.
-- Hermes/OpenClaw: use the host's delegation channel with the same prompt and worker identity.
+`get_capabilities` reports `host` (the connected harness, from the client's initialize
+`clientInfo` or its environment) and `host.workers`; every `manage_workers` assign answer repeats
+it as `spawn`. `concurrent: true` means background delivery lets workers on distinct apps act at
+the same time; `false` (attended) serializes their input, so extra workers only add overhead.
+Start every worker in one round so they overlap. Worker refreshes omit screenshots unless
+`include_screenshot: true`, which keeps rounds fast and cheap.
+
+| `host.name` | How to start one worker per assignment |
+|---|---|
+| `omo` | One `task` call with a `tasks` batch and `run_in_background: true`, one item per worker; join, verify, then release. |
+| `claude-code` | One `Task` (Agent) subagent per assignment, all launched in the same message; collect, verify, then release. |
+| `codex` | Its subagent/worker facility when the build has one, keeping one MCP session; otherwise one `run_parallel` call per round. |
+| `hermes`, `openclaw` | The host's delegation channel with the same prompt and worker identity. |
+| `pi`, `gemini`, `cursor`, `unknown` | The host's own spawn tool if it has one; otherwise one `run_parallel` call per round. |
 
 If the host cannot spawn subagents, keep the coordinator as the only actor and use
 `run_parallel` for independent apps.

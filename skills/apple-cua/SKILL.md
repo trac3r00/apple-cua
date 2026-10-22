@@ -296,6 +296,10 @@ With the full toolset, one main agent may use `manage_workers` to assign
 non-overlapping app tasks, then spawn those workers through its own host runtime.
 Each worker receives its `worker_id` and assignment `observation_token`, acts
 only through `run_worker`, and returns an outcome for the main agent to verify.
+The assign answer's `spawn` (also `get_capabilities` `host.workers`) names the
+connected harness and its spawn mechanism; launch every worker in one round. See
+[host examples](references/subagents.md#host-examples).
+Worker observations omit screenshots unless `include_screenshot: true`.
 The MCP server does not contain an LLM scheduler or spawn agents. Background
 delivery remains invisible. Attended cursor identities are isolated visual
 indicators, not independent operating-system mice; release workers only after
@@ -421,6 +425,12 @@ access for calls; use the configured Mac Phone/FaceTime service for those.
 - [OpenClaw/Hermes configuration](references/harnesses.md)
 - [Troubleshooting](references/troubleshooting.md)
 - [Architecture and boundaries](references/architecture.md)
+
+The stdio server supervises itself: a crash, a rebuilt or updated server, or a
+newly granted permission restarts it behind the same connection and sends
+`notifications/tools/list_changed`, so no session restart is needed. A call that was
+running during a crash fails with "outcome is unknown": observe again, never replay it.
+Tokens from before a restart are invalid. `APPLE_CUA_SUPERVISOR=off` serves directly.
 
 Screen Recording, Accessibility and, where needed, Automation/Apple Events permissions
 must be granted to the actual process chain launching the server. Do not assume another

@@ -128,6 +128,11 @@ export type ObservationLimits = z.infer<typeof limitsSchema>;
 export type BrowserExpectation = z.infer<typeof expectSchema>;
 export type TargetQuery = z.infer<typeof targetQuerySchema>;
 
+export interface HandoffRequest {
+	readonly reason: string;
+	readonly requestedAt: string;
+}
+
 export interface RunCommand {
 	readonly method: "run";
 	readonly tabId: number;
@@ -162,6 +167,7 @@ export type BrowserCommand =
 	| { readonly method: "screenshot"; readonly tabId: number; readonly fullPage: boolean }
 	| RunCommand
 	| { readonly method: "close"; readonly tabId: number }
+	| { readonly method: "handoff"; readonly reason: string }
 	| { readonly method: "stop" };
 
 export const replySchema = z.discriminatedUnion("ok", [
@@ -173,6 +179,7 @@ export type BrowserErrorCode =
 	| "disconnected"
 	| "timeout"
 	| "stopped"
+	| "human_control"
 	| "stale"
 	| "extension"
 	| "busy"

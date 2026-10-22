@@ -8,15 +8,17 @@ describe("manual browser connection options", () => {
 		async (token) => {
 			const listeners = new Map<string, () => void>();
 			const elements = new Map(
-				["#settings", "#port", "#token", "#status", "#stop", "#connect-local"].map((selector) => [
-					selector,
-					{
-						value: selector === "#port" ? "47953" : token,
-						dataset: {},
-						addEventListener: (event: string, listener: () => void) =>
-							listeners.set(`${selector}:${event}`, listener),
-					},
-				]),
+				["#settings", "#port", "#token", "#status", "#stop", "#take-over", "#give-back", "#connect-local"].map(
+					(selector) => [
+						selector,
+						{
+							value: selector === "#port" ? "47953" : token,
+							dataset: {},
+							addEventListener: (event: string, listener: () => void) =>
+								listeners.set(`${selector}:${event}`, listener),
+						},
+					],
+				),
 			);
 			const save = vi.fn();
 			const sendMessage = vi.fn();

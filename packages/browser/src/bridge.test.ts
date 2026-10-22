@@ -78,6 +78,201 @@ describe("BrowserBridge", () => {
 		await expect(request).resolves.toEqual({ tabId: 1 });
 	});
 
+	it("#given human control #when opening and running #then rejects input but permits observation", async () => {
+		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		await nextJson(socket);
+		const changed = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "human", reason: "taken_over" }));
+		await changed;
+		expect(bridge.control).toBe("human");
+		expect(bridge.controlReason).toBe("taken_over");
+		expect(bridge.paused).toBe(true);
+		await expect(bridge.request({ method: "open", url: "https://example.com" })).rejects.toMatchObject({
+			code: "human_control",
+			message:
+				"The person has taken over the browser. Call browser_wait_control or ask them; never resume it yourself.",
+		});
+		await expect(
+			bridge.request({
+				method: "run",
+				tabId: 1,
+				revision: "r1",
+				steps: [],
+				expect: undefined,
+				limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
+			}),
+		).rejects.toMatchObject({ code: "human_control" });
+		const observed = bridge.request({
+			method: "observe",
+			tabId: 1,
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
+		});
+		const packet = await nextJson(socket);
+		expect(packet.command).toMatchObject({ method: "observe" });
+		const returned = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "agent" }));
+		await returned;
+		expect(bridge.control).toBe("agent");
+		socket.send(JSON.stringify({ id: packet.id, ok: true, value: {} }));
+		await expect(observed).resolves.toEqual({});
+	});
+
+	it("#given a pending run #when human control begins #then rejects it with human control", async () => {
+		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		await nextJson(socket);
+		const request = bridge.request({
+			method: "run",
+			tabId: 1,
+			revision: "r1",
+			steps: [],
+			expect: undefined,
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
+		});
+		await nextJson(socket);
+		const rejected = expect(request).rejects.toMatchObject({ code: "human_control" });
+		const changed = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "human", reason: "window_revealed" }));
+		await changed;
+		await rejected;
+		expect(bridge.control).toBe("human");
+	});
+
+	it("#given a stopped request #when legacy stop arrives #then records human stopped control", async () => {
+		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		await nextJson(socket);
+		const changed = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "stop" }));
+		await changed;
+		expect(bridge.control).toBe("human");
+		expect(bridge.controlReason).toBe("stopped");
+		await expect(
+			bridge.request({
+				method: "run",
+				tabId: 1,
+				revision: "r",
+				steps: [],
+				expect: undefined,
+				limits: {
+					maxChars: 6000,
+					maxElements: 80,
+					fullPage: false,
+					profile: "interactive",
+					maxNameChars: 120,
+				},
+			}),
+		).rejects.toMatchObject({ code: "human_control" });
+	});
+
+	it("#given a human owner #when extension gives control back #then allows the next run", async () => {
+		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		await nextJson(socket);
+		const takenOver = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "human", reason: "taken_over" }));
+		await takenOver;
+		const waiting = bridge.waitForAgentControl(1000);
+		const returned = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "agent" }));
+		await returned;
+		await expect(waiting).resolves.toBe(true);
+		const request = bridge.request({
+			method: "run",
+			tabId: 1,
+			revision: "r1",
+			steps: [],
+			expect: undefined,
+			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
+		});
+		const packet = await nextJson(socket);
+		socket.send(JSON.stringify({ id: packet.id, ok: true, value: {} }));
+		await expect(request).resolves.toEqual({});
+	});
+
+	it("#given an authenticated extension #when handoff is requested #then sends its reason and records it", async () => {
+		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		await nextJson(socket);
+		const handoff = bridge.requestHandoff("Please complete sign-in");
+		const packet = await nextJson(socket);
+		expect(packet.command).toEqual({ method: "handoff", reason: "Please complete sign-in" });
+		socket.send(JSON.stringify({ id: packet.id, ok: true, value: null }));
+		const recorded = await handoff;
+		expect(recorded).toMatchObject({ reason: "Please complete sign-in" });
+		expect(Number.isNaN(Date.parse(recorded.requestedAt))).toBe(false);
+		expect(bridge.handoffRequest).toEqual(recorded);
+		const takenOver = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "human" }));
+		await takenOver;
+		const returned = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "agent" }));
+		await returned;
+		expect(bridge.handoffRequest).toBeUndefined();
+	});
+
+	it("#given human control #when waiting for agent control #then resolves on give-back", async () => {
+		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		await nextJson(socket);
+		const takenOver = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "human" }));
+		await takenOver;
+		const waiting = bridge.waitForAgentControl(1000);
+		const returned = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "agent" }));
+		await returned;
+		await expect(waiting).resolves.toBe(true);
+	});
+
+	it("#given human control #when waiting times out #then returns false", async () => {
+		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		await nextJson(socket);
+		const takenOver = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "human" }));
+		await takenOver;
+		await expect(bridge.waitForAgentControl(20)).resolves.toBe(false);
+	});
+
+	it("#given human control #when the wait is aborted #then returns false", async () => {
+		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
+		bridges.push(bridge);
+		const socket = await connect(await bridge.listen(0));
+		clients.push(socket);
+		socket.send(JSON.stringify({ token: "secret" }));
+		await nextJson(socket);
+		const takenOver = once(bridge, "control");
+		socket.send(JSON.stringify({ event: "control", owner: "human" }));
+		await takenOver;
+		const cancellation = new AbortController();
+		const waiting = bridge.waitForAgentControl(1000, cancellation.signal);
+		cancellation.abort();
+		await expect(waiting).resolves.toBe(false);
+	});
+
 	it("#given a pending request #when the extension disconnects #then rejects without replay", async () => {
 		const bridge = new BrowserBridge(stopSource(), 1000, "secret");
 		bridges.push(bridge);

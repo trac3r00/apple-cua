@@ -56,6 +56,26 @@ For example, to draft in two already-approved, running apps:
    worker_id: ...}`. The coordinator can then observe and verify the combined
    result. A restarted app requires release and reassignment.
 
+### Spawning workers in each harness
+
+`get_capabilities` reports `host` (which harness is connected, from the client's
+initialize `clientInfo` or its environment) and `host.workers`; every `manage_workers`
+assign answer repeats it as `spawn`. `concurrent: true` means background delivery lets
+workers on distinct apps act at the same time; `false` (attended) serializes their input,
+so extra workers only add overhead. Start all workers in one round so they overlap:
+
+| `host.name` | How to start one worker per assignment |
+|---|---|
+| `omo` | One `task` call with a `tasks` batch, `run_in_background: true`, one item per worker. |
+| `claude-code` | One Task (Agent) subagent per worker, all launched in the same message. |
+| `codex` | Its subagent/spawn tool when the build has one; otherwise drive every worker yourself with one `run_parallel` call per round. |
+| `pi`, `gemini`, `cursor`, `openclaw`, `hermes`, `unknown` | The host's own spawn tool if it has one; otherwise one `run_parallel` call per round. |
+
+Each worker prompt carries its `worker_id`, assigned app, token, the attributed
+observation, the bounded subtask and its completion check, and nothing about other
+workers' apps. Workers refresh with `manage_workers {op: "observe"}` (no screenshot unless
+`include_screenshot: true`, which keeps rounds fast and cheap) and act with `run_worker`.
+
 Assignment batches publish only after every app has usable context; on failure,
 ownership remains reserved until all in-flight assignment reads finish, then the
 batch rolls back. Do not retry while that assignment call is pending.

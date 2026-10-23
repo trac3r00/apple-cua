@@ -7,6 +7,7 @@ import { BrowserError, connectBrowserController, registerBrowserTools } from "@a
 import {
 	IPhoneMirroring,
 	StopSwitch,
+	UTM,
 	currentSystemPrompts,
 	probeHostCapabilities,
 	readHidModifierFlags,
@@ -58,6 +59,7 @@ import {
 	verifyStateSchema,
 } from "./tool-schemas.js";
 import { type McpServerOptions, type ToolsetProfile, resolveServerOptions, serverInstructionsFor } from "./toolset.js";
+import { registerUtmTools } from "./utm-tools.js";
 import { registerVisualTools } from "./visual-tools.js";
 import { WorkerCoordinator } from "./worker-coordinator.js";
 import { registerWorkerTools } from "./worker-tools.js";
@@ -107,19 +109,21 @@ export function createMcpServer(
 ): McpServer {
 	const { toolset, iphone } = resolveServerOptions(options);
 	const browser = browserToolsEnabled();
+	const utm = process.env["APPLE_CUA_UTM"] === "1";
 	const resolvedComputer = computer ?? createNativeComputer();
 	// Natively, the machine-wide file-backed stop switch plus the keyboard chord that flips it; tests inject their own.
 	const nativeStopSwitch = computer === undefined && stopSwitch === undefined ? new StopSwitch() : undefined;
 	const stopGate = stopSwitch ?? nativeStopSwitch;
 	const stopChord =
 		nativeStopSwitch === undefined ? undefined : startStopChordDetector(nativeStopSwitch, readHidModifierFlags);
+	let launcher = appLauncher;
+	if (launcher === undefined && computer === undefined) {
+		launcher = spawnOpenLauncher({ background: resolvedComputer.delivery === "background" });
+	}
 	const session = new GuardedSession(
 		resolvedComputer,
 		windowProbe ?? (computer === undefined ? createNativeWindowProbe() : undefined),
-		appLauncher ??
-			(computer === undefined
-				? spawnOpenLauncher({ background: resolvedComputer.delivery === "background" })
-				: undefined),
+		launcher,
 		systemPromptProbe ?? (computer === undefined ? currentSystemPrompts : undefined),
 		stopGate,
 	);
@@ -261,7 +265,7 @@ export function createMcpServer(
 		allowedBundleIds: allowedBundleIdsFromProcessEnvironment(),
 		stop: stopGate,
 		toolset,
-		toolNames: toolNamesFor(toolset, iphone, browser),
+		toolNames: toolNamesFor(toolset, iphone, browser, utm),
 		host,
 	});
 	registerSkillResources(server);
@@ -289,6 +293,12 @@ export function createMcpServer(
 			new PhoneGuardSession(phone, { ...(stopGate === undefined ? {} : { stopSwitch: stopGate }) }),
 			phone,
 		);
+	}
+	if (utm) {
+		const appPath = process.env["APPLE_CUA_UTM_APP"];
+		registerUtmTools(server, new UTM(appPath === undefined ? {} : { appPath }), {
+			...(stopGate === undefined ? {} : { stopSwitch: stopGate }),
+		});
 	}
 	return server;
 }

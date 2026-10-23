@@ -116,6 +116,12 @@ apple-cua doctor --fix  # repair what is safe, ask before the rest
 
 Restart the agent client, and ask it to use an app by name.
 
+### UTM virtual machines
+
+Control UTM guests through native background scripting with `apple-cua utm list`, `apple-cua utm key Windows win+r`,
+and `apple-cua utm screenshot Windows -o windows.png`. Enable MCP tools with `APPLE_CUA_UTM=1`.
+See [UTM support](docs/utm.md) for setup, guest coordinates, and backend limits.
+
 ### Browser and iPhone
 
 The same agent registration exposes the background browser tools once the browser bridge is

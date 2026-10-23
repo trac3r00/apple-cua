@@ -95,6 +95,7 @@ export {
 export type { PermissionInterface, PermissionKind, PermissionStatus } from "./permission/interface.js";
 export { MacOSPermissions } from "./permission/macos.js";
 export { CloudComputer, type CloudComputerOptions } from "./platform/cloud.js";
+export { UTM, UTMError, UTM_BUNDLE_ID, type UTMVirtualMachine, type UTMObservation } from "./platform/utm.js";
 export { HostComputer, type HostComputerOptions } from "./platform/host.js";
 export { MacOSHostComputer, type MacOSHostComputerOptions, agentCursorEnabled } from "./platform/macos.js";
 export type { InputDelivery } from "./platform/macos-input.js";

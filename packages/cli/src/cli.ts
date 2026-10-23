@@ -28,6 +28,7 @@ import { registerIosCommands } from "./ios.js";
 import { resolveLayout } from "./layout.js";
 import { registerLifecycleCommands, resolveCursorMotion } from "./lifecycle-commands.js";
 import { commandPathOf, isInputCommand, stopRefusalFor } from "./stop-gate.js";
+import { registerUtmCommands } from "./utm.js";
 
 type PackageJson = {
 	version: string;
@@ -537,6 +538,7 @@ program
 registerIosCommands(program, { isJsonOutput });
 registerBrowserCommands(program, { isJsonOutput });
 registerLifecycleCommands(program, { isJsonOutput });
+registerUtmCommands(program, { isJsonOutput });
 
 // Refuse input commands while the stop switch is on, before any command code can send input.
 program.hook("preAction", (_program, actionCommand) => {

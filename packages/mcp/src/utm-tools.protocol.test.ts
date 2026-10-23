@@ -60,7 +60,7 @@ class FakeUtm implements UtmToolSource {
 		return this.machines.map((vm) => ({ ...vm }));
 	}
 
-	async screenshot(vm: string): Promise<Awaited<ReturnType<UtmToolSource["screenshot"]>>> {
+	async screenshot(vm: string): Promise<UTMObservation["image"]> {
 		if (this.captureError) throw new Error("capture failed");
 		this.captures.push(vm);
 		return { data: Buffer.from("png"), mimeType: "image/png", width: 800, height: 600 };
@@ -358,6 +358,64 @@ describe("optional UTM MCP protocol", () => {
 		expect(source.calls).toContainEqual({ action: "click", vm: VM, point: { x: 20, y: 20 }, options: undefined });
 	});
 
+	it.each([false, true])(
+		"#given earlier mutation %s #when observe precedes image click #then refuses an unseen image",
+		async (mutate) => {
+			const source = new FakeUtm();
+			const client = await connect(source);
+			const token = await observe(client);
+			const result = await run(client, token, VM, [
+				...(mutate ? [{ action: "key", combo: "a" }] : []),
+				{ action: "observe" },
+				{ action: "click-image", x: 400, y: 320 },
+			]);
+			expect(result.isError).toBe(true);
+			expect(payload(result)).toMatchObject({
+				reason: "utm-visual-reference-stale",
+				stepsCompleted: mutate ? 1 : 0,
+				actionDispatched: mutate,
+			});
+			expect(source.calls).toEqual(mutate ? [{ action: "key", vm: VM, combo: "a" }] : []);
+		},
+	);
+
+	it.each([
+		{ partial: false, prior: false },
+		{ partial: true, prior: false },
+		{ partial: true, prior: true },
+	])(
+		"#given partial type $partial and prior input $prior #when typing throws #then reports honest progress",
+		async ({ partial, prior }) => {
+			const source = new FakeUtm();
+			const client = await connect(source);
+			const token = await observe(client);
+			const type = vi.spyOn(source, "type").mockImplementation(async (vm, text) => {
+				if (partial) source.calls.push({ action: "type", vm, text: text.slice(0, 1) });
+				throw new Error("typing failed");
+			});
+			try {
+				const result = await run(client, token, VM, [
+					...(prior ? [{ action: "key", combo: "a" }] : []),
+					{ action: "type", text: "hello" },
+					{ action: "key", combo: "b" },
+				]);
+				expect(result.isError).toBe(true);
+				expect(payload(result)).toMatchObject({
+					reason: "utm-failed",
+					stepsCompleted: prior ? 1 : 0,
+					actionDispatched: prior ? true : "unknown",
+				});
+				expect(payload(result)["observation_token"]).toBeUndefined();
+				expect(source.calls).toEqual([
+					...(prior ? [{ action: "key", vm: VM, combo: "a" }] : []),
+					...(partial ? [{ action: "type", vm: VM, text: "h" }] : []),
+				]);
+			} finally {
+				type.mockRestore();
+			}
+		},
+	);
+
 	it("#given observed QEMU VM #when running native inputs #then returns fresh one-use authority", async () => {
 		const source = new FakeUtm();
 		const client = await connect(source);
@@ -521,6 +579,19 @@ describe("optional UTM MCP protocol", () => {
 			expect(source.listCalls).toBe(reads);
 			expect(source.captures).toEqual([VM]);
 			expect(source.calls).toEqual([]);
+		},
+	);
+
+	it.each(["com.utmapp.utm", "COM.UTMAPP.UTM", "com.apple.finder,CoM.UtMaPp.UtM"])(
+		"#given allowlist casing %s #when listing observing and running #then permits UTM",
+		async (allowed) => {
+			const source = new FakeUtm();
+			const client = await connect(source);
+			vi.stubEnv("APPLE_CUA_ALLOWED_BUNDLE_IDS", allowed);
+			expect((await client.callTool({ name: "utm_list", arguments: {} })).isError).not.toBe(true);
+			const token = await observe(client);
+			expect((await run(client, token)).isError).not.toBe(true);
+			expect(source.calls).toEqual([{ action: "type", vm: VM, text: "hi" }]);
 		},
 	);
 

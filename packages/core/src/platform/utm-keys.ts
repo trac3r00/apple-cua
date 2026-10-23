@@ -87,8 +87,9 @@ export class UTMKeyError extends Error {
 
 export function utmKeyCodes(combo: string): readonly number[] {
 	const parts = combo.toLowerCase().split("+");
-	const key = KEYS[parts.pop() ?? ""];
-	const modifiers = parts.map((part) => MODIFIERS[part]);
+	const name = parts.pop() ?? "";
+	const key = Object.hasOwn(KEYS, name) ? KEYS[name] : undefined;
+	const modifiers = parts.map((part) => (Object.hasOwn(MODIFIERS, part) ? MODIFIERS[part] : undefined));
 	if (key === undefined || modifiers.some((modifier) => modifier === undefined)) throw new UTMKeyError(combo);
 	const pressed = [...modifiers.filter((modifier) => modifier !== undefined), key];
 	return [...pressed.flat(), ...pressed.reverse().flatMap((codes) => codes.map((code) => code | 128))];

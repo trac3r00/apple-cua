@@ -14,7 +14,10 @@ describe("#given a guest key combination #when encoded #then every key is releas
 		expect(utmKeyCodes("enter")).toEqual([28, 156]);
 	});
 
-	it.each(["", "ctrl+", "hyper+a", "a+b", "ctrl+unknown"])("refuses unsupported combination %j", (combo) => {
-		expect(() => utmKeyCodes(combo)).toThrow(UTMKeyError);
-	});
+	it.each(["", "ctrl+", "hyper+a", "a+b", "ctrl+unknown", "constructor", "__proto__", "constructor+a"])(
+		"refuses unsupported combination %j",
+		(combo) => {
+			expect(() => utmKeyCodes(combo)).toThrow(UTMKeyError);
+		},
+	);
 });

@@ -7,7 +7,7 @@ export function windowsDisplayScript(position?: Point): string {
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y); }';
 $w=[D]::GetSystemMetrics(0); $h=[D]::GetSystemMetrics(1);
 if ($w -le 0 -or $h -le 0 -or $w -gt 32767 -or $h -gt 32767) { exit 0 };
-${position === undefined ? "" : `if (${Math.round(position.x)} -ge $w -or ${Math.round(position.y)} -ge $h) { exit 0 }; if (-not [D]::SetCursorPos(${Math.round(position.x)},${Math.round(position.y)})) { exit 0 };`}
+${position === undefined ? "" : `if (${Math.round(position.x)} -ge $w -or ${Math.round(position.y)} -ge $h) { exit 2 }; if (-not [D]::SetCursorPos(${Math.round(position.x)},${Math.round(position.y)})) { exit 3 };`}
 exit (($w -shl 16) -bor $h)`;
 	const encoded = Buffer.from(child, "utf16le").toString("base64");
 	return `Add-Type -TypeDefinition @'
@@ -55,6 +55,6 @@ public class CuaInteractive {
 '@
 $command='"'+$PSHOME+'\\powershell.exe" -NoProfile -NonInteractive -EncodedCommand ${encoded}';
 $result=[CuaInteractive]::Run($command);
-if ($result -eq 0) { exit 2 };
+if ($result -lt 65536) { exit ([Math]::Max(1,$result)) };
 [Console]::WriteLine(($result -shr 16).ToString()+"x"+($result -band 65535).ToString())`;
 }

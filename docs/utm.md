@@ -5,7 +5,7 @@ without activating UTM or moving the host pointer. The local `~/Applications/UTM
 then `/Applications/UTM.app`; `--app` overrides it.
 
 ```bash
-apple-cua utm --app /Users/cminseo/Applications/UTM.app list
+apple-cua utm --app "$HOME/Applications/UTM.app" list
 apple-cua utm screenshot Windows -o windows.png
 apple-cua utm key Windows win+r
 apple-cua utm type Windows notepad
@@ -19,12 +19,13 @@ apple-cua utm click Windows -x 300 -y 784 --image-coordinates
 
 `start`, `suspend`, and `stop` provide lifecycle control. Stop requests a graceful guest shutdown rather than
 using UTM's default forced power off. Suspend saves state to disk. Names must resolve to exactly one VM;
-UUIDs avoid ambiguity.
+UUIDs avoid inventory-selection ambiguity; window observation additionally requires unique VM names.
 
 ## MCP
 
 Set `APPLE_CUA_UTM=1` in the MCP server environment and reconnect the client. Optionally set
-`APPLE_CUA_UTM_APP=/Users/cminseo/Applications/UTM.app`. The opt-in adds `utm_list`, `utm_observe`, and `utm_run`.
+`APPLE_CUA_UTM_APP` to your absolute UTM.app path (`$HOME/Applications/UTM.app` in a shell; expand it before
+placing it in JSON configuration). The opt-in adds `utm_list`, `utm_observe`, and `utm_run`.
 Observe before input; run requires the returned one-use observation token and returns a new observation.
 The machine-wide stop switch also applies to UTM input.
 
@@ -41,7 +42,12 @@ input do not require that agent.
 
 Windows guest queries launch hidden processes in the active console session, because the guest agent itself
 runs in session 0. Slow emulated guests can take tens of seconds to compile and start the query; the operation
-has a bounded two-minute deadline and reports a timeout rather than guessing display dimensions.
+has a two-minute polling deadline after launch; each scripting call is separately capped at 30 seconds and can
+finish after that polling deadline. Failures report a timeout rather than guessing display dimensions.
+
+CLI `click --image-coordinates` maps against an observation taken during that command, not a saved screenshot.
+It cannot prove that a point selected from an earlier screenshot is still the same target. Use the MCP
+observation token for cross-call image targeting. CLI `click-text` re-observes the named text before dispatch.
 
 ## Capabilities and limits
 

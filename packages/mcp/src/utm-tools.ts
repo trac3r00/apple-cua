@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Point, ScreenshotResult, StopStatusSource, UTMObservation } from "@apple-cua/core";
+import type { Point, StopStatusSource, UTMObservation } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import { allowedBundleIdsFromProcessEnvironment } from "./native-policy.js";
@@ -15,7 +15,6 @@ interface UtmVm {
 
 export interface UtmToolSource {
 	list(): Promise<readonly UtmVm[]>;
-	screenshot(vm: string): Promise<ScreenshotResult>;
 	observe(vm: string): Promise<UTMObservation>;
 	move(vm: string, point: Point): Promise<void>;
 	clickObserved(vm: string, point: Point, observation: UTMObservation): Promise<void>;
@@ -42,7 +41,7 @@ export function registerUtmTools(server: McpServer, source: UtmToolSource, optio
 
 	function checkGate(): void {
 		const allowed = allowedBundleIdsFromProcessEnvironment();
-		if (allowed !== undefined && !allowed.includes("com.utmapp.UTM")) {
+		if (allowed !== undefined && !allowed.some((bundleId) => bundleId.toLowerCase() === "com.utmapp.utm")) {
 			tokens.clear();
 			throw new UtmRefusal("app-not-allowed", "UTM is excluded by APPLE_CUA_ALLOWED_BUNDLE_IDS.");
 		}
@@ -112,7 +111,10 @@ export function registerUtmTools(server: McpServer, source: UtmToolSource, optio
 		return result;
 	}
 
-	async function guarded(operation: () => Promise<ToolResult>, progress?: () => number): Promise<ToolResult> {
+	async function guarded(
+		operation: () => Promise<ToolResult>,
+		progress?: () => { stepsCompleted: number; actionDispatched: boolean | "unknown" },
+	): Promise<ToolResult> {
 		try {
 			checkGate();
 			return await operation();
@@ -125,9 +127,7 @@ export function registerUtmTools(server: McpServer, source: UtmToolSource, optio
 						text: JSON.stringify({
 							reason: error instanceof UtmRefusal ? error.reason : "utm-failed",
 							message: error instanceof Error ? error.message : String(error),
-							...(progress === undefined
-								? {}
-								: { stepsCompleted: progress(), actionDispatched: progress() > 0, effect: "unverifiable" }),
+							...(progress === undefined ? {} : { ...progress(), effect: "unverifiable" }),
 						}),
 					},
 				],
@@ -165,7 +165,7 @@ export function registerUtmTools(server: McpServer, source: UtmToolSource, optio
 		"utm_run",
 		{
 			description:
-				"Run 1-8 QEMU steps with a one-use observation_token: type, key, click/move (coordinate_space=guest-display-pixels), click-image (screenshot x/y mapped through chrome/letterboxing), click-text (unique case-insensitive text or element_id), observe (refresh). Visual references after any input require observe first. Observation/move require a Windows QEMU guest agent. Returns fresh context, not proof of effect or human consent.",
+				"Run 1-8 QEMU steps with a one-use observation_token: type, key, click/move (coordinate_space=guest-display-pixels), click-image (screenshot x/y mapped through chrome/letterboxing), click-text (element_id or case-insensitive text: prefer a unique exact match, otherwise require a unique substring match), observe (refresh). Visual references after any input require observe first. click-image is refused after any in-run observe because the client has not seen that image; click-text can use refreshed OCR. Observation/move require a Windows QEMU guest agent. Returns fresh context, not proof of effect or human consent.",
 			inputSchema: {
 				vm: z.uuid(),
 				observation_token: z.string().min(1),
@@ -176,6 +176,7 @@ export function registerUtmTools(server: McpServer, source: UtmToolSource, optio
 		async ({ vm, observation_token, steps }) =>
 			serial(async () => {
 				let completed = 0;
+				let inputAttempted = false;
 				return guarded(
 					async () => {
 						const authority = tokens.get(vm);
@@ -189,6 +190,7 @@ export function registerUtmTools(server: McpServer, source: UtmToolSource, optio
 						let observation = authority.observation;
 						let referenceToken = authority.token;
 						let dirty = false;
+						let imageReferenceVisible = true;
 						const expected = authority.vm;
 						async function checkContext(): Promise<void> {
 							const current = await resolve(vm);
@@ -205,6 +207,7 @@ export function registerUtmTools(server: McpServer, source: UtmToolSource, optio
 							switch (step.action) {
 								case "observe":
 									observation = await source.observe(vm);
+									imageReferenceVisible = false;
 									await checkContext();
 									referenceToken = randomUUID();
 									dirty = false;
@@ -220,9 +223,16 @@ export function registerUtmTools(server: McpServer, source: UtmToolSource, optio
 											"Refresh with observe before visual input.",
 										);
 									}
+									if (step.action === "click-image" && !imageReferenceVisible) {
+										throw new UtmRefusal(
+											"utm-visual-reference-stale",
+											"Request utm_observe separately before clicking an image the client has not seen.",
+										);
+									}
 									await visualAction(source, vm, step, observation, referenceToken, checkContext);
 									break;
 								case "type":
+									inputAttempted = true;
 									await source.type(vm, step.text);
 									break;
 								case "key":
@@ -244,7 +254,10 @@ export function registerUtmTools(server: McpServer, source: UtmToolSource, optio
 						}
 						return observe(vm, authority.vm, completed);
 					},
-					() => completed,
+					() => ({
+						stepsCompleted: completed,
+						actionDispatched: completed > 0 ? true : inputAttempted ? "unknown" : false,
+					}),
 				);
 			}),
 	);

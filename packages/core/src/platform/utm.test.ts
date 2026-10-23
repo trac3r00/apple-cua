@@ -69,6 +69,16 @@ describe("#given UTM scripting #when a VM is selected #then only its exact ident
 		expect(application.inputScanCode).toHaveBeenCalledWith(guest, { codes: [29, 30, 158, 157] });
 	});
 
+	it("sends one Enter for a Windows CRLF newline", async () => {
+		await new UTM().type(id, "\r\n");
+		expect(application.inputScanCode).toHaveBeenCalledTimes(1);
+		expect(application.inputScanCode).toHaveBeenCalledWith(guest, { codes: [28, 156] });
+	});
+
+	it("treats a blank app path as default", () => {
+		expect(new UTM({ appPath: " " }).appPath).toMatch(/UTM\.app$/u);
+	});
+
 	it("routes guest pixels and monitor without using host pointer input", async () => {
 		await new UTM().click(id, { x: 240, y: 150 }, { button: "right", monitor: 2 });
 		expect(application.inputMouseClick).toHaveBeenCalledWith(guest, {

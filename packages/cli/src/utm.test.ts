@@ -178,9 +178,83 @@ describe("#given UTM commands #when Commander parses them #then calls route to c
 	it.each(["sEtTiNgS", "etti"])("clicks a unique OCR match %j in guest pixels", async (query) => {
 		await createProgram().parseAsync(["utm", "click-text", "vm-123", query], { from: "user" });
 
-		expect(core.methods.observe.mock.calls).toEqual([["vm-123"]]);
+		expect(core.methods.observe.mock.calls).toEqual([["vm-123"], ["vm-123"]]);
 		expect(core.methods.click.mock.calls).toEqual([["vm-123", { x: 126, y: 215 }]]);
+		expect(core.methods.observe.mock.invocationCallOrder[1]).toBeLessThan(
+			core.methods.click.mock.invocationCallOrder[0] ?? 0,
+		);
 		expect(core.methods.clickObserved).not.toHaveBeenCalled();
+	});
+
+	it.each(["x", "y", "width", "height"] as const)(
+		"allows two pixels of OCR box %s drift at the original target",
+		async (field) => {
+			core.methods.observe.mockResolvedValueOnce(observation).mockResolvedValueOnce({
+				...observation,
+				texts: observation.texts.map((entry) => ({
+					...entry,
+					box: { ...entry.box, [field]: entry.box[field] + 2 },
+				})),
+			});
+
+			await createProgram().parseAsync(["utm", "click-text", "vm-123", "settings"], { from: "user" });
+
+			expect(core.methods.click.mock.calls).toEqual([["vm-123", { x: 126, y: 215 }]]);
+		},
+	);
+
+	it.each([
+		{ change: "window", fresh: { ...observation, windowId: 43 } },
+		...(["width", "height"] as const).map((field) => ({
+			change: `guest ${field}`,
+			fresh: { ...observation, guestSize: { ...observation.guestSize, [field]: observation.guestSize[field] + 1 } },
+		})),
+		...(["x", "y", "width", "height"] as const).map((field) => ({
+			change: `display ${field}`,
+			fresh: {
+				...observation,
+				displayRect: { ...observation.displayRect, [field]: observation.displayRect[field] + 1 },
+			},
+		})),
+		...(["x", "y", "width", "height"] as const).map((field) => ({
+			change: `OCR box ${field}`,
+			fresh: {
+				...observation,
+				texts: observation.texts.map((entry) => ({
+					...entry,
+					box: { ...entry.box, [field]: entry.box[field] + 3 },
+				})),
+			},
+		})),
+		{ change: "disappeared text", fresh: { ...observation, texts: [] } },
+		{
+			change: "changed text",
+			fresh: { ...observation, texts: observation.texts.map((entry) => ({ ...entry, text: "Settings changed" })) },
+		},
+		{ change: "duplicate target", fresh: { ...observation, texts: [...observation.texts, ...observation.texts] } },
+	])("refuses stale click-text after $change", async ({ fresh }) => {
+		core.methods.observe.mockResolvedValueOnce(observation).mockResolvedValueOnce(fresh);
+
+		await expect(
+			createProgram().parseAsync(["utm", "click-text", "vm-123", "settings"], { from: "user" }),
+		).rejects.toThrow(/observe again/);
+
+		expect(core.methods.observe.mock.calls).toEqual([["vm-123"], ["vm-123"]]);
+		expect(core.methods.click).not.toHaveBeenCalled();
+		expect(core.methods.clickObserved).not.toHaveBeenCalled();
+		expect(stdout).not.toHaveBeenCalled();
+	});
+
+	it("propagates revalidation observation failure without clicking", async () => {
+		const error = new Error("Fresh observation failed");
+		core.methods.observe.mockResolvedValueOnce(observation).mockRejectedValueOnce(error);
+
+		await expect(
+			createProgram().parseAsync(["utm", "click-text", "vm-123", "settings"], { from: "user" }),
+		).rejects.toBe(error);
+
+		expect(core.methods.click).not.toHaveBeenCalled();
+		expect(stdout).not.toHaveBeenCalled();
 	});
 
 	it("prefers an exact OCR match over substring matches", async () => {

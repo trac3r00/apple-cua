@@ -46,7 +46,7 @@ export class UTM {
 
 	constructor(options: { readonly appPath?: string } = {}) {
 		const local = join(homedir(), "Applications", "UTM.app");
-		this.appPath = options.appPath ?? (existsSync(local) ? local : "/Applications/UTM.app");
+		this.appPath = options.appPath?.trim() || (existsSync(local) ? local : "/Applications/UTM.app");
 	}
 
 	async list(): Promise<readonly UTMVirtualMachine[]> {
@@ -93,8 +93,9 @@ export class UTM {
 		if ([...text].some((character) => character.charCodeAt(0) > 127)) {
 			throw new UTMError("UTM keystrokes support ASCII text only");
 		}
-		utmTextCodes(text);
-		for (const character of text) {
+		const normalized = text.replaceAll("\r\n", "\n");
+		utmTextCodes(normalized);
+		for (const character of normalized) {
 			const codes = utmTextCodes(character);
 			await this.mutate(vm, `u.inputScanCode(v, {codes:${JSON.stringify(codes)}});`, true);
 		}
@@ -125,6 +126,7 @@ export class UTM {
 			},
 			this.select(vm),
 			point,
+			(body) => this.script(body),
 		);
 		this.cursors.set(vm, point);
 	}

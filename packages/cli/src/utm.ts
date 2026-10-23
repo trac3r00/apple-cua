@@ -70,7 +70,10 @@ export function registerUtmCommands(program: Command, options: RegisterUtmOption
 		.requiredOption("-y, --y <number>", "non-negative integer y coordinate", parseCoordinate)
 		.option("--button <button>", "mouse button: left, right, or middle", parseMouseButton)
 		.option("--monitor <number>", "positive monitor number", parseMonitor)
-		.option("--image-coordinates", "interpret coordinates as screenshot pixels")
+		.option(
+			"--image-coordinates",
+			"map screenshot pixels using a fresh current observation; does not validate an earlier screenshot",
+		)
 		.action(async (vm: string, flags: ClickOptions) => {
 			const { x, y, imageCoordinates, ...clickOptions } = flags;
 			if (imageCoordinates && (clickOptions.button !== undefined || clickOptions.monitor !== undefined)) {
@@ -135,6 +138,31 @@ export function registerUtmCommands(program: Command, options: RegisterUtmOption
 				throw new InvalidArgumentError(
 					`Ambiguous OCR text query ${JSON.stringify(query)}: ${matches.length} matches`,
 				);
+			}
+			const fresh = await client.observe(vm);
+			const a = observation.displayRect;
+			const b = fresh.displayRect;
+			if (
+				fresh.windowId !== observation.windowId ||
+				fresh.guestSize.width !== observation.guestSize.width ||
+				fresh.guestSize.height !== observation.guestSize.height ||
+				a.x !== b.x ||
+				a.y !== b.y ||
+				a.width !== b.width ||
+				a.height !== b.height
+			) {
+				throw new InvalidArgumentError("UTM window or display geometry changed; observe again");
+			}
+			const currentTargets = fresh.texts.filter(
+				(entry) =>
+					entry.text === match.text &&
+					Math.abs(entry.box.x - match.box.x) <= 2 &&
+					Math.abs(entry.box.y - match.box.y) <= 2 &&
+					Math.abs(entry.box.width - match.box.width) <= 2 &&
+					Math.abs(entry.box.height - match.box.height) <= 2,
+			);
+			if (currentTargets.length !== 1) {
+				throw new InvalidArgumentError("The observed OCR text changed, moved or disappeared; observe again");
 			}
 			const point = {
 				x: Math.floor(match.box.x + match.box.width / 2),

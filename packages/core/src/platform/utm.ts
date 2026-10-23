@@ -46,7 +46,7 @@ export class UTM {
 
 	constructor(options: { readonly appPath?: string } = {}) {
 		const local = join(homedir(), "Applications", "UTM.app");
-		this.appPath = options.appPath?.trim() || (existsSync(local) ? local : "/Applications/UTM.app");
+		this.appPath = options.appPath?.trim() ? options.appPath : existsSync(local) ? local : "/Applications/UTM.app";
 	}
 
 	async list(): Promise<readonly UTMVirtualMachine[]> {

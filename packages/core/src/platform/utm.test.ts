@@ -77,6 +77,7 @@ describe("#given UTM scripting #when a VM is selected #then only its exact ident
 
 	it("treats a blank app path as default", () => {
 		expect(new UTM({ appPath: " " }).appPath).toMatch(/UTM\.app$/u);
+		expect(new UTM({ appPath: "/Applications/UTM.app " }).appPath).toBe("/Applications/UTM.app ");
 	});
 
 	it("routes guest pixels and monitor without using host pointer input", async () => {

@@ -54,31 +54,49 @@ return String(p.id());`),
 		throw new Error("Timed out reading the UTM guest display");
 	} catch (error) {
 		if (running) {
-			const killer = Number(
-				await cleanup(`${selection}
-return String(u.execute(v,{at:"taskkill.exe",withArguments:["/PID","${processId}","/T","/F"],outputCapturing:true}).id());`),
-			);
-			if (!Number.isSafeInteger(killer) || killer <= 0)
-				throw new Error("Invalid guest cleanup process identifier", { cause: error });
-			const deadline = Date.now() + 30_000;
-			let terminated = false;
-			while (Date.now() < deadline) {
-				const raw: unknown = JSON.parse(
+			try {
+				const killer = Number(
 					await cleanup(`${selection}
-return JSON.stringify(u.getResult(v.guestProcesses.byId(${killer})));`),
+return String(u.execute(v,{at:"taskkill.exe",withArguments:["/PID","${processId}","/T","/F"],outputCapturing:true}).id());`),
 				);
-				if (typeof raw !== "object" || raw === null || !("exited" in raw) || typeof raw.exited !== "boolean") {
-					throw new Error("Invalid guest cleanup result", { cause: error });
+				if (!Number.isSafeInteger(killer) || killer <= 0)
+					throw new Error("Invalid guest cleanup process identifier", { cause: error });
+				const deadline = Date.now() + 30_000;
+				let terminated = false;
+				while (Date.now() < deadline) {
+					const raw: unknown = JSON.parse(
+						await cleanup(`${selection}
+return JSON.stringify(u.getResult(v.guestProcesses.byId(${killer})));`),
+					);
+					if (typeof raw !== "object" || raw === null || !("exited" in raw) || typeof raw.exited !== "boolean") {
+						throw new Error("Invalid guest cleanup result", { cause: error });
+					}
+					if (raw.exited) {
+						if (!("exitCode" in raw) || raw.exitCode !== 0) {
+							const original: unknown = JSON.parse(
+								await cleanup(`${selection}
+return JSON.stringify(u.getResult(v.guestProcesses.byId(${processId})));`),
+							);
+							if (
+								typeof original !== "object" ||
+								original === null ||
+								!("exited" in original) ||
+								original.exited !== true
+							)
+								throw new Error("Guest query termination failed", { cause: error });
+						}
+						terminated = true;
+						break;
+					}
+					await sleep(50);
 				}
-				if (raw.exited) {
-					if (!("exitCode" in raw) || raw.exitCode !== 0)
-						throw new Error("Guest query termination failed", { cause: error });
-					terminated = true;
-					break;
-				}
-				await sleep(50);
+				if (!terminated) throw new Error("Timed out terminating the guest query", { cause: error });
+			} catch (cleanupError) {
+				throw new Error(
+					`Guest query cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+					{ cause: error },
+				);
 			}
-			if (!terminated) throw new Error("Timed out terminating the guest query", { cause: error });
 		}
 		throw error;
 	}

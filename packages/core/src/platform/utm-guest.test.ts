@@ -2,6 +2,44 @@ import { describe, expect, it, vi } from "vitest";
 import { windowsGuestDisplay } from "./utm-guest.js";
 
 describe("#given a guest process #when its completed display query is read #then dimensions are parsed", () => {
+	it("preserves the original error as cause when cleanup transport fails", async () => {
+		const stopped = new Error("stopped");
+		let calls = 0;
+		await expect(
+			windowsGuestDisplay(
+				async () => {
+					if (++calls === 1) return "42";
+					throw stopped;
+				},
+				"const v = {};",
+				undefined,
+				async () => {
+					throw new Error("transport");
+				},
+			),
+		).rejects.toMatchObject({ cause: stopped, message: "Guest query cleanup failed: transport" });
+	});
+
+	it("preserves the stop when the query exited before taskkill", async () => {
+		const stopped = new Error("stopped");
+		let calls = 0;
+		let cleaning = 0;
+		await expect(
+			windowsGuestDisplay(
+				async () => {
+					if (++calls === 1) return "42";
+					throw stopped;
+				},
+				"const v = {};",
+				undefined,
+				async () => {
+					if (++cleaning === 1) return "99";
+					return JSON.stringify({ exited: true, exitCode: 1 });
+				},
+			),
+		).rejects.toBe(stopped);
+		expect(cleaning).toBe(3);
+	});
 	it("reads output from a stable guest process identity", async () => {
 		const scripts: string[] = [];
 		const size = await windowsGuestDisplay(async (body) => {

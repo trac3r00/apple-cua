@@ -73,10 +73,11 @@ const DEFAULT_FIND_RESULTS = 5;
 const MAX_NEAR_MISSES = 5;
 const MAX_ALTERNATIVES = 3;
 
-const TIMING_ENABLED = process.env["APPLE_CUA_TIMING"] === "1";
-
+function timingEnabled(): boolean {
+	return process.env["APPLE_CUA_TIMING"] === "1";
+}
 async function timed<T>(label: string, run: () => Promise<T>): Promise<T> {
-	if (!TIMING_ENABLED) {
+	if (!timingEnabled()) {
 		return await run();
 	}
 	const startedAt = performance.now();
@@ -418,6 +419,7 @@ export class GuardedSession {
 		return this.enqueue(targetPid, async () => {
 			this.clearTokenFor(targetPid);
 			this.bindWindow(targetPid, request.windowId);
+			const startedAt = timingEnabled() ? performance.now() : undefined;
 			const state = await this.computer.getAppState(targetPid, {
 				...(request.diffOnly ? STRICT_DIFF_STATE_OPTIONS : STRICT_STATE_OPTIONS),
 				...(request.includeScreenshot === undefined ? {} : { includeScreenshot: request.includeScreenshot }),
@@ -431,6 +433,7 @@ export class GuardedSession {
 				...(request.includeMenuBar === undefined ? {} : { includeMenuBar: request.includeMenuBar }),
 				...(request.subtreeOf === undefined ? {} : { subtreeOf: request.subtreeOf }),
 			});
+			const timing = startedAt === undefined ? undefined : { capture: Math.round(performance.now() - startedAt) };
 			this.assertOpen();
 			const observation = this.computer.getInputObservation(targetPid);
 			const token = this.issueForObservation(observation, state);
@@ -443,7 +446,7 @@ export class GuardedSession {
 			) {
 				this.rememberRead(targetPid, observation, state);
 			}
-			return stateResult(state, token, request.elementFormat);
+			return stateResult(state, token, request.elementFormat, timing);
 		});
 	}
 
@@ -639,6 +642,7 @@ export class GuardedSession {
 								: {}),
 							...(verification === undefined ? {} : { verification }),
 						},
+						outcome.timing,
 					);
 				} catch (error: unknown) {
 					this.clearTokenFor(targetPid);
@@ -760,6 +764,7 @@ export class GuardedSession {
 					windowEvents,
 					dispatch === undefined ? undefined : dispatch,
 					outcome.setValue === undefined ? {} : { setValue: outcome.setValue },
+					outcome.timing,
 				);
 			} catch (error: unknown) {
 				this.clearTokenFor(expected.pid);
@@ -861,7 +866,13 @@ export class GuardedSession {
 			};
 			try {
 				const outcome = await this.readOutcome(expected.pid, expected.observation, options);
-				return observedSetFieldsResult(outcome.state, report, outcome.contextUnchanged, outcome.nextToken);
+				return observedSetFieldsResult(
+					outcome.state,
+					report,
+					outcome.contextUnchanged,
+					outcome.nextToken,
+					outcome.timing,
+				);
 			} catch (error: unknown) {
 				this.clearTokenFor(expected.pid);
 				return postActionErrorResult(error, { setFields: report });
@@ -1537,6 +1548,7 @@ export class GuardedSession {
 		readonly state: AppState;
 		readonly contextUnchanged: boolean;
 		readonly nextToken: string | undefined;
+		readonly timing?: Readonly<Record<string, number>>;
 		readonly setValue?: {
 			readonly element_index: number;
 			readonly requested_value: string;
@@ -1549,6 +1561,7 @@ export class GuardedSession {
 		// have produced on its own.
 		const retain = (options.retainTree === true || options.valueCheck !== undefined) && options.fullState !== true;
 		const bound = await this.boundWindowOption(targetPid);
+		const startedAt = timingEnabled() ? performance.now() : undefined;
 		const read = await timed("readOutcome.getAppState", () =>
 			this.computer.getAppState(targetPid, {
 				...(options.fullState === true || retain ? STRICT_STATE_OPTIONS : STRICT_DIFF_STATE_OPTIONS),
@@ -1585,6 +1598,7 @@ export class GuardedSession {
 			state,
 			contextUnchanged,
 			nextToken,
+			...(startedAt === undefined ? {} : { timing: { capture: Math.round(performance.now() - startedAt) } }),
 			...(check === undefined
 				? {}
 				: {

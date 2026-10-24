@@ -280,9 +280,18 @@ export function textResult(text: string): ToolResult {
 	return { content: [{ type: "text", text }] };
 }
 
-export function stateResult(state: AppState, observationToken?: string, elementFormat?: ElementFormat): ToolResult {
+export function stateResult(
+	state: AppState,
+	observationToken?: string,
+	elementFormat?: ElementFormat,
+	timing?: Readonly<Record<string, number>>,
+): ToolResult {
 	const extra = observationToken === undefined ? {} : { observation_token: observationToken };
-	return stateToolResult(state, extra, { elementFormat });
+	return stateToolResult(
+		state,
+		{ ...extra, ...(timing === undefined || Object.keys(timing).length === 0 ? {} : { timing_ms: timing }) },
+		{ elementFormat },
+	);
 }
 
 /**
@@ -317,6 +326,7 @@ export function observedActionResult(
 	windowEvents: readonly WindowEvent[] = [],
 	dispatch?: ActionDispatch,
 	extra: Record<string, unknown> = {},
+	timing?: Readonly<Record<string, number>>,
 ): ToolResult {
 	const observationStatus = contextUnchanged ? axObservationStatus(state) : "context-changed";
 	const envelope = actionEnvelope({
@@ -333,6 +343,7 @@ export function observedActionResult(
 		state,
 		{
 			...extra,
+			...(timing === undefined ? {} : { timing_ms: timing }),
 			actionDispatched: true,
 			observationStatus,
 			paused: observationToken === undefined,
@@ -412,6 +423,7 @@ export function observedSetFieldsResult(
 	report: SetFieldsReport,
 	contextUnchanged: boolean,
 	observationToken?: string,
+	timing?: Readonly<Record<string, number>>,
 ): ToolResult {
 	const observationStatus = contextUnchanged ? axObservationStatus(state) : "context-changed";
 	const effect: ActionEffect =
@@ -430,6 +442,7 @@ export function observedSetFieldsResult(
 			paused: observationToken === undefined,
 			needsExplicitObservation: observationToken === undefined,
 			setFields: report,
+			...(timing === undefined ? {} : { timing_ms: timing }),
 			...envelopeFields({ ...envelope, effect }),
 			...(observationToken === undefined ? {} : { observation_token: observationToken }),
 		},
@@ -444,6 +457,7 @@ export function observedRunStepsResult(
 	contextUnchanged: boolean,
 	observationToken?: string,
 	windowEvents: readonly WindowEvent[] = [],
+	timing?: Readonly<Record<string, number>>,
 ): ToolResult {
 	const observationStatus = contextUnchanged ? axObservationStatus(state) : "context-changed";
 	// A wait dispatches no input: a run of waits that were all satisfied confirmed what it waited for.
@@ -485,6 +499,7 @@ export function observedRunStepsResult(
 			paused: observationToken === undefined,
 			needsExplicitObservation: observationToken === undefined,
 			runSteps: report,
+			...(timing === undefined ? {} : { timing_ms: timing }),
 			...(verification === undefined ? {} : { verification }),
 			...envelopeFields({ ...envelope, effect }),
 			...(windowEvents.length === 0 ? {} : { windowEvents }),

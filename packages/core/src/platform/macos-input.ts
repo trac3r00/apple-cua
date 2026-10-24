@@ -227,9 +227,25 @@ export function backgroundActivationEnabled(environment: NodeJS.ProcessEnv = pro
 /** Re-exported for callers that import the delivery mode beside the input controller. */
 export type { InputDelivery };
 
-// Inter-character delay for typeText. Posting keystrokes back-to-back outruns the
-// target app's event loop and drops characters; ~12ms lets each be consumed.
-const TYPE_CHARACTER_DELAY_MS = 12;
+/**
+ * Inter-character delay for typeText. Posting keystrokes back-to-back outruns the
+ * target app's event loop and drops characters; the default paces each keystroke.
+ * APPLE_CUA_TYPE_CHARACTER_DELAY_MS raises or lowers it (0 posts every character
+ * back-to-back, which known-fast apps tolerate but slower ones drop).
+ */
+export function typeCharacterDelayMilliseconds(environment: NodeJS.ProcessEnv = process.env): number {
+	const raw = environment["APPLE_CUA_TYPE_CHARACTER_DELAY_MS"]?.trim();
+	if (raw === undefined || raw.length === 0) {
+		return TYPE_CHARACTER_DELAY_MS_DEFAULT;
+	}
+	const value = Number(raw);
+	if (!Number.isInteger(value) || value < 0) {
+		return TYPE_CHARACTER_DELAY_MS_DEFAULT;
+	}
+	return value;
+}
+
+const TYPE_CHARACTER_DELAY_MS_DEFAULT = 4;
 
 /** How often a held key checks whether its call was stopped, so a long hold is released soon after a stop. */
 const HOLD_CHECK_MILLISECONDS = 50;
@@ -768,6 +784,7 @@ export class MacOSInputController {
 		// event processing and drops characters ("https://example.com" -> "https://e").
 		// A small inter-character delay lets each keystroke be consumed before the next,
 		// so a single delivery per char is reliable (no drops) without doubling.
+		const pacing = typeCharacterDelayMilliseconds();
 		const segments = Array.from(text);
 		for (let i = 0; i < segments.length; i++) {
 			const segment = segments[i];
@@ -780,8 +797,8 @@ export class MacOSInputController {
 			postUnicodeText(segment, keyboardPid, targetWindow);
 			if (!this.isBackground || this.backgroundCues) this.overlay.keyPress?.(call.pid);
 			this.noteKeyboardInput(call.pid);
-			if (i < segments.length - 1) {
-				await delayMilliseconds(TYPE_CHARACTER_DELAY_MS);
+			if (pacing > 0 && i < segments.length - 1) {
+				await delayMilliseconds(pacing);
 			}
 		}
 	}

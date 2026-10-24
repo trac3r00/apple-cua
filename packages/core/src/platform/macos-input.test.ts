@@ -601,3 +601,23 @@ describe("#given background delivery #when an action would need the foreground #
 		controller.close();
 	});
 });
+
+describe("#given the typeText pacing setting #when it is read #then an absent or unusable value keeps the default and a whole number is honored", () => {
+	it("returns the default when the setting is absent or not a non-negative whole number", async () => {
+		const { typeCharacterDelayMilliseconds } = await import("./macos-input.js");
+		const fallback = typeCharacterDelayMilliseconds({});
+		expect(typeCharacterDelayMilliseconds({})).toEqual(
+			typeCharacterDelayMilliseconds({ APPLE_CUA_TYPE_CHARACTER_DELAY_MS: "garbage" }),
+		);
+		expect(typeCharacterDelayMilliseconds({ APPLE_CUA_TYPE_CHARACTER_DELAY_MS: "-4" })).toEqual(fallback);
+		expect(typeCharacterDelayMilliseconds({ APPLE_CUA_TYPE_CHARACTER_DELAY_MS: "1.5" })).toEqual(fallback);
+		expect(fallback).toBe(4);
+	});
+
+	it("honors a non-negative whole number, including zero", async () => {
+		const { typeCharacterDelayMilliseconds } = await import("./macos-input.js");
+		expect(typeCharacterDelayMilliseconds({ APPLE_CUA_TYPE_CHARACTER_DELAY_MS: "0" })).toBe(0);
+		expect(typeCharacterDelayMilliseconds({ APPLE_CUA_TYPE_CHARACTER_DELAY_MS: "20" })).toBe(20);
+		expect(typeCharacterDelayMilliseconds({ APPLE_CUA_TYPE_CHARACTER_DELAY_MS: " 4 " })).toBe(4);
+	});
+});

@@ -23,7 +23,13 @@ export type CallMethod =
 	| "chain"
 	| "verify"
 	| "dockObserve"
-	| "dockAct";
+	| "dockAct"
+	| "terminalRun"
+	| "terminalRead"
+	| "spacesActive"
+	| "spacesDisplays"
+	| "menubarObserve"
+	| "menubarPress";
 
 export type ScriptOutcome =
 	| { readonly ok: true; readonly value: unknown; readonly valueTruncated: boolean }
@@ -39,14 +45,16 @@ export interface CallError {
 	readonly payload: unknown;
 }
 
+interface WorkerCall {
+	readonly type: "call";
+	readonly id: number;
+	readonly method: CallMethod;
+	readonly target: WorkerTarget | undefined;
+	readonly args: readonly unknown[];
+}
+
 export type WorkerMessage =
-	| {
-			readonly type: "call";
-			readonly id: number;
-			readonly method: CallMethod;
-			readonly target: WorkerTarget | undefined;
-			readonly args: readonly unknown[];
-	  }
+	| WorkerCall
 	| { readonly type: "log"; readonly text: string }
 	| { readonly type: "done"; readonly outcome: ScriptOutcome; readonly logDropped: number };
 

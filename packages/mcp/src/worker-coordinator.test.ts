@@ -1,6 +1,7 @@
 import { currentCursorIdentity, currentInputScope } from "@apple-cua/core";
 import { describe, expect, it, vi } from "vitest";
 import { GuardedSession } from "./guarded-session.js";
+import * as notify from "./notify.js";
 import { Deferred, FakeGuardedComputer } from "./protocol-test-harness.js";
 import type { RunStep } from "./tool-schemas.js";
 import { WorkerCoordinator } from "./worker-coordinator.js";
@@ -72,6 +73,62 @@ describe("WorkerCoordinator #given a worker cursor #when observing #then feedbac
 
 			expect(computer.observedCursors).toEqual([assigned.cursor_id, assigned.cursor_id]);
 			expect(coordinator.status()[0]).not.toHaveProperty("observation");
+		} finally {
+			await coordinator.close();
+		}
+	});
+});
+
+describe("WorkerCoordinator #given a worker run #when it succeeds or rejects #then status retains bounded report-back", () => {
+	it("records successful result text and clears it when released", async () => {
+		const computer = new FakeGuardedComputer();
+		const coordinator = new WorkerCoordinator(new GuardedSession(computer), computer);
+		try {
+			const [worker] = await coordinator.assign([{ worker_id: "one", task: "edit note", app: "Finder" }]);
+			if (worker?.observation_token === undefined) throw new Error("missing worker token");
+
+			await coordinator.run("one", worker.observation_token, steps, undefined);
+			expect(coordinator.status()[0]?.lastRun).toMatchObject({ ok: true, stepCount: 1 });
+			expect(coordinator.status()[0]?.lastRun?.text).toContain("runSteps");
+
+			coordinator.release("one");
+			expect(coordinator.status()).toEqual([]);
+		} finally {
+			await coordinator.close();
+		}
+	});
+
+	it("records a bounded rejection and notifies once", async () => {
+		const computer = new FakeGuardedComputer();
+		const session = new GuardedSession(computer);
+		const failure = "x".repeat(250);
+		vi.spyOn(session, "runSteps").mockRejectedValue(new Error(failure));
+		const coordinator = new WorkerCoordinator(session, computer);
+		const notification = vi.spyOn(notify, "postNotification").mockImplementation(() => undefined);
+		try {
+			const [worker] = await coordinator.assign([{ worker_id: "one", task: "edit note", app: "Finder" }]);
+			if (worker?.observation_token === undefined) throw new Error("missing worker token");
+
+			await expect(coordinator.run("one", worker.observation_token, steps, undefined)).rejects.toThrow();
+			expect(coordinator.status()[0]?.lastRun).toMatchObject({
+				ok: false,
+				stepCount: 1,
+				errorSummary: failure.slice(0, 200),
+			});
+			expect(notification).toHaveBeenCalledTimes(1);
+			expect(notification).toHaveBeenCalledWith("apple-cua", `worker one task failed: ${failure.slice(0, 120)}`);
+		} finally {
+			notification.mockRestore();
+			await coordinator.close();
+		}
+	});
+
+	it("does not expose lastRun for a fresh worker", async () => {
+		const computer = new FakeGuardedComputer();
+		const coordinator = new WorkerCoordinator(new GuardedSession(computer), computer);
+		try {
+			await coordinator.assign([{ worker_id: "one", task: "edit note", app: "Finder" }]);
+			expect(coordinator.status()[0]).not.toHaveProperty("lastRun");
 		} finally {
 			await coordinator.close();
 		}

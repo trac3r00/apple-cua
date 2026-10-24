@@ -58,8 +58,16 @@ describe("#given keyboard mode #when selected #then it serializes the native mod
 		const overlay = createCursorOverlay(() => transport);
 
 		overlay.setMode("keyboard");
+		overlay.setMode("drag", 7);
+		overlay.setScrollMode?.("left", 7);
+		overlay.keyPress?.(7);
 
-		expect(transport.sends).toEqual(["mode keyboard\n"]);
+		expect(transport.sends).toEqual([
+			"mode keyboard\n",
+			"pid 7 mode drag\n",
+			"pid 7 mode scroll left\n",
+			"pid 7 mode keypress\n",
+		]);
 	});
 });
 

@@ -15,11 +15,17 @@ const CALL_HOST_PATHS = new Map([
 	],
 ]);
 
+const SYSTEM_UI_DISCOVERY = new Map([["com.apple.controlcenter", "/System/Library/CoreServices/ControlCenter.app"]]);
+
 export function isSystemCallHost(bundleId: string, path: string): boolean {
 	return CALL_HOST_PATHS.get(bundleId) === path;
 }
 
+function isSystemUiDiscoveryHost(bundleId: string, path: string): boolean {
+	return SYSTEM_UI_DISCOVERY.get(bundleId) === path;
+}
+
 /** Discovery does not confer approval: helpers retain their own bundle identity. */
 export function isDiscoverableApplication(activationPolicy: number, bundleId: string, path: string): boolean {
-	return activationPolicy === 0 || isSystemCallHost(bundleId, path);
+	return activationPolicy === 0 || isSystemCallHost(bundleId, path) || isSystemUiDiscoveryHost(bundleId, path);
 }

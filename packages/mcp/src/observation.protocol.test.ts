@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 
 let closeHarness: (() => Promise<void>) | undefined;
 
 afterEach(async () => {
+	vi.unstubAllEnvs();
 	if (closeHarness !== undefined) {
 		await closeHarness();
 		closeHarness = undefined;
@@ -109,6 +110,43 @@ describe("post-action observation #given dispatched input #when capture outcome 
 		expect(payload["element_columns"]).toBe("id\trole\tlabel\tvalue\tframe(x,y,w,h)\tactions\tchildren");
 		expect(payload["element_rows"]).toContain("9\tButton\tOpen\t\t10,20,30,40\tPress\t");
 		expect(typeof payload["observation_token"]).toBe("string");
+	});
+
+	it("reports measured capture timing with an injected clock", async () => {
+		vi.stubEnv("APPLE_CUA_TIMING", "1");
+		const clock = vi.spyOn(performance, "now");
+		let now = 0;
+		clock.mockImplementation(() => {
+			now += 6;
+			return now;
+		});
+		const harness = await createHarness();
+		closeHarness = harness.close;
+
+		const payload = jsonPayload(
+			await harness.client.callTool({
+				name: "get_app_state",
+				arguments: { app: "Finder", include_screenshot: false },
+			}),
+		);
+
+		expect(payload["timing_ms"]).toEqual({ capture: 6 });
+		clock.mockRestore();
+	});
+
+	it("omits timing when collection is disabled", async () => {
+		vi.stubEnv("APPLE_CUA_TIMING", "0");
+		const harness = await createHarness();
+		closeHarness = harness.close;
+
+		const payload = jsonPayload(
+			await harness.client.callTool({
+				name: "get_app_state",
+				arguments: { app: "Finder", include_screenshot: false },
+			}),
+		);
+
+		expect(payload).not.toHaveProperty("timing_ms");
 	});
 
 	it("pauses when post-action context changes even if the AX tree changed", async () => {

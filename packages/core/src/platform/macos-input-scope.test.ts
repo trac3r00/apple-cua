@@ -76,6 +76,21 @@ function backgroundController(): MacOSInputController {
 	return new MacOSInputController(undefined, NOOP_POINTER_OVERLAY, () => false, NO_SLEEP, "background");
 }
 
+/** Background cue rendering is env-gated at construction; some tests need the legacy silent behavior. */
+function withBackgroundCuesDisabled<T>(run: () => T): T {
+	const previous = process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"];
+	process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = "off";
+	try {
+		return run();
+	} finally {
+		if (previous === undefined) {
+			Reflect.deleteProperty(process.env, "APPLE_CUA_CURSOR_BACKGROUND_CUES");
+		} else {
+			process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = previous;
+		}
+	}
+}
+
 function boundTo(pid: number, windowId: number, interruption?: () => string | undefined): InputScope {
 	return interruption === undefined ? { target: { pid, windowId } } : { target: { pid, windowId }, interruption };
 }
@@ -129,21 +144,36 @@ describe("#given a pointer bound to an observed window #when moving or dragging 
 			await runInInputScope(boundTo(77, 21), async () => {
 				expect(controller.getCursorPosition()).toEqual(initial);
 			});
-			if (delivery === "background") {
-				expect(set).not.toHaveBeenCalled();
-				expect(setMode).not.toHaveBeenCalled();
-			} else {
-				expect(set).toHaveBeenNthCalledWith(1, { x: 650, y: 50 }, 77);
-				expect(set).toHaveBeenNthCalledWith(2, { x: 660, y: 60 }, 77);
-				expect(setMode.mock.calls).toEqual([
-					["pointer", 77],
-					["click", 77],
-					["scroll", 77],
-				]);
-			}
+			// Background cue rendering is on by default now, so the drawn marker feedback matches attended.
+			expect(set).toHaveBeenNthCalledWith(1, { x: 650, y: 50 }, 77);
+			expect(set).toHaveBeenNthCalledWith(2, { x: 660, y: 60 }, 77);
+			expect(setMode.mock.calls).toEqual([
+				["pointer", 77],
+				["click", 77],
+				["scroll", 77],
+			]);
 			controller.close();
 		},
 	);
+
+	it("#when background actions request cursor modes with background cues disabled #then all injected feedback stays silent", () => {
+		withBackgroundCuesDisabled(() => {
+			const set = vi.fn();
+			const setMode = vi.fn();
+			const controller = new MacOSInputController(
+				42,
+				{ ...NOOP_POINTER_OVERLAY, set, setMode },
+				() => false,
+				NO_SLEEP,
+				"background",
+			);
+			controller.showPointer({ x: 650, y: 50 }, true, 77);
+			controller.showScrollPointer({ x: 660, y: 60 }, 77);
+			expect(set).not.toHaveBeenCalled();
+			expect(setMode).not.toHaveBeenCalled();
+			controller.close();
+		});
+	});
 
 	it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_VALUE])(
 		"#when a drag duration is %s #then rejects before native input or activation",
@@ -185,7 +215,8 @@ describe("#given a pointer bound to an observed window #when moving or dragging 
 		expect(positions.length).toBeGreaterThan(2);
 		expect(positions[0]).not.toEqual({ x: 350, y: 250 });
 		expect(positions.at(-1)).toEqual({ x: 350, y: 250 });
-		expect(track).not.toHaveBeenCalled();
+		// Background cues are on by default: the drawn marker follows every paced sample.
+		expect(track.mock.calls.map(([point]) => point)).toEqual(positions);
 		expect(set).not.toHaveBeenCalled();
 		expect(await runInInputScope(boundTo(42, 12), async () => controller.getCursorPosition())).toEqual({
 			x: 350,
@@ -251,8 +282,9 @@ describe("#given a pointer bound to an observed window #when moving or dragging 
 				([event]) => event.position.x === 200 && event.position.y === 200,
 			),
 		).toBe(true);
-		expect(setMode).not.toHaveBeenCalled();
-		expect(set).not.toHaveBeenCalled();
+		// Background cues are on by default: the drawn marker shows the scroll cue at the scroll position.
+		expect(setMode).toHaveBeenCalledWith("scroll", 42);
+		expect(set).toHaveBeenCalledWith({ x: 200, y: 200 }, 42);
 		expect(track).not.toHaveBeenCalled();
 		expect(highlight).not.toHaveBeenCalled();
 		expect(await runInInputScope(boundTo(42, 12), async () => controller.getCursorPosition())).toEqual({
@@ -262,7 +294,34 @@ describe("#given a pointer bound to an observed window #when moving or dragging 
 		controller.close();
 	});
 
-	it("#when background actions request cursor modes #then all injected feedback stays silent", async () => {
+	it("#when background actions request cursor modes with background cues disabled #then all injected feedback stays silent", () => {
+		withBackgroundCuesDisabled(() => {
+			const set = vi.fn();
+			const track = vi.fn();
+			const setMode = vi.fn();
+			const highlight = vi.fn();
+			const controller = new MacOSInputController(
+				undefined,
+				{ ...NOOP_POINTER_OVERLAY, set, track, setMode, highlight },
+				() => false,
+				NO_SLEEP,
+				"background",
+			);
+
+			controller.showPointer({ x: 175, y: 125 }, true);
+			controller.showScrollPointer({ x: 200, y: 200 });
+			controller.showThinking();
+
+			expect(set).not.toHaveBeenCalled();
+			expect(track).not.toHaveBeenCalled();
+			expect(setMode).not.toHaveBeenCalled();
+			expect(highlight).not.toHaveBeenCalled();
+			expect(controller.getCursorPosition()).toEqual({ x: 200, y: 200 });
+			controller.close();
+		});
+	});
+
+	it("#when background actions request cursor modes with cues enabled by default #then pointer and scroll show on the drawn marker while thinking stays silent", () => {
 		const set = vi.fn();
 		const track = vi.fn();
 		const setMode = vi.fn();
@@ -279,10 +338,13 @@ describe("#given a pointer bound to an observed window #when moving or dragging 
 		controller.showScrollPointer({ x: 200, y: 200 });
 		controller.showThinking();
 
-		expect(set).not.toHaveBeenCalled();
-		expect(track).not.toHaveBeenCalled();
-		expect(setMode).not.toHaveBeenCalled();
-		expect(highlight).not.toHaveBeenCalled();
+		expect(set).toHaveBeenNthCalledWith(1, { x: 175, y: 125 }, undefined);
+		expect(set).toHaveBeenNthCalledWith(2, { x: 200, y: 200 }, undefined);
+		expect(setMode.mock.calls).toEqual([
+			["pointer", undefined],
+			["click", undefined],
+			["scroll", undefined],
+		]);
 		expect(controller.getCursorPosition()).toEqual({ x: 200, y: 200 });
 		controller.close();
 	});
@@ -567,7 +629,7 @@ describe("#given a stop arrives while input is going out #when the call is mid-w
 		controller.close();
 	});
 
-	it("#when background drag samples post #then the logical pointer follows without feedback or changed flags", async () => {
+	it("#when background drag samples post with cues enabled by default #then the logical pointer follows and the drawn marker shows the drag cue", async () => {
 		const overlay = { set: vi.fn(), highlight: vi.fn(), setMode: vi.fn(), hide: vi.fn(), close: vi.fn() };
 		const controller = new MacOSInputController(undefined, overlay, () => false, NO_SLEEP, "background");
 		const positions: Array<{ readonly x: number; readonly y: number }> = [];
@@ -591,8 +653,8 @@ describe("#given a stop arrives while input is going out #when the call is mid-w
 		);
 
 		expect(positions.length).toBeGreaterThan(1);
-		expect(overlay.set).not.toHaveBeenCalled();
-		expect(overlay.setMode).not.toHaveBeenCalled();
+		expect(overlay.set).toHaveBeenCalled();
+		expect(overlay.setMode).toHaveBeenCalledWith("drag", 42);
 		expect(await runInInputScope(boundTo(42, 12), async () => controller.getCursorPosition())).toEqual(
 			positions.at(-1),
 		);

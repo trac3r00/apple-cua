@@ -59,6 +59,7 @@ interface Fixture {
 	readonly change: (reason: string) => void;
 	readonly unsubscribed: () => boolean;
 	readonly setNow: (now: number) => void;
+	readonly notifications: ReturnType<typeof vi.fn<(title: string, body: string) => void>>;
 }
 
 const fixtures: Fixture[] = [];
@@ -71,6 +72,7 @@ function fixture(maxCrashes = 5): Fixture {
 	let change: (reason: string) => void = () => undefined;
 	let unsubscribed = false;
 	let now = 0;
+	const notifications = vi.fn<(title: string, body: string) => void>();
 	const framer = new LineFramer(
 		(line) => messages.push(JSON.parse(line)),
 		() => undefined,
@@ -82,6 +84,7 @@ function fixture(maxCrashes = 5): Fixture {
 		log: (line) => logs.push(line),
 		maxCrashes,
 		now: () => now,
+		notify: notifications,
 		spawnChild: () => {
 			const child = new FakeChild();
 			children.push(child);
@@ -107,6 +110,7 @@ function fixture(maxCrashes = 5): Fixture {
 		setNow: (value: number) => {
 			now = value;
 		},
+		notifications,
 	};
 	fixtures.push(result);
 	return result;
@@ -146,7 +150,12 @@ describe("stdio supervisor", () => {
 		const f = fixture();
 		initialize(f);
 		send(f, { jsonrpc: "2.0", id: 2, method: "tools/call" });
+		f.handle.requestRestart("build changed");
 		childAt(f, 0).exit();
+		expect(f.notifications).toHaveBeenCalledWith(
+			"apple-cua",
+			"Server restarted after a child crash (build changed); observe again before acting.",
+		);
 		expect(f.messages.at(-1)).toMatchObject({ id: 2, error: { code: -32000 } });
 		send(f, { jsonrpc: "2.0", id: 3, method: "tools/list" });
 		const second = childAt(f, 1);
@@ -342,12 +351,14 @@ describe("node supervisor adapters with injected processes and fake timers", () 
 	it("#given a missing permission #when a 15000ms probe observes a grant #then the idle child restarts", async () => {
 		vi.useFakeTimers();
 		const f = nativeFixture();
+		const notifications = vi.fn<(title: string, body: string) => void>();
 		const input = new PassThrough();
 		const handle = startSupervisor({
 			...nodeSupervisorOptions("/repo/packages/mcp/dist/server.js", [], SELF_CHECK_FLAG),
 			input,
 			output: new PassThrough(),
 			log: () => undefined,
+			notify: notifications,
 		});
 		try {
 			expect(native.spawn).toHaveBeenNthCalledWith(
@@ -361,6 +372,7 @@ describe("node supervisor adapters with injected processes and fake timers", () 
 			expect(f.processes).toHaveLength(2);
 			await vi.advanceTimersByTimeAsync(1);
 			processAt(f.processes, 2).report({ accessibility: true, screenRecording: true });
+			expect(notifications).toHaveBeenCalledWith("apple-cua", "Permissions granted; server reloading.");
 			expect(processAt(f.processes, 0).kill).toHaveBeenCalledTimes(1);
 			expect(processAt(f.processes, 0).kill).toHaveBeenCalledWith("SIGTERM");
 			processAt(f.processes, 0).emit("exit");

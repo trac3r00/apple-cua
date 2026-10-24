@@ -267,8 +267,8 @@ describe("#given one observation #when the driver resolves its target window and
 	});
 });
 
-describe("#given an injected overlay #when observing in background #then no highlight or cursor is drawn", () => {
-	it("ignores injected visual feedback while retaining the observed window and elements", async () => {
+describe("#given an injected overlay #when observing in background #then the drawn marker shows what is being read", () => {
+	it("highlights the observed window while retaining the observed window and elements", async () => {
 		const overlay = {
 			set: vi.fn(),
 			track: vi.fn(),
@@ -283,11 +283,42 @@ describe("#given an injected overlay #when observing in background #then no high
 
 			expect(state.windowId).toBe(99);
 			expect(state.elements).not.toHaveLength(0);
-			expect(overlay.highlight).not.toHaveBeenCalled();
-			expect(overlay.setMode).not.toHaveBeenCalled();
-			expect(overlay.set).not.toHaveBeenCalled();
+			// Background cues are on by default: observing highlights the read region on the drawn marker.
+			expect(overlay.highlight).toHaveBeenCalled();
 		} finally {
 			await computer.close();
+		}
+	});
+});
+
+describe("#given background cues disabled #when observing #then nothing is drawn", () => {
+	it("#when background cues are disabled #then observing draws nothing", async () => {
+		const previous = process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"];
+		process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = "off";
+		try {
+			const overlay2 = {
+				set: vi.fn(),
+				track: vi.fn(),
+				highlight: vi.fn(),
+				setMode: vi.fn(),
+				hide: vi.fn(),
+				close: vi.fn(),
+			};
+			const computer2 = new MacOSHostComputer({ delivery: "background", overlay: overlay2 });
+			try {
+				await computer2.getAppState(TARGET_PID, { settleMs: 0, includeScreenshot: false });
+				expect(overlay2.highlight).not.toHaveBeenCalled();
+				expect(overlay2.setMode).not.toHaveBeenCalled();
+				expect(overlay2.set).not.toHaveBeenCalled();
+			} finally {
+				await computer2.close();
+			}
+		} finally {
+			if (previous === undefined) {
+				Reflect.deleteProperty(process.env, "APPLE_CUA_CURSOR_BACKGROUND_CUES");
+			} else {
+				process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = previous;
+			}
 		}
 	});
 });

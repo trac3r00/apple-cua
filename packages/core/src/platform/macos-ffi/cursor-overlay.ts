@@ -16,7 +16,8 @@ import {
 import { prepareCursorMotion } from "./cursor-motion.js";
 
 /** "click" is an event rather than a lasting mode: the overlay ripples where the dot lands. */
-export type PointerMode = "pointer" | "scroll" | "thinking" | "keyboard" | "click";
+export type PointerMode = "pointer" | "scroll" | "thinking" | "keyboard" | "click" | "drag";
+export type ScrollDirection = "up" | "down" | "left" | "right";
 
 export interface PointerOverlay {
 	set(point: Point, pid?: number, direct?: boolean): void;
@@ -24,6 +25,8 @@ export interface PointerOverlay {
 	track?(point: Point, pid?: number): void;
 	highlight(rect: Rect, pid?: number): void;
 	setMode(mode: PointerMode, pid?: number): void;
+	setScrollMode?(direction: ScrollDirection, pid?: number): void;
+	keyPress?(pid?: number): void;
 	hide(pid?: number): void;
 	close(): void;
 }
@@ -105,6 +108,10 @@ export function createCursorOverlay(
 				: cursorMotionFromEnvironment();
 	const transportsByIdentity = new Map<string | undefined, OverlayTransport | undefined>();
 	const pidsByIdentity = new Map<string | undefined, Set<number>>();
+	const factory =
+		transportFactory ??
+		((scopedIdentity) =>
+			defaultSocketTransport(Date.now, spawn, configuration, cursorOverlaySocketPath(scopedIdentity)));
 
 	function send(command: string, pid?: number, direct = false): void {
 		const identity = currentCursorIdentity();
@@ -117,15 +124,7 @@ export function createCursorOverlay(
 			pids.add(pid);
 		}
 		if (!transportsByIdentity.has(identity)) {
-			transportsByIdentity.set(
-				identity,
-				safeTransport(
-					transportFactory ??
-						((scopedIdentity) =>
-							defaultSocketTransport(Date.now, spawn, configuration, cursorOverlaySocketPath(scopedIdentity))),
-					identity,
-				),
-			);
+			transportsByIdentity.set(identity, safeTransport(factory, identity));
 		}
 		try {
 			transportsByIdentity.get(identity)?.send(command, pid, direct);
@@ -149,6 +148,12 @@ export function createCursorOverlay(
 		},
 		setMode(mode: PointerMode, pid?: number): void {
 			send(`mode ${mode}\n`, pid);
+		},
+		setScrollMode(direction: ScrollDirection, pid?: number): void {
+			send(`mode scroll ${direction}\n`, pid);
+		},
+		keyPress(pid?: number): void {
+			send("mode keypress\n", pid);
 		},
 		hide(pid?: number): void {
 			send("hide\n", pid);

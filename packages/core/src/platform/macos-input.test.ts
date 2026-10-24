@@ -357,7 +357,7 @@ describe("#given MacOSInputController target routing", () => {
 		expect(overlay.close).toHaveBeenCalledOnce();
 	});
 
-	it("#when clicking and moving under background delivery #then injected cursor feedback stays silent", async () => {
+	it("#when clicking and moving under background delivery #then the drawn marker follows and cues clicks", async () => {
 		// given
 		windowMock.openWindows.mockResolvedValue([
 			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
@@ -384,9 +384,9 @@ describe("#given MacOSInputController target routing", () => {
 		await controller.move({ x: 60, y: 80 });
 
 		// then
-		expect(overlay.set).not.toHaveBeenCalled();
-		expect(overlay.track).not.toHaveBeenCalled();
-		expect(overlay.setMode).not.toHaveBeenCalled();
+		expect(overlay.set).toHaveBeenCalledWith({ x: 50, y: 70 }, 1234);
+		expect(overlay.track).toHaveBeenCalledWith({ x: 60, y: 80 }, 1234);
+		expect(overlay.setMode).toHaveBeenCalledWith("click", 1234);
 		expect(overlay.highlight).not.toHaveBeenCalled();
 		expect(overlay.hide).not.toHaveBeenCalled();
 		expect(controller.getCursorPosition()).toEqual({ x: 60, y: 80 });
@@ -396,6 +396,58 @@ describe("#given MacOSInputController target routing", () => {
 				targetWindow: { id: 99, bounds: { x: 10, y: 20, width: 300, height: 200 } },
 			}),
 		);
+		controller.close();
+	});
+
+	it("#given background cues are off #when clicking #then no overlay command is emitted", async () => {
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
+		]);
+		const previous = process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"];
+		process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = " Off ";
+		const overlay = {
+			set: vi.fn(),
+			track: vi.fn(),
+			highlight: vi.fn(),
+			setMode: vi.fn(),
+			hide: vi.fn(),
+			close: vi.fn(),
+		};
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(1234, overlay, undefined, undefined, "background");
+		await controller.click({ x: 50, y: 70 });
+		expect(overlay.set).not.toHaveBeenCalled();
+		expect(overlay.setMode).not.toHaveBeenCalled();
+		controller.close();
+		if (previous === undefined) process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = undefined;
+		else process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = previous;
+	});
+
+	it("#given background cue delivery #when scrolling typing and dragging #then each action cues its drawn marker", async () => {
+		windowMock.openWindows.mockResolvedValue([
+			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
+		]);
+		const overlay = {
+			set: vi.fn(),
+			track: vi.fn(),
+			highlight: vi.fn(),
+			setMode: vi.fn(),
+			setScrollMode: vi.fn(),
+			keyPress: vi.fn(),
+			hide: vi.fn(),
+			close: vi.fn(),
+		};
+		const { MacOSInputController } = await import("./macos-input.js");
+		const controller = new MacOSInputController(1234, overlay, undefined, undefined, "background");
+		await controller.scroll({ direction: "left", amount: 1 });
+		await controller.typeText("x");
+		await controller.drag({ from: { x: 40, y: 60 }, to: { x: 80, y: 100 }, duration: 0 });
+
+		expect(overlay.setScrollMode).toHaveBeenCalledWith("left", 1234);
+		expect(overlay.setMode).toHaveBeenCalledWith("keyboard", 1234);
+		expect(overlay.keyPress).toHaveBeenCalledWith(1234);
+		expect(overlay.setMode).toHaveBeenCalledWith("drag", 1234);
+		expect(overlay.track).toHaveBeenCalled();
 		controller.close();
 	});
 

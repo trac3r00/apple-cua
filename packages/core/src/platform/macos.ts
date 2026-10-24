@@ -53,6 +53,7 @@ import {
 import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
 import { createAxEventWaiter, waitForAxQuiet } from "./macos-ffi/ax-observer.js";
 import type { CursorMotionConfig } from "./macos-ffi/cursor-motion-config.js";
+import { cursorBackgroundCuesEnabled } from "./macos-ffi/cursor-background-cues.js";
 import { NOOP_POINTER_OVERLAY, type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
 import { onlineDisplayInfo } from "./macos-ffi/display-list.js";
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";
@@ -170,10 +171,12 @@ export class MacOSHostComputer extends HostComputer {
 		this.delivery = options.delivery ?? "background";
 		this.urlBlocklist = options.urlBlocklist ?? [];
 		this.overlay =
-			this.delivery === "background"
+			options.overlay ??
+			(this.delivery === "background" && !cursorBackgroundCuesEnabled()
 				? NOOP_POINTER_OVERLAY
-				: (options.overlay ??
-					(agentCursorEnabled() ? createCursorOverlay(undefined, options.cursorMotion) : NOOP_POINTER_OVERLAY));
+				: agentCursorEnabled()
+					? createCursorOverlay(undefined, options.cursorMotion)
+					: NOOP_POINTER_OVERLAY);
 		this.isLocked = options.isLocked ?? isScreenLocked;
 		this.input = new MacOSInputController(
 			options.defaultTargetPid,
@@ -710,7 +713,7 @@ export class MacOSHostComputer extends HostComputer {
 			this.lastViewportByPid.set(app.pid, viewport);
 			windowBounds = viewport.windowBounds;
 			elements = tree === undefined ? [] : remapElementFramesToScreenshot(tree.elements, viewport);
-			if (!this.highlightedApps.has(app.pid)) {
+			if (!this.highlightedApps.has(app.pid) && (this.delivery !== "background" || cursorBackgroundCuesEnabled())) {
 				this.highlightedApps.add(app.pid);
 				this.overlay.highlight(viewport.windowBounds, app.pid);
 			}

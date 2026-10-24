@@ -27,7 +27,8 @@ import {
 	postScrollEvent,
 	postUnicodeText,
 } from "./macos-ffi/coregraphics.js";
-import { NOOP_POINTER_OVERLAY, type PointerOverlay } from "./macos-ffi/cursor-overlay.js";
+import { cursorBackgroundCuesEnabled } from "./macos-ffi/cursor-background-cues.js";
+import { NOOP_POINTER_OVERLAY, type PointerOverlay, type ScrollDirection } from "./macos-ffi/cursor-overlay.js";
 import { onlineDisplayBounds } from "./macos-ffi/display-list.js";
 import { filePanelServicePid } from "./macos-ffi/file-panel-service.js";
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";
@@ -278,6 +279,7 @@ export class MacOSInputController {
 	private readonly delivery: InputDelivery;
 	/** Whether background delivery may tell an app behind the person's that it is active (see activateBehind). */
 	private readonly backgroundActivation: boolean;
+	private readonly backgroundCues: boolean;
 
 	constructor(
 		targetPid?: number,
@@ -289,6 +291,7 @@ export class MacOSInputController {
 	) {
 		this.delivery = delivery;
 		this.backgroundActivation = backgroundActivation;
+		this.backgroundCues = cursorBackgroundCuesEnabled();
 		this.overlay = overlay;
 		this.isLocked = isLocked;
 		this.displaySleep = displaySleep;
@@ -775,6 +778,7 @@ export class MacOSInputController {
 			this.checkpoint(call);
 			this.assertDeliverable(keyboardPid);
 			postUnicodeText(segment, keyboardPid, targetWindow);
+			if (!this.isBackground || this.backgroundCues) this.overlay.keyPress?.(call.pid);
 			this.noteKeyboardInput(call.pid);
 			if (i < segments.length - 1) {
 				await delayMilliseconds(TYPE_CHARACTER_DELAY_MS);
@@ -807,6 +811,7 @@ export class MacOSInputController {
 			targetPid: keyboardPid,
 			targetWindow,
 		});
+		if (!this.isBackground || this.backgroundCues) this.overlay.keyPress?.(call.pid);
 		try {
 			if (options?.holdMilliseconds !== undefined) {
 				await this.holdKey(call, options.holdMilliseconds);
@@ -862,8 +867,8 @@ export class MacOSInputController {
 		if (pid !== undefined) {
 			this.keyboardInputAt.set(pid, performance.now());
 		}
-		if (!this.isBackground) {
-			this.overlay.setMode("keyboard");
+		if (!this.isBackground || this.backgroundCues) {
+			this.overlay.setMode("keyboard", pid);
 		}
 	}
 
@@ -886,7 +891,7 @@ export class MacOSInputController {
 		if (options.position !== undefined) {
 			await this.pointerWindow(call, position);
 		}
-		this.showScrollPointer(position, call.pid);
+		this.showScrollPointer(position, call.pid, options.direction);
 		const unit: Record<ScrollOptions["direction"], [number, number]> = {
 			up: [0, 1],
 			down: [0, -1],
@@ -937,6 +942,7 @@ export class MacOSInputController {
 				throw new Error("drag destination is outside the target window; observe the destination window first");
 			}
 			this.checkpoint(call);
+			this.showDragPointer(options.from, call.pid);
 			const mousePost = this.mousePost(call);
 			const post: MousePost = async (kind, at, button, clickState, window, flags) => {
 				await mousePost(kind, at, button, clickState, window, flags);
@@ -984,7 +990,7 @@ export class MacOSInputController {
 
 	private markPointer(position: Point, pid = this.currentTargetPid): void {
 		this.pointerFor(pid).moveTo(position);
-		if (!this.isBackground) {
+		if (!this.isBackground || this.backgroundCues) {
 			this.overlay.set(position, pid);
 		}
 	}
@@ -995,7 +1001,7 @@ export class MacOSInputController {
 
 	private trackPointer(position: Point, pid = this.currentTargetPid): void {
 		this.pointerFor(pid).moveTo(position);
-		if (this.isBackground) {
+		if (this.isBackground && !this.backgroundCues) {
 			return;
 		}
 		if (this.overlay.track === undefined) {
@@ -1005,19 +1011,30 @@ export class MacOSInputController {
 		}
 	}
 
-	showScrollPointer(position: Point, pid = this.currentTargetPid): void {
-		if (!this.isBackground) {
-			this.overlay.setMode("scroll", pid);
+	showScrollPointer(position: Point, pid = this.currentTargetPid, direction?: ScrollDirection): void {
+		if (!this.isBackground || this.backgroundCues) {
+			if (direction !== undefined && this.overlay.setScrollMode !== undefined) {
+				this.overlay.setScrollMode(direction, pid);
+			} else {
+				this.overlay.setMode("scroll", pid);
+			}
 		}
+		this.markPointer(position, pid);
+	}
+
+	private showDragPointer(position: Point, pid: number | undefined): void {
+		if (this.isBackground && !this.backgroundCues) return;
+		this.overlay.setMode("drag", pid);
 		this.markPointer(position, pid);
 	}
 
 	/**
 	 * Show where the agent is acting with the drawn overlay dot, and ripple it for a press. Background
-	 * delivery updates only the logical pointer model and never emits overlay feedback.
+	 * delivery updates the drawn marker only when background cues are enabled (see
+	 * APPLE_CUA_CURSOR_BACKGROUND_CUES); otherwise it updates the logical pointer model silently.
 	 */
 	showPointer(position: Point, press: boolean, pid = this.currentTargetPid): void {
-		if (this.isBackground) {
+		if (this.isBackground && !this.backgroundCues) {
 			this.pointerFor(pid).moveTo(position);
 			return;
 		}
@@ -1034,9 +1051,9 @@ export class MacOSInputController {
 		}
 	}
 
-	/** Show attended keyboard activity while background delivery remains visually silent. */
+	/** Show keyboard activity on the drawn cursor in either delivery mode. */
 	showKeyboard(): void {
-		if (!this.isBackground) {
+		if (!this.isBackground || this.backgroundCues) {
 			const pid = this.currentTargetPid;
 			this.overlay.setMode("keyboard", pid);
 			this.overlay.set(this.pointerFor(pid).position(), pid);

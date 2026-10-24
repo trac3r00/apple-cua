@@ -2,10 +2,12 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { parseElementIndex } from "@apple-cua/core";
+import { activeSpaceId, managedDisplaySpaces, spaceTypeFor } from "@apple-cua/core";
 import type { DockAction, DockSnapshot, ElementQuery, GuardedComputerInterface, TopLevelWindow } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import type { DockGuardSession } from "./dock-session.js";
+import type { ExtrasGuardSession } from "./extras-session.js";
 import type { GuardedSession, RunPace, RunStepDriver, VerifyCheckRequest, VerifyRequest } from "./guarded-session.js";
 import type {
 	CallError,
@@ -16,6 +18,7 @@ import type {
 	WorkerTarget,
 } from "./script-protocol.js";
 import { createRunStepDriver } from "./step-actions.js";
+import type { TerminalGuardSession } from "./terminal-session.js";
 import type { ToolContent, ToolResult } from "./tool-result.js";
 import { MAX_RUN_STEPS, elementQuerySchema, runStepSchema } from "./tool-schemas.js";
 import type { RunStep } from "./tool-schemas.js";
@@ -29,6 +32,7 @@ const MAX_LOG_CHARS = 2_000;
 const MAX_FIND_RESULTS = 25;
 const MAX_BATCH_STEPS = MAX_RUN_STEPS;
 const dockRunTails = new WeakMap<DockGuardSession, Promise<void>>();
+const extrasRunTails = new WeakMap<ExtrasGuardSession, Promise<void>>();
 const observationOptionsSchema = z
 	.object({
 		diffOnly: z.boolean().optional(),
@@ -55,7 +59,9 @@ Targets are observed ids or unique queries {role,label,label_contains,value_cont
 app.waitFor(target|{window_title},options); app.verify(checks,options); app.step(step); app.batch(steps,options); app.chain(steps) (fast; batch verifies intermediate targets by default); app.reveal(query,findOptions) only scrolls.
 Find options: scrollWithin,maxPages,vision,direction. OCR needs Screen Recording and finds click targets, not AX values.
 const dock=apple.dock(); await dock.observe(); dock.click/showMenu/cancel(target). Dock actions need explicit approval and attended delivery.
-Refusals throw ScriptActionError {kind,refused,payload}; read_only forbids mutations. timeout_ms/cancellation stop input. Apps overlap only in background; attended actions serialize. Returns {ok,value,log,actions}; log(...), sleep(ms), JSON, Math, Date are available. Images need top-level and observation include_screenshot.`;
+apple.terminal(): run/read; approval required.
+apple.spaces(): active()/displays() read-only; apple.menubar(): observe(), press(observedId), guarded.
+Refusals throw ScriptActionError; read_only forbids mutations. Timeout/cancellation stop input. Attended actions serialize; background apps overlap. Returns {ok,value,log,actions}.`;
 
 class ScriptActionError extends Error {
 	readonly kind: string;
@@ -347,8 +353,10 @@ class ScriptRun {
 	private readonly tokens = new Map<string, { readonly token: string; readonly windowId: number | undefined }>();
 	private dockToken: string | undefined;
 	private dockElements: DockSnapshot["elements"] | undefined;
+	private menubarToken: string | undefined;
+	private menubarItems: readonly { readonly id: number }[] | undefined;
 	private readonly tails = new Map<string, Promise<unknown>>();
-	private nextAction = 1;
+	private nextAction: number;
 
 	constructor(
 		private readonly session: GuardedSession,
@@ -356,7 +364,141 @@ class ScriptRun {
 		private readonly options: RunOptions,
 		private readonly signal: AbortSignal,
 		private readonly dockSession?: DockGuardSession,
-	) {}
+		private readonly terminalSession?: TerminalGuardSession,
+		private readonly extrasSession?: ExtrasGuardSession,
+	) {
+		this.nextAction = 1;
+	}
+
+	terminalRun(command: unknown): Promise<unknown> {
+		return this.queue("terminal", async () => {
+			if (this.options.readOnly)
+				throw this.refuseDock("read-only", "run_script is read_only: Terminal command was not dispatched");
+			if (this.signal.aborted) throw this.stopped();
+			const terminalSession = this.terminalSession;
+			if (terminalSession === undefined)
+				throw this.refuseDock("terminal-unavailable", "Terminal session is unavailable");
+			return await this.execTerminal("terminal.run", async () => await terminalSession.run(command));
+		});
+	}
+
+	terminalRead(windowId: unknown): Promise<unknown> {
+		return this.queue("terminal", async () => {
+			if (this.signal.aborted) throw this.stopped();
+			const terminalSession = this.terminalSession;
+			if (terminalSession === undefined)
+				throw this.refuseDock("terminal-unavailable", "Terminal session is unavailable");
+			const result = terminalSession.read(windowId);
+			if (typeof result === "string") return result;
+			return await this.execTerminal("terminal.read", () => result);
+		});
+	}
+
+	spacesActive(): { readonly activeSpaceId: number | undefined; readonly type?: number; readonly reason?: string } {
+		try {
+			const id = activeSpaceId();
+			if (id === undefined) {
+				return { activeSpaceId: undefined, reason: "active space is unavailable" };
+			}
+			const type = spaceTypeFor(id);
+			return type === undefined ? { activeSpaceId: id } : { activeSpaceId: id, type };
+		} catch (error: unknown) {
+			return { activeSpaceId: undefined, reason: errorMessage(error) };
+		}
+	}
+
+	spacesDisplays(): ReturnType<typeof managedDisplaySpaces> {
+		try {
+			return managedDisplaySpaces();
+		} catch {
+			return [];
+		}
+	}
+
+	menubarObserve(): Promise<unknown> {
+		return this.queue("menubar", async () => {
+			if (this.extrasSession === undefined)
+				throw this.refuseDock("menubar-unavailable", "Menu extras are unavailable");
+			const result = await this.extrasSession.observe();
+			const parsed = parseResult(result).payload;
+			const token = pick(parsed, "observation_token");
+			this.menubarToken = typeof token === "string" ? token : undefined;
+			const items = pick(parsed, "items");
+			this.menubarItems = Array.isArray(items)
+				? items.filter((item): item is { readonly id: number } => isRecord(item) && typeof item["id"] === "number")
+				: undefined;
+			const failure = describeFailure(result, parsed);
+			if (failure !== undefined) throw this.refuseDock(failure.refused ?? "menubar-observe-failed", failure.message);
+			return parsed;
+		});
+	}
+
+	menubarPress(elementId: unknown): Promise<unknown> {
+		return this.queue("menubar", async () => {
+			if (this.options.readOnly)
+				throw this.refuseDock("read-only", "run_script is read_only: menu extra press was not dispatched");
+			if (this.signal.aborted) throw this.stopped();
+			if (this.extrasSession === undefined)
+				throw this.refuseDock("menubar-unavailable", "Menu extras are unavailable");
+			if (typeof elementId !== "number" || !Number.isSafeInteger(elementId) || elementId < 0)
+				throw this.refuseDock("invalid-argument", "menu extra id must be a non-negative integer");
+			const token = this.menubarToken;
+			const observed = this.menubarItems?.some((item) => item.id === elementId);
+			this.menubarToken = undefined;
+			this.menubarItems = undefined;
+			if (token === undefined)
+				throw this.refuseDock("needs-observation", "call apple.menubar().observe() before pressing an id");
+			if (observed !== true)
+				throw this.refuseDock("menubar-element-not-observed", "press only an observed menu extra id");
+			const result = await this.queueExtrasSession(
+				this.extrasSession,
+				() => this.extrasSession?.act(token, elementId) ?? Promise.resolve({ content: [] }),
+			);
+			const parsed = parseResult(result).payload;
+			const failure = describeFailure(result, parsed);
+			if (failure !== undefined) throw this.refuseDock(failure.refused ?? "menubar-action-failed", failure.message);
+			return parsed;
+		});
+	}
+
+	private queueExtrasSession<T>(session: ExtrasGuardSession, work: () => Promise<T>): Promise<T> {
+		const next = (extrasRunTails.get(session) ?? Promise.resolve()).then(() => {
+			if (this.signal.aborted) throw this.stopped();
+			return work();
+		});
+		extrasRunTails.set(
+			session,
+			next.then(
+				() => undefined,
+				() => undefined,
+			),
+		);
+		return next;
+	}
+
+	private async execTerminal(kind: string, call: () => Promise<ToolResult> | ToolResult): Promise<unknown> {
+		const startedAt = Date.now();
+		const n = this.nextAction++;
+		const result = await call();
+		const payload = parseResult(result).payload;
+		const failure = describeFailure(result, isRecord(payload) ? payload : {});
+		this.actions.push({
+			n,
+			app: "Terminal",
+			kind,
+			ms: Date.now() - startedAt,
+			status: failure === undefined ? "ok" : `refused:${failure.refused ?? "failed"}`,
+		});
+		if (failure !== undefined) {
+			this.lastFailure = this.actions.at(-1);
+			throw new ScriptActionError(failure.message, {
+				kind: failure.refused === undefined ? "failed" : "refused",
+				payload,
+				...(failure.refused === undefined ? {} : { refused: failure.refused }),
+			});
+		}
+		return payload;
+	}
 
 	dockObserve(): Promise<unknown> {
 		return this.queue("dock", async () => {
@@ -954,6 +1096,20 @@ async function perform(
 				throw invalid("Dock action must be AXPress, AXShowMenu, or AXCancel");
 			}
 			return await run.dockAct(first, second);
+		case "terminalRun":
+			return await run.terminalRun(first);
+		case "terminalRead":
+			return await run.terminalRead(first);
+		case "spacesActive":
+			return run.spacesActive();
+		case "spacesDisplays":
+			return run.spacesDisplays();
+		case "menubarObserve":
+			return await run.menubarObserve();
+		case "menubarPress":
+			return await run.menubarPress(first);
+		default:
+			throw new Error(`Unhandled script call method: ${call.method satisfies never}`);
 	}
 }
 
@@ -975,20 +1131,21 @@ function runInWorker(code: string, run: ScriptRun, signal: AbortSignal, timeoutM
 			void worker.terminate();
 			resolve(outcome);
 		};
-		const onAbort = (): void =>
-			finish(
-				signal.reason === "timeout"
-					? {
-							ok: false,
-							kind: "timeout",
-							error: `run_script timed out after ${timeoutMs} ms; no further actions were dispatched`,
-						}
-					: {
-							ok: false,
-							kind: "cancelled",
-							error: "run_script was cancelled; no further actions were dispatched",
-						},
-			);
+		const onAbort = (): void => {
+			if (signal.reason === "timeout") {
+				finish({
+					ok: false,
+					kind: "timeout",
+					error: `run_script timed out after ${timeoutMs} ms; no further actions were dispatched`,
+				});
+				return;
+			}
+			finish({
+				ok: false,
+				kind: "cancelled",
+				error: "run_script was cancelled; no further actions were dispatched",
+			});
+		};
 		const answer = async (call: Extract<WorkerMessage, { readonly type: "call" }>): Promise<void> => {
 			let reply: HostMessage;
 			try {
@@ -1039,6 +1196,8 @@ export function registerScriptTools(
 	session: GuardedSession,
 	computer: GuardedComputerInterface,
 	dockSession?: DockGuardSession,
+	terminalSession?: TerminalGuardSession,
+	extrasSession?: ExtrasGuardSession,
 ): void {
 	warmWorker();
 	server.registerTool(
@@ -1069,6 +1228,8 @@ export function registerScriptTools(
 				},
 				controller.signal,
 				dockSession,
+				terminalSession,
+				extrasSession,
 			);
 			try {
 				const outcome = controller.signal.aborted

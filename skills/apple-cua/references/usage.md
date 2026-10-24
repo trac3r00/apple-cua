@@ -118,6 +118,18 @@ mapping; window-scoped AX frames must not be scaled a second time.
 - `type_text`: text into the established target's focused input.
 - `press_keys`: a deliberate key/chord sequence, with optional timing.
 
+`run_script` also exposes `apple.terminal()`: `await terminal.run(command)` sends a command to
+Terminal.app and returns its dispatch marker, while `await terminal.read(windowId?)` reads the
+visible text tail. Terminal.app must be running and allowlisted with
+`APPLE_CUA_ALLOWED_BUNDLE_IDS=com.apple.Terminal`; command dispatch requires attended console
+delivery and Apple Events authorization. `read_only` forbids terminal commands.
+
+`run_script` also provides `apple.spaces()`: `active()` returns the active Space id and its
+type when available; `displays()` returns the managed display/Space inventory. These calls are
+read-only. `apple.menubar()` reads Control Center menu extras with `observe()` and presses an
+observed id with `press(id)`. Presses require a fresh observation token, Control Center
+allowlisting, attended console delivery, and accessibility permission.
+
 Every mutation answers with the fresh post-action observation: what changed, the affected
 controls and, when the input context is unchanged, a new one-use `observation_token`, so
 consecutive actions need no extra `get_app_state`. That answer omits the full accessibility

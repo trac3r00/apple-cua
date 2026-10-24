@@ -27,6 +27,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { registerCapabilityTools, registerSkillResources } from "./capability-tools.js";
 import { elementQueryFromInput, registerDesktopMutationTools } from "./desktop-mutation-tools.js";
 import { DockGuardSession } from "./dock-session.js";
+import { ExtrasGuardSession } from "./extras-session.js";
 import { GuardedSession } from "./guarded-session.js";
 import { detectHost, spawnGuidance } from "./host-detection.js";
 import { registerHumanTools } from "./human-tools.js";
@@ -50,6 +51,7 @@ import {
 } from "./self-check.js";
 import { SERVER_INFO } from "./server-info.js";
 import { SUPERVISED_CHILD_FLAG, nodeSupervisorOptions, startSupervisor } from "./supervisor.js";
+import { TerminalGuardSession } from "./terminal-session.js";
 import { toolNamesFor } from "./tool-names.js";
 import {
 	emptySchema,
@@ -74,6 +76,8 @@ class ComputerMcpServer extends McpServer {
 	constructor(
 		private readonly session: GuardedSession,
 		private readonly dockSession: DockGuardSession,
+		private readonly terminalSession: TerminalGuardSession,
+		private readonly extrasSession: ExtrasGuardSession,
 		private readonly stopChord: { stop(): void } | undefined,
 		private readonly workers: WorkerCoordinator,
 		toolset: ToolsetProfile,
@@ -86,6 +90,8 @@ class ComputerMcpServer extends McpServer {
 				process.stderr.write(`Failed to close worker coordinator: ${details}\n`);
 			});
 			this.dockSession.close();
+			this.terminalSession.close();
+			this.extrasSession.close();
 		};
 	}
 
@@ -93,6 +99,8 @@ class ComputerMcpServer extends McpServer {
 		this.stopChord?.stop();
 		this.session.invalidate();
 		this.dockSession.close();
+		this.terminalSession.close();
+		this.extrasSession.close();
 		await super.close();
 		await this.workers.close();
 	}
@@ -133,8 +141,32 @@ export function createMcpServer(
 		probeHost: options?.dockHostProbe ?? probeHostCapabilities,
 		...(stopGate === undefined ? {} : { stopSwitch: stopGate }),
 	});
+	const terminalSession = new TerminalGuardSession({
+		allowedBundleIds: allowedBundleIdsFromProcessEnvironment(),
+		delivery: resolvedComputer.delivery ?? "background",
+		probeHost: options?.terminalHostProbe ?? probeHostCapabilities,
+		...(options?.terminalDispatch === undefined ? {} : { dispatch: options.terminalDispatch }),
+		...(options?.terminalRead === undefined ? {} : { readText: options.terminalRead }),
+		...(stopGate === undefined ? {} : { stopSwitch: stopGate }),
+	});
+	const extrasSession = new ExtrasGuardSession(options?.extrasSource, {
+		allowedBundleIds: allowedBundleIdsFromProcessEnvironment(),
+		delivery: resolvedComputer.delivery ?? "background",
+		probeHost: options?.extrasHostProbe ?? probeHostCapabilities,
+		...(options?.extrasNow === undefined ? {} : { now: options.extrasNow }),
+		...(options?.extrasTtlMs === undefined ? {} : { ttlMs: options.extrasTtlMs }),
+		...(stopGate === undefined ? {} : { stopSwitch: stopGate }),
+	});
 	const workers = new WorkerCoordinator(session, resolvedComputer);
-	const server = new ComputerMcpServer(session, dockSession, stopChord, workers, toolset);
+	const server = new ComputerMcpServer(
+		session,
+		dockSession,
+		terminalSession,
+		extrasSession,
+		stopChord,
+		workers,
+		toolset,
+	);
 	// The harness is known only after initialize, so read it on demand rather than at construction.
 	const host = () => detectHost(server.server.getClientVersion(), process.env);
 
@@ -258,7 +290,7 @@ export function createMcpServer(
 	}
 	registerHumanTools(server, session);
 	registerVisualTools(server, session);
-	registerScriptTools(server, session, resolvedComputer, dockSession);
+	registerScriptTools(server, session, resolvedComputer, dockSession, terminalSession, extrasSession);
 	registerCapabilityTools(server, {
 		delivery: resolvedComputer.delivery,
 		probeHost: probeHostCapabilities,

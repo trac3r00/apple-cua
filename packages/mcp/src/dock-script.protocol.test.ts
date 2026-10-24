@@ -1,4 +1,4 @@
-import type { DockSnapshot, DockSource, HostCapabilities, StopStatus } from "@apple-cua/core";
+import type { DockSnapshot, DockSource, HostCapabilities, MenuExtraSnapshot, StopStatus } from "@apple-cua/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
@@ -11,7 +11,9 @@ class MemoryTransport implements Transport {
 	onclose?: () => void;
 	onerror?: (error: Error) => void;
 	onmessage?: <T extends JSONRPCMessage>(message: T) => void;
-	async start(): Promise<void> {}
+	async start(): Promise<void> {
+		return;
+	}
 	async send(message: JSONRPCMessage): Promise<void> {
 		queueMicrotask(() => this.peer?.onmessage?.(message));
 	}
@@ -43,6 +45,10 @@ async function setup(
 		changeOnAct?: boolean;
 		duplicate?: boolean;
 		actFailure?: boolean;
+		terminalApproved?: boolean;
+		terminalDelivery?: "attended" | "background";
+		extrasApproved?: boolean;
+		expireToken?: boolean;
 	} = {},
 ) {
 	let generation = 0;
@@ -54,6 +60,25 @@ async function setup(
 			? { stopped: true, stoppedAt: "2026-10-13T00:00:00.000Z", reason: "test", source: "api" }
 			: { stopped: false };
 	const effects: string[] = [];
+	const terminalCommands: string[] = [];
+	let extrasActions = 0;
+	let clock = 0;
+	const extrasSnapshot: MenuExtraSnapshot = {
+		pid: 9001,
+		observationKey: "extras:1",
+		items: [
+			{
+				id: 17,
+				role: "AXStatusBarItem",
+				label: "Wi-Fi",
+				value: null,
+				frame: { x: 0, y: 0, width: 20, height: 20 },
+				actions: ["AXPress"],
+				children: [],
+			},
+		],
+		truncated: false,
+	};
 	let actionAttempts = 0;
 	const snapshot = (): DockSnapshot => ({
 		pid: 4242,
@@ -77,8 +102,17 @@ async function setup(
 		},
 	};
 	const computer = new FakeGuardedComputer();
-	Object.defineProperty(computer, "delivery", { value: options.delivery ?? "attended" });
-	vi.stubEnv("APPLE_CUA_ALLOWED_BUNDLE_IDS", options.approved === false ? "" : "com.apple.dock");
+	Object.defineProperty(computer, "delivery", {
+		value: options.terminalDelivery ?? options.delivery ?? "attended",
+	});
+	vi.stubEnv(
+		"APPLE_CUA_ALLOWED_BUNDLE_IDS",
+		options.terminalApproved === true
+			? "com.apple.dock,com.apple.Terminal,com.apple.controlcenter"
+			: options.approved === false
+				? ""
+				: `com.apple.dock${options.extrasApproved === true ? ",com.apple.controlcenter" : ""}`,
+	);
 	const server = createMcpServer(
 		computer,
 		undefined,
@@ -92,6 +126,25 @@ async function setup(
 			toolset: "lean",
 			dockSource: source,
 			dockHostProbe: () => host,
+			terminalHostProbe: () => host,
+			terminalDispatch: async (command) => {
+				terminalCommands.push(command);
+				return { dispatched: true, marker: `apple-cua-marker-${command.length}` };
+			},
+			terminalRead: () => "visible terminal output",
+			extrasSource: {
+				read: async () => extrasSnapshot,
+				act: async (_snapshot, id) => {
+					if (id !== 17) throw new Error("unexpected menu extra");
+					extrasActions += 1;
+				},
+			},
+			extrasHostProbe: () => host,
+			extrasNow: () => {
+				const current = clock;
+				clock += options.expireToken === true ? 120_001 : 1;
+				return current;
+			},
 		},
 	);
 	const client = new Client({ name: "dock-protocol-test", version: "1" });
@@ -103,6 +156,10 @@ async function setup(
 	return {
 		client,
 		effects,
+		terminalCommands,
+		get extrasActions() {
+			return extrasActions;
+		},
 		get actionAttempts() {
 			return actionAttempts;
 		},
@@ -127,14 +184,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function payload(result: Awaited<ReturnType<typeof call>>): Record<string, unknown> {
 	const content: unknown = result["content"];
-	const text = Array.isArray(content)
-		? content.find(
-				(part: unknown): part is { type: "text"; text: string } =>
-					typeof part === "object" && part !== null && "type" in part && part.type === "text" && "text" in part,
-			)
-		: undefined;
-	if (text?.type !== "text") throw new Error("missing result text");
-	const parsed: unknown = JSON.parse(text.text);
+	const text = Array.isArray(content) ? content.find((part) => isRecord(part) && part["type"] === "text") : undefined;
+	if (!isRecord(text) || text["type"] !== "text" || typeof text["text"] !== "string") {
+		throw new Error("missing result text");
+	}
+	const parsed: unknown = JSON.parse(text["text"]);
 	if (!isRecord(parsed)) throw new Error("result payload is not an object");
 	return parsed;
 }
@@ -146,6 +200,76 @@ afterEach(async () => {
 });
 
 describe("run_script Dock handle", () => {
+	it("#given spaces APIs are read-only #when queried #then active and display data return", async () => {
+		const h = await setup();
+		live.push(h.close);
+		const result = await call(
+			h,
+			"return {active:await apple.spaces().active(),displays:await apple.spaces().displays()};",
+			true,
+		);
+		expect(result.isError).not.toBe(true);
+		const value = payload(result)["value"];
+		expect(isRecord(value)).toBe(true);
+		if (!isRecord(value)) throw new Error("spaces result is not an object");
+		expect(isRecord(value["active"])).toBe(true);
+		expect(Array.isArray(value["displays"])).toBe(true);
+		if (!isRecord(value["active"])) throw new Error("active space result is not an object");
+		expect(
+			value["active"]["activeSpaceId"] === undefined || typeof value["active"]["activeSpaceId"] === "number",
+		).toBe(true);
+	});
+
+	it("#given an allowlisted menu extra #when observed and pressed #then the observed AXPress dispatches", async () => {
+		const h = await setup({ extrasApproved: true });
+		live.push(h.close);
+		const result = await call(
+			h,
+			"const m=apple.menubar();const o=await m.observe();return await m.press(o.items[0].id);",
+		);
+		expect(result.isError).not.toBe(true);
+		expect(h.extrasActions).toBe(1);
+	});
+
+	it("#given no fresh token #when a menu extra is pressed #then no action dispatches", async () => {
+		const h = await setup({ extrasApproved: true });
+		live.push(h.close);
+		const result = await call(h, "await apple.menubar().press(17);");
+		expect(result.isError).toBe(true);
+		expect(h.extrasActions).toBe(0);
+	});
+
+	it("#given a stale token #when a menu extra is pressed #then no action dispatches", async () => {
+		const h = await setup({ extrasApproved: true, expireToken: true });
+		live.push(h.close);
+		const result = await call(
+			h,
+			"const m=apple.menubar();const o=await m.observe();return await m.press(o.items[0].id);",
+		);
+		expect(result.isError).toBe(true);
+		expect(h.extrasActions).toBe(0);
+	});
+
+	it("#given Control Center is not allowlisted #when observed #then policy refuses", async () => {
+		const h = await setup();
+		live.push(h.close);
+		const result = await call(h, "await apple.menubar().observe();");
+		expect(result.isError).toBe(true);
+		expect(h.extrasActions).toBe(0);
+	});
+
+	it("#given read_only mode #when menu extra press is attempted #then it is refused", async () => {
+		const h = await setup({ extrasApproved: true });
+		live.push(h.close);
+		const result = await call(
+			h,
+			"const m=apple.menubar();const o=await m.observe();return await m.press(o.items[0].id);",
+			true,
+		);
+		expect(result.isError).toBe(true);
+		expect(h.extrasActions).toBe(0);
+	});
+
 	it("resolves and acts on a unique query, returning observed frames and actions", async () => {
 		const h = await setup();
 		live.push(h.close);
@@ -259,5 +383,36 @@ describe("run_script Dock handle", () => {
 		expect(h.closed).toBe(true);
 		await h.client.close();
 		await expect(call(h, "await apple.dock().observe();")).rejects.toThrow();
+	});
+
+	it("#given Terminal.app is allowlisted #when terminal.run and read execute #then dispatch marker and visible text return", async () => {
+		const h = await setup({ terminalApproved: true });
+		live.push(h.close);
+		expect(process.env["APPLE_CUA_ALLOWED_BUNDLE_IDS"]).toContain("com.apple.Terminal");
+		const result = await call(
+			h,
+			`const t=apple.terminal(); const run=await t.run("echo hi"); const text=await t.read(); return {run,text};`,
+		);
+		expect(result.isError, JSON.stringify(payload(result))).not.toBe(true);
+		expect(payload(result)).toMatchObject({
+			ok: true,
+			value: {
+				run: { dispatched: true, marker: "apple-cua-marker-7" },
+				text: "visible terminal output",
+			},
+		});
+		expect(h.terminalCommands).toEqual(["echo hi"]);
+	});
+
+	it("#given Terminal.app is not allowlisted #when terminal.run is called #then the mutation is refused", async () => {
+		const h = await setup();
+		live.push(h.close);
+		const result = await call(h, `await apple.terminal().run("echo must-not-run");`);
+		expect(result.isError).toBe(true);
+		expect(payload(result)).toMatchObject({
+			ok: false,
+			error: expect.stringContaining("com.apple.Terminal"),
+		});
+		expect(h.terminalCommands).toEqual([]);
 	});
 });

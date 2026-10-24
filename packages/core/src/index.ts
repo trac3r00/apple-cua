@@ -57,6 +57,14 @@ export {
 } from "./platform/macos-top-level-windows.js";
 export { type ListedWindow, listWindows } from "./platform/macos-ffi/window-list.js";
 export {
+	activeSpaceId,
+	managedDisplaySpaces,
+	spaceTypeFor,
+	spacesForWindows,
+	type ManagedDisplaySpaces,
+	type SpaceInfo,
+} from "./platform/macos-ffi/sls-spaces.js";
+export {
 	type SystemPrompt,
 	type SystemPromptKind,
 	classifySystemPrompts,
@@ -116,6 +124,22 @@ export {
 	type DockSource,
 	createNativeDockSource,
 } from "./platform/macos-dock.js";
+export { type MenuExtraSnapshot, createNativeMenuExtrasSource } from "./platform/macos-menu-extras.js";
+export {
+	type TerminalApplication,
+	type TerminalCapture,
+	type TerminalCaptureOptions,
+	type TerminalRunOptions,
+	type TerminalRunResult,
+	TerminalAutomationPermissionError,
+	TerminalNotRunningError,
+	createTerminalSession,
+	dispatchTerminalCommand,
+	findTerminal,
+	readVisibleText,
+	runAndCapture,
+	runCommand,
+} from "./platform/terminal-session.js";
 export {
 	type OcrBox,
 	type OcrTextObservation,

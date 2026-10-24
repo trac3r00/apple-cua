@@ -52,8 +52,8 @@ import {
 } from "./macos-ffi/accessibility.js";
 import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
 import { createAxEventWaiter, waitForAxQuiet } from "./macos-ffi/ax-observer.js";
-import type { CursorMotionConfig } from "./macos-ffi/cursor-motion-config.js";
 import { cursorBackgroundCuesEnabled } from "./macos-ffi/cursor-background-cues.js";
+import type { CursorMotionConfig } from "./macos-ffi/cursor-motion-config.js";
 import { NOOP_POINTER_OVERLAY, type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
 import { onlineDisplayInfo } from "./macos-ffi/display-list.js";
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";

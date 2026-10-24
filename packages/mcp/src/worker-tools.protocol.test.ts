@@ -8,6 +8,31 @@ type Worker = {
 	readonly cursor_id?: string;
 };
 
+type WorkerRunSummary = {
+	readonly ok: boolean;
+	readonly text?: string;
+	readonly errorSummary?: string;
+};
+
+function workerRunSummary(value: unknown): WorkerRunSummary | undefined {
+	if (!Array.isArray(value)) throw new Error("expected a worker list");
+	const workerValue = value[0];
+	if (workerValue === undefined) return undefined;
+	const worker = objectValue(workerValue);
+	const summary = worker["lastRun"];
+	if (summary === undefined) return undefined;
+	const fields = objectValue(summary);
+	const ok = fields["ok"];
+	const text = fields["text"];
+	const errorSummary = fields["errorSummary"];
+	if (typeof ok !== "boolean") throw new Error("worker run summary is missing its outcome");
+	return {
+		ok,
+		...(typeof text === "string" ? { text } : {}),
+		...(typeof errorSummary === "string" ? { errorSummary } : {}),
+	};
+}
+
 describe("registered worker tools #given malformed steps #when submitted #then strict validation precedes every dispatch", () => {
 	it("rejects incomplete assignment and release operations without changing ownership", async () => {
 		const harness = await createHarness();
@@ -56,6 +81,45 @@ describe("registered worker tools #given malformed steps #when submitted #then s
 			});
 			expect(valid.isError).not.toBe(true);
 			expect(objectValue(JSON.parse(jsonText(valid)))["verification"]).toMatchObject({ verified: true });
+			const status = await harness.client.callTool({ name: "manage_workers", arguments: { op: "status" } });
+			expect(workerRunSummary(JSON.parse(jsonText(status)))).toMatchObject({ ok: true, text: expect.any(String) });
+		} finally {
+			await harness.close();
+		}
+	});
+});
+
+describe("registered worker tools #given fresh and completed workers #when status is requested #then last run is additive and released state clears", () => {
+	it("omits lastRun until execution then clears it on release", async () => {
+		const harness = await createHarness();
+		try {
+			const assigned = await harness.client.callTool({
+				name: "manage_workers",
+				arguments: { op: "assign", assignments: [{ worker_id: "one", task: "edit note", app: "Finder" }] },
+			});
+			const [worker] = workerList(JSON.parse(jsonText(assigned)));
+			if (worker === undefined) throw new Error("missing worker");
+			const fresh = await harness.client.callTool({ name: "manage_workers", arguments: { op: "status" } });
+			expect(workerRunSummary(JSON.parse(jsonText(fresh)))).toBeUndefined();
+
+			const completed = await harness.client.callTool({
+				name: "run_worker",
+				arguments: {
+					worker_id: worker.worker_id,
+					observation_token: worker.observation_token,
+					steps: [{ type: "set_value", element_index: "20", value: "resumable" }],
+				},
+			});
+			expect(completed.isError).not.toBe(true);
+			const status = await harness.client.callTool({ name: "manage_workers", arguments: { op: "status" } });
+			expect(workerRunSummary(JSON.parse(jsonText(status)))).toMatchObject({ ok: true, text: expect.any(String) });
+
+			await harness.client.callTool({
+				name: "manage_workers",
+				arguments: { op: "release", worker_id: worker.worker_id },
+			});
+			const released = await harness.client.callTool({ name: "manage_workers", arguments: { op: "status" } });
+			expect(JSON.parse(jsonText(released))).toEqual([]);
 		} finally {
 			await harness.close();
 		}
@@ -230,6 +294,16 @@ describe("registered worker tools #given two app assignments #when workers execu
 				actionDispatched: false,
 				effect: "refused",
 				reason: "window-missing",
+			});
+			const failedStatus = await harness.client.callTool({
+				name: "manage_workers",
+				arguments: { op: "status" },
+			});
+			const failedRuns = JSON.parse(jsonText(failedStatus));
+			if (!Array.isArray(failedRuns)) throw new Error("expected a worker list");
+			const failedWorker = failedRuns.map(objectValue).find((entry) => entry["worker_id"] === first.worker_id);
+			expect(failedWorker).toMatchObject({
+				lastRun: { ok: false, errorSummary: expect.any(String) },
 			});
 			expect(imageBlocks(refused)).toHaveLength(0);
 

@@ -3,6 +3,7 @@ import { existsSync, watch } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
+import { postNotification } from "./notify.js";
 
 export const SUPERVISED_CHILD_FLAG = "--supervised-child";
 const MAX_LINE_BYTES = 32 * 1024 * 1024;
@@ -25,6 +26,7 @@ export interface SupervisorOptions {
 	readonly maxCrashes?: number;
 	readonly crashWindowMs?: number;
 	readonly now?: () => number;
+	readonly notify?: typeof postNotification;
 }
 
 export interface SupervisorHandle {
@@ -98,6 +100,7 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 	let unsubscribe: () => void = () => undefined;
 	let restarting = false;
 	let pendingRestart: string | undefined;
+	let restartReason: string | undefined;
 	let initialization: Record<string, unknown> | undefined;
 	let initialized = false;
 	let rewritten = false;
@@ -162,6 +165,7 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 				}
 				if (initialized) child?.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
 				restarting = false;
+				restartReason = undefined;
 				send({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
 				const waiting = queued;
 				queued = [];
@@ -208,6 +212,7 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 				child = undefined;
 				if (stopped) return;
 				if (!restarting || internalId !== undefined) {
+					const crashed = !restarting || internalId !== undefined;
 					failRequests(UNKNOWN_OUTCOME, false);
 					const now = (options.now ?? Date.now)();
 					crashes = crashes.filter((time) => now - time <= (options.crashWindowMs ?? 60_000));
@@ -217,6 +222,13 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 						failRequests("apple-cua crash loop: restart limit exceeded");
 						stop(1);
 						return;
+					}
+					if (crashed) {
+						const reason = restartReason ?? pendingRestart ?? "unexpected child exit";
+						(options.notify ?? postNotification)(
+							"apple-cua",
+							`Server restarted after a child crash (${reason}); observe again before acting.`,
+						);
 					}
 				}
 				restarting = true;
@@ -274,8 +286,13 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 		stop(1);
 	};
 	const requestRestart = (reason: string) => {
-		if (stopped || restarting) return;
+		if (stopped) return;
+		if (reason === "permission-granted") {
+			(options.notify ?? postNotification)("apple-cua", "Permissions granted; server reloading.");
+		}
+		if (restarting) return;
 		pendingRestart ??= reason;
+		restartReason ??= reason;
 		restartIfIdle();
 	};
 	options.input.on("data", inputData);
@@ -354,7 +371,9 @@ export function nodeSupervisorOptions(
 										(key) => previous?.[key] === false && permissions[key] === true,
 									);
 									previous = permissions;
-									if (granted) listener("permission-granted");
+									if (granted) {
+										listener("permission-granted");
+									}
 								}
 							} catch (cause) {
 								process.stderr.write(`apple-cua permission probe: ${String(cause)}\n`);

@@ -92,7 +92,8 @@ describe("system dialogs #given macOS has a permission prompt on screen #when th
 
 		const payload = jsonPayload(await harness.client.callTool({ name: "list_windows", arguments: {} }));
 
-		expect(payload).toEqual({ windows: [] });
+		expect(payload).toMatchObject({ windows: [] });
+		expect(payload["timing_ms"]).toMatchObject({ total: expect.any(Number) });
 	});
 
 	it("an app observation carries the prompt so the agent does not act into a blocked screen", async () => {

@@ -95,7 +95,7 @@ describe("mutation routing #given every mutation tool #when token state varies #
 		});
 		expect(payload["observation_token"]).toEqual(expect.any(String));
 		expect(harness.computer.stateOptions.at(-1)).toEqual({
-			...(testCase.name === "set_value" ? {} : { diffOnly: true }),
+			...(testCase.name === "set_value" ? {} : { diffOnly: true, maxElements: 250 }),
 			requireWindow: true,
 			includeScreenshot: false,
 		});

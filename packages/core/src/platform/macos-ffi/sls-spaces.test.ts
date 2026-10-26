@@ -1,0 +1,160 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const ffi = vi.hoisted(() => {
+	type Ref = {
+		readonly kind: "array" | "dictionary" | "number" | "string";
+		readonly values?: readonly Ref[];
+		readonly entries?: Readonly<Record<string, Ref>>;
+		readonly value?: number | string;
+	};
+	const ref = {
+		array: (...values: readonly Ref[]): Ref => ({ kind: "array", values }),
+		dictionary: (entries: Readonly<Record<string, Ref>>): Ref => ({ kind: "dictionary", entries }),
+		number: (value: number): Ref => ({ kind: "number", value }),
+		string: (value: string): Ref => ({ kind: "string", value }),
+	};
+	const current = ref.dictionary({ ManagedSpaceID: ref.number(10), type: ref.number(0) });
+	const regular = ref.dictionary({ ManagedSpaceID: ref.number(10), type: ref.number(0), uuid: ref.string("a") });
+	const nested = ref.dictionary({ TileSpaces: ref.array(regular), WallSpace: regular });
+	const secondCurrent = ref.dictionary({ id64: ref.number(20), type: ref.number(0) });
+	const secondSpace = ref.dictionary({ id64: ref.number(20), type: ref.number(0) });
+	const displays = ref.array(
+		ref.dictionary({
+			"Display Identifier": ref.string("display-a"),
+			"Current Space": current,
+			Spaces: ref.array(regular, nested),
+		}),
+		ref.dictionary({
+			"Display Identifier": ref.string("display-b"),
+			"Current Space": secondCurrent,
+			Spaces: ref.array(secondSpace),
+		}),
+	);
+	let managedResult: Ref | null = displays;
+	const sky = {
+		SLSMainConnectionID: vi.fn(() => 7),
+		SLSGetActiveSpace: vi.fn(() => 10),
+		SLSCopyManagedDisplaySpaces: vi.fn(() => managedResult),
+		SLSSpaceGetType: vi.fn(() => 0),
+	};
+	const core = {
+		CFRelease: vi.fn(),
+	};
+	const func = vi.fn((name: string) => {
+		const symbol = name.startsWith("SLS") ? sky[name as keyof typeof sky] : core[name as keyof typeof core];
+		if (symbol === undefined) throw new Error(`unexpected function: ${name}`);
+		return symbol;
+	});
+	const koffi = {
+		load: vi.fn((path: string) => (path.includes("SkyLight") ? { func } : { func })),
+		pointer: vi.fn(() => ({})),
+		opaque: vi.fn(() => ({})),
+	};
+	return {
+		ref,
+		sky,
+		core,
+		koffi,
+		get managedResult() {
+			return managedResult;
+		},
+		set managedResult(value: Ref | null) {
+			managedResult = value;
+		},
+	};
+});
+
+vi.mock("koffi", () => ffi.koffi);
+vi.mock("./corefoundation.js", () => ({
+	cfArrayLength: (reference: { values?: readonly unknown[] }) => reference.values?.length ?? 0,
+	cfArrayValueAt: (reference: { values?: readonly unknown[] }, index: number) => reference.values?.[index] ?? null,
+	cfDictionaryValue: (dictionary: { entries?: Readonly<Record<string, unknown>> }, key: { value: string }) =>
+		dictionary.entries?.[key.value] ?? null,
+	cfRelease: (reference: object | null) => ffi.core.CFRelease(reference),
+	fromCFNumber: (reference: { value?: number }) => reference.value ?? 0,
+	fromCFString: (reference: { value?: string }) => reference.value ?? "",
+	isCFArray: (reference: { kind?: string }): boolean => reference.kind === "array",
+	isCFDictionary: (reference: { kind?: string }): boolean => reference.kind === "dictionary",
+	isCFNumber: (reference: { kind?: string }): boolean => reference.kind === "number",
+	isCFString: (reference: { kind?: string }): boolean => reference.kind === "string",
+	withCFString: <T>(value: string, callback: (reference: { value: string }) => T): T => callback({ value }),
+}));
+
+import {
+	activeSpaceId,
+	managedDisplaySpaces,
+	parseWindowSpaceResults,
+	spaceTypeFor,
+	spacesForWindows,
+} from "./sls-spaces.js";
+
+beforeEach(() => {
+	ffi.managedResult = ffi.ref.array(
+		ffi.ref.dictionary({
+			"Display Identifier": ffi.ref.string("display-a"),
+			"Current Space": ffi.ref.dictionary({ ManagedSpaceID: ffi.ref.number(10), type: ffi.ref.number(0) }),
+			Spaces: ffi.ref.array(
+				ffi.ref.dictionary({
+					ManagedSpaceID: ffi.ref.number(10),
+					type: ffi.ref.number(0),
+					uuid: ffi.ref.string("a"),
+				}),
+				ffi.ref.dictionary({
+					TileSpaces: ffi.ref.array(ffi.ref.dictionary({ ManagedSpaceID: ffi.ref.number(11) })),
+				}),
+			),
+		}),
+		ffi.ref.dictionary({
+			"Display Identifier": ffi.ref.string("display-b"),
+			"Current Space": ffi.ref.dictionary({ id64: ffi.ref.number(20), type: ffi.ref.number(0) }),
+			Spaces: ffi.ref.array(ffi.ref.dictionary({ id64: ffi.ref.number(20), type: ffi.ref.number(0) })),
+		}),
+	);
+});
+
+describe("#given managed display dictionaries #when parsing spaces #then each display and regular space is returned", () => {
+	it("maps two displays and skips nested tiled-space dictionaries", () => {
+		expect(managedDisplaySpaces()).toEqual([
+			{
+				displayIdentifier: "display-a",
+				currentSpaceId: 10,
+				spaces: [{ id: 10, type: 0, uuid: "a" }],
+			},
+			{ displayIdentifier: "display-b", currentSpaceId: 20, spaces: [{ id: 20, type: 0 }] },
+		]);
+	});
+});
+
+describe("#given SkyLight returns no managed-space array #when queried #then an empty result is returned", () => {
+	it("returns no displays and still exposes scalar query results", () => {
+		ffi.managedResult = null;
+
+		expect(managedDisplaySpaces()).toEqual([]);
+		expect(activeSpaceId()).toBe(10);
+		expect(spaceTypeFor(10)).toBe(0);
+	});
+
+	it("returns undefined when the active-space native query fails", () => {
+		ffi.sky.SLSGetActiveSpace.mockImplementation(() => {
+			throw new Error("native query failed");
+		});
+
+		expect(activeSpaceId()).toBeUndefined();
+	});
+});
+
+describe("#given window IDs #when requesting their spaces without a safe native binding #then no crash occurs", () => {
+	it("returns an empty mapping for valid and invalid IDs", () => {
+		expect(spacesForWindows([123])).toEqual(new Map());
+		expect(spacesForWindows([0])).toEqual(new Map());
+	});
+
+	it("maps injected per-window CF space lists to their window IDs", () => {
+		expect(parseWindowSpaceResults([123, 456], [[10, 11], [20]])).toEqual(
+			new Map([
+				[123, [10, 11]],
+				[456, [20]],
+			]),
+		);
+	});
+});

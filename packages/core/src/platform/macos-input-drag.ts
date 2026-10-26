@@ -41,3 +41,26 @@ export function easedProgress(progress: number): number {
 export function interpolatePointEased(from: Point, to: Point, progress: number): Point {
 	return interpolatePoint(from, to, easedProgress(progress));
 }
+
+/** Exact wheel displacement with eased ends; large scrolls trade smaller deltas for a bounded event rate. */
+export function scrollEventPlan(units: number): number[] {
+	if (!Number.isFinite(units)) {
+		throw new RangeError("scroll units must be finite");
+	}
+	if (Math.abs(units) <= 4) {
+		return [units];
+	}
+	const magnitude = Math.abs(units);
+	const steps = Math.min(40, Math.ceil(magnitude / 8));
+	const deltas: number[] = [];
+	let delivered = 0;
+	for (let step = 1; step <= steps; step += 1) {
+		const cumulative =
+			step === steps
+				? units
+				: Math.sign(units) * Math.min(magnitude, Math.round(magnitude * easedProgress(step / steps)));
+		deltas.push(cumulative - delivered);
+		delivered = cumulative;
+	}
+	return deltas;
+}

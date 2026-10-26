@@ -18,6 +18,8 @@
 		"lint:fix": "biome check . --write",
 		"test": "vitest --run",
 		"test:watch": "vitest",
+		"test:browser:bun": "bun node_modules/vitest/vitest.mjs run packages/browser",
+		"smoke:browser:bun": "bun scripts/bun-browser-smoke.mjs",
 		"check": "biome check . && pnpm -r typecheck && pnpm typecheck:tests && vitest --run && pnpm test:scripts",
 		"setup": "./scripts/setup.sh",
 		"doctor": "node packages/cli/dist/cli.js doctor",

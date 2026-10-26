@@ -34,6 +34,16 @@ export const targetQuerySchema = z
 
 const positiveRef = z.number().int().positive();
 const pressKeys = z.enum(["Enter", "Tab", "Escape", "ArrowDown", "ArrowUp"]);
+const selectChoice = z
+	.object({
+		value: z.string().max(2000).optional(),
+		label: z.string().max(2000).optional(),
+		index: z.number().int().min(0).max(100000).optional(),
+	})
+	.strict()
+	.refine((choice) => [choice.value, choice.label, choice.index].filter((item) => item !== undefined).length === 1, {
+		message: "A select step needs exactly one of value, label, or index",
+	});
 
 export const stepSchema = z.union([
 	z.object({ action: z.literal("click"), ref: positiveRef }).strict(),
@@ -42,6 +52,8 @@ export const stepSchema = z.union([
 	z.object({ action: z.literal("fill"), target: targetQuerySchema, text: z.string().max(10000) }).strict(),
 	z.object({ action: z.literal("press"), ref: positiveRef, key: pressKeys }).strict(),
 	z.object({ action: z.literal("press"), target: targetQuerySchema, key: pressKeys }).strict(),
+	z.object({ action: z.literal("select"), ref: positiveRef, choice: selectChoice }).strict(),
+	z.object({ action: z.literal("select"), target: targetQuerySchema, choice: selectChoice }).strict(),
 	z.object({ action: z.literal("scroll"), deltaY: z.number().min(-5000).max(5000) }).strict(),
 	z
 		.object({

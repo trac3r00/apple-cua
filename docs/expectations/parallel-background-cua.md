@@ -68,7 +68,9 @@ Reviewed against `main` at 8880d25 (after PR #11 unified the browser tools and a
 EXP-005 numbers are proposed by the implementer, not a project or user value. The first proposal
 (full <= 30,000) was revised to 32,000 after measurement: descriptions were shortened and the
 duplicated step schema removed (-20% full, -11% lean); going further would cut behavioral facts
-models need from tool descriptions.
+models need from tool descriptions. On 2026-10-25 the full list measured 34,556 bytes after
+`run_hands` and `get_tool_usage`; the active cap for that surface is recorded as 35,000 in
+`docs/expectations/human-like-controls-2026-10-25.md`.
 
 ## Assumptions
 

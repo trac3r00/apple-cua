@@ -30,6 +30,14 @@ const INPUT_COMMAND_PATHS: ReadonlySet<string> = new Set([
 	"ios home",
 	"ios app-switcher",
 	"ios open-app",
+	"utm type",
+	"utm key",
+	"utm click",
+	"utm move",
+	"utm click-text",
+	"utm start",
+	"utm suspend",
+	"utm stop",
 ]);
 
 export function isInputCommand(commandPath: string): boolean {

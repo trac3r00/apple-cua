@@ -73,6 +73,7 @@ describe("browser MCP contract", () => {
 			"browser_handoff",
 			"browser_observe",
 			"browser_open",
+			"browser_open_many",
 			"browser_read",
 			"browser_run",
 			"browser_screenshot",

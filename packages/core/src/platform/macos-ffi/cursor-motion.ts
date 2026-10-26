@@ -3,9 +3,11 @@ import { planMove } from "../../../vendor/cua-cursor-motion.js";
 import type { Point } from "../../types/index.js";
 import type { CursorMotionConfig } from "./cursor-motion-config.js";
 
-interface CursorState extends Point {
+export interface CursorState extends Point {
 	readonly shown: boolean;
 	readonly reducedMotion: boolean;
+	/** Native-reported overlay mode; absent on daemon builds that predate mode reporting. */
+	readonly mode?: string;
 }
 
 function parseState(text: string): CursorState {
@@ -26,7 +28,22 @@ function parseState(text: string): CursorState {
 	) {
 		throw new Error("Invalid cursor overlay state");
 	}
-	return { x: value.x, y: value.y, shown: value.shown, reducedMotion: value.reducedMotion };
+	const record = value as { x: number; y: number; shown: boolean; reducedMotion: boolean; mode?: unknown };
+	// "mode" is optional: daemon builds that predate mode reporting simply omit it.
+	if (record.mode !== undefined && typeof record.mode !== "string") {
+		throw new Error("Invalid cursor overlay state");
+	}
+	return {
+		x: record.x,
+		y: record.y,
+		shown: record.shown,
+		reducedMotion: record.reducedMotion,
+		...(typeof record.mode === "string" ? { mode: record.mode } : {}),
+	};
+}
+
+export function parseCursorState(text: string): CursorState {
+	return parseState(text);
 }
 
 /** Build the native playback packet from the daemon's actual, possibly mid-flight hotspot. */

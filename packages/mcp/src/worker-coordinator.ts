@@ -8,6 +8,7 @@ import type {
 	RunControl,
 	VerifyRequest,
 } from "./guarded-session.js";
+import { notificationsEnabled, postNotification } from "./notify.js";
 import { createRunStepDriver } from "./step-actions.js";
 import type { ToolResult } from "./tool-result.js";
 import type { RunStep } from "./tool-schemas.js";
@@ -26,6 +27,18 @@ export type WorkerAssignment = WorkerAssignmentInput & {
 
 export type WorkerStatus = Omit<WorkerAssignment, "observation"> & {
 	readonly busy: boolean;
+	readonly lastRun?: WorkerRunSummary;
+};
+
+export type WorkerRunSummary = {
+	readonly startedAt: string;
+	readonly endedAt: string;
+	readonly ok: boolean;
+	readonly stepCount: number;
+	readonly errorSummary?: string;
+	readonly appId?: string | number;
+	readonly bundleId?: string;
+	readonly text?: string;
 };
 
 export type WorkerObservationOptions = Omit<ObservationOptions, "includeAccessibilityTree">;
@@ -56,6 +69,7 @@ type WorkerState = {
 	};
 	readonly pid: number;
 	busy: boolean;
+	lastRun: WorkerRunSummary | undefined;
 };
 
 function payload(result: ToolResult): Record<string, unknown> {
@@ -114,6 +128,7 @@ export class WorkerCoordinator {
 				},
 				pid,
 				busy: true,
+				lastRun: undefined,
 			};
 			this.workers.set(assignment.worker_id, worker);
 			return worker;
@@ -186,7 +201,7 @@ export class WorkerCoordinator {
 	}
 
 	status(): readonly WorkerStatus[] {
-		return [...this.workers.values()].flatMap(({ assignment, busy }) => {
+		return [...this.workers.values()].flatMap(({ assignment, busy, lastRun }) => {
 			if (assignment.observation === undefined) {
 				return [];
 			}
@@ -200,6 +215,7 @@ export class WorkerCoordinator {
 						? {}
 						: { observation_token: assignment.observation_token }),
 					busy,
+					...(lastRun === undefined ? {} : { lastRun }),
 				},
 			];
 		});
@@ -238,6 +254,7 @@ export class WorkerCoordinator {
 		}
 		worker.busy = true;
 		worker.assignment = { ...worker.assignment, observation_token: undefined };
+		const startedAt = new Date().toISOString();
 		try {
 			const dispatch = () =>
 				withCursorIdentity(worker.assignment.cursor_id, () =>
@@ -259,10 +276,28 @@ export class WorkerCoordinator {
 				);
 			}
 			const result = await pending;
-			const nextToken = payload(result)["observation_token"];
+			const resultPayload = payload(result);
+			const resultText = result.content.find((content) => content.type === "text");
+			const nextToken = resultPayload["observation_token"];
+			const resultError =
+				result.isError === true
+					? String(resultPayload["reason"] ?? resultPayload["error"] ?? "worker run failed").slice(0, 200)
+					: undefined;
 			if (typeof nextToken === "string") {
 				worker.assignment = { ...worker.assignment, observation_token: nextToken, observation: result };
 			}
+			worker.lastRun = {
+				startedAt,
+				endedAt: new Date().toISOString(),
+				ok: result.isError !== true,
+				stepCount: steps.length,
+				...(resultError === undefined ? {} : { errorSummary: resultError }),
+				...(typeof resultPayload["appId"] === "string" || typeof resultPayload["appId"] === "number"
+					? { appId: resultPayload["appId"] }
+					: {}),
+				...(typeof resultPayload["bundleId"] === "string" ? { bundleId: resultPayload["bundleId"] } : {}),
+				...(resultText?.type === "text" ? { text: resultText.text.trim().slice(0, 2000) } : {}),
+			};
 			const { worker_id, task, app, cursor_id } = worker.assignment;
 			return {
 				worker_id,
@@ -272,6 +307,19 @@ export class WorkerCoordinator {
 				...(typeof nextToken === "string" ? { observation_token: nextToken } : {}),
 				result,
 			};
+		} catch (error: unknown) {
+			const errorSummary = (error instanceof Error ? error.message : String(error)).slice(0, 200);
+			worker.lastRun = {
+				startedAt,
+				endedAt: new Date().toISOString(),
+				ok: false,
+				stepCount: steps.length,
+				errorSummary,
+			};
+			if (notificationsEnabled()) {
+				postNotification("apple-cua", `worker ${workerId} task failed: ${errorSummary.slice(0, 120)}`);
+			}
+			throw error;
 		} finally {
 			worker.busy = false;
 		}

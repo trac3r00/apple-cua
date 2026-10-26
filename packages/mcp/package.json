@@ -19,6 +19,7 @@
 		"test": "vitest --run"
 	},
 	"dependencies": {
+		"@apple-cua/agent": "workspace:*",
 		"@apple-cua/browser": "workspace:*",
 		"@apple-cua/core": "workspace:*",
 		"@modelcontextprotocol/sdk": "^1.0.0",

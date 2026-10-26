@@ -107,6 +107,6 @@ export interface ComputerInterface {
 	recognizeWindowText?(targetPid: number, options?: { readonly region?: Rect }): Promise<WindowTextRead>;
 	/** Show the drawn agent cursor at a point (it glides there); never moves the real pointer. */
 	showPointerAt?(position: Point, press: boolean): void;
-	typeIntoFocused(targetPid: number, text: string): Promise<boolean>;
+	typeIntoFocused(targetPid: number, text: string, options?: { readonly settleWrite?: boolean }): Promise<boolean>;
 	close(): Promise<void>;
 }

@@ -54,7 +54,7 @@ describe("#given an app state worth checking #when verify_state runs #then it an
 				arguments: {
 					app: "Finder",
 					observation_token: token,
-					steps: [{ type: "wait_for", window_title: "Private folder", timeout_ms: 1 }],
+					steps: [{ type: "wait_for", window_title: "Private folder", timeout_ms: 200 }],
 				},
 			}),
 		);

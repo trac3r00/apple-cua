@@ -3,11 +3,23 @@ import { existsSync, watch } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
+import { postNotification } from "./notify.js";
 
 export const SUPERVISED_CHILD_FLAG = "--supervised-child";
 const MAX_LINE_BYTES = 32 * 1024 * 1024;
+/** Requested restarts wait at most this long for in-flight calls; override with APPLE_CUA_SUPERVISOR_DRAIN_MS. */
+const DEFAULT_DRAIN_MS = 15_000;
+/** A restarted child that cannot answer its own tools/list must not hold the client queue forever. */
+const DEFAULT_TOOLS_PROBE_MS = 5_000;
 const UNKNOWN_OUTCOME =
 	"apple-cua restarted while this call ran; its outcome is unknown. Observe again before acting and never replay it.";
+
+function drainMilliseconds(value: string | undefined): number {
+	if (value === undefined || value.trim() === "") return DEFAULT_DRAIN_MS;
+	if (!/^\d+$/.test(value.trim())) return DEFAULT_DRAIN_MS;
+	const parsed = Number(value);
+	return Number.isInteger(parsed) && parsed >= 0 ? parsed : DEFAULT_DRAIN_MS;
+}
 
 export interface SupervisedChild {
 	readonly stdin: Writable;
@@ -25,6 +37,8 @@ export interface SupervisorOptions {
 	readonly maxCrashes?: number;
 	readonly crashWindowMs?: number;
 	readonly now?: () => number;
+	readonly notify?: typeof postNotification;
+	readonly toolsProbeTimeoutMs?: number;
 }
 
 export interface SupervisorHandle {
@@ -87,6 +101,17 @@ function hasId(value: Record<string, unknown>): value is Record<string, unknown>
 	return "id" in value && (value["id"] === null || typeof value["id"] === "string" || typeof value["id"] === "number");
 }
 
+function toolsFingerprint(message: Record<string, unknown>): string | undefined {
+	const result = message["result"];
+	if ("error" in message || !record(result) || !Array.isArray(result["tools"])) return undefined;
+	return JSON.stringify(result["tools"], (_key, value: unknown) => {
+		if (!record(value)) return value;
+		return Object.fromEntries(
+			Object.entries(value).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
+		);
+	});
+}
+
 export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 	let finish: (code: number) => void = () => undefined;
 	const done = new Promise<number>((resolveDone) => {
@@ -98,10 +123,15 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 	let unsubscribe: () => void = () => undefined;
 	let restarting = false;
 	let pendingRestart: string | undefined;
+	let restartReason: string | undefined;
+	let drainTimer: ReturnType<typeof setTimeout> | undefined;
+	let toolsProbeTimer: ReturnType<typeof setTimeout> | undefined;
 	let initialization: Record<string, unknown> | undefined;
 	let initialized = false;
 	let rewritten = false;
 	let internalId: string | undefined;
+	let probingTools = false;
+	let previousTools: string | undefined;
 	let generation = 0;
 	const inFlight = new Map<Id, Record<string, unknown>>();
 	let queued: Record<string, unknown>[] = [];
@@ -119,9 +149,18 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 		}
 		queued = [];
 	};
+	const clearDrainTimer = () => {
+		if (drainTimer) clearTimeout(drainTimer);
+		drainTimer = undefined;
+	};
+	const clearToolsProbeTimer = () => {
+		if (toolsProbeTimer) clearTimeout(toolsProbeTimer);
+		toolsProbeTimer = undefined;
+	};
 	const stop = (code: number) => {
 		if (stopped) return;
 		stopped = true;
+		clearToolsProbeTimer();
 		unsubscribe();
 		detach();
 		options.input.off("data", inputData);
@@ -136,7 +175,19 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 		child?.stdin.write(`${JSON.stringify(message)}\n`);
 	};
 	const restartIfIdle = () => {
-		if (stopped || restarting || !pendingRestart || inFlight.size > 0) return;
+		if (stopped || restarting || !pendingRestart) return;
+		if (inFlight.size > 0) {
+			if (!drainTimer) {
+				drainTimer = setTimeout(() => {
+					drainTimer = undefined;
+					if (stopped || restarting || !pendingRestart || inFlight.size === 0) return;
+					failRequests(UNKNOWN_OUTCOME, false);
+					restartIfIdle();
+				}, drainMilliseconds(process.env["APPLE_CUA_SUPERVISOR_DRAIN_MS"]));
+			}
+			return;
+		}
+		clearDrainTimer();
 		options.log(`apple-cua restarting: ${pendingRestart}`);
 		pendingRestart = undefined;
 		restarting = true;
@@ -153,16 +204,40 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 		if (!record(message)) return;
 		if (hasId(message) && typeof message["method"] !== "string") {
 			if (internalId !== undefined && message.id === internalId) {
+				clearDrainTimer();
+				clearToolsProbeTimer();
 				internalId = undefined;
-				if ("error" in message) {
-					options.log("apple-cua child re-initialization failed");
-					failRequests("apple-cua re-initialization failed");
-					stop(1);
+				if (!probingTools) {
+					if ("error" in message) {
+						options.log("apple-cua child re-initialization failed");
+						failRequests("apple-cua re-initialization failed");
+						stop(1);
+						return;
+					}
+					if (initialized) child?.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+					probingTools = true;
+					internalId = `apple-cua-supervisor-tools-${generation}`;
+					child?.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: internalId, method: "tools/list" })}\n`);
+					toolsProbeTimer = setTimeout(() => {
+						toolsProbeTimer = undefined;
+						if (!probingTools) return;
+						options.log("apple-cua tools/list probe timed out");
+						probingTools = false;
+						internalId = undefined;
+						failRequests("apple-cua re-initialization timed out; observe again before acting");
+						restarting = true;
+						child?.kill("SIGTERM");
+					}, options.toolsProbeTimeoutMs ?? DEFAULT_TOOLS_PROBE_MS);
 					return;
 				}
-				if (initialized) child?.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+				probingTools = false;
+				const fingerprint = toolsFingerprint(message);
+				if (fingerprint === undefined || previousTools === undefined || fingerprint !== previousTools) {
+					send({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
+				}
+				previousTools = fingerprint;
 				restarting = false;
-				send({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
+				restartReason = undefined;
 				const waiting = queued;
 				queued = [];
 				for (const request of waiting) forward(request);
@@ -171,6 +246,10 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 			}
 			const responseId = message.id;
 			const request = inFlight.get(responseId);
+			if (request?.["method"] === "tools/list") {
+				const fingerprint = toolsFingerprint(message);
+				if (fingerprint !== undefined) previousTools = fingerprint;
+			}
 			if (!rewritten && request?.["method"] === "initialize" && record(message["result"])) {
 				const result = message["result"];
 				const capabilities = record(result["capabilities"]) ? result["capabilities"] : {};
@@ -184,6 +263,7 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 			// Preserve response-before-restart ordering on the client stream.
 			send(message);
 			inFlight.delete(responseId);
+			if (inFlight.size === 0) clearDrainTimer();
 			restartIfIdle();
 			return;
 		}
@@ -206,8 +286,11 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 			const removeExit = current.onExit(() => {
 				detach();
 				child = undefined;
+				clearDrainTimer();
+				clearToolsProbeTimer();
 				if (stopped) return;
 				if (!restarting || internalId !== undefined) {
+					const crashed = !restarting || internalId !== undefined;
 					failRequests(UNKNOWN_OUTCOME, false);
 					const now = (options.now ?? Date.now)();
 					crashes = crashes.filter((time) => now - time <= (options.crashWindowMs ?? 60_000));
@@ -217,6 +300,13 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 						failRequests("apple-cua crash loop: restart limit exceeded");
 						stop(1);
 						return;
+					}
+					if (crashed) {
+						const reason = restartReason ?? pendingRestart ?? "unexpected child exit";
+						(options.notify ?? postNotification)(
+							"apple-cua",
+							`Server restarted after a child crash (${reason}); observe again before acting.`,
+						);
 					}
 				}
 				restarting = true;
@@ -232,6 +322,7 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 			};
 			if (restarting) {
 				if (initialization) {
+					probingTools = false;
 					internalId = `apple-cua-supervisor-init-${++generation}`;
 					current.stdin.write(`${JSON.stringify({ ...initialization, id: internalId })}\n`);
 				} else {
@@ -260,6 +351,11 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 		}
 		if (message["method"] === "initialize") initialization = message;
 		if (message["method"] === "notifications/initialized") initialized = true;
+		// Heartbeats measure this connection, not a native call or child reload's event-loop availability.
+		if (message["method"] === "ping" && hasId(message)) {
+			send({ jsonrpc: "2.0", id: message.id, result: {} });
+			return;
+		}
 		if (restarting) queued.push(message);
 		else forward(message);
 	}, parseError);
@@ -274,8 +370,13 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 		stop(1);
 	};
 	const requestRestart = (reason: string) => {
-		if (stopped || restarting) return;
+		if (stopped) return;
+		if (reason === "permission-granted") {
+			(options.notify ?? postNotification)("apple-cua", "Permissions granted; server reloading.");
+		}
+		if (restarting) return;
 		pendingRestart ??= reason;
+		restartReason ??= reason;
 		restartIfIdle();
 	};
 	options.input.on("data", inputData);
@@ -354,7 +455,9 @@ export function nodeSupervisorOptions(
 										(key) => previous?.[key] === false && permissions[key] === true,
 									);
 									previous = permissions;
-									if (granted) listener("permission-granted");
+									if (granted) {
+										listener("permission-granted");
+									}
 								}
 							} catch (cause) {
 								process.stderr.write(`apple-cua permission probe: ${String(cause)}\n`);

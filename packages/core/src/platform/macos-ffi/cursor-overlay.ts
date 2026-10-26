@@ -13,17 +13,24 @@ import {
 	cursorMotionFromEnvironment,
 	parseCursorMotion,
 } from "./cursor-motion-config.js";
-import { prepareCursorMotion } from "./cursor-motion.js";
+import { parseCursorState, prepareCursorMotion } from "./cursor-motion.js";
+import type { CursorState } from "./cursor-motion.js";
+export type { CursorState } from "./cursor-motion.js";
+import { setTimeout as delay } from "node:timers/promises";
 
 /** "click" is an event rather than a lasting mode: the overlay ripples where the dot lands. */
-export type PointerMode = "pointer" | "scroll" | "thinking" | "keyboard" | "click";
+export type PointerMode = "pointer" | "scroll" | "thinking" | "keyboard" | "click" | "drag";
+export type ScrollDirection = "up" | "down" | "left" | "right";
 
 export interface PointerOverlay {
+	state?(options?: { readonly deadlineMs?: number }): Promise<CursorState | null>;
 	set(point: Point, pid?: number, direct?: boolean): void;
 	/** Already-paced input samples must not start another glide behind the real gesture. */
 	track?(point: Point, pid?: number): void;
 	highlight(rect: Rect, pid?: number): void;
 	setMode(mode: PointerMode, pid?: number): void;
+	setScrollMode?(direction: ScrollDirection, pid?: number): void;
+	keyPress?(pid?: number): void;
 	hide(pid?: number): void;
 	close(): void;
 }
@@ -34,12 +41,16 @@ export interface PointerOverlay {
 // its own short-lived process); tests inject a fake transport to capture commands.
 export interface OverlayTransport {
 	send(command: string, pid?: number, direct?: boolean): void;
+	queryState?(options?: { readonly deadlineMs?: number }): Promise<CursorState | null>;
 	close(): void;
 }
 
 export type OverlayTransportFactory = (identity?: string) => OverlayTransport | undefined;
 
 export const NOOP_POINTER_OVERLAY: PointerOverlay = {
+	state(): Promise<CursorState | null> {
+		return Promise.resolve(null);
+	},
 	set(): void {
 		/* no-op */
 	},
@@ -105,6 +116,10 @@ export function createCursorOverlay(
 				: cursorMotionFromEnvironment();
 	const transportsByIdentity = new Map<string | undefined, OverlayTransport | undefined>();
 	const pidsByIdentity = new Map<string | undefined, Set<number>>();
+	const factory =
+		transportFactory ??
+		((scopedIdentity) =>
+			defaultSocketTransport(Date.now, spawn, configuration, cursorOverlaySocketPath(scopedIdentity)));
 
 	function send(command: string, pid?: number, direct = false): void {
 		const identity = currentCursorIdentity();
@@ -117,15 +132,7 @@ export function createCursorOverlay(
 			pids.add(pid);
 		}
 		if (!transportsByIdentity.has(identity)) {
-			transportsByIdentity.set(
-				identity,
-				safeTransport(
-					transportFactory ??
-						((scopedIdentity) =>
-							defaultSocketTransport(Date.now, spawn, configuration, cursorOverlaySocketPath(scopedIdentity))),
-					identity,
-				),
-			);
+			transportsByIdentity.set(identity, safeTransport(factory, identity));
 		}
 		try {
 			transportsByIdentity.get(identity)?.send(command, pid, direct);
@@ -135,6 +142,16 @@ export function createCursorOverlay(
 	}
 
 	return {
+		state(options?: { readonly deadlineMs?: number }): Promise<CursorState | null> {
+			const identity = currentCursorIdentity();
+			if (!transportsByIdentity.has(identity)) {
+				transportsByIdentity.set(identity, safeTransport(factory, identity));
+			}
+			const transport = transportsByIdentity.get(identity);
+			if (transport === undefined) return Promise.resolve(null);
+			// State queries bypass pending sends, so acknowledgement does not guarantee queue ordering.
+			return transport.queryState?.(options) ?? Promise.resolve(null);
+		},
 		set(point: Point, pid?: number, direct?: boolean): void {
 			send(`set ${Math.round(point.x)} ${Math.round(point.y)}\n`, pid, direct);
 		},
@@ -149,6 +166,12 @@ export function createCursorOverlay(
 		},
 		setMode(mode: PointerMode, pid?: number): void {
 			send(`mode ${mode}\n`, pid);
+		},
+		setScrollMode(direction: ScrollDirection, pid?: number): void {
+			send(`mode scroll ${direction}\n`, pid);
+		},
+		keyPress(pid?: number): void {
+			send("mode keypress\n", pid);
 		},
 		hide(pid?: number): void {
 			send("hide\n", pid);
@@ -210,6 +233,25 @@ export function defaultSocketTransport(
 	// A binary that cannot be executed (ENOENT/EACCES) will not become executable by retrying every
 	// second, so one failure turns daemon spawning off; the overlay then stays a silent no-op.
 	let spawnFailed = false;
+	async function queryState(options?: { readonly deadlineMs?: number }): Promise<CursorState | null> {
+		const deadline = options?.deadlineMs === undefined ? undefined : Date.now() + Math.max(0, options.deadlineMs);
+		for (let attempt = 0; attempt <= 2; attempt += 1) {
+			const remaining = deadline === undefined ? undefined : deadline - Date.now();
+			if (remaining !== undefined && remaining <= 0) return null;
+			const attemptTimeout = remaining === undefined ? 2_000 : Math.min(2_000, remaining);
+			try {
+				return await querySocketState(socketPath, attemptTimeout);
+			} catch {
+				if (attempt < 2) {
+					const remainingAfterAttempt = deadline === undefined ? undefined : deadline - Date.now();
+					if (remainingAfterAttempt !== undefined && remainingAfterAttempt <= 0) return null;
+					const retryDelay = remainingAfterAttempt === undefined ? 150 : Math.min(150, remainingAfterAttempt);
+					await delay(retryDelay);
+				}
+			}
+		}
+		return null;
+	}
 
 	function ensureDaemon(): void {
 		if (spawnFailed) {
@@ -307,6 +349,7 @@ export function defaultSocketTransport(
 	}
 
 	return {
+		queryState,
 		send(command: string, pid?: number, direct = false): void {
 			// Only already-paced samples bypass motion planning, not ordinary app moves.
 			const directUpdate = direct;
@@ -322,4 +365,44 @@ export function defaultSocketTransport(
 			/* shared daemon outlives this transport */
 		},
 	};
+}
+
+function querySocketState(socketPath: string, timeoutMs: number): Promise<CursorState> {
+	return new Promise((resolve, reject) => {
+		const socket = connect(socketPath);
+		let response = "";
+		const timeout = setTimeout(() => socket.destroy(new Error("Cursor overlay state request timed out")), timeoutMs);
+		const cleanup = (): void => {
+			clearTimeout(timeout);
+			socket.off("data", onData);
+			socket.off("error", onError);
+			socket.off("end", onEnd);
+		};
+		const onError = (error: Error): void => {
+			cleanup();
+			reject(error);
+		};
+		const onEnd = (): void => onError(new Error("Cursor overlay closed before returning its state"));
+		const onData = (chunk: Buffer): void => {
+			response += chunk.toString("utf8");
+			if (response.length > 4096) {
+				onError(new Error("Cursor overlay state exceeds 4096 bytes"));
+				return;
+			}
+			const newline = response.indexOf("\n");
+			if (newline < 0) {
+				return;
+			}
+			cleanup();
+			try {
+				resolve(parseCursorState(response.slice(0, newline)));
+			} catch (error) {
+				reject(error);
+			}
+		};
+		socket.on("data", onData);
+		socket.once("error", onError);
+		socket.once("end", onEnd);
+		socket.once("connect", () => socket.end("state\n"));
+	});
 }

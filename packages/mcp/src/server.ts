@@ -7,6 +7,7 @@ import { BrowserError, connectBrowserController, registerBrowserTools } from "@a
 import {
 	IPhoneMirroring,
 	StopSwitch,
+	UTM,
 	currentSystemPrompts,
 	probeHostCapabilities,
 	readHidModifierFlags,
@@ -24,9 +25,12 @@ import { resolveStateDir } from "@apple-cua/core/stop";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerCapabilityTools, registerSkillResources } from "./capability-tools.js";
+import { registerDecisionTools } from "./decision-tools.js";
 import { elementQueryFromInput, registerDesktopMutationTools } from "./desktop-mutation-tools.js";
 import { DockGuardSession } from "./dock-session.js";
+import { ExtrasGuardSession } from "./extras-session.js";
 import { GuardedSession } from "./guarded-session.js";
+import { registerHandsTools } from "./hands-tools.js";
 import { detectHost, spawnGuidance } from "./host-detection.js";
 import { registerHumanTools } from "./human-tools.js";
 import {
@@ -49,6 +53,7 @@ import {
 } from "./self-check.js";
 import { SERVER_INFO } from "./server-info.js";
 import { SUPERVISED_CHILD_FLAG, nodeSupervisorOptions, startSupervisor } from "./supervisor.js";
+import { TerminalGuardSession } from "./terminal-session.js";
 import { toolNamesFor } from "./tool-names.js";
 import {
 	emptySchema,
@@ -57,7 +62,9 @@ import {
 	openAppSchema,
 	verifyStateSchema,
 } from "./tool-schemas.js";
+import { ToolUsageRegistry, installToolTiming } from "./tool-timing.js";
 import { type McpServerOptions, type ToolsetProfile, resolveServerOptions, serverInstructionsFor } from "./toolset.js";
+import { registerUtmTools } from "./utm-tools.js";
 import { registerVisualTools } from "./visual-tools.js";
 import { WorkerCoordinator } from "./worker-coordinator.js";
 import { registerWorkerTools } from "./worker-tools.js";
@@ -72,6 +79,8 @@ class ComputerMcpServer extends McpServer {
 	constructor(
 		private readonly session: GuardedSession,
 		private readonly dockSession: DockGuardSession,
+		private readonly terminalSession: TerminalGuardSession,
+		private readonly extrasSession: ExtrasGuardSession,
 		private readonly stopChord: { stop(): void } | undefined,
 		private readonly workers: WorkerCoordinator,
 		toolset: ToolsetProfile,
@@ -84,6 +93,8 @@ class ComputerMcpServer extends McpServer {
 				process.stderr.write(`Failed to close worker coordinator: ${details}\n`);
 			});
 			this.dockSession.close();
+			this.terminalSession.close();
+			this.extrasSession.close();
 		};
 	}
 
@@ -91,6 +102,8 @@ class ComputerMcpServer extends McpServer {
 		this.stopChord?.stop();
 		this.session.invalidate();
 		this.dockSession.close();
+		this.terminalSession.close();
+		this.extrasSession.close();
 		await super.close();
 		await this.workers.close();
 	}
@@ -107,21 +120,24 @@ export function createMcpServer(
 ): McpServer {
 	const { toolset, iphone } = resolveServerOptions(options);
 	const browser = browserToolsEnabled();
+	const utm = process.env["APPLE_CUA_UTM"] === "1";
 	const resolvedComputer = computer ?? createNativeComputer();
 	// Natively, the machine-wide file-backed stop switch plus the keyboard chord that flips it; tests inject their own.
 	const nativeStopSwitch = computer === undefined && stopSwitch === undefined ? new StopSwitch() : undefined;
 	const stopGate = stopSwitch ?? nativeStopSwitch;
 	const stopChord =
 		nativeStopSwitch === undefined ? undefined : startStopChordDetector(nativeStopSwitch, readHidModifierFlags);
+	let launcher = appLauncher;
+	if (launcher === undefined && computer === undefined) {
+		launcher = spawnOpenLauncher({ background: resolvedComputer.delivery === "background" });
+	}
 	const session = new GuardedSession(
 		resolvedComputer,
 		windowProbe ?? (computer === undefined ? createNativeWindowProbe() : undefined),
-		appLauncher ??
-			(computer === undefined
-				? spawnOpenLauncher({ background: resolvedComputer.delivery === "background" })
-				: undefined),
+		launcher,
 		systemPromptProbe ?? (computer === undefined ? currentSystemPrompts : undefined),
 		stopGate,
+		options?.hotFramesSource,
 	);
 	const dockSession = new DockGuardSession(options?.dockSource, {
 		allowedBundleIds: allowedBundleIdsFromProcessEnvironment(),
@@ -129,8 +145,34 @@ export function createMcpServer(
 		probeHost: options?.dockHostProbe ?? probeHostCapabilities,
 		...(stopGate === undefined ? {} : { stopSwitch: stopGate }),
 	});
+	const terminalSession = new TerminalGuardSession({
+		allowedBundleIds: allowedBundleIdsFromProcessEnvironment(),
+		delivery: resolvedComputer.delivery ?? "background",
+		probeHost: options?.terminalHostProbe ?? probeHostCapabilities,
+		...(options?.terminalDispatch === undefined ? {} : { dispatch: options.terminalDispatch }),
+		...(options?.terminalRead === undefined ? {} : { readText: options.terminalRead }),
+		...(stopGate === undefined ? {} : { stopSwitch: stopGate }),
+	});
+	const extrasSession = new ExtrasGuardSession(options?.extrasSource, {
+		allowedBundleIds: allowedBundleIdsFromProcessEnvironment(),
+		delivery: resolvedComputer.delivery ?? "background",
+		probeHost: options?.extrasHostProbe ?? probeHostCapabilities,
+		...(options?.extrasNow === undefined ? {} : { now: options.extrasNow }),
+		...(options?.extrasTtlMs === undefined ? {} : { ttlMs: options.extrasTtlMs }),
+		...(stopGate === undefined ? {} : { stopSwitch: stopGate }),
+	});
 	const workers = new WorkerCoordinator(session, resolvedComputer);
-	const server = new ComputerMcpServer(session, dockSession, stopChord, workers, toolset);
+	const server = new ComputerMcpServer(
+		session,
+		dockSession,
+		terminalSession,
+		extrasSession,
+		stopChord,
+		workers,
+		toolset,
+	);
+	const toolUsage = new ToolUsageRegistry();
+	installToolTiming(server, toolUsage);
 	// The harness is known only after initialize, so read it on demand rather than at construction.
 	const host = () => detectHost(server.server.getClientVersion(), process.env);
 
@@ -248,21 +290,24 @@ export function createMcpServer(
 
 	if (toolset === "full") {
 		registerDesktopMutationTools(server, session, resolvedComputer);
+		registerHandsTools(server, session, resolvedComputer);
 		registerPowerTools(server, session, resolvedComputer);
+		registerDecisionTools(server, session);
 		registerParallelTools(server, session, resolvedComputer);
 		registerWorkerTools(server, workers, () => spawnGuidance(host().name, resolvedComputer.delivery ?? "attended"));
 	}
 	registerHumanTools(server, session);
 	registerVisualTools(server, session);
-	registerScriptTools(server, session, resolvedComputer, dockSession);
+	registerScriptTools(server, session, resolvedComputer, dockSession, terminalSession, extrasSession);
 	registerCapabilityTools(server, {
 		delivery: resolvedComputer.delivery,
 		probeHost: probeHostCapabilities,
 		allowedBundleIds: allowedBundleIdsFromProcessEnvironment(),
 		stop: stopGate,
 		toolset,
-		toolNames: toolNamesFor(toolset, iphone, browser),
+		toolNames: toolNamesFor(toolset, iphone, browser, utm),
 		host,
+		toolUsage: () => toolUsage.snapshot(),
 	});
 	registerSkillResources(server);
 	if (browser) {
@@ -289,6 +334,12 @@ export function createMcpServer(
 			new PhoneGuardSession(phone, { ...(stopGate === undefined ? {} : { stopSwitch: stopGate }) }),
 			phone,
 		);
+	}
+	if (utm) {
+		const appPath = process.env["APPLE_CUA_UTM_APP"];
+		registerUtmTools(server, new UTM(appPath === undefined ? {} : { appPath }), {
+			...(stopGate === undefined ? {} : { stopSwitch: stopGate }),
+		});
 	}
 	return server;
 }

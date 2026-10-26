@@ -8,6 +8,7 @@ export const FULL_ONLY_TOOL_NAMES = [
 	"set_value",
 	"set_fields",
 	"run_steps",
+	"run_hands",
 	"observe_apps",
 	"run_parallel",
 	"manage_workers",
@@ -21,6 +22,7 @@ export const FULL_ONLY_TOOL_NAMES = [
 	"set_window_frame",
 	"clipboard_read",
 	"clipboard_write",
+	"run_decision",
 ] as const;
 
 /** The small observe / script / verify surface registered by `APPLE_CUA_TOOLSET=lean`. */
@@ -32,6 +34,7 @@ export const LEAN_TOOL_NAMES = [
 	"find_elements",
 	"run_script",
 	"get_capabilities",
+	"get_tool_usage",
 	"verify_state",
 	"ask_user",
 	"analyze_screen",
@@ -55,20 +58,29 @@ export const IPHONE_TOOL_NAMES = [
 	"ios_open_app",
 ] as const;
 
-/** Every tool this server can ever register (full toolset, iPhone, and the browser bridge). */
+export const UTM_TOOL_NAMES = ["utm_list", "utm_observe", "utm_run"] as const;
+
+/** Every tool this server can ever register, including opt-in tools. */
 export const TOOL_NAMES = [
 	...LEAN_TOOL_NAMES,
 	...FULL_ONLY_TOOL_NAMES,
 	...IPHONE_TOOL_NAMES,
 	...BROWSER_TOOL_NAMES,
+	...UTM_TOOL_NAMES,
 ] as const;
 
 /** Tools registered for one configuration: lean or full desktop, plus iPhone and browser when enabled. */
-export function toolNamesFor(toolset: "full" | "lean", iphone: boolean, browser = false): readonly string[] {
+export function toolNamesFor(
+	toolset: "full" | "lean",
+	iphone: boolean,
+	browser = false,
+	utm = false,
+): readonly string[] {
 	return [
 		...LEAN_TOOL_NAMES,
 		...(toolset === "full" ? FULL_ONLY_TOOL_NAMES : []),
 		...(iphone ? IPHONE_TOOL_NAMES : []),
 		...(browser ? BROWSER_TOOL_NAMES : []),
+		...(utm ? UTM_TOOL_NAMES : []),
 	];
 }

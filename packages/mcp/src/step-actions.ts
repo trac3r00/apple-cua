@@ -1,6 +1,6 @@
 import { parseElementIndex } from "@apple-cua/core";
 import type { ElementQuery, GuardedComputerInterface, InputObservation, Point } from "@apple-cua/core";
-import type { RunStepDriver, StepTarget, StepWait, VerifyRequest } from "./guarded-session.js";
+import type { RunStepDriver, StepDispatchOptions, StepTarget, StepWait, VerifyRequest } from "./guarded-session.js";
 import { validateElement } from "./guarded-session.js";
 import {
 	click,
@@ -186,6 +186,7 @@ async function dispatchStep(
 	targetPid: number,
 	observation: InputObservation,
 	actions?: readonly string[],
+	options?: StepDispatchOptions,
 ): Promise<StepDispatch> {
 	const power = await dispatchPowerStep(computer, step, targetPid, observation);
 	if (power !== undefined) {
@@ -212,7 +213,7 @@ async function dispatchStep(
 			// The guarded find already scrolled the target into view; revealing never acts on it.
 			return { route: "accessibility", delivery: "background" };
 		case "type_text":
-			return await typeText(computer, targetPid, step.text);
+			return await typeText(computer, targetPid, step.text, options);
 		case "press_keys":
 			return await pressKeys(computer, targetPid, step);
 		default:
@@ -228,7 +229,7 @@ export function createRunStepDriver(computer: GuardedComputerInterface): RunStep
 		resolve: resolveStepElement,
 		resolveAtPoint: resolveStepAtPoint,
 		validate: validateStep,
-		dispatch: async (step, targetPid, observation, actions) =>
-			await dispatchStep(computer, step, targetPid, observation, actions),
+		dispatch: async (step, targetPid, observation, actions, options) =>
+			await dispatchStep(computer, step, targetPid, observation, actions, options),
 	};
 }

@@ -601,6 +601,48 @@ export const runStepsSchema = z.object({
 	include_screenshot: includeScreenshotSchema,
 });
 
+/**
+ * One human-like batch: separate keyboard and pointer lanes plus an optional vision capture,
+ * scheduled over explicit resources. The published step shape stays on `run_steps`; each lane
+ * is validated against the strict per-type schema before any input is dispatched.
+ */
+export const runHandsSchema = z
+	.object({
+		app: appSchema,
+		observation_token: observationTokenSchema,
+		keyboard: workerStepsSchema
+			.describe("Same step objects as run_steps.steps; only type_text and press_keys.")
+			.optional(),
+		pointer: workerStepsSchema
+			.describe("Same step objects as run_steps.steps; only click, drag, and scroll with explicit targets.")
+			.optional(),
+		vision: z
+			.object({
+				include_screenshot: includeScreenshotSchema.describe("default true"),
+				settle_ms: z.number().int().nonnegative().optional(),
+				max_elements: z.number().int().positive().optional(),
+			})
+			.optional(),
+		overlap: z
+			.enum(["auto", "never", "always"])
+			.optional()
+			.describe(
+				"auto (default) overlaps lanes with disjoint resources; never serializes; always is refused when lanes share a resource.",
+			),
+		outcome: z
+			.enum(["live", "deferred"])
+			.optional()
+			.describe(
+				"deferred (default) skips the result read; the next token's element ids predate the action. live reads the result state as before.",
+			),
+		expect: verifyExpectSchema.optional(),
+		full_state: fullStateSchema,
+		include_screenshot: includeScreenshotSchema,
+	})
+	.refine((input) => input.keyboard !== undefined || input.pointer !== undefined || input.vision !== undefined, {
+		message: "run_hands needs at least one of keyboard, pointer, or vision",
+	});
+
 const workerAssignmentsSchema = z
 	.array(z.object({ worker_id: z.string().min(1), task: z.string().min(1), app: appSchema }))
 	.min(1)
@@ -679,6 +721,7 @@ export type PressKeysInput = z.infer<typeof pressKeysSchema>;
 export type SelectTextInput = z.infer<typeof selectTextSchema>;
 export type RunStep = z.infer<typeof runStepSchema>;
 export type RunStepsInput = z.infer<typeof runStepsSchema>;
+export type RunHandsInput = z.infer<typeof runHandsSchema>;
 
 export type ClickActionInput = Omit<ClickInput, "app" | "observation_token" | "full_state">;
 export type DragActionInput = Omit<DragInput, "app" | "observation_token" | "full_state">;

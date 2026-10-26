@@ -87,6 +87,8 @@ export interface ActionSpace {
 
 /** The answer to one fan-out request, after every field has been checked against the table. */
 export interface Decision {
+	readonly cache?: "hit";
+	readonly frameHash?: string;
 	readonly operation: Operation;
 	/** The model's calibrated probability for the chosen operation, not a self-reported guess. */
 	readonly confidence: number;
@@ -101,6 +103,7 @@ export interface Decision {
 
 /** A refusal is not an error: nothing ran, and the caller decides what happens next. */
 export type DecisionRefusal =
+	| { readonly reason: "stale-frame"; readonly detail: string }
 	| { readonly reason: "unknown-operation"; readonly detail: string }
 	| { readonly reason: "missing-target"; readonly detail: string }
 	| { readonly reason: "target-not-offered"; readonly detail: string }

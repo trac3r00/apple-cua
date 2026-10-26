@@ -11,6 +11,8 @@ const spaceSchema = z
 	.default("default");
 const workerSchema = z.string().regex(/^[a-zA-Z0-9_.-]{1,64}$/);
 const pageSchema = z.string().regex(/^p[1-9][0-9]*$/);
+const MAX_PARALLEL_OPEN = 8;
+const MAX_PAGES_PER_SPACE = 12;
 
 export const controllerRequestSchema = z.discriminatedUnion("action", [
 	z.object({ action: z.literal("status") }),
@@ -24,6 +26,12 @@ export const controllerRequestSchema = z.discriminatedUnion("action", [
 		action: z.literal("open"),
 		space: spaceSchema,
 		url: httpUrl,
+		worker_id: workerSchema.optional(),
+	}),
+	z.object({
+		action: z.literal("open_many"),
+		space: spaceSchema,
+		urls: z.array(httpUrl).min(1).max(MAX_PARALLEL_OPEN),
 		worker_id: workerSchema.optional(),
 	}),
 	z.object({
@@ -101,7 +109,12 @@ export class BrowserController {
 
 	async dispatch(value: unknown, signal?: AbortSignal): Promise<unknown> {
 		const input = controllerRequestSchema.parse(value);
-		if (signal !== undefined && input.action !== "open" && input.action !== "wait_control")
+		if (
+			signal !== undefined &&
+			input.action !== "open" &&
+			input.action !== "open_many" &&
+			input.action !== "wait_control"
+		)
 			return this.bridge.withCancellation(signal, () => this.dispatch(value));
 		switch (input.action) {
 			case "status": {
@@ -147,6 +160,7 @@ export class BrowserController {
 			}
 			case "open": {
 				const state = this.create(input.space, input.worker_id);
+				this.reservePages(state, 1);
 				state.opening++;
 				try {
 					const opened = await state.session.open(input.url, signal);
@@ -155,6 +169,34 @@ export class BrowserController {
 					return { space: input.space, page, ...attribution(state) };
 				} finally {
 					state.opening--;
+				}
+			}
+			case "open_many": {
+				const state = this.create(input.space, input.worker_id);
+				this.reservePages(state, input.urls.length);
+				state.opening += input.urls.length;
+				try {
+					const outcomes = await Promise.all(
+						input.urls.map(async (url) => {
+							try {
+								return { url, opened: await state.session.open(url, signal) };
+							} catch (error: unknown) {
+								return { url, error: error instanceof Error ? error.message : String(error) };
+							}
+						}),
+					);
+					const pages: { page: string; url: string; tab_id: number }[] = [];
+					const failed: { url: string; error: string }[] = [];
+					for (const outcome of outcomes) {
+						if ("opened" in outcome) {
+							const page = `p${state.nextPage++}`;
+							state.pages.set(page, { tabId: outcome.opened.tabId, generation: this.bridge.generation });
+							pages.push({ page, url: outcome.url, tab_id: outcome.opened.tabId });
+						} else failed.push({ url: outcome.url, error: outcome.error });
+					}
+					return { space: input.space, pages, failed, ...attribution(state) };
+				} finally {
+					state.opening -= input.urls.length;
 				}
 			}
 			case "observe": {
@@ -273,6 +315,14 @@ export class BrowserController {
 		};
 		this.spaces.set(space, state);
 		return state;
+	}
+
+	private reservePages(state: SpaceState, count: number): void {
+		if (state.pages.size + state.opening + count > MAX_PAGES_PER_SPACE)
+			throw new BrowserError(
+				"busy",
+				`A browser space holds at most ${MAX_PAGES_PER_SPACE} pages. Close pages before opening more.`,
+			);
 	}
 
 	private target(space: string, page: string) {

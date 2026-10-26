@@ -32,4 +32,14 @@ describe("#given background call helpers #when discovering apps #then only verif
 			),
 		).toBe(true);
 	});
+
+	it("#given Control Center #when the verified bundle path is discovered #then its system UI process is included", () => {
+		expect(
+			isDiscoverableApplication(1, "com.apple.controlcenter", "/System/Library/CoreServices/ControlCenter.app"),
+		).toBe(true);
+		expect(isDiscoverableApplication(1, "com.apple.controlcenter", "/tmp/ControlCenter.app")).toBe(false);
+		expect(isDiscoverableApplication(1, "com.apple.other-ui", "/System/Library/CoreServices/ControlCenter.app")).toBe(
+			false,
+		);
+	});
 });

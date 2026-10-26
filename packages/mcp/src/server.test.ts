@@ -11,6 +11,7 @@ const MUTATION_NAMES = [
 	"set_value",
 	"set_fields",
 	"run_steps",
+	"run_hands",
 	"run_worker",
 	"select_text",
 	"drag",

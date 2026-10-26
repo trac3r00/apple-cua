@@ -94,9 +94,12 @@ describe("supervisor NDJSON framing FDD", () => {
 				input.write(`${line}\n${JSON.stringify({ id, method: "ping" })}\n`);
 			}
 			expect(replies).toEqual(
-				invalid.map(() => ({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } })),
+				invalid.flatMap((_, id) => [
+					{ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } },
+					{ jsonrpc: "2.0", id, result: {} },
+				]),
 			);
-			expect(forwarded).toEqual(invalid.map((_, id) => ({ id, method: "ping" })));
+			expect(forwarded).toEqual([]);
 		} finally {
 			input.end();
 			await handle.done;

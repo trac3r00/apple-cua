@@ -1,4 +1,11 @@
-import type { AXTreeElement, AppState, AxTreeChanges, ElementMatch, SystemPrompt } from "@apple-cua/core";
+import type {
+	AXTreeElement,
+	AppState,
+	AxTreeChanges,
+	ElementMatch,
+	InputObservation,
+	SystemPrompt,
+} from "@apple-cua/core";
 
 export type ToolContent =
 	| { readonly type: "text"; readonly text: string }
@@ -36,7 +43,7 @@ export const SYSTEM_PROMPT_NOTE =
 export type ActionEffect = "confirmed" | "partial" | "observed_change" | "unverifiable" | "suspected_noop" | "refused";
 export type ActionRoute = "accessibility" | "synthetic_events" | "unknown";
 export type ActionDelivery = "background" | "foreground" | "not_applicable" | "unknown";
-export type ActionEvidenceKind = "value_readback" | "ax_change" | "window_change";
+export type ActionEvidenceKind = "value_readback" | "ax_change" | "ax_events" | "window_change";
 export type EscalationTarget = "pixel" | "foreground" | "page" | "session" | "human";
 export type EscalationReason =
 	| "route_unavailable"
@@ -150,6 +157,42 @@ export interface SetFieldsReport {
 /** How one batch step actually dispatched, plus any detail the dispatcher itself reports. */
 export interface StepDispatch extends ActionDispatch {
 	readonly detail?: unknown;
+}
+
+export interface RunHandsLaneReport {
+	readonly hand: "left" | "right" | "vision";
+	readonly lane: "keyboard" | "pointer" | "vision";
+	readonly status: "completed" | "failed" | "aborted" | "not_started";
+	readonly resources: readonly string[];
+	readonly steps: readonly RunStepReport[];
+	readonly started_ms: number | null;
+	readonly finished_ms: number | null;
+	readonly wait_ms: number;
+	readonly duration_ms: number;
+	readonly error?: string;
+}
+
+export interface RunHandsVisionReport {
+	readonly captured: boolean;
+	readonly width: number;
+	readonly height: number;
+	readonly bytes: number;
+	readonly duration_ms: number;
+	/** "hot" frames come from the speculative refresher; age says how stale the pixels are. */
+	readonly source?: "hot" | "live";
+	readonly frame_age_ms?: number;
+	readonly image_index?: number;
+	readonly unavailable?: string;
+}
+
+export interface RunHandsReport {
+	readonly policy: "auto" | "never" | "always";
+	readonly overlap_ms: number;
+	readonly sequential_estimate_ms: number;
+	readonly aborted: boolean;
+	readonly lanes: readonly RunHandsLaneReport[];
+	readonly unstarted?: readonly string[];
+	readonly vision?: RunHandsVisionReport;
 }
 
 export interface RunStepReport {
@@ -280,9 +323,18 @@ export function textResult(text: string): ToolResult {
 	return { content: [{ type: "text", text }] };
 }
 
-export function stateResult(state: AppState, observationToken?: string, elementFormat?: ElementFormat): ToolResult {
+export function stateResult(
+	state: AppState,
+	observationToken?: string,
+	elementFormat?: ElementFormat,
+	timing?: Readonly<Record<string, number>>,
+): ToolResult {
 	const extra = observationToken === undefined ? {} : { observation_token: observationToken };
-	return stateToolResult(state, extra, { elementFormat });
+	return stateToolResult(
+		state,
+		{ ...extra, ...(timing === undefined || Object.keys(timing).length === 0 ? {} : { timing_ms: timing }) },
+		{ elementFormat },
+	);
 }
 
 /**
@@ -317,6 +369,7 @@ export function observedActionResult(
 	windowEvents: readonly WindowEvent[] = [],
 	dispatch?: ActionDispatch,
 	extra: Record<string, unknown> = {},
+	timing?: Readonly<Record<string, number>>,
 ): ToolResult {
 	const observationStatus = contextUnchanged ? axObservationStatus(state) : "context-changed";
 	const envelope = actionEnvelope({
@@ -333,6 +386,7 @@ export function observedActionResult(
 		state,
 		{
 			...extra,
+			...(timing === undefined ? {} : { timing_ms: timing }),
 			actionDispatched: true,
 			observationStatus,
 			paused: observationToken === undefined,
@@ -412,6 +466,7 @@ export function observedSetFieldsResult(
 	report: SetFieldsReport,
 	contextUnchanged: boolean,
 	observationToken?: string,
+	timing?: Readonly<Record<string, number>>,
 ): ToolResult {
 	const observationStatus = contextUnchanged ? axObservationStatus(state) : "context-changed";
 	const effect: ActionEffect =
@@ -430,10 +485,114 @@ export function observedSetFieldsResult(
 			paused: observationToken === undefined,
 			needsExplicitObservation: observationToken === undefined,
 			setFields: report,
+			...(timing === undefined ? {} : { timing_ms: timing }),
 			...envelopeFields({ ...envelope, effect }),
 			...(observationToken === undefined ? {} : { observation_token: observationToken }),
 		},
 		{ boundDiff: true },
+	);
+}
+
+export interface DeferredOutcomeSettleReport {
+	readonly events: number;
+	readonly settleMs: number;
+}
+
+const DEFERRED_OUTCOME_NOTE =
+	"outcome deferred: the result read was skipped for speed, so no fresh tree or screenshot is attached and the token's element ids predate this action - observe again (get_app_state or find_elements) before element actions that depend on this action's result; keyboard, x/y pointer, and menu input keep the window guard";
+
+/** The answer for a deferred outcome: identity from the observation, effect from the app's own events. */
+export function deferredHandsResult(
+	observation: InputObservation,
+	report: RunHandsReport,
+	settle: DeferredOutcomeSettleReport,
+	observationToken: string | undefined,
+	dispatch: ActionDispatch | undefined,
+	timing?: Readonly<Record<string, number>>,
+	extraImages: readonly ToolContent[] = [],
+): ToolResult {
+	const effect: ActionEffect = settle.events > 0 ? "observed_change" : "unverifiable";
+	const evidence: ActionEvidence[] = settle.events > 0 ? [{ kind: "ax_events" }] : [];
+	const result = textResult(
+		JSON.stringify(
+			{
+				pid: observation.pid,
+				bundle_id: observation.bundleId,
+				window_id: observation.windowId,
+				window_bounds: observation.windowBounds,
+				actionDispatched: true,
+				observationStatus: "deferred",
+				outcome: "deferred",
+				paused: observationToken === undefined,
+				needsExplicitObservation: false,
+				outcome_note: DEFERRED_OUTCOME_NOTE,
+				hands: report,
+				ax_events: settle.events,
+				settle_ms: settle.settleMs,
+				...(timing === undefined ? {} : { timing_ms: timing }),
+				effect,
+				route: dispatch?.route ?? "unknown",
+				delivery: dispatch?.delivery ?? "unknown",
+				evidence,
+				...(observationToken === undefined ? {} : { observation_token: observationToken }),
+			},
+			null,
+			2,
+		),
+	);
+	return extraImages.length === 0 ? result : { content: [...result.content, ...extraImages] };
+}
+
+export function observedHandsResult(
+	state: AppState,
+	report: RunHandsReport,
+	verification: Verification | undefined,
+	contextUnchanged: boolean,
+	observationToken?: string,
+	windowEvents: readonly WindowEvent[] = [],
+	dispatch?: ActionDispatch,
+	timing?: Readonly<Record<string, number>>,
+	extraImages: readonly ToolContent[] = [],
+): ToolResult {
+	const observationStatus = contextUnchanged ? axObservationStatus(state) : "context-changed";
+	const anyDispatched = report.lanes.some((lane) => lane.steps.some((step) => step.input_dispatched));
+	const anyFailed = report.lanes.some((lane) => lane.status === "failed" || lane.status === "aborted");
+	const effect: ActionEffect =
+		verification?.verified === true
+			? "confirmed"
+			: !anyDispatched
+				? "refused"
+				: anyFailed || report.aborted
+					? "partial"
+					: windowEvents.length > 0
+						? "observed_change"
+						: observationStatus === "unchanged"
+							? "suspected_noop"
+							: observationStatus === "changed"
+								? "observed_change"
+								: "unverifiable";
+	const envelope = actionEnvelope({
+		dispatch: dispatch ?? { route: "unknown", delivery: "unknown" },
+		observationStatus,
+		windowEvents,
+		readbackConfirmed: verification?.verified === true,
+	});
+	return stateToolResult(
+		state,
+		{
+			actionDispatched: anyDispatched,
+			observationStatus,
+			paused: observationToken === undefined,
+			needsExplicitObservation: observationToken === undefined,
+			hands: report,
+			...(timing === undefined ? {} : { timing_ms: timing }),
+			...(verification === undefined ? {} : { verification }),
+			...envelopeFields({ ...envelope, effect }),
+			...(windowEvents.length === 0 ? {} : { windowEvents }),
+			...(observationToken === undefined ? {} : { observation_token: observationToken }),
+		},
+		{ boundDiff: true },
+		extraImages,
 	);
 }
 
@@ -444,6 +603,7 @@ export function observedRunStepsResult(
 	contextUnchanged: boolean,
 	observationToken?: string,
 	windowEvents: readonly WindowEvent[] = [],
+	timing?: Readonly<Record<string, number>>,
 ): ToolResult {
 	const observationStatus = contextUnchanged ? axObservationStatus(state) : "context-changed";
 	// A wait dispatches no input: a run of waits that were all satisfied confirmed what it waited for.
@@ -485,6 +645,7 @@ export function observedRunStepsResult(
 			paused: observationToken === undefined,
 			needsExplicitObservation: observationToken === undefined,
 			runSteps: report,
+			...(timing === undefined ? {} : { timing_ms: timing }),
 			...(verification === undefined ? {} : { verification }),
 			...envelopeFields({ ...envelope, effect }),
 			...(windowEvents.length === 0 ? {} : { windowEvents }),
@@ -525,6 +686,7 @@ function stateToolResult(
 	state: AppState,
 	extra: Record<string, unknown>,
 	options: { readonly boundDiff?: boolean; readonly elementFormat?: ElementFormat | undefined } = {},
+	extraImages: readonly ToolContent[] = [],
 ): ToolResult {
 	const payload: Record<string, unknown> = { ...state, screenshotBase64: undefined };
 	const imageAvailable = state.screenshotBase64.length > 0;
@@ -611,8 +773,8 @@ function stateToolResult(
 	}
 	// Unindented: an observation is read by a model, and indentation alone was about 45% of its size.
 	const text: ToolContent = { type: "text", text: JSON.stringify({ ...payload, ...extra }) };
-	const content: ToolContent[] = state.screenshotBase64.length === 0 ? [text] : [stateImage(state), text];
-	return { content };
+	const images: ToolContent[] = state.screenshotBase64.length === 0 ? [] : [stateImage(state)];
+	return { content: [...images, ...extraImages, text] };
 }
 
 /** Each bucket cut to the compact-diff cap, with the exact count of entries left out when any were. */

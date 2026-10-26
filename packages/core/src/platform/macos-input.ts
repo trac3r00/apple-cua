@@ -27,7 +27,8 @@ import {
 	postScrollEvent,
 	postUnicodeText,
 } from "./macos-ffi/coregraphics.js";
-import { NOOP_POINTER_OVERLAY, type PointerOverlay } from "./macos-ffi/cursor-overlay.js";
+import { cursorBackgroundCuesEnabled } from "./macos-ffi/cursor-background-cues.js";
+import { NOOP_POINTER_OVERLAY, type PointerOverlay, type ScrollDirection } from "./macos-ffi/cursor-overlay.js";
 import { onlineDisplayBounds } from "./macos-ffi/display-list.js";
 import { filePanelServicePid } from "./macos-ffi/file-panel-service.js";
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";
@@ -40,7 +41,7 @@ import {
 } from "./macos-ffi/skylight.js";
 import { listOnscreenWindows, listWindows } from "./macos-ffi/window-list.js";
 import { startFocusStealWatch } from "./macos-focus-watch.js";
-import { dragSteps, interpolatePointEased, pointerTravelDuration } from "./macos-input-drag.js";
+import { dragSteps, interpolatePointEased, pointerTravelDuration, scrollEventPlan } from "./macos-input-drag.js";
 import { pointerModifierFlags, withHeldModifiers } from "./macos-input-modifiers.js";
 import {
 	type MousePost,
@@ -226,9 +227,25 @@ export function backgroundActivationEnabled(environment: NodeJS.ProcessEnv = pro
 /** Re-exported for callers that import the delivery mode beside the input controller. */
 export type { InputDelivery };
 
-// Inter-character delay for typeText. Posting keystrokes back-to-back outruns the
-// target app's event loop and drops characters; ~12ms lets each be consumed.
-const TYPE_CHARACTER_DELAY_MS = 12;
+/**
+ * Inter-character delay for typeText. Posting keystrokes back-to-back outruns the
+ * target app's event loop and drops characters; the default paces each keystroke.
+ * APPLE_CUA_TYPE_CHARACTER_DELAY_MS raises or lowers it (0 posts every character
+ * back-to-back, which known-fast apps tolerate but slower ones drop).
+ */
+export function typeCharacterDelayMilliseconds(environment: NodeJS.ProcessEnv = process.env): number {
+	const raw = environment["APPLE_CUA_TYPE_CHARACTER_DELAY_MS"]?.trim();
+	if (raw === undefined || raw.length === 0) {
+		return TYPE_CHARACTER_DELAY_MS_DEFAULT;
+	}
+	const value = Number(raw);
+	if (!Number.isInteger(value) || value < 0) {
+		return TYPE_CHARACTER_DELAY_MS_DEFAULT;
+	}
+	return value;
+}
+
+const TYPE_CHARACTER_DELAY_MS_DEFAULT = 4;
 
 /** How often a held key checks whether its call was stopped, so a long hold is released soon after a stop. */
 const HOLD_CHECK_MILLISECONDS = 50;
@@ -278,6 +295,7 @@ export class MacOSInputController {
 	private readonly delivery: InputDelivery;
 	/** Whether background delivery may tell an app behind the person's that it is active (see activateBehind). */
 	private readonly backgroundActivation: boolean;
+	private readonly backgroundCues: boolean;
 
 	constructor(
 		targetPid?: number,
@@ -286,9 +304,11 @@ export class MacOSInputController {
 		displaySleep: DisplaySleepAssertion = NOOP_DISPLAY_SLEEP,
 		delivery: InputDelivery = "background",
 		backgroundActivation: boolean = backgroundActivationEnabled(),
+		private readonly cursorMotionEnabled = false,
 	) {
 		this.delivery = delivery;
 		this.backgroundActivation = backgroundActivation;
+		this.backgroundCues = cursorBackgroundCuesEnabled();
 		this.overlay = overlay;
 		this.isLocked = isLocked;
 		this.displaySleep = displaySleep;
@@ -694,6 +714,32 @@ export class MacOSInputController {
 		this.markPointer(position, call.pid);
 	}
 
+	/** Expand the lease's hover into already-paced travel, after its saved cursor snapshot. */
+	private clickPost(call: InputCall): MousePost {
+		const post = this.mousePost(call);
+		if (this.isBackground || !this.cursorMotionEnabled) {
+			return post;
+		}
+		return async (kind, position, button, clickState, window, flags) => {
+			const from = this.pointerFor(call.pid).position();
+			if (kind === "move" && Math.hypot(position.x - from.x, position.y - from.y) > 8) {
+				const duration = pointerTravelDuration(from, position);
+				const steps = dragSteps(duration);
+				const started = performance.now();
+				for (let step = 1; step <= steps; step += 1) {
+					const remaining = started + (duration * step) / steps - performance.now();
+					if (remaining > 0) await delayMilliseconds(Math.ceil(remaining));
+					this.checkpoint(call);
+					const at = interpolatePointEased(from, position, step / steps);
+					await post("move", at, button, clickState, window, flags);
+					this.trackPointer(at, call.pid);
+				}
+				return;
+			}
+			await post(kind, position, button, clickState, window, flags);
+		};
+	}
+
 	async click(
 		position: Point,
 		button: MouseButton = "left",
@@ -706,10 +752,10 @@ export class MacOSInputController {
 			this.requirePointerWindow(call, targetWindow);
 			// Read after waiting for the gesture before this one and for the window lookup: nothing goes down once stopped.
 			this.checkpoint(call);
-			const post = this.mousePost(call);
+			const post = this.clickPost(call);
 			await this.holdModifiers(call, modifiers, targetWindow, "pointer", async (flags) => {
 				if (call.pid === undefined) {
-					await this.postMove(call, position);
+					await post("move", position, "left", undefined, targetWindow);
 					await postClick(post, position, button, 1, targetWindow, flags);
 					this.markPointer(position);
 				} else if (targetWindow !== undefined) {
@@ -718,7 +764,7 @@ export class MacOSInputController {
 						this.showPointer(position, true, call.pid);
 						return;
 					}
-					await runFocusLeasedClick(targetWindow, position, button, post, flags);
+					await runFocusLeasedClick(targetWindow, position, button, post, flags, { targetPid: call.pid });
 					this.showPointer(position, true, call.pid);
 				}
 			});
@@ -732,10 +778,10 @@ export class MacOSInputController {
 			const targetWindow = await this.pointerWindow(call, position);
 			this.requirePointerWindow(call, targetWindow);
 			this.checkpoint(call);
-			const post = this.mousePost(call);
+			const post = this.clickPost(call);
 			await this.holdModifiers(call, modifiers, targetWindow, "pointer", async (flags) => {
 				if (call.pid === undefined) {
-					await this.postMove(call, position);
+					await post("move", position, "left", undefined, targetWindow);
 					await postDoubleClick(post, position, targetWindow, flags);
 					this.markPointer(position);
 				} else if (targetWindow !== undefined) {
@@ -744,7 +790,7 @@ export class MacOSInputController {
 						this.showPointer(position, true, call.pid);
 						return;
 					}
-					await runFocusLeasedDoubleClick(targetWindow, position, post, flags);
+					await runFocusLeasedDoubleClick(targetWindow, position, post, flags, { targetPid: call.pid });
 					this.showPointer(position, true, call.pid);
 				}
 			});
@@ -765,6 +811,7 @@ export class MacOSInputController {
 		// event processing and drops characters ("https://example.com" -> "https://e").
 		// A small inter-character delay lets each keystroke be consumed before the next,
 		// so a single delivery per char is reliable (no drops) without doubling.
+		const pacing = typeCharacterDelayMilliseconds();
 		const segments = Array.from(text);
 		for (let i = 0; i < segments.length; i++) {
 			const segment = segments[i];
@@ -775,9 +822,10 @@ export class MacOSInputController {
 			this.checkpoint(call);
 			this.assertDeliverable(keyboardPid);
 			postUnicodeText(segment, keyboardPid, targetWindow);
+			if (!this.isBackground || this.backgroundCues) this.overlay.keyPress?.(call.pid);
 			this.noteKeyboardInput(call.pid);
-			if (i < segments.length - 1) {
-				await delayMilliseconds(TYPE_CHARACTER_DELAY_MS);
+			if (pacing > 0 && i < segments.length - 1) {
+				await delayMilliseconds(pacing);
 			}
 		}
 	}
@@ -807,6 +855,7 @@ export class MacOSInputController {
 			targetPid: keyboardPid,
 			targetWindow,
 		});
+		if (!this.isBackground || this.backgroundCues) this.overlay.keyPress?.(call.pid);
 		try {
 			if (options?.holdMilliseconds !== undefined) {
 				await this.holdKey(call, options.holdMilliseconds);
@@ -862,8 +911,8 @@ export class MacOSInputController {
 		if (pid !== undefined) {
 			this.keyboardInputAt.set(pid, performance.now());
 		}
-		if (!this.isBackground) {
-			this.overlay.setMode("keyboard");
+		if (!this.isBackground || this.backgroundCues) {
+			this.overlay.setMode("keyboard", pid);
 		}
 	}
 
@@ -886,7 +935,7 @@ export class MacOSInputController {
 		if (options.position !== undefined) {
 			await this.pointerWindow(call, position);
 		}
-		this.showScrollPointer(position, call.pid);
+		this.showScrollPointer(position, call.pid, options.direction);
 		const unit: Record<ScrollOptions["direction"], [number, number]> = {
 			up: [0, 1],
 			down: [0, -1],
@@ -894,14 +943,16 @@ export class MacOSInputController {
 			right: [1, 0],
 		};
 		const [ux, uy] = unit[options.direction];
-		// Deliver the total in small steps so it GLIDES smoothly instead of jumping.
-		const perStep = 4;
-		const steps = Math.max(1, Math.ceil(amount / perStep));
+		const plan = scrollEventPlan(amount);
 		await this.holdModifiers(call, options.modifiers, targetWindow, "wheel", async (flags) => {
-			for (let i = 0; i < steps; i++) {
+			const started = performance.now();
+			for (const [index, d] of plan.entries()) {
+				const remaining = started + 14 * index - performance.now();
+				if (remaining > 0) {
+					await delayMilliseconds(Math.ceil(remaining));
+				}
 				this.checkpoint(call);
 				this.assertDeliverable(call.pid);
-				const d = Math.round(((i + 1) * amount) / steps) - Math.round((i * amount) / steps);
 				postScrollEvent({
 					deltaX: d * ux,
 					deltaY: d * uy,
@@ -910,9 +961,6 @@ export class MacOSInputController {
 					flags,
 					position: options.position ?? (targetWindow === undefined ? undefined : position),
 				});
-				if (i < steps - 1) {
-					await delayMilliseconds(14);
-				}
 			}
 		});
 	}
@@ -937,6 +985,7 @@ export class MacOSInputController {
 				throw new Error("drag destination is outside the target window; observe the destination window first");
 			}
 			this.checkpoint(call);
+			this.showDragPointer(options.from, call.pid);
 			const mousePost = this.mousePost(call);
 			const post: MousePost = async (kind, at, button, clickState, window, flags) => {
 				await mousePost(kind, at, button, clickState, window, flags);
@@ -984,7 +1033,7 @@ export class MacOSInputController {
 
 	private markPointer(position: Point, pid = this.currentTargetPid): void {
 		this.pointerFor(pid).moveTo(position);
-		if (!this.isBackground) {
+		if (!this.isBackground || this.backgroundCues) {
 			this.overlay.set(position, pid);
 		}
 	}
@@ -995,7 +1044,7 @@ export class MacOSInputController {
 
 	private trackPointer(position: Point, pid = this.currentTargetPid): void {
 		this.pointerFor(pid).moveTo(position);
-		if (this.isBackground) {
+		if (this.isBackground && !this.backgroundCues) {
 			return;
 		}
 		if (this.overlay.track === undefined) {
@@ -1005,19 +1054,30 @@ export class MacOSInputController {
 		}
 	}
 
-	showScrollPointer(position: Point, pid = this.currentTargetPid): void {
-		if (!this.isBackground) {
-			this.overlay.setMode("scroll", pid);
+	showScrollPointer(position: Point, pid = this.currentTargetPid, direction?: ScrollDirection): void {
+		if (!this.isBackground || this.backgroundCues) {
+			if (direction !== undefined && this.overlay.setScrollMode !== undefined) {
+				this.overlay.setScrollMode(direction, pid);
+			} else {
+				this.overlay.setMode("scroll", pid);
+			}
 		}
+		this.markPointer(position, pid);
+	}
+
+	private showDragPointer(position: Point, pid: number | undefined): void {
+		if (this.isBackground && !this.backgroundCues) return;
+		this.overlay.setMode("drag", pid);
 		this.markPointer(position, pid);
 	}
 
 	/**
 	 * Show where the agent is acting with the drawn overlay dot, and ripple it for a press. Background
-	 * delivery updates only the logical pointer model and never emits overlay feedback.
+	 * delivery updates the drawn marker only when background cues are enabled (see
+	 * APPLE_CUA_CURSOR_BACKGROUND_CUES); otherwise it updates the logical pointer model silently.
 	 */
 	showPointer(position: Point, press: boolean, pid = this.currentTargetPid): void {
-		if (this.isBackground) {
+		if (this.isBackground && !this.backgroundCues) {
 			this.pointerFor(pid).moveTo(position);
 			return;
 		}
@@ -1034,9 +1094,9 @@ export class MacOSInputController {
 		}
 	}
 
-	/** Show attended keyboard activity while background delivery remains visually silent. */
+	/** Show keyboard activity on the drawn cursor in either delivery mode. */
 	showKeyboard(): void {
-		if (!this.isBackground) {
+		if (!this.isBackground || this.backgroundCues) {
 			const pid = this.currentTargetPid;
 			this.overlay.setMode("keyboard", pid);
 			this.overlay.set(this.pointerFor(pid).position(), pid);

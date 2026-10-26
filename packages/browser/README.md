@@ -1,5 +1,8 @@
 # apple-cua browser
 
+For an AI-guided install with explicit consent checkpoints and a background smoke test, see
+[skills/apple-cua-browser/README.md](../../skills/apple-cua-browser/README.md).
+
 An MV3 Chromium extension, authenticated loopback WebSocket bridge, compact
 browser session API, and MCP server. It reuses apple-cua's file-backed stop gate.
 DOM input uses CDP; native dialogs/canvas use the existing guarded apple-cua
@@ -58,11 +61,38 @@ implementation to fork, so this package does not claim Codex-derived code.
 See [installation](../../skills/apple-cua-browser/references/installation.md)
 and [the skill](../../skills/apple-cua-browser/SKILL.md).
 
+## Bun development lane (optional)
+
+The shipped daemon, CLI, MCP server, helper app, installer, and LaunchAgent stay on
+Node. Bun is an optional fast local lane for this package only:
+
+```sh
+bun run test:browser:bun     # browser Vitest suite under Bun
+bun run smoke:browser:bun    # TypeScript source doctor, plus dist doctor when built
+```
+
+The root `vitest.config.ts` detects Bun and inlines `zod` for Vitest's loader; Node
+runs keep the externalized path. The smoke command is read-only and does not start
+the daemon or require the extension. It proves the package's TypeScript source and
+built CLI load under Bun; it is not the real-browser verifier and does not cover the
+MCP, CLI, or core suites, which are not yet green under Bun. Do not use Bun to run
+`setup.sh`, the LaunchAgent, or the bundled helper app.
+
 ## Contract
 
 - Own tabs only; no user-tab borrowing or arbitrary evaluate/CDP endpoint.
 - Ground actions in compact observed refs and a one-use token.
-- Batches of up to 12 click/fill/press/scroll steps, with stop checks between steps.
+- `browser_open_many` loads up to 8 URLs concurrently in the same minimized
+  window, returns stable `pN` labels plus per-URL failures, and refuses before
+  creating a tab when a space would exceed 12 pages.
+- `browser_find` and described targets rank matches by exact name, prefix, role,
+  and interactive role instead of returning DOM order.
+- Batches of up to 20 click/fill/select/press/scroll/wait steps, with stop checks
+  between steps. A described target is resolved in the same page call as the action.
+- `select` sets a native dropdown value and dispatches input/change without
+  opening the native popup, then verifies the control accepted the option.
+- A completed fill waits for bounded DOM quiet before the next step, so suggestion
+  lists are ready without a fixed sleep.
 - Pages remain inactive inside an owned minimized window. Renderer-only focus
   emulation avoids selecting tabs or focusing windows.
 - Revealing the window or moving controlled tabs stops input.
@@ -90,7 +120,10 @@ disposable profile, pairs through the actual options page, checks five independe
 fill/click flows, shadow-root targeting, stale/token refusal, stop/read behavior,
 compact deltas, independent skill CLI calls, Enter/scroll input, and human
 pause/resume. It closes its tabs/browser and removes its temporary profiles.
-It writes options screenshots under `.omo/evidence/apple-cua-browser`.
+It writes options screenshots under `.omo/evidence/apple-cua-browser`. The verifier
+predates `select`, `browser_open_many`, and ranked matching; those paths are covered
+by the protocol, controller, background-worker, and page-runtime tests above, not by
+this end-to-end script.
 
 For recent Chrome builds that disable command-line unpacked-extension loading,
 the verifier can use the experimental developer CDP loader in its disposable

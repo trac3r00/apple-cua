@@ -12,9 +12,25 @@ const childProcessMock = vi.hoisted(() => ({
 	execFile: vi.fn<ExecFileMock>(),
 }));
 
+const sckitMock = vi.hoisted(() => ({
+	captureWindowImage: vi.fn<() => never>(() => {
+		throw new Error("libsckit.dylib not found (looked in /native/libsckit.dylib)");
+	}),
+}));
+
 vi.mock("node:child_process", () => ({
 	execFile: childProcessMock.execFile,
 }));
+
+// The real adapter would attempt a live ScreenCaptureKit capture; pin it to the classified
+// unavailable class so the CLI-fallback routing stays provable under the retry contract.
+vi.mock("./macos-ffi/screenshot.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./macos-ffi/screenshot.js")>();
+	return {
+		...actual,
+		captureWindowImage: sckitMock.captureWindowImage,
+	};
+});
 
 import { parseRunningApps } from "./app-list.js";
 import { parseImageDimensions, parsePngDimensions } from "./image-format.js";

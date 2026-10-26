@@ -364,6 +364,21 @@ const apple = Object.freeze({
 			showMenu: (target: unknown) => call("dockAct", undefined, [target, "AXShowMenu"]),
 			cancel: (target: unknown) => call("dockAct", undefined, [target, "AXCancel"]),
 		}),
+	terminal: () =>
+		Object.freeze({
+			run: (command: unknown) => call("terminalRun", undefined, [command]),
+			read: (windowId?: unknown) => call("terminalRead", undefined, [windowId]),
+		}),
+	spaces: () =>
+		Object.freeze({
+			active: () => call("spacesActive", undefined, []),
+			displays: () => call("spacesDisplays", undefined, []),
+		}),
+	menubar: () =>
+		Object.freeze({
+			observe: () => call("menubarObserve", undefined, []),
+			press: (elementId: unknown) => call("menubarPress", undefined, [elementId]),
+		}),
 });
 
 function serializeValue(value: unknown): { readonly value: unknown; readonly valueTruncated: boolean } {

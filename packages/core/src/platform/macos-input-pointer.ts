@@ -3,7 +3,7 @@ import type { DragOptions, Point, Rect } from "../types/index.js";
 import type { MouseButton } from "./macos-ffi/coregraphics.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
 import { dragSteps, interpolatePointEased, pointerTravelDuration } from "./macos-input-drag.js";
-import { runFocusLeasedGesture } from "./macos-targeted-gesture.js";
+import { type GestureSleepOptions, runFocusLeasedGesture } from "./macos-targeted-gesture.js";
 
 /** `flags` is the held-modifier CGEventFlags mask to stamp on the event; undefined leaves the flags alone. */
 export type MousePost = (
@@ -24,7 +24,16 @@ export interface ScreenLayout {
 /** Just above and left of the main display, which is clear on most arrangements. */
 const PRIMER_USUAL_POSITION: Point = { x: -1, y: -1 };
 const PRIMER_GAP_MILLISECONDS = 1;
-const PRIMER_SETTLE_MILLISECONDS = 100;
+const PRIMER_SETTLE_MILLISECONDS_DEFAULT = 40;
+
+export function gesturePrimerSettleMilliseconds(): number {
+	const raw = process.env["APPLE_CUA_GESTURE_PRIMER_SETTLE_MS"]?.trim();
+	if (raw === undefined || raw.length === 0) {
+		return PRIMER_SETTLE_MILLISECONDS_DEFAULT;
+	}
+	const value = Number(raw);
+	return Number.isInteger(value) && value >= 0 ? value : PRIMER_SETTLE_MILLISECONDS_DEFAULT;
+}
 
 /**
  * Where the activation primer can click without landing on anything: a point inside no display and no on-screen
@@ -69,11 +78,14 @@ export async function postActivationPrimer(
 	post: MousePost,
 	targetWindow: SkyLightTargetWindow,
 	position: Point,
+	options: GestureSleepOptions = {},
 ): Promise<void> {
+	const wait = options.sleep ?? ((milliseconds) => sleep(milliseconds).then(() => undefined));
 	await post("down", position, "left", 1, targetWindow);
-	await sleep(PRIMER_GAP_MILLISECONDS);
+	await wait(PRIMER_GAP_MILLISECONDS);
 	await post("up", position, "left", 1, targetWindow);
-	await sleep(PRIMER_SETTLE_MILLISECONDS);
+	const primerSettle = gesturePrimerSettleMilliseconds();
+	if (primerSettle > 0) await wait(primerSettle);
 }
 
 export async function postClick(
@@ -162,9 +174,14 @@ export async function runFocusLeasedClick(
 	button: MouseButton,
 	post: MousePost,
 	flags?: number,
+	options: GestureSleepOptions = {},
 ): Promise<void> {
-	await runFocusLeasedGesture(targetWindow, position, post, () =>
-		postClick(post, position, button, 1, targetWindow, flags),
+	await runFocusLeasedGesture(
+		targetWindow,
+		position,
+		post,
+		() => postClick(post, position, button, 1, targetWindow, flags),
+		options,
 	);
 }
 
@@ -173,20 +190,30 @@ export async function runFocusLeasedDoubleClick(
 	position: Point,
 	post: MousePost,
 	flags?: number,
+	options: GestureSleepOptions = {},
 ): Promise<void> {
-	await runFocusLeasedGesture(targetWindow, position, post, () =>
-		postDoubleClick(post, position, targetWindow, flags),
+	await runFocusLeasedGesture(
+		targetWindow,
+		position,
+		post,
+		() => postDoubleClick(post, position, targetWindow, flags),
+		options,
 	);
 }
 
 export async function runFocusLeasedDrag(
 	targetWindow: SkyLightTargetWindow,
-	options: DragOptions,
+	dragOptions: DragOptions,
 	post: MousePost,
 	flags?: number,
 	checkpoint?: () => void,
+	sleepOptions: GestureSleepOptions = {},
 ): Promise<void> {
-	await runFocusLeasedGesture(targetWindow, options.from, post, () =>
-		postDragSequence(post, options, targetWindow, flags, checkpoint),
+	await runFocusLeasedGesture(
+		targetWindow,
+		dragOptions.from,
+		post,
+		() => postDragSequence(post, dragOptions, targetWindow, flags, checkpoint),
+		sleepOptions,
 	);
 }

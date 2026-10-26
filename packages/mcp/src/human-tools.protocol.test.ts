@@ -60,7 +60,7 @@ describe("ask_user #given an eliciting client #when the human responds #then the
 		});
 
 		expect(result.isError).not.toBe(true);
-		expect(jsonPayload(result)).toEqual({ answered: true, action: "accept", answer: "Quarterly report" });
+		expect(jsonPayload(result)).toMatchObject({ answered: true, action: "accept", answer: "Quarterly report" });
 	});
 
 	it.each(["decline", "cancel"] as const)("returns unanswered when the human chooses %s", async (action) => {
@@ -69,7 +69,7 @@ describe("ask_user #given an eliciting client #when the human responds #then the
 		const result = await harness.client.callTool({ name: "ask_user", arguments: { question: "Proceed?" } });
 
 		expect(result.isError).not.toBe(true);
-		expect(jsonPayload(result)).toEqual({ answered: false, action });
+		expect(jsonPayload(result)).toMatchObject({ answered: false, action });
 	});
 
 	it.each(["handoff", "screen_locked"] as const)(

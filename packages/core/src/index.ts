@@ -28,6 +28,16 @@ export {
 export { resolveScreenPoint } from "./computer/coordinate.js";
 export { currentCursorIdentity, withCursorIdentity } from "./computer/cursor-scope.js";
 export {
+	HandsCoordinator,
+	type HandName,
+	type HandResource,
+	type HandTask,
+	type HandsPolicy,
+	type HandLaneResult,
+	type HandsRunOptions,
+	type HandsRunResult,
+} from "./computer/hands.js";
+export {
 	type InputScope,
 	type InputTarget,
 	InputInterrupted,
@@ -56,6 +66,21 @@ export {
 	listTopLevelWindows,
 } from "./platform/macos-top-level-windows.js";
 export { type ListedWindow, listWindows } from "./platform/macos-ffi/window-list.js";
+export { captureWindowViaSck } from "./platform/macos-ffi/sckit.js";
+export {
+	type AxEventWaiter,
+	type AxQuietOutcome,
+	createAxEventWaiter,
+	waitForAxQuiet,
+} from "./platform/macos-ffi/ax-observer.js";
+export {
+	activeSpaceId,
+	managedDisplaySpaces,
+	spaceTypeFor,
+	spacesForWindows,
+	type ManagedDisplaySpaces,
+	type SpaceInfo,
+} from "./platform/macos-ffi/sls-spaces.js";
 export {
 	type SystemPrompt,
 	type SystemPromptKind,
@@ -71,6 +96,14 @@ export {
 	screenshotPointToScreen,
 } from "./computer/viewport.js";
 export { type AppApprovalDecision, AppApprovalStore } from "./permission/app-approval.js";
+export { type InputLockRecord, InputLock } from "./platform/input-lock.js";
+export {
+	type HotFrame,
+	type HotFrameSourceOptions,
+	type HotFrameWorker,
+	type HotFrameWorkerSpawner,
+	HotFrameSource,
+} from "./computer/hot-frames.js";
 export { type LockScreenMonitorCallbacks, LockScreenMonitor } from "./platform/lock-screen-monitor.js";
 export { type HostCapabilities, probeHostCapabilities } from "./platform/host-capabilities.js";
 export { getSckitLoadError, isSckitAvailable } from "./platform/macos-ffi/sckit.js";
@@ -95,6 +128,7 @@ export {
 export type { PermissionInterface, PermissionKind, PermissionStatus } from "./permission/interface.js";
 export { MacOSPermissions } from "./permission/macos.js";
 export { CloudComputer, type CloudComputerOptions } from "./platform/cloud.js";
+export { UTM, UTMError, UTM_BUNDLE_ID, type UTMVirtualMachine, type UTMObservation } from "./platform/utm.js";
 export { HostComputer, type HostComputerOptions } from "./platform/host.js";
 export { MacOSHostComputer, type MacOSHostComputerOptions, agentCursorEnabled } from "./platform/macos.js";
 export type { InputDelivery } from "./platform/macos-input.js";
@@ -115,6 +149,22 @@ export {
 	type DockSource,
 	createNativeDockSource,
 } from "./platform/macos-dock.js";
+export { type MenuExtraSnapshot, createNativeMenuExtrasSource } from "./platform/macos-menu-extras.js";
+export {
+	type TerminalApplication,
+	type TerminalCapture,
+	type TerminalCaptureOptions,
+	type TerminalRunOptions,
+	type TerminalRunResult,
+	TerminalAutomationPermissionError,
+	TerminalNotRunningError,
+	createTerminalSession,
+	dispatchTerminalCommand,
+	findTerminal,
+	readVisibleText,
+	runAndCapture,
+	runCommand,
+} from "./platform/terminal-session.js";
 export {
 	type OcrBox,
 	type OcrTextObservation,
@@ -202,6 +252,7 @@ export {
 export {
 	type PointerMode,
 	type PointerOverlay,
+	type CursorState,
 	NOOP_POINTER_OVERLAY,
 	createCursorOverlay,
 } from "./platform/macos-ffi/cursor-overlay.js";

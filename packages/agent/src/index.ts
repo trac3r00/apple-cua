@@ -37,6 +37,16 @@ export {
 } from "./adapters.js";
 export type { ExecutionResult, Observation, PlatformAdapter } from "./adapter.js";
 export {
+	ProxyError,
+	handleChatRequest,
+	postToSystemone,
+	respondWithError,
+	stripProviderPrefix,
+	translateChatToSystemone,
+	type SystemoneBody,
+	wrapSystemoneAsChat,
+} from "./decision-proxy.js";
+export {
 	CONFIDENCE_FLOOR,
 	DONE_THRESHOLD,
 	MAX_DECISIONS,

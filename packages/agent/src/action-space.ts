@@ -1,6 +1,6 @@
 import type { AXTreeElement, AppState } from "@apple-cua/core";
 import { MAX_TARGETS_PER_OPERATION, SPARSE_TARGET_COUNT } from "./questions.js";
-import type { ActionSpace, TableElement, Target, TargetedOperation } from "./types.js";
+import type { ActionSpace, Operation, TableElement, Target, TargetedOperation } from "./types.js";
 
 /**
  * Roles whose whole point is holding text the user can change. Role decides this, never
@@ -204,16 +204,17 @@ function capPerOperation(
 	return { allowed, truncated };
 }
 
-function offeredOperations(
-	targets: Readonly<Partial<Record<TargetedOperation, Record<number, Target>>>>,
-): TargetedOperation[] {
-	const operations: TargetedOperation[] = [];
+function offeredOperations(targets: Readonly<Partial<Record<TargetedOperation, Record<number, Target>>>>): Operation[] {
+	const operations: Operation[] = [];
 	if (targets.PRESS !== undefined) {
 		operations.push("PRESS");
 	}
 	if (targets.TYPE_TEXT !== undefined) {
 		operations.push("TYPE_TEXT");
 	}
+	// DONE and BLOCKED are control answers, not target operations: the loop cannot terminate or
+	// report honestly unless the decision model can always choose them.
+	operations.push("DONE", "BLOCKED");
 	return operations;
 }
 

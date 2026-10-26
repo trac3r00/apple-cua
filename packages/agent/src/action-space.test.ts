@@ -49,7 +49,7 @@ describe("buildMacActionSpace", () => {
 		expect(space.elements.map((row) => row.index)).toStrictEqual([0, 1]);
 		expect(space.targets.PRESS?.[0]?.label).toBe("Save");
 		expect(space.targets.TYPE_TEXT?.[1]?.label).toBe("Document");
-		expect(space.operations).toStrictEqual(["PRESS", "TYPE_TEXT"]);
+		expect(space.operations).toStrictEqual(["PRESS", "TYPE_TEXT", "DONE", "BLOCKED"]);
 		expect(space.sparse).toBe(false);
 	});
 
@@ -134,7 +134,7 @@ describe("buildMacActionSpace", () => {
 		const space = buildMacActionSpace(stateWith([element({ id: 0, role: "AXStaticText", label: "Loading…" })]));
 
 		expect(space.sparse).toBe(true);
-		expect(space.operations).toStrictEqual([]);
+		expect(space.operations).toStrictEqual(["DONE", "BLOCKED"]);
 	});
 
 	it("#given a chosen target #when it is resolved #then it carries the identity the executor must find again", () => {

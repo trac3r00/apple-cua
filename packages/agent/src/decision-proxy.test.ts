@@ -166,6 +166,31 @@ describe("#given gateway-decisions mode #when questions are translated #then onl
 		expect(JSON.parse(on.choices[0].message.content)).toEqual({ answers: { risk: { score: 1 } } });
 	});
 
+	it("#given state.image #when decoded size reaches the limit or exceeds it #then only the oversized image is rejected", async () => {
+		const base = {
+			fallbackModel: "jev-latest",
+			systemoneEndpoint: "https://stub.invalid/v1",
+			apiKey: "k",
+			mode: "gateway-decisions" as const,
+			fetchImpl: (async () => new Response(JSON.stringify({ answers: {} }), { status: 200 })) as typeof fetch,
+		};
+		const requestFor = (size: number): string =>
+			JSON.stringify({
+				messages: [
+					{
+						role: "user",
+						content: {
+							state: { ...CONTRACT.state, image: Buffer.alloc(size).toString("base64") },
+							questions: GATEWAY_QUESTIONS,
+						},
+					},
+				],
+			});
+
+		await expect(handleChatRequest(requestFor(20_000), base)).resolves.toBeDefined();
+		await expect(handleChatRequest(requestFor(20_001), base)).rejects.toMatchObject({ code: "image-too-large" });
+	});
+
 	it("uses the gateway fallback model for the legacy TypeSafe model alias", async () => {
 		let postedModel: string | undefined;
 		await handleChatRequest(

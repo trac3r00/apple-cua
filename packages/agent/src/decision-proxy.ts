@@ -13,10 +13,12 @@ export interface SystemoneBody {
 
 export class ProxyError extends Error {
 	readonly status: number;
+	readonly code: string | undefined;
 
-	constructor(status: number, message: string) {
+	constructor(status: number, message: string, code?: string) {
 		super(message);
 		this.status = status;
+		this.code = code;
 	}
 }
 
@@ -45,10 +47,12 @@ export function translateChatToSystemone(body: unknown, fallbackModel: string): 
 		}
 	}
 	const model = chat.model ?? fallbackModel;
+	const { state, questions } = toContract(contract);
+	validateImageSize(state);
 	return {
 		model: stripProviderPrefix(model),
-		state: toContract(contract).state,
-		questions: toContract(contract).questions,
+		state,
+		questions,
 	};
 }
 
@@ -82,6 +86,7 @@ export function wrapSystemoneAsChat(result: unknown): unknown {
 
 /** The decision layer reads `risk.score` on a 0-4 scale; keep in step with RISK_LEVELS in decision.ts. */
 const GATEWAY_RISK_SCORE_SPAN = 4;
+const MAX_IMAGE_BYTES = 20_000;
 
 export interface GatewayTranslation {
 	readonly questions: unknown;
@@ -90,6 +95,24 @@ export interface GatewayTranslation {
 
 function stringify(value: unknown): string {
 	return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+function validateImageSize(state: unknown): void {
+	if (typeof state !== "object" || state === null) {
+		return;
+	}
+	const image = (state as { image?: unknown }).image;
+	if (typeof image !== "string") {
+		return;
+	}
+	const byteLength = Buffer.from(image, "base64").byteLength;
+	if (byteLength > MAX_IMAGE_BYTES) {
+		throw new ProxyError(
+			400,
+			`state.image exceeds the ${MAX_IMAGE_BYTES}-byte limit (received ${byteLength} bytes)`,
+			"image-too-large",
+		);
+	}
 }
 
 /**
@@ -220,7 +243,11 @@ export async function handleChatRequest(
 export function respondWithError(response: ServerResponse, error: unknown): void {
 	if (error instanceof ProxyError) {
 		response.statusCode = error.status;
-		response.end(JSON.stringify({ error: { message: error.message } }));
+		response.end(
+			JSON.stringify({
+				error: { ...(error.code === undefined ? {} : { code: error.code }), message: error.message },
+			}),
+		);
 		return;
 	}
 	response.statusCode = 502;

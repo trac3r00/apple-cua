@@ -192,3 +192,32 @@ The typed field value was read back after the type-only call and contained
   under-200 successes.
 - Token/context rules, stop switch, attended serialization, verification, and
   sequential `run_steps` remain covered by existing suites.
+
+## 2026-10-26 latency fastpath
+
+The 200 ms interactive contract covers tool shapes, not the decision-model
+call. The model round trip through the gateway is now the dominant share of a
+decision step (~85%): measured text calls take 287-313 ms, small-vision calls
+(14.5 KB JPEG) take 328-345 ms, and cold calls take 2.5-4.0 s.
+
+- **Keep-alive pinger** (`scripts/llm-pool-systemone.mjs`):
+  `LLM_POOL_KEEPALIVE_MS` defaults to 30000; 0 disables it. After 65 s idle,
+  the first decision measured 0.332 s, down from 2.5-4.0 s cold.
+- **Decision-skip cache** (`packages/agent/src/decision-cache.ts`): identical
+  frame decisions replay the gateway answer with a 2 s TTL, invalidated on
+  hash change. Live measurement: first call 2576 ms (cold, populating), then
+  0 ms with `decision.cache` `"hit"`.
+- **Speculative prefetch**: the next decision is requested while the current
+  action dispatches. If the frame changes mid-flight, the prefetch is
+  discarded (observed `"discarded"`); the next decision makes a fresh
+  ~300-540 ms call and never applies the stale answer.
+- **Decision image budget**: `state.image` is capped at 20 KB decoded
+  (`packages/agent`, `image-too-large`). The decision image is captured at
+  480x300 q50, with a 320x200 q30 retry; a 230,820-byte raw hot frame
+  transmits as 9,100 bytes.
+- **Deferred settle**: `DEFERRED_SETTLE_QUIET_MS` changes from 30 to 15; the
+  deferred fence drops from 60 ms to ~30 ms for an early-event settle in the
+  controlled-clock measurement. The silent deadline remains 100 ms.
+
+Known limits: hot frames are larger than the cap by design. The decision
+path sends its own sized capture while vision keeps full frames.

@@ -144,8 +144,9 @@ export function createDecider(config: DecisionConfig): Decider {
 		const key = frame === undefined ? undefined : keyFor(request, frame);
 		const cached = key === undefined ? undefined : cache.get(key);
 		const answers = cached ?? (await load(request, frame));
-		if (frame !== undefined && !isCurrent(frame)) {
-			return refuse("stale-frame", "the hot frame changed while deciding");
+		// A hit has no asynchronous decision window; only a gateway miss needs a completion capture.
+		if (cached === undefined && frame !== undefined && !isCurrent(frame)) {
+			return refuse("stale-frame", "the decision snapshot changed while deciding");
 		}
 		if (key !== undefined && cached === undefined) {
 			cache.put(key, answers);

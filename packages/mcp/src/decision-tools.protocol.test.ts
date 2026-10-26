@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Server } from "node:http";
 import { createServer } from "node:http";
 import type { HotFrameWorker } from "@apple-cua/core";
@@ -116,7 +117,7 @@ describe("hot frame decision wiring", () => {
 		expect(image).not.toEqual(Buffer.alloc(80_000, 1));
 	});
 
-	it("#given changing capture bytes #when the hot frame is unchanged #then its hash remains the identity", async () => {
+	it("#given changing capture bytes #when the published hot hash is unchanged #then each snapshot has its own identity", async () => {
 		const frames = decisionFrames();
 		try {
 			const capture = vi.mocked(core.captureWindowViaSck);
@@ -124,12 +125,15 @@ describe("hot frame decision wiring", () => {
 			const surface = { pid: 1234, windowId: 71 };
 			const first = latestDecisionFrame(frames.hotFrames, surface);
 			const second = latestDecisionFrame(frames.hotFrames, surface);
-			expect(first?.hash).toBe("frame-a");
-			expect(second?.hash).toBe(first?.hash);
+			expect(first?.hash).toBe(createHash("sha1").update(Buffer.alloc(20_000, 2)).digest("hex"));
+			expect(second?.hash).toBe(createHash("sha1").update(Buffer.alloc(10_000, 3)).digest("hex"));
+			expect(second?.hash).not.toBe(first?.hash);
 			expect(first?.image).not.toBe(second?.image);
 			expect(Buffer.from(first?.image ?? "", "base64").byteLength).toBe(20_000);
 			frames.frame("frame-b");
-			expect(latestDecisionFrame(frames.hotFrames, surface)?.hash).toBe("frame-b");
+			expect(latestDecisionFrame(frames.hotFrames, surface)?.hash).toBe(
+				createHash("sha1").update(Buffer.from("small-decision-jpeg")).digest("hex"),
+			);
 		} finally {
 			await frames.hotFrames.dispose();
 		}
@@ -146,11 +150,11 @@ describe("hot frame decision wiring", () => {
 					.mockReturnValueOnce(size === null ? null : Buffer.alloc(size));
 				const result = latestDecisionFrame(frames.hotFrames, { pid: 1234, windowId: 71 });
 				expect(capture.mock.calls).toEqual([
-					[71, 480, 300, "jpeg", 50],
 					[71, 320, 200, "jpeg", 30],
+					[71, 320, 200, "jpeg", 20],
 				]);
 				if (size === 20_000) {
-					expect(result?.hash).toBe("frame-a");
+					expect(result?.hash).toBe(createHash("sha1").update(Buffer.alloc(20_000)).digest("hex"));
 					expect(Buffer.from(result?.image ?? "", "base64").byteLength).toBe(20_000);
 				} else {
 					expect(result).toBeUndefined();
@@ -202,6 +206,7 @@ describe("hot frame decision wiring", () => {
 		computer.delivery = "background";
 		vi.spyOn(computer, "preflightInput").mockImplementation(async () => {
 			frames.frame("frame-b");
+			vi.mocked(core.captureWindowViaSck).mockReturnValue(Buffer.from("changed-decision-jpeg"));
 			return { ok: true };
 		});
 		const harness = await createHarness(computer, undefined, undefined, {

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PrefetchStatus } from "./decision-cache.js";
+import { DecisionCache } from "./decision-cache.js";
 import { createDecider } from "./decision.js";
 import type { DecisionFrame, DecisionRequest } from "./decision.js";
 
@@ -66,6 +67,41 @@ function fixture() {
 }
 
 describe("frame decision cache", () => {
+	it("#given cached answers #when replayed #then only one snapshot is captured", async () => {
+		const latestFrame = vi.fn(() => ({ hash: "a", image: "aW1hZ2U=", surface: "1:2" }));
+		const decide = createDecider({
+			endpoint: "https://decision.invalid",
+			model: "test",
+			latestFrame,
+			fetchImpl: async () => response(),
+		});
+		await decide(request);
+		latestFrame.mockClear();
+
+		expect(await decide(request)).toMatchObject({ ok: true, decision: { cache: "hit" } });
+		expect(latestFrame).toHaveBeenCalledTimes(1);
+	});
+
+	it.each(["parked", "discarded", "error"] as const)(
+		"#given a throwing observer #when speculation reports %s #then it resolves and clears single flight",
+		async (status) => {
+			const cache = new DecisionCache<string>(undefined, () => {
+				throw new Error("observer failed");
+			});
+			const load = status === "error" ? () => Promise.reject(new Error("gateway failed")) : async () => "answers";
+			await expect(cache.prefetch("a", load, () => status !== "discarded")).resolves.toBeUndefined();
+			expect(cache.get("a")).toBe(status === "parked" ? "answers" : undefined);
+			await expect(
+				cache.prefetch(
+					"b",
+					async () => "fresh",
+					() => true,
+				),
+			).resolves.toBeUndefined();
+			expect(cache.get("b")).toBe("fresh");
+		},
+	);
+
 	it("#given cached answers #when the frame and questions match #then a marked hit makes zero gateway calls", async () => {
 		const f = fixture();
 		await f.decide(request);

@@ -26,6 +26,14 @@ export class DecisionCache<T> {
 		this.entry = { key, value, storedAt: this.now() };
 	}
 
+	private notify(status: PrefetchStatus): void {
+		try {
+			this.onPrefetch?.(status);
+		} catch {
+			// Observer failures must not reject speculation or change its cache outcome.
+		}
+	}
+
 	prefetch(key: string, load: () => Promise<T>, isCurrent: () => boolean): Promise<void> {
 		if (this.pending !== undefined) {
 			return this.pending;
@@ -35,15 +43,15 @@ export class DecisionCache<T> {
 			.then(load)
 			.then((value) => {
 				if (!isCurrent()) {
-					this.onPrefetch?.("discarded");
+					this.notify("discarded");
 					return;
 				}
 				this.put(key, value);
-				this.onPrefetch?.("parked");
+				this.notify("parked");
 			})
 			.catch(() => {
 				// Speculation must never fail the action or leave an unhandled rejection.
-				this.onPrefetch?.("error");
+				this.notify("error");
 			})
 			.finally(() => {
 				this.pending = undefined;

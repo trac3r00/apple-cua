@@ -1709,6 +1709,9 @@ export class GuardedSession {
 					if (!preflight.ok) {
 						return { status: "refused", route: "none", detail: preflight.reason };
 					}
+					// The guard now verifies the screen is unchanged since the decision snapshot (capture-byte
+					// identity), a strictly more direct check than the previous published-hot-hash comparison.
+					// Published hot-frame hashes remain in service for vision/hot-frames consumers.
 					if (decision.frameHash !== undefined && latestFrame()?.hash !== decision.frameHash) {
 						return { status: "refused", route: "none", detail: "stale-frame: hot frame changed before dispatch" };
 					}

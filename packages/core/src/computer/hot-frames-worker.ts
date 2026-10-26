@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { parentPort } from "node:worker_threads";
 import { parseImageDimensions } from "../platform/image-format.js";
 import { captureWindowViaSck } from "../platform/macos-ffi/sckit.js";
@@ -50,7 +51,7 @@ port?.on("message", (message: unknown) => {
 port?.postMessage("ready");
 
 void (async () => {
-	for (;;) {
+	while (true) {
 		if (stopping) {
 			process.exit(0);
 		}
@@ -63,10 +64,18 @@ void (async () => {
 			const data = captureWindowViaSck(current.windowId, current.width, current.height, "jpeg", current.quality);
 			if (data !== null && data.length > 0 && port !== null) {
 				const dimensions = parseImageDimensions(data);
+				const hash = createHash("sha1").update(data).digest("hex");
 				const bytes = new Uint8Array(data.byteLength);
 				bytes.set(data);
 				port.postMessage(
-					{ type: "frame", bytes, width: dimensions.width, height: dimensions.height, capturedAt: Date.now() },
+					{
+						type: "frame",
+						bytes,
+						width: dimensions.width,
+						height: dimensions.height,
+						capturedAt: Date.now(),
+						hash,
+					},
 					[bytes.buffer],
 				);
 				await delay(1);

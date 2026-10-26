@@ -13,6 +13,7 @@ export interface HotFrame {
 	readonly width: number;
 	readonly height: number;
 	readonly capturedAt: number;
+	readonly hash: string;
 }
 
 export interface HotFrameWorker {
@@ -40,6 +41,7 @@ interface FrameMessage {
 	readonly width: number;
 	readonly height: number;
 	readonly capturedAt: number;
+	readonly hash: string;
 }
 
 /**
@@ -112,7 +114,7 @@ export class HotFrameSource {
 	/** Bounded wait for the refresher's next frame; undefined when none lands inside the budget. */
 	async waitForFrame(pid: number, windowId: number, budgetMs: number): Promise<HotFrame | undefined> {
 		const started = Date.now();
-		for (;;) {
+		while (true) {
 			const frame = this.latestFor(pid, windowId);
 			if (frame !== undefined) {
 				return frame;
@@ -189,7 +191,7 @@ export class HotFrameSource {
 				return;
 			}
 			const frame = message as Partial<FrameMessage>;
-			if (frame.type !== "frame" || !(frame.bytes instanceof Uint8Array)) {
+			if (frame.type !== "frame" || !(frame.bytes instanceof Uint8Array) || typeof frame.hash !== "string") {
 				return;
 			}
 			this.latest = {
@@ -198,6 +200,7 @@ export class HotFrameSource {
 				width: frame.width ?? size.width,
 				height: frame.height ?? size.height,
 				capturedAt: typeof frame.capturedAt === "number" ? frame.capturedAt : Date.now(),
+				hash: frame.hash,
 			};
 		});
 		// A dead refresher must not pin the slot: the next start() respawns a fresh worker.

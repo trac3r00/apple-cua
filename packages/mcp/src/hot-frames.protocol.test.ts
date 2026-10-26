@@ -42,7 +42,7 @@ describe("#given an engaged hot frame source #when a vision call needs pixels #t
 		const hotFrames = new HotFrameSource({ spawnWorker: () => worker });
 		hotFrames.start(1234, 71, { width: 1000, height: 800 });
 		const jpeg = Buffer.from("warm-jpeg-bytes");
-		worker.deliver({ type: "frame", bytes: new Uint8Array(jpeg), width: 1000, height: 800 });
+		worker.deliver({ type: "frame", bytes: new Uint8Array(jpeg), width: 1000, height: 800, hash: "warm-frame" });
 
 		const computer = new FakeGuardedComputer();
 		computer.delivery = "background";
@@ -143,6 +143,7 @@ describe("#given the frame source #when frames age or targets move #then it refu
 			bytes: new Uint8Array(Buffer.from("frame")),
 			width: 1000,
 			height: 800,
+			hash: "frame",
 		});
 		expect(hotFrames.latestFor(1234, 71)).toBeDefined();
 		vi.advanceTimersByTime(101);
@@ -160,6 +161,7 @@ describe("#given the frame source #when frames age or targets move #then it refu
 			bytes: new Uint8Array(Buffer.from("frame")),
 			width: 1000,
 			height: 800,
+			hash: "frame",
 		});
 		vi.advanceTimersByTime(1_001);
 		expect(hotFrames.latestFor(1234, 71)).toBeUndefined();
@@ -175,6 +177,7 @@ describe("#given the frame source #when frames age or targets move #then it refu
 			bytes: new Uint8Array(Buffer.from("frame")),
 			width: 1000,
 			height: 800,
+			hash: "frame",
 		});
 		hotFrames.start(1234, 72, { width: 1000, height: 800 });
 		expect(hotFrames.latestFor(1234, 72)).toBeUndefined();

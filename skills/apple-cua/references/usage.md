@@ -112,6 +112,17 @@ mapping; window-scoped AX frames must not be scaled a second time.
   `app.reveal(query, { scrollWithin, maxPages, vision, direction })`, which `read_only` rejects. The optional `expect` block verifies the outcome in the same call with
   the same checks as `verify_state` (`element_index` with `exists`/`value`/`label`,
   `window_title`, `timeout_ms`).
+- `run_hands`: one guarded call for a person-like two-handed action. `keyboard` accepts
+  `type_text`/`press_keys`; `pointer` accepts `click`/`drag`/`scroll` with an explicit
+  `element_index` or `x`/`y`; `vision` optionally captures the window while the lanes run.
+  `overlap` defaults to `auto`: disjoint lanes may overlap in background delivery, while
+  attended focus-sensitive lanes serialize. `always` is refused when lanes share a resource.
+  The answer includes per-lane `wait_ms`, `duration_ms`, `overlap_ms`, the final fresh state,
+  and the next observation token. Use it when typing and pointing are genuinely independent;
+  use `run_steps` when order and intermediate reads matter.
+- `get_tool_usage`: read-only session counts, errors, bytes, p50/p95/max latency, and per-tool
+  stats. Every tool result also carries `timing_ms` (`total`, `handler`, `bytes`, plus the
+  existing `capture` phase when `APPLE_CUA_TIMING=1`); no token is needed for the usage report.
 - `select_text`: exact text selection or caret placement in an observed text element.
 - `drag`: bounded start/end coordinates from the screenshot.
 - `scroll`: an observed scrollable element and direction.

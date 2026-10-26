@@ -87,6 +87,47 @@ type KeyCommandOptions = {
 	modifiers?: string;
 };
 
+export interface CursorOverlayAckOptions {
+	requestedMode?: string;
+	timeoutMs?: number;
+	pollMs?: number;
+	now?: () => number;
+	sleep?: (milliseconds: number) => Promise<void>;
+}
+
+type CursorOverlayWithState = {
+	setMode(mode: PointerMode): void;
+	state?(options?: { readonly deadlineMs?: number }): Promise<{
+		readonly shown: boolean;
+		readonly mode?: string;
+	} | null>;
+};
+
+export async function waitForCursorOverlayAck(
+	overlay: CursorOverlayWithState,
+	{
+		requestedMode,
+		timeoutMs = 1_000,
+		pollMs = 100,
+		now = Date.now,
+		sleep: pause = sleep,
+	}: CursorOverlayAckOptions = {},
+): Promise<boolean> {
+	const deadline = now() + timeoutMs;
+	do {
+		const remaining = deadline - now();
+		if (remaining <= 0) return false;
+		const state = overlay.state === undefined ? null : await overlay.state({ deadlineMs: remaining });
+		if (now() >= deadline) return false;
+		// A requested mode is answered by the mode the daemon reports; "shown" only says whether the cursor is drawn,
+		// which is false whenever the overlay is idle or hidden and says nothing about whether the mode was applied.
+		// Without requestedMode, any shown state is accepted for compatibility.
+		if (requestedMode === undefined ? state?.shown === true : state?.mode === requestedMode) return true;
+		await pause(Math.min(pollMs, deadline - now()));
+	} while (now() < deadline);
+	return false;
+}
+
 const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -273,13 +314,15 @@ program
 		// setMode writes to the daemon socket asynchronously; await briefly so the
 		// command actually lands before this short-lived process exits (otherwise
 		// the mode change is dropped and the cursor stays the plain pointer).
-		const overlay =
+		const overlay = (
 			program.opts<GlobalOptions>().cursor === false || !agentCursorEnabled()
 				? NOOP_POINTER_OVERLAY
-				: createCursorOverlay(undefined, resolveCursorMotion(resolveLayout().configPath));
+				: createCursorOverlay(undefined, resolveCursorMotion(resolveLayout().configPath))
+		) as CursorOverlayWithState;
 		overlay.setMode(normalized);
-		await sleep(200);
-		writeActionOutput("cursor-mode", { mode: normalized }, `Cursor mode: ${normalized}`);
+		const acknowledged = await waitForCursorOverlayAck(overlay, { requestedMode: normalized });
+		// The flag reports what the overlay actually confirmed, so a script can tell an applied mode from a bare send.
+		writeActionOutput("cursor-mode", { mode: normalized, acknowledged }, `Cursor mode: ${normalized}`);
 	});
 
 program

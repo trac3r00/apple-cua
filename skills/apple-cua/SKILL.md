@@ -23,6 +23,8 @@ Use the cheapest observation that can support the next decision:
 |---|---|
 | A control you can describe | `find_elements`, then `click_target`, `set_value`, or one `run_steps` with a `target` query |
 | A known sequence on one screen | one `run_steps` (up to 20 steps) with `pace: "fast"` and `expect` |
+| Typing and pointing at once | one `run_hands` with keyboard and pointer lanes (plus optional vision); conflicts serialize automatically |
+| Checking latency or usage | `get_tool_usage`; every tool result also carries `timing_ms` |
 | A field or a few fields | `set_value` or `set_fields`; do not fetch the tree again |
 | A whole flow with reads and branches | one `run_script` |
 | Pixels matter | `get_app_state` with `profile: "visual"` or `analyze_screen` |

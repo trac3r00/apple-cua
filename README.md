@@ -144,6 +144,8 @@ apple-cua ios status
 
 Use the `apple-cua-browser` skill for web pages and the `apple-cua` skill for native apps and the
 phone. Both skills explain the one-cursor-per-subagent workflow and the non-disruption rules.
+For a question-driven install an AI can run end to end, see the
+[AI setup guide](skills/apple-cua-browser/README.md).
 
 <p align="center">
   <img src="./docs/assets/doctor.svg" alt="apple-cua doctor output: every check reports ok, ending in 'Ready: apple-cua is installed and holds its permissions.'" width="760" />
@@ -330,6 +332,15 @@ pnpm doctor            # is this Mac ready?
 
 The codebase uses strict TypeScript, ESM, Biome and Vitest; [`AGENTS.md`](AGENTS.md) has the conventions. CI runs
 setup and `pnpm check` on macOS 15 and macOS 26, each on Apple Silicon and Intel.
+
+The shipped runtime is Node. Bun is an optional local lane for the browser package only:
+
+```bash
+bun run test:browser:bun
+bun run smoke:browser:bun
+```
+
+It does not change `setup.sh`, the LaunchAgent, or the bundled helper app.
 
 ## License
 

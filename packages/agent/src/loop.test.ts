@@ -221,6 +221,32 @@ describe("DecisionAgent guards", () => {
 });
 
 describe("DecisionAgent run", () => {
+	it("#given an executing action #when the step dispatches #then prefetch runs before execution completes", async () => {
+		let complete: (result: ExecutionResult) => void = () => {
+			throw new Error("execution has not started");
+		};
+		const execute = vi.fn(
+			() =>
+				new Promise<ExecutionResult>((resolve) => {
+					complete = resolve;
+				}),
+		);
+		const prefetch = vi.fn(async () => {
+			expect(execute).toHaveBeenCalledTimes(1);
+			complete(ran);
+		});
+		const agent = new DecisionAgent({
+			adapter: adapterWith(state([saveButton]), execute),
+			goal: "save the note",
+			decide: Object.assign(deciderReturning({}), { prefetch }),
+		});
+
+		const record = await agent.decideOnce();
+
+		expect(record.status).toBe("ran");
+		expect(prefetch).toHaveBeenCalledTimes(1);
+	});
+
 	it("#given three steps that change nothing #when the run continues #then it stops as stalled", async () => {
 		const agent = new DecisionAgent({
 			adapter: adapterWith(state([saveButton]), async () => ran),

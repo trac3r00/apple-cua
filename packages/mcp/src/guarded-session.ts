@@ -33,6 +33,7 @@ import type {
 	TopLevelWindow,
 	WindowProbe,
 } from "@apple-cua/core";
+import { latestDecisionFrame } from "./decision-frame.js";
 import { settleDeferredOutcome } from "./deferred-settle.js";
 import type { ResolvedTargetClick } from "./mutation-actions.js";
 import {
@@ -1671,16 +1672,30 @@ export class GuardedSession {
 					"set APPLE_CUA_DECISION_ENDPOINT and LLM_POOL_PROXY_API_KEY (or TYPESAFE_API_KEY); scripts/llm-pool-systemone.mjs serves the local proxy",
 				);
 			}
+			let decisionSurface: InputObservation | undefined;
+			const latestFrame = () => latestDecisionFrame(this.hotFrames, decisionSurface);
 			const decide = createDecider({
 				endpoint,
 				model,
 				apiKey,
+				latestFrame,
+				onPrefetch: (prefetch) => {
+					// stderr stays observable even when speculation completes after the tool response.
+					process.stderr.write(`${JSON.stringify({ event: "decision-prefetch", prefetch, app: request.app })}\n`);
+				},
 				...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
 			});
 			const inner = macosAdapter({ computer: this.computer, app: request.app });
 			const guarded: PlatformAdapter<AppState> = {
 				platform: "macos",
-				observe: () => inner.observe(),
+				observe: async () => {
+					const observation = await inner.observe();
+					decisionSurface = this.computer.getInputObservation(observation.state.pid);
+					if (decisionSurface !== undefined) {
+						this.hotFrames.start(decisionSurface.pid, decisionSurface.windowId, decisionSurface.windowBounds);
+					}
+					return observation;
+				},
 				execute: async (observation, decision) => {
 					const expected = this.computer.getInputObservation(observation.state.pid);
 					if (expected === undefined) {
@@ -1693,6 +1708,9 @@ export class GuardedSession {
 					const preflight = await this.computer.preflightInput(expected, { requireSameBounds: false });
 					if (!preflight.ok) {
 						return { status: "refused", route: "none", detail: preflight.reason };
+					}
+					if (decision.frameHash !== undefined && latestFrame()?.hash !== decision.frameHash) {
+						return { status: "refused", route: "none", detail: "stale-frame: hot frame changed before dispatch" };
 					}
 					return await inner.execute(observation, decision);
 				},
@@ -1723,6 +1741,7 @@ export class GuardedSession {
 						? {}
 						: {
 								operation: record.decision.operation,
+								...(record.decision.cache === undefined ? {} : { cache: record.decision.cache }),
 								...(record.decision.target === undefined ? {} : { target: record.decision.target.label }),
 								risk: record.decision.risk,
 								risk_class: record.decision.riskClass,

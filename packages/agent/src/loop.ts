@@ -157,7 +157,9 @@ export class DecisionAgent<TState> {
 			});
 		}
 
-		const execution = await this.options.adapter.execute(observation, runnable);
+		const executing = this.options.adapter.execute(observation, runnable);
+		void this.options.decide.prefetch?.({ space, goal: this.options.goal, history: this.history });
+		const execution = await executing;
 		if (execution.status === "ran") {
 			this.executed += 1;
 		}

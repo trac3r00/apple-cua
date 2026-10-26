@@ -1,3 +1,5 @@
+import { DecisionCache, decisionCacheKey } from "./decision-cache.js";
+import type { PrefetchStatus } from "./decision-cache.js";
 import { BLOCKED, GOAL_SATISFIED, NEXT_OPERATION, RISK_CLASS, RISK_SCORE, TARGET } from "./questions.js";
 import { RISK_CLASSES, TARGETED_OPERATIONS } from "./types.js";
 import type {
@@ -53,6 +55,16 @@ export interface DecisionConfig {
 	readonly fetchImpl?: typeof fetch;
 	/** How many recent actions travel with the state. Enough to see a loop, short enough to stay cheap. */
 	readonly maxRecentActions?: number;
+	readonly latestFrame?: () => DecisionFrame | undefined;
+	readonly now?: () => number;
+	readonly onPrefetch?: (status: PrefetchStatus) => void;
+}
+
+export interface DecisionFrame {
+	readonly hash: string;
+	readonly image: string;
+	/** PID and window identity, not just identical pixels from another surface. */
+	readonly surface: string;
 }
 
 export interface HistoryEntry {
@@ -67,7 +79,9 @@ export interface DecisionRequest {
 	readonly history: readonly HistoryEntry[];
 }
 
-export type Decider = (request: DecisionRequest) => Promise<DecisionOutcome>;
+export type Decider = ((request: DecisionRequest) => Promise<DecisionOutcome>) & {
+	readonly prefetch?: (request: DecisionRequest) => Promise<void>;
+};
 
 type Question =
 	| { readonly type: "choice"; readonly instructions: string; readonly criteria: Record<string, string> }
@@ -90,9 +104,20 @@ export function createDecider(config: DecisionConfig): Decider {
 	const doFetch = config.fetchImpl ?? fetch;
 	const timeoutMs = config.timeoutMs ?? 30_000;
 	const maxRecent = config.maxRecentActions ?? 8;
-	return async (request: DecisionRequest): Promise<DecisionOutcome> => {
+	// Per-decider ownership plus goal/surface keys prevents reuse across goals even for shared deciders.
+	const cache = new DecisionCache<Readonly<Record<string, Answer>>>(config.now, config.onPrefetch);
+	const keyFor = (request: DecisionRequest, frame: DecisionFrame): string =>
+		decisionCacheKey(frame.hash, questionsFor(request.space), JSON.stringify([request.goal, frame.surface]));
+	const isCurrent = (frame: DecisionFrame): boolean => {
+		const latest = config.latestFrame?.();
+		return latest?.hash === frame.hash && latest.surface === frame.surface;
+	};
+	const load = async (request: DecisionRequest, frame?: DecisionFrame): Promise<Readonly<Record<string, Answer>>> => {
 		const questions = questionsFor(request.space);
 		const state = stateFor(request, maxRecent);
+		if (frame !== undefined) {
+			state["image"] = frame.image;
+		}
 		const body = {
 			model: config.model,
 			temperature: 0,
@@ -112,8 +137,46 @@ export function createDecider(config: DecisionConfig): Decider {
 		if (!response.ok) {
 			throw new Error(`decision endpoint returned HTTP ${response.status}: ${text.slice(0, 300)}`);
 		}
-		return validate(answersOf(text), request.space);
+		return answersOf(text);
 	};
+	const decide: Decider = async (request) => {
+		const frame = config.latestFrame?.();
+		const key = frame === undefined ? undefined : keyFor(request, frame);
+		const cached = key === undefined ? undefined : cache.get(key);
+		const answers = cached ?? (await load(request, frame));
+		if (frame !== undefined && !isCurrent(frame)) {
+			return refuse("stale-frame", "the hot frame changed while deciding");
+		}
+		if (key !== undefined && cached === undefined) {
+			cache.put(key, answers);
+		}
+		// Re-resolve target ids against this observation, never reuse a previously resolved target.
+		const outcome = validate(answers, request.space);
+		if (!outcome.ok) {
+			return outcome;
+		}
+		return {
+			ok: true,
+			decision: {
+				...outcome.decision,
+				...(frame === undefined ? {} : { frameHash: frame.hash }),
+				...(cached === undefined ? {} : { cache: "hit" }),
+			},
+		};
+	};
+	return Object.assign(decide, {
+		prefetch: (request: DecisionRequest): Promise<void> => {
+			const frame = config.latestFrame?.();
+			if (frame === undefined) {
+				return Promise.resolve();
+			}
+			return cache.prefetch(
+				keyFor(request, frame),
+				() => load(request, frame),
+				() => isCurrent(frame),
+			);
+		},
+	});
 }
 
 export function questionsFor(space: ActionSpace): Record<string, Question> {

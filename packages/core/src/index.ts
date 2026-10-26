@@ -66,6 +66,7 @@ export {
 	listTopLevelWindows,
 } from "./platform/macos-top-level-windows.js";
 export { type ListedWindow, listWindows } from "./platform/macos-ffi/window-list.js";
+export { captureWindowViaSck } from "./platform/macos-ffi/sckit.js";
 export {
 	type AxEventWaiter,
 	type AxQuietOutcome,

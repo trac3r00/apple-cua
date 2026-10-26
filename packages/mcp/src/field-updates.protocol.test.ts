@@ -80,6 +80,7 @@ describe("set_fields #given observed text fields #when several values change #th
 			diffOnly: true,
 			requireWindow: true,
 			includeScreenshot: false,
+			maxElements: 250,
 		});
 	});
 });

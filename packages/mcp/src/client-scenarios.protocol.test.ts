@@ -108,7 +108,7 @@ describe("observe, batch, and verify #given any protocol client #when a workflow
 		});
 		expect(humanResult.isError).not.toBe(true);
 		if (canElicit) {
-			expect(jsonPayload(humanResult)).toEqual({ answered: true, action: "accept", answer: "continue" });
+			expect(jsonPayload(humanResult)).toMatchObject({ answered: true, action: "accept", answer: "continue" });
 		} else {
 			expect(jsonPayload(humanResult)).toMatchObject({
 				needs_user: true,

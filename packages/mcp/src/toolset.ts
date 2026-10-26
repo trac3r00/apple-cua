@@ -5,7 +5,7 @@
  */
 export type ToolsetProfile = "full" | "lean";
 
-import type { DockSource, HostCapabilities } from "@apple-cua/core";
+import type { DockSource, HostCapabilities, HotFrameSource } from "@apple-cua/core";
 import type { ExtrasSource } from "./extras-session.js";
 import type { TerminalCommandSource, TerminalTextReader } from "./terminal-session.js";
 
@@ -23,6 +23,8 @@ export interface McpServerOptions {
 	readonly extrasHostProbe?: () => HostCapabilities;
 	readonly extrasNow?: () => number;
 	readonly extrasTtlMs?: number;
+	/** Speculative frame refresher to share; tests inject a controllable source. */
+	readonly hotFramesSource?: HotFrameSource;
 }
 
 export interface ResolvedServerOptions {

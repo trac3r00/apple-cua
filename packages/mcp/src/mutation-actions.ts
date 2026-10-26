@@ -316,8 +316,21 @@ export async function scroll(
 	return { route: "accessibility", delivery: "background" };
 }
 
-export async function typeText(computer: ComputerInterface, targetPid: number, text: string): Promise<ActionDispatch> {
-	if (await computer.typeIntoFocused(targetPid, text)) {
+export async function typeText(
+	computer: ComputerInterface,
+	targetPid: number,
+	text: string,
+	options?: { readonly settleWrite?: boolean },
+): Promise<ActionDispatch> {
+	// The published core declaration can lag the source during a workspace typecheck. The
+	// implementation accepts the optional settle option; this adapter keeps that call typed
+	// without depending on a rebuilt declaration file.
+	const typeIntoFocused: (
+		targetPid: number,
+		text: string,
+		options?: { readonly settleWrite?: boolean },
+	) => Promise<boolean> = computer.typeIntoFocused.bind(computer);
+	if (await typeIntoFocused(targetPid, text, options)) {
 		return { route: "accessibility", delivery: "background" };
 	}
 	await withTargetedApp(computer, targetPid, async () => {

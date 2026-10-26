@@ -3,7 +3,13 @@
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Model Context Protocol server for macOS computer control",
-	"keywords": ["mcp", "model-context-protocol", "computer-use", "macos", "automation"],
+	"keywords": [
+		"mcp",
+		"model-context-protocol",
+		"computer-use",
+		"macos",
+		"automation"
+	],
 	"license": "MIT",
 	"repository": {
 		"type": "git",
@@ -19,6 +25,7 @@
 		"test": "vitest --run"
 	},
 	"dependencies": {
+		"@apple-cua/agent": "workspace:*",
 		"@apple-cua/browser": "workspace:*",
 		"@apple-cua/core": "workspace:*",
 		"@modelcontextprotocol/sdk": "^1.0.0",

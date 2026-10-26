@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { DecisionAgent, type PlatformAdapter, createDecider, macosAdapter } from "@apple-cua/agent";
 import {
 	AX_PRESS_ACTION,
+	HandsCoordinator,
+	HotFrameSource,
 	InputInterrupted,
 	describeQuery,
 	describeUserStop,
@@ -18,6 +21,10 @@ import type {
 	ElementMatch,
 	ElementQuery,
 	GuardedComputerInterface,
+	HandResource,
+	HandTask,
+	HandsPolicy,
+	HandsRunResult,
 	InputObservation,
 	Point,
 	Rect,
@@ -26,6 +33,7 @@ import type {
 	TopLevelWindow,
 	WindowProbe,
 } from "@apple-cua/core";
+import { settleDeferredOutcome } from "./deferred-settle.js";
 import type { ResolvedTargetClick } from "./mutation-actions.js";
 import {
 	type FindEvidence,
@@ -37,6 +45,9 @@ import {
 import {
 	type ActionDispatch,
 	type ElementFormat,
+	type RunHandsLaneReport,
+	type RunHandsReport,
+	type RunHandsVisionReport,
 	type RunStepReport,
 	type RunStepsReport,
 	SYSTEM_PROMPT_NOTE,
@@ -50,10 +61,12 @@ import {
 	appNotRunningResult,
 	compactElement,
 	compactElementMatch,
+	deferredHandsResult,
 	describeElement,
 	describeSystemPrompt,
 	lockRefusalResult,
 	observedActionResult,
+	observedHandsResult,
 	observedRunStepsResult,
 	observedSetFieldsResult,
 	openAppResult,
@@ -67,6 +80,8 @@ import {
 import type { RunStep } from "./tool-schemas.js";
 
 const VERIFY_POLL_INTERVAL_MILLISECONDS = 150;
+/** How long the vision lane waits for the refresher's next frame before a live capture. */
+const HOT_FRAME_WAIT_BUDGET_MS = 250;
 /** How long one targeting attempt waits before re-observing while it looks for its element. */
 const TARGET_POLL_INTERVAL_MILLISECONDS = 200;
 const DEFAULT_FIND_RESULTS = 5;
@@ -99,6 +114,8 @@ const STRICT_DIFF_STATE_OPTIONS = { diffOnly: true, requireWindow: true } as con
 // A baseline read only needs element facts; capturing the window image here cost a screen grab
 // per element step for pixels nothing looked at.
 const FIELD_VERIFY_STATE_OPTIONS = { requireWindow: true, settleMs: 80, includeScreenshot: false } as const;
+/** The outcome is only a token/diff, so cap the walk well below the full-tree budget. */
+const FAST_OUTCOME_MAX_ELEMENTS = 250;
 
 export interface MutationOptions {
 	/** Read back a single field from the post-action tree, without another accessibility walk. */
@@ -248,6 +265,53 @@ export interface RunControl {
 	readonly onProgress?: (completed: number, total: number, message: string) => void;
 }
 
+export interface RunHandsVisionOptions {
+	readonly includeScreenshot?: boolean;
+	readonly settleMs?: number;
+	readonly maxElements?: number;
+}
+
+type HandsLaneValue = readonly RunStepReport[] | HandsVisionCapture;
+
+/**
+ * One guarded two-handed batch sharing a single observation token. Keyboard and pointer lanes
+ * are explicit sequences; vision is an optional concurrent capture. The overlap policy is a
+ * resource decision, not a promise: attended focus conflicts always serialize.
+ */
+export interface RunHandsRequest {
+	readonly app: string;
+	readonly token: string;
+	readonly keyboard: readonly RunStep[];
+	readonly pointer: readonly RunStep[];
+	readonly vision?: RunHandsVisionOptions | undefined;
+	readonly overlap: HandsPolicy;
+	readonly expect?: VerifyRequest | undefined;
+	/** Undefined takes the deferred outcome for eligible input-only calls; "live" always reads. */
+	readonly outcomeMode?: "live" | "deferred" | undefined;
+	readonly fullState: boolean;
+	readonly includeScreenshot: boolean;
+}
+
+interface HandsVisionImage {
+	readonly base64: string;
+	readonly mimeType: "image/png" | "image/jpeg";
+	readonly width: number;
+	readonly height: number;
+}
+
+interface HandsVisionCapture {
+	readonly image: HandsVisionImage | undefined;
+	readonly unavailable?: string;
+	readonly durationMs: number;
+	readonly frameAgeMs?: number;
+	readonly hot?: boolean;
+}
+
+export interface StepDispatchOptions {
+	/** The final type_text is covered by the outcome read; earlier writes keep their fence. */
+	readonly settleWrite?: boolean;
+}
+
 export interface RunStepDriver {
 	readonly elementIndex: (step: RunStep) => number | undefined;
 	/** The described element a step acts on, resolved against a fresh read right before it runs. */
@@ -263,6 +327,7 @@ export interface RunStepDriver {
 		targetPid: number,
 		observation: InputObservation,
 		actions?: readonly string[],
+		options?: StepDispatchOptions,
 	) => Promise<StepDispatch>;
 }
 
@@ -346,6 +411,16 @@ interface LiveToken {
 	readonly token: string;
 	readonly observation: InputObservation;
 	readonly elements: ObservedElementIdentity | undefined;
+	/** True when the token answers a deferred outcome: its element ids predate the action. */
+	readonly deferred: boolean;
+}
+
+export interface DecisionRunRequest {
+	readonly app: string;
+	readonly goal: string;
+	readonly maxSteps?: number;
+	readonly approveRisk?: boolean;
+	readonly timeoutMs?: number;
 }
 
 export class GuardedSession {
@@ -366,6 +441,7 @@ export class GuardedSession {
 		private readonly appLauncher?: AppOpenLauncher,
 		private readonly systemPromptProbe?: () => readonly SystemPrompt[],
 		private readonly stopSwitch?: StopStatusSource,
+		private readonly hotFrames: HotFrameSource = new HotFrameSource(),
 	) {}
 
 	listApps(): Promise<ToolResult> {
@@ -726,6 +802,9 @@ export class GuardedSession {
 		options: MutationOptions = {},
 	): Promise<ToolResult> {
 		return this.enqueue(this.laneForRequestedToken(token), async () => {
+			// This is read-only and independent of the token/preflight work; start it now so the
+			// action never waits for a second listing after the safety gate has already passed.
+			const beforeActionPromise = this.captureWindowBaseline();
 			let expected: Awaited<ReturnType<typeof this.beginMutation>>;
 			try {
 				expected = await this.beginMutation(token, app, validate, options.screenPoints === true);
@@ -736,7 +815,8 @@ export class GuardedSession {
 				}
 				throw error;
 			}
-			const beforeAction = await this.captureWindowBaseline();
+			const beforeAction = await beforeActionPromise;
+			this.forgetClosedBoundWindow(expected.pid, beforeAction);
 			// Read again right before the input goes out: the preflight and the window baseline both awaited.
 			const halted = this.inputHalt(undefined);
 			if (halted !== undefined) {
@@ -755,8 +835,10 @@ export class GuardedSession {
 				throw error;
 			}
 			try {
+				// The post-action listing and the AX outcome are independent; overlap them.
+				const windowEventsPromise = this.describeWindowSideEffects(beforeAction, expected.pid);
 				const outcome = await this.readOutcome(expected.pid, expected.observation, options, expected.elements);
-				const windowEvents = await this.describeWindowSideEffects(beforeAction, expected.pid);
+				const windowEvents = await windowEventsPromise;
 				return observedActionResult(
 					outcome.state,
 					outcome.contextUnchanged,
@@ -890,6 +972,7 @@ export class GuardedSession {
 		control: RunControl = {},
 	): Promise<ToolResult> {
 		return this.enqueue(this.laneForRequestedToken(token), async () => {
+			const beforeActionPromise = this.captureWindowBaseline();
 			let expected: Awaited<ReturnType<typeof this.beginMutation>>;
 			try {
 				expected = await this.beginMutation(
@@ -913,7 +996,8 @@ export class GuardedSession {
 				}
 				throw error;
 			}
-			const beforeAction = await this.captureWindowBaseline();
+			const beforeAction = await beforeActionPromise;
+			this.forgetClosedBoundWindow(expected.pid, beforeAction);
 			const reports: RunStepReport[] = [];
 			let stoppedEarly = false;
 			let refused: string | undefined;
@@ -1099,9 +1183,13 @@ export class GuardedSession {
 				canReuseRead = false;
 				guardNeeded = true;
 				try {
+					const finalReadCoversWrite =
+						position === steps.length - 1 && step.type === "type_text" && expect === undefined;
 					const dispatch = await timed("dispatch", () =>
 						this.inInputScope(expected.pid, expected.observation, control.signal, () =>
-							driver.dispatch(runnable, expected.pid, expected.observation, targetActions),
+							driver.dispatch(runnable, expected.pid, expected.observation, targetActions, {
+								settleWrite: !finalReadCoversWrite,
+							}),
 						),
 					);
 					reports.push({
@@ -1150,23 +1238,40 @@ export class GuardedSession {
 					: {}),
 			};
 			try {
-				if (expect?.timeoutMs !== undefined) {
-					await this.pollVerification(expected.pid, expect);
-				}
+				const windowEventsPromise = this.describeWindowSideEffects(beforeAction, expected.pid);
+				const verificationStartedAt = Date.now();
 				const outcome = await this.readOutcome(
 					expected.pid,
 					expected.observation,
 					expect?.checks !== undefined && expect.checks.length > 0 ? { ...options, fullState: true } : options,
 				);
-				const verification =
+				let verification =
 					expect === undefined ? undefined : await this.runChecks(expected.pid, outcome.state, expect);
-				const windowEvents = await this.describeWindowSideEffects(beforeAction, expected.pid);
+				let finalOutcome = outcome;
+				if (
+					expect !== undefined &&
+					verification !== undefined &&
+					!verification.verified &&
+					expect.timeoutMs !== undefined
+				) {
+					const polled = await this.pollVerification(expected.pid, expect, this.boundWindows.get(expected.pid), {
+						state: outcome.state,
+						verification,
+						startedAt: verificationStartedAt,
+					});
+					verification = polled.verification;
+					finalOutcome = this.outcomeFromState(expected.pid, expected.observation, polled.state, {
+						...outcome.timing,
+						verificationPoll: Math.round(performance.now() - verificationStartedAt),
+					});
+				}
+				const windowEvents = await windowEventsPromise;
 				return observedRunStepsResult(
-					outcome.state,
+					finalOutcome.state,
 					report,
 					verification,
-					outcome.contextUnchanged,
-					outcome.nextToken,
+					finalOutcome.contextUnchanged,
+					finalOutcome.nextToken,
 					windowEvents,
 				);
 			} catch (error: unknown) {
@@ -1174,6 +1279,559 @@ export class GuardedSession {
 				return postActionErrorResult(error, { runSteps: report });
 			}
 		});
+	}
+
+	/**
+	 * Run keyboard and pointer lanes against one observation, with an optional capture watching
+	 * while they work. The whole batch holds the app's lane once, so the scheduler can overlap
+	 * lanes the native driver keeps independent; only the final read and verification run after
+	 * every lane has settled. A lane failure is reported per lane, never silently retried.
+	 */
+	runHands(request: RunHandsRequest, driver: RunStepDriver, control: RunControl = {}): Promise<ToolResult> {
+		return this.enqueue(this.laneForRequestedToken(request.token), async () => {
+			// A text write cannot open or close a window; pointer input and key sequences can.
+			const trackWindowSideEffects =
+				request.pointer.length > 0 || request.keyboard.some((step) => step.type !== "type_text");
+			const beforeActionPromise = trackWindowSideEffects ? this.captureWindowBaseline() : Promise.resolve(undefined);
+			let expected: Awaited<ReturnType<typeof this.beginMutation>>;
+			try {
+				expected = await this.beginMutation(
+					request.token,
+					request.app,
+					(observation) => {
+						for (const step of [...request.keyboard, ...request.pointer]) {
+							driver.validate(step, observation);
+						}
+					},
+					request.pointer.some((step) => step.type === "click" && step.element_index === undefined),
+				);
+			} catch (error: unknown) {
+				const refused = this.refusalFrom(error);
+				if (refused !== undefined) {
+					return refused;
+				}
+				throw error;
+			}
+			const beforeAction = await beforeActionPromise;
+			if (beforeAction !== undefined) {
+				this.forgetClosedBoundWindow(expected.pid, beforeAction);
+			}
+			this.hotFrames.start(expected.pid, expected.observation.windowId, expected.observation.windowBounds);
+			const halted = this.inputHalt(control.signal);
+			if (halted !== undefined) {
+				return refusalResult(halted.reason, halted.message);
+			}
+
+			const delivery = this.computer.delivery === "background" ? "background" : "attended";
+			const focusResources: readonly HandResource[] = delivery === "attended" ? ["focus"] : [];
+			const runLane = async (
+				kind: "keyboard" | "pointer",
+				steps: readonly RunStep[],
+			): Promise<readonly RunStepReport[]> => {
+				const reports: RunStepReport[] = [];
+				try {
+					for (const [index, step] of steps.entries()) {
+						const stop = this.inputHalt(control.signal);
+						if (stop !== undefined) {
+							throw stop;
+						}
+						// beginMutation already ran the one preflight for this call. The first step only has
+						// to prove that the observation still names the same window; later steps retain the
+						// full preflight because their own input may have moved or replaced it.
+						const guard = await this.chainGuard(expected.pid, expected.observation, step, {
+							preflight: index > 0,
+						});
+						if (guard !== undefined) {
+							throw new Error(`window guard refused the ${kind} lane: ${guard}`);
+						}
+						const elementIndex = driver.elementIndex(step);
+						const actions =
+							elementIndex === undefined ? undefined : expected.elements?.get(elementIndex)?.actions;
+						const finalReadCoversWrite =
+							index === steps.length - 1 && step.type === "type_text" && request.expect === undefined;
+						const dispatch = await timed(`hands.${kind}.dispatch`, () =>
+							this.inInputScope(expected.pid, expected.observation, control.signal, () =>
+								driver.dispatch(step, expected.pid, expected.observation, actions, {
+									settleWrite: !finalReadCoversWrite,
+								}),
+							),
+						);
+						reports.push({
+							step: index,
+							type: step.type,
+							input_dispatched: true,
+							status: "dispatched",
+							...dispatch,
+						});
+						control.onProgress?.(reports.length, steps.length, `${kind} ${step.type} dispatched`);
+					}
+					return reports;
+				} catch (error: unknown) {
+					throw new HandsLaneError(reports, error);
+				}
+			};
+
+			const tasks: HandTask<HandsLaneValue>[] = [];
+			let settleInputs = (): void => {};
+			const inputsSettled = new Promise<void>((resolve) => {
+				settleInputs = resolve;
+			});
+			let remainingInputLanes = 0;
+			const finishInputLane = (): void => {
+				remainingInputLanes -= 1;
+				if (remainingInputLanes === 0) {
+					settleInputs();
+				}
+			};
+			if (request.keyboard.length > 0) {
+				remainingInputLanes += 1;
+				tasks.push({
+					hand: "right",
+					resources: ["keyboard", ...focusResources],
+					run: async () => {
+						try {
+							return await runLane("keyboard", request.keyboard);
+						} finally {
+							finishInputLane();
+						}
+					},
+				});
+			}
+			if (request.pointer.length > 0) {
+				remainingInputLanes += 1;
+				tasks.push({
+					hand: "left",
+					resources: ["pointer", ...focusResources],
+					run: async () => {
+						try {
+							return await runLane("pointer", request.pointer);
+						} finally {
+							finishInputLane();
+						}
+					},
+				});
+			}
+			const vision = request.vision;
+			if (vision !== undefined) {
+				tasks.push({
+					hand: "vision",
+					resources: ["capture"],
+					run: async () =>
+						await timed("hands.vision.capture", () =>
+							this.captureVisionLane(expected.pid, vision, this.boundWindows.get(expected.pid)),
+						),
+				});
+			}
+			if (remainingInputLanes === 0) {
+				settleInputs();
+			}
+
+			const handsPromise = timed("hands.coordinator", () =>
+				new HandsCoordinator().run(tasks, {
+					policy: request.overlap,
+					...(control.signal === undefined ? {} : { signal: control.signal }),
+				}),
+			);
+			void handsPromise.then(settleInputs, settleInputs);
+			await inputsSettled;
+			const deferredOutcome =
+				(request.outcomeMode ?? "deferred") === "deferred" &&
+				request.expect === undefined &&
+				request.fullState !== true &&
+				request.includeScreenshot !== true &&
+				(request.keyboard.length > 0 || request.pointer.length > 0 || request.vision !== undefined);
+			if (deferredOutcome) {
+				return await this.deferredHandsTail(handsPromise, tasks, expected, beforeAction, request);
+			}
+			const windowEventsPromise = trackWindowSideEffects
+				? this.describeWindowSideEffects(beforeAction, expected.pid)
+				: Promise.resolve<readonly WindowEvent[]>([]);
+			void windowEventsPromise.catch(() => undefined);
+			const verificationStartedAt = Date.now();
+			const outcomePromise = this.readOutcome(
+				expected.pid,
+				expected.observation,
+				{
+					fullState:
+						request.expect?.checks !== undefined && request.expect.checks.length > 0 ? true : request.fullState,
+					includeScreenshot: request.includeScreenshot,
+				},
+				expected.elements,
+			);
+			void outcomePromise.catch(() => undefined);
+
+			let hands: HandsRunResult<HandsLaneValue>;
+			try {
+				hands = await handsPromise;
+			} catch (error: unknown) {
+				this.clearTokenFor(expected.pid);
+				throw error;
+			}
+
+			const lanes = hands.lanes.map((lane) => this.handsLaneReport(lane.hand, lane, tasks));
+			const visionLane = hands.lanes.find((lane) => lane.hand === "vision");
+			const visionCapture =
+				visionLane?.ok === true && isVisionCapture(visionLane.value) ? visionLane.value : undefined;
+			try {
+				const outcome = await outcomePromise;
+				let verification =
+					request.expect === undefined
+						? undefined
+						: await this.runChecks(expected.pid, outcome.state, request.expect);
+				let finalOutcome = outcome;
+				if (
+					request.expect !== undefined &&
+					verification !== undefined &&
+					!verification.verified &&
+					request.expect.timeoutMs !== undefined
+				) {
+					const polled = await this.pollVerification(
+						expected.pid,
+						request.expect,
+						this.boundWindows.get(expected.pid),
+						{ state: outcome.state, verification, startedAt: verificationStartedAt },
+					);
+					verification = polled.verification;
+					finalOutcome = this.outcomeFromState(expected.pid, expected.observation, polled.state, {
+						...outcome.timing,
+						verificationPoll: Math.round(performance.now() - verificationStartedAt),
+					});
+				}
+				const windowEvents = await windowEventsPromise;
+				const dispatch = handsDispatch(hands.lanes);
+				const visionImage =
+					visionCapture?.image === undefined
+						? undefined
+						: {
+								type: "image" as const,
+								data: visionCapture.image.base64,
+								mimeType: visionCapture.image.mimeType,
+							};
+				const visionReport = handsVisionReport(
+					request.vision,
+					visionLane,
+					visionCapture,
+					finalOutcome.state.screenshotBase64.length > 0 ? 1 : 0,
+				);
+				const report: RunHandsReport = {
+					policy: hands.policy,
+					overlap_ms: Math.round(hands.overlapMs),
+					sequential_estimate_ms: Math.round(hands.sequentialEstimateMs),
+					aborted: hands.aborted,
+					lanes,
+					...(hands.notStarted.length === 0
+						? {}
+						: { unstarted: hands.notStarted.map((index) => tasks[index]?.hand ?? String(index)) }),
+					...(visionReport === undefined ? {} : { vision: visionReport }),
+				};
+				return observedHandsResult(
+					finalOutcome.state,
+					report,
+					verification,
+					finalOutcome.contextUnchanged,
+					finalOutcome.nextToken,
+					windowEvents,
+					dispatch,
+					finalOutcome.timing,
+					visionImage === undefined ? [] : [visionImage],
+				);
+			} catch (error: unknown) {
+				this.clearTokenFor(expected.pid);
+				return postActionErrorResult(error, {
+					hands: {
+						policy: hands.policy,
+						overlap_ms: Math.round(hands.overlapMs),
+						sequential_estimate_ms: Math.round(hands.sequentialEstimateMs),
+						aborted: hands.aborted,
+						lanes,
+					},
+				});
+			}
+		});
+	}
+
+	/**
+	 * The deferred outcome for an input-only call: no result read at all. The app's own accessibility
+	 * events (bounded settle) stand in for the read, and the next token carries the pre-action
+	 * observation without element ids, so the window guard still protects every later call while
+	 * element ids are honestly labeled as predating the action.
+	 */
+	private async deferredHandsTail(
+		handsPromise: Promise<HandsRunResult<HandsLaneValue>>,
+		tasks: readonly HandTask<HandsLaneValue>[],
+		expected: {
+			readonly pid: number;
+			readonly observation: InputObservation;
+			readonly elements: ObservedElementIdentity | undefined;
+		},
+		beforeAction: readonly number[] | undefined,
+		request: Pick<RunHandsRequest, "vision">,
+	): Promise<ToolResult> {
+		let hands: HandsRunResult<HandsLaneValue>;
+		try {
+			hands = await handsPromise;
+		} catch (error: unknown) {
+			this.clearTokenFor(expected.pid);
+			throw error;
+		}
+		const lanes = hands.lanes.map((lane) => this.handsLaneReport(lane.hand, lane, tasks));
+		const visionLane = hands.lanes.find((lane) => lane.hand === "vision");
+		const visionCapture = visionLane?.ok === true && isVisionCapture(visionLane.value) ? visionLane.value : undefined;
+		if (hands.aborted || hands.lanes.some((lane) => !lane.ok)) {
+			// Part of the input may have gone out with no dispatch report to trust: read the result live
+			// instead of deferring it, exactly as a failed mutation would.
+			const outcome = await this.readOutcome(
+				expected.pid,
+				expected.observation,
+				{ fullState: false, includeScreenshot: false },
+				expected.elements,
+			);
+			const finalOutcome = this.outcomeFromState(expected.pid, expected.observation, outcome.state, outcome.timing);
+			const windowEvents = await this.describeWindowSideEffects(beforeAction, expected.pid);
+			return observedHandsResult(
+				finalOutcome.state,
+				{
+					policy: hands.policy,
+					overlap_ms: Math.round(hands.overlapMs),
+					sequential_estimate_ms: Math.round(hands.sequentialEstimateMs),
+					aborted: hands.aborted,
+					lanes,
+					...(hands.notStarted.length === 0
+						? {}
+						: { unstarted: hands.notStarted.map((index) => tasks[index]?.hand ?? String(index)) }),
+				},
+				undefined,
+				finalOutcome.contextUnchanged,
+				finalOutcome.nextToken,
+				windowEvents,
+				handsDispatch(hands.lanes),
+				finalOutcome.timing,
+				[],
+			);
+		}
+		const inputDispatched = hands.lanes.some(
+			(lane) => isStepReports(lane.value) && lane.value.some((step) => step.input_dispatched),
+		);
+		const settle = inputDispatched ? settleDeferredOutcome(expected.pid) : { events: 0, settleMs: 0 };
+		const nextToken = this.issue(expected.observation, undefined, true);
+		const dispatch = handsDispatch(hands.lanes);
+		const visionImage =
+			visionCapture?.image === undefined
+				? undefined
+				: {
+						type: "image" as const,
+						data: visionCapture.image.base64,
+						mimeType: visionCapture.image.mimeType,
+					};
+		const visionReport = handsVisionReport(request.vision, visionLane, visionCapture, 0);
+		const report: RunHandsReport = {
+			policy: hands.policy,
+			overlap_ms: Math.round(hands.overlapMs),
+			sequential_estimate_ms: Math.round(hands.sequentialEstimateMs),
+			aborted: hands.aborted,
+			lanes,
+			...(hands.notStarted.length === 0
+				? {}
+				: { unstarted: hands.notStarted.map((index) => tasks[index]?.hand ?? String(index)) }),
+			...(visionReport === undefined ? {} : { vision: visionReport }),
+		};
+		return deferredHandsResult(
+			expected.observation,
+			report,
+			settle,
+			nextToken,
+			dispatch,
+			{
+				settle: settle.settleMs,
+			},
+			visionImage === undefined ? [] : [visionImage],
+		);
+	}
+
+	/**
+	 * The Jev decision kernel: one indexed action-space observation per step, one fan-out decision
+	 * call, execution guarded by a preflight per step. The endpoint contract and every risk gate
+	 * live in @apple-cua/agent; this method supplies the safety rails (stop switch, preflight,
+	 * per-step refusal) and the honest record.
+	 */
+	runDecision(request: DecisionRunRequest): Promise<ToolResult> {
+		return this.enqueue(undefined, async () => {
+			this.assertOpen();
+			const halted = this.userStopped();
+			if (halted !== undefined) {
+				return refusalResult(halted.reason, halted.message);
+			}
+			const endpoint = process.env["APPLE_CUA_DECISION_ENDPOINT"];
+
+			const model = process.env["APPLE_CUA_DECISION_MODEL"] ?? "typesafe/jev-latest";
+			const apiKey = process.env["LLM_POOL_PROXY_API_KEY"] ?? process.env["TYPESAFE_API_KEY"];
+			if (endpoint === undefined || endpoint === "" || apiKey === undefined || apiKey === "") {
+				return refusalResult(
+					"decision-endpoint-not-configured",
+					"set APPLE_CUA_DECISION_ENDPOINT and LLM_POOL_PROXY_API_KEY (or TYPESAFE_API_KEY); scripts/llm-pool-systemone.mjs serves the local proxy",
+				);
+			}
+			const decide = createDecider({
+				endpoint,
+				model,
+				apiKey,
+				...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
+			});
+			const inner = macosAdapter({ computer: this.computer, app: request.app });
+			const guarded: PlatformAdapter<AppState> = {
+				platform: "macos",
+				observe: () => inner.observe(),
+				execute: async (observation, decision) => {
+					const expected = this.computer.getInputObservation(observation.state.pid);
+					if (expected === undefined) {
+						return {
+							status: "refused",
+							route: "none",
+							detail: "preflight-unavailable: no stored input observation for this app",
+						};
+					}
+					const preflight = await this.computer.preflightInput(expected, { requireSameBounds: false });
+					if (!preflight.ok) {
+						return { status: "refused", route: "none", detail: preflight.reason };
+					}
+					return await inner.execute(observation, decision);
+				},
+			};
+			const agent = new DecisionAgent({
+				adapter: guarded,
+				goal: request.goal,
+				decide,
+				...(request.approveRisk === true ? { approve: () => true } : {}),
+			});
+			const steps: Record<string, unknown>[] = [];
+			let executed = 0;
+			let lastStatus: string | undefined;
+			const stepCap = Math.min(60, Math.max(1, Math.trunc(request.maxSteps ?? 8)));
+			let processed = 0;
+			for await (const record of agent.run()) {
+				processed += 1;
+				if (record.status === "ran") {
+					executed += 1;
+				}
+				lastStatus = record.status;
+				steps.push({
+					step: record.step,
+					status: record.status,
+					detail: record.detail,
+					elapsed_ms: record.elapsedMs,
+					...(record.decision === undefined
+						? {}
+						: {
+								operation: record.decision.operation,
+								...(record.decision.target === undefined ? {} : { target: record.decision.target.label }),
+								risk: record.decision.risk,
+								risk_class: record.decision.riskClass,
+							}),
+				});
+				if (processed >= stepCap) {
+					break;
+				}
+			}
+			return textResult(
+				JSON.stringify(
+					{
+						app: request.app,
+						goal: request.goal,
+						executed,
+						last_status: lastStatus,
+						steps,
+					},
+					null,
+					2,
+				),
+			);
+		});
+	}
+
+	private async captureVisionLane(
+		pid: number,
+		vision: RunHandsVisionOptions,
+		windowId?: number,
+	): Promise<HandsVisionCapture> {
+		const startedAt = performance.now();
+		if (windowId !== undefined && vision.includeScreenshot !== false) {
+			const warm = this.hotFrames.latestFor(pid, windowId);
+			if (warm !== undefined) {
+				return {
+					image: {
+						base64: warm.data.toString("base64"),
+						mimeType: "image/jpeg",
+						width: warm.width,
+						height: warm.height,
+					},
+					durationMs: performance.now() - startedAt,
+					frameAgeMs: Math.max(0, Date.now() - warm.capturedAt),
+					hot: true,
+				};
+			}
+			if (this.hotFrames.engaged(pid, windowId)) {
+				const waited = await this.hotFrames.waitForFrame(pid, windowId, HOT_FRAME_WAIT_BUDGET_MS);
+				if (waited !== undefined) {
+					return {
+						image: {
+							base64: waited.data.toString("base64"),
+							mimeType: "image/jpeg",
+							width: waited.width,
+							height: waited.height,
+						},
+						durationMs: performance.now() - startedAt,
+						frameAgeMs: Math.max(0, Date.now() - waited.capturedAt),
+						hot: true,
+					};
+				}
+				this.hotFrames.drop();
+			}
+		}
+		const state = await this.computer.getAppState(pid, {
+			...STRICT_STATE_OPTIONS,
+			includeScreenshot: vision.includeScreenshot !== false,
+			includeAccessibilityTree: false,
+			settleMs: vision.settleMs ?? 0,
+			...(vision.maxElements === undefined ? {} : { maxElements: vision.maxElements }),
+			...(windowId === undefined ? {} : { windowId }),
+		});
+		const captured = state.screenshotBase64.length > 0;
+		return {
+			image: captured
+				? {
+						base64: state.screenshotBase64,
+						mimeType: state.screenshotMimeType ?? "image/png",
+						width: state.screenshotWidth,
+						height: state.screenshotHeight,
+					}
+				: undefined,
+			...(captured ? {} : { unavailable: state.screenshotUnavailable ?? "the capture returned no image" }),
+			durationMs: performance.now() - startedAt,
+			hot: false,
+		};
+	}
+
+	private handsLaneReport(
+		hand: HandTask<unknown>["hand"],
+		lane: HandsRunResult<unknown>["lanes"][number],
+		tasks: readonly HandTask<unknown>[],
+	): RunHandsLaneReport {
+		const task = tasks.find((candidate) => candidate.hand === hand);
+		const failure = lane.error instanceof HandsLaneError ? lane.error : undefined;
+		return {
+			hand,
+			lane: hand === "right" ? "keyboard" : hand === "left" ? "pointer" : "vision",
+			status: lane.ok ? "completed" : lane.aborted ? "aborted" : "failed",
+			resources: task?.resources ?? [],
+			steps: isStepReports(lane.value) ? lane.value : (failure?.reports ?? []),
+			started_ms: lane.startedMs,
+			finished_ms: lane.finishedMs,
+			wait_ms: lane.waitMs,
+			duration_ms: lane.durationMs,
+			...(lane.error === undefined
+				? {}
+				: { error: handsErrorText(failure === undefined ? lane.error : failure.laneError) }),
+		};
 	}
 
 	invalidate(): void {
@@ -1184,6 +1842,7 @@ export class GuardedSession {
 
 	async close(): Promise<void> {
 		this.invalidate();
+		this.hotFrames.dispose();
 		this.closePromise ??= Promise.all([this.globalTail, ...this.tails.values()]).then(async () =>
 			this.computer.close(),
 		);
@@ -1219,14 +1878,29 @@ export class GuardedSession {
 	}> {
 		const startedAt = Date.now();
 		const deadline = startedAt + wait.timeoutMs;
+		// A zero timeout keeps its single-pass meaning; only a positive budget gates whether work may start.
+		const budgeted = wait.timeoutMs > 0;
 		let changed = false;
+		let firstObservation = true;
+		let lastUnmet = "wait condition is unmet";
 		for (;;) {
 			this.assertOpen();
+			if (!firstObservation && deadline - Date.now() <= 0) {
+				const waitedMs = Date.now() - startedAt;
+				return { satisfied: false, changed, waitedMs, reason: `after ${waitedMs} ms: ${lastUnmet}` };
+			}
+			// The bound-window listing is an inventory query like any other: an expired budget must not start it.
+			const windowOption = await this.boundWindowOption(targetPid);
+			if (budgeted && deadline - Date.now() <= 0) {
+				const waitedMs = Date.now() - startedAt;
+				return { satisfied: false, changed, waitedMs, reason: `after ${waitedMs} ms: ${lastUnmet}` };
+			}
+			firstObservation = false;
 			const state = await this.computer.getAppState(targetPid, {
 				...STRICT_STATE_OPTIONS,
 				includeScreenshot: false,
 				settleMs: 0,
-				...(await this.boundWindowOption(targetPid)),
+				...windowOption,
 			});
 			this.assertOpen();
 			changed = changed || hasAxChange(state);
@@ -1238,25 +1912,33 @@ export class GuardedSession {
 				}
 			}
 			if (wait.windowTitle !== undefined) {
-				const titles = (await this.windowsForPid(targetPid)).map((window) => window.title);
-				if (state.windowTitle !== undefined && !titles.includes(state.windowTitle)) {
-					titles.push(state.windowTitle);
-				}
-				if (!titles.includes(wait.windowTitle)) {
-					unmet.push(`no window titled ${JSON.stringify(wait.windowTitle)} is open`);
+				if (state.windowTitle !== wait.windowTitle) {
+					const remainingBeforeProbe = deadline - Date.now();
+					const titles =
+						remainingBeforeProbe > 0 ? (await this.windowsForPid(targetPid)).map((window) => window.title) : [];
+					if (state.windowTitle !== undefined && !titles.includes(state.windowTitle)) {
+						titles.push(state.windowTitle);
+					}
+					if (!titles.includes(wait.windowTitle)) {
+						unmet.push(`no window titled ${JSON.stringify(wait.windowTitle)} is open`);
+					}
 				}
 			}
 			const waitedMs = Date.now() - startedAt;
 			if (unmet.length === 0) {
 				return { satisfied: true, changed, waitedMs, reason: "" };
 			}
+			lastUnmet = unmet.join("; ");
 			if (signal?.aborted === true) {
 				return { satisfied: false, changed, waitedMs, reason: "cancelled by the client while waiting" };
 			}
 			if (Date.now() >= deadline) {
 				return { satisfied: false, changed, waitedMs, reason: `after ${waitedMs} ms: ${unmet.join("; ")}` };
 			}
-			await delayMilliseconds(VERIFY_POLL_INTERVAL_MILLISECONDS);
+			const remaining = deadline - Date.now();
+			if (remaining > 0) {
+				await delayMilliseconds(Math.min(VERIFY_POLL_INTERVAL_MILLISECONDS, Math.max(0, remaining)));
+			}
 		}
 	}
 
@@ -1264,26 +1946,71 @@ export class GuardedSession {
 		targetPid: number,
 		request: VerifyRequest,
 		windowId?: number,
+		initial?: {
+			readonly state: AppState;
+			readonly verification: Verification;
+			readonly startedAt: number;
+		},
 	): Promise<{ readonly state: AppState; readonly verification: Verification }> {
-		const deadline = Date.now() + (request.timeoutMs ?? 0);
+		const deadline = (initial?.startedAt ?? Date.now()) + (request.timeoutMs ?? 0);
+		// An absent or zero timeout keeps its single-pass meaning; only a positive budget gates whether work may start.
+		const budgeted = request.timeoutMs !== undefined && request.timeoutMs > 0;
+		let firstObservation = initial === undefined;
+		let lastState: AppState | undefined = initial?.state;
+		let lastVerification: Verification | undefined = initial?.verification;
+		if (initial !== undefined) {
+			if (initial.verification.verified || Date.now() >= deadline) {
+				return { state: initial.state, verification: initial.verification };
+			}
+			this.assertOpen();
+			const remaining = deadline - Date.now();
+			if (remaining > 0) {
+				await delayMilliseconds(Math.min(VERIFY_POLL_INTERVAL_MILLISECONDS, remaining));
+			}
+		}
 		for (;;) {
 			this.assertOpen();
+			if (!firstObservation && deadline - Date.now() <= 0) {
+				if (lastState === undefined || lastVerification === undefined) {
+					throw new Error("verification deadline expired before an initial observation");
+				}
+				return { state: lastState, verification: lastVerification };
+			}
+			// Resolving the bound window probes the window list, so the budget is checked on both sides of it.
+			const windowOption = windowId === undefined ? await this.boundWindowOption(targetPid) : { windowId };
+			if (budgeted && deadline - Date.now() <= 0) {
+				if (lastState === undefined || lastVerification === undefined) {
+					throw new Error("verification deadline expired before an initial observation");
+				}
+				return { state: lastState, verification: lastVerification };
+			}
+			firstObservation = false;
 			const state = await this.computer.getAppState(targetPid, {
 				...STRICT_STATE_OPTIONS,
 				includeScreenshot: false,
 				settleMs: 0,
-				...(windowId === undefined ? await this.boundWindowOption(targetPid) : { windowId }),
+				...windowOption,
 			});
 			this.assertOpen();
-			const verification = await this.runChecks(targetPid, state, request);
+			const verification = await this.runChecks(targetPid, state, request, budgeted ? deadline : undefined);
+			lastState = state;
+			lastVerification = verification;
 			if (verification.verified || Date.now() >= deadline) {
 				return { state, verification };
 			}
-			await delayMilliseconds(VERIFY_POLL_INTERVAL_MILLISECONDS);
+			const remaining = deadline - Date.now();
+			if (remaining > 0) {
+				await delayMilliseconds(Math.min(VERIFY_POLL_INTERVAL_MILLISECONDS, Math.max(0, remaining)));
+			}
 		}
 	}
 
-	private async runChecks(pid: number, state: AppState, request: VerifyRequest): Promise<Verification> {
+	private async runChecks(
+		pid: number,
+		state: AppState,
+		request: VerifyRequest,
+		deadline?: number,
+	): Promise<Verification> {
 		const byId = new Map(state.elements.map((element) => [element.id, element] as const));
 		const checks: VerificationCheck[] = [];
 		for (const check of request.checks ?? []) {
@@ -1320,15 +2047,28 @@ export class GuardedSession {
 			}
 		}
 		if (request.windowTitle !== undefined) {
-			const titles = (await this.windowsForPid(pid)).map((window) => window.title);
-			if (state.windowTitle !== undefined && !titles.includes(state.windowTitle)) {
-				titles.push(state.windowTitle);
+			const check = `a window titled ${JSON.stringify(request.windowTitle)} is open`;
+			if (deadline !== undefined && deadline - Date.now() <= 0) {
+				// The budget is spent: keep the title the observation itself reported rather than starting a new query.
+				checks.push({
+					check,
+					verified: state.windowTitle === request.windowTitle,
+					actual:
+						state.windowTitle === undefined
+							? "window list not queried: deadline expired"
+							: `observed window title ${JSON.stringify(state.windowTitle)}`,
+				});
+			} else {
+				const titles = (await this.windowsForPid(pid)).map((window) => window.title);
+				if (state.windowTitle !== undefined && !titles.includes(state.windowTitle)) {
+					titles.push(state.windowTitle);
+				}
+				checks.push({
+					check,
+					verified: titles.includes(request.windowTitle),
+					actual: titles.length === 0 ? "window titles are unavailable" : titles.join(" | "),
+				});
 			}
-			checks.push({
-				check: `a window titled ${JSON.stringify(request.windowTitle)} is open`,
-				verified: titles.includes(request.windowTitle),
-				actual: titles.length === 0 ? "window titles are unavailable" : titles.join(" | "),
-			});
 		}
 		return { verified: checks.every((check) => check.verified), checks };
 	}
@@ -1459,7 +2199,12 @@ export class GuardedSession {
 	 * still the same window (and, for steps that aim at screen points, the same bounds), the app is still approved
 	 * and running, and the observation was not replaced. A reason means refuse.
 	 */
-	private async chainGuard(pid: number, observed: InputObservation, step: RunStep): Promise<string | undefined> {
+	private async chainGuard(
+		pid: number,
+		observed: InputObservation,
+		step: RunStep,
+		options: { readonly preflight?: boolean } = {},
+	): Promise<string | undefined> {
 		const pointer = POINTER_STEP_TYPES.has(step.type);
 		const current = this.computer.getInputObservation(pid);
 		if (current === undefined) {
@@ -1476,6 +2221,9 @@ export class GuardedSession {
 			if (pointer && !sameInputContext(observed, current)) {
 				return "window-bounds-changed";
 			}
+		}
+		if (options.preflight === false) {
+			return undefined;
 		}
 		const result = await timed("chainGuard", () =>
 			this.computer.preflightInput(current, { requireSameBounds: pointer }),
@@ -1560,13 +2308,17 @@ export class GuardedSession {
 		// A retained read asks for the whole tree and answers with the same diff-only state the walk would
 		// have produced on its own.
 		const retain = (options.retainTree === true || options.valueCheck !== undefined) && options.fullState !== true;
-		const bound = await this.boundWindowOption(targetPid);
+		// A bound window is the one the observation named. The pre-action listing already validated
+		// it and dropped it when closed, so the outcome read needs no second inventory probe.
+		const windowId = this.boundWindows.get(targetPid);
 		const startedAt = timingEnabled() ? performance.now() : undefined;
 		const read = await timed("readOutcome.getAppState", () =>
 			this.computer.getAppState(targetPid, {
-				...(options.fullState === true || retain ? STRICT_STATE_OPTIONS : STRICT_DIFF_STATE_OPTIONS),
+				...(options.fullState === true || retain
+					? STRICT_STATE_OPTIONS
+					: { ...STRICT_DIFF_STATE_OPTIONS, maxElements: FAST_OUTCOME_MAX_ELEMENTS }),
 				includeScreenshot: options.includeScreenshot === true,
-				...bound,
+				...(windowId === undefined ? {} : { windowId }),
 			}),
 		);
 		const state: AppState =
@@ -1614,6 +2366,34 @@ export class GuardedSession {
 						},
 					}),
 		};
+	}
+
+	/** Turn a fresh state into the next token/context answer without another read. */
+	private outcomeFromState(
+		targetPid: number,
+		expected: InputObservation,
+		state: AppState,
+		timing?: Readonly<Record<string, number>>,
+	): {
+		readonly state: AppState;
+		readonly contextUnchanged: boolean;
+		readonly nextToken: string | undefined;
+		readonly timing?: Readonly<Record<string, number>>;
+	} {
+		this.assertOpen();
+		const current = this.computer.getInputObservation(targetPid);
+		const focusSatisfied = state.frontmost || this.computer.delivery === "background";
+		const contextUnchanged =
+			current !== undefined &&
+			focusSatisfied &&
+			observationMatchesState(current, state) &&
+			sameInputContext(expected, current);
+		const nextToken =
+			contextUnchanged && state.axChangeSummary !== undefined ? this.issue(current, undefined) : undefined;
+		if (nextToken !== undefined) {
+			this.rememberRead(targetPid, current, state);
+		}
+		return { state, contextUnchanged, nextToken, ...(timing === undefined ? {} : { timing }) };
 	}
 
 	private async readFieldBaseline(targetPid: number): Promise<{
@@ -1678,15 +2458,27 @@ export class GuardedSession {
 		}
 	}
 
-	private issue(observation: InputObservation, elements: ObservedElementIdentity | undefined): string {
+	private issue(
+		observation: InputObservation,
+		elements: ObservedElementIdentity | undefined,
+		deferred = false,
+	): string {
 		const token = randomUUID();
 		const previous = this.tokenByPid.get(observation.pid);
 		if (previous !== undefined) {
 			this.tokens.delete(previous);
 		}
-		this.tokens.set(token, { token, observation, elements });
+		this.tokens.set(token, { token, observation, elements, deferred });
 		this.tokenByPid.set(observation.pid, token);
 		return token;
+	}
+
+	/** A pre-action listing is also the bound-window liveness check; no extra probe is needed. */
+	private forgetClosedBoundWindow(pid: number, openWindowIds: readonly number[] | undefined): void {
+		const windowId = this.boundWindows.get(pid);
+		if (windowId !== undefined && openWindowIds !== undefined && !openWindowIds.includes(windowId)) {
+			this.boundWindows.delete(pid);
+		}
 	}
 
 	/**
@@ -1843,6 +2635,91 @@ export class GuardedSession {
 		}
 		return result;
 	}
+}
+
+type HandsLaneSnapshot = HandsRunResult<unknown>["lanes"][number];
+
+class HandsLaneError extends Error {
+	constructor(
+		readonly reports: readonly RunStepReport[],
+		readonly laneError: unknown,
+	) {
+		super(handsErrorText(laneError));
+		this.name = "HandsLaneError";
+	}
+}
+
+function isStepReports(value: unknown): value is readonly RunStepReport[] {
+	return Array.isArray(value);
+}
+
+function isVisionCapture(value: unknown): value is HandsVisionCapture {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"image" in value &&
+		"durationMs" in value &&
+		typeof value.durationMs === "number"
+	);
+}
+
+function handsErrorText(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function handsDispatch(lanes: readonly HandsLaneSnapshot[]): ActionDispatch | undefined {
+	const routes = new Set<ActionDispatch["route"]>();
+	const deliveries = new Set<ActionDispatch["delivery"]>();
+	for (const lane of lanes) {
+		if (!isStepReports(lane.value)) {
+			continue;
+		}
+		for (const step of lane.value) {
+			if (step.route !== undefined) {
+				routes.add(step.route);
+			}
+			if (step.delivery !== undefined) {
+				deliveries.add(step.delivery);
+			}
+		}
+	}
+	const route = routes.size === 1 ? ([...routes][0] ?? "unknown") : "unknown";
+	const delivery = deliveries.size === 1 ? ([...deliveries][0] ?? "unknown") : "unknown";
+	return { route, delivery };
+}
+
+function handsVisionReport(
+	vision: RunHandsVisionOptions | undefined,
+	lane: HandsLaneSnapshot | undefined,
+	capture: HandsVisionCapture | undefined,
+	imageIndex: number,
+): RunHandsVisionReport | undefined {
+	if (vision === undefined) {
+		return undefined;
+	}
+	if (capture !== undefined) {
+		const image = capture.image;
+		const captured = image !== undefined;
+		return {
+			captured,
+			width: image?.width ?? 0,
+			height: image?.height ?? 0,
+			bytes: image === undefined ? 0 : Buffer.byteLength(image.base64, "base64"),
+			duration_ms: Math.round(capture.durationMs),
+			...(capture.hot === true ? { source: "hot" as const, frame_age_ms: capture.frameAgeMs ?? 0 } : {}),
+			...(capture.hot === true ? {} : { source: "live" as const }),
+			...(captured ? { image_index: imageIndex } : {}),
+			...(captured ? {} : { unavailable: capture.unavailable ?? "the capture returned no image" }),
+		};
+	}
+	return {
+		captured: false,
+		width: 0,
+		height: 0,
+		bytes: 0,
+		duration_ms: lane?.durationMs ?? 0,
+		unavailable: lane?.error === undefined ? "the vision lane did not run" : handsErrorText(lane.error),
+	};
 }
 
 export function validateElement(observation: InputObservation, elementIndex: number): void {

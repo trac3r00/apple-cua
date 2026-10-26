@@ -130,11 +130,12 @@ describe("post-action observation #given dispatched input #when capture outcome 
 			}),
 		);
 
-		expect(payload["timing_ms"]).toEqual({ capture: 6 });
+		expect(payload["timing_ms"]).toMatchObject({ capture: 6 });
+		expect(payload["timing_ms"]).toMatchObject({ total: expect.any(Number), handler: expect.any(Number) });
 		clock.mockRestore();
 	});
 
-	it("omits timing when collection is disabled", async () => {
+	it("still reports server timing without capture when collection is disabled", async () => {
 		vi.stubEnv("APPLE_CUA_TIMING", "0");
 		const harness = await createHarness();
 		closeHarness = harness.close;
@@ -146,7 +147,8 @@ describe("post-action observation #given dispatched input #when capture outcome 
 			}),
 		);
 
-		expect(payload).not.toHaveProperty("timing_ms");
+		expect(payload["timing_ms"]).toMatchObject({ total: expect.any(Number), handler: expect.any(Number) });
+		expect(payload["timing_ms"]).not.toHaveProperty("capture");
 	});
 
 	it("pauses when post-action context changes even if the AX tree changed", async () => {
@@ -186,13 +188,14 @@ describe("post-action observation #given dispatched input #when capture outcome 
 		});
 		const recoveredToken = await observe(harness);
 
-		expect(payload).toEqual({
+		expect(payload).toMatchObject({
 			actionDispatched: true,
 			observationStatus: "error",
 			paused: true,
 			needsExplicitObservation: true,
 			error: "window capture failed",
 		});
+		expect(payload["timing_ms"]).toMatchObject({ total: expect.any(Number) });
 		expect(stale.isError).toBe(true);
 		expect(typeof recoveredToken).toBe("string");
 	});

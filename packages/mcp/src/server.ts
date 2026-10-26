@@ -25,10 +25,12 @@ import { resolveStateDir } from "@apple-cua/core/stop";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerCapabilityTools, registerSkillResources } from "./capability-tools.js";
+import { registerDecisionTools } from "./decision-tools.js";
 import { elementQueryFromInput, registerDesktopMutationTools } from "./desktop-mutation-tools.js";
 import { DockGuardSession } from "./dock-session.js";
 import { ExtrasGuardSession } from "./extras-session.js";
 import { GuardedSession } from "./guarded-session.js";
+import { registerHandsTools } from "./hands-tools.js";
 import { detectHost, spawnGuidance } from "./host-detection.js";
 import { registerHumanTools } from "./human-tools.js";
 import {
@@ -60,6 +62,7 @@ import {
 	openAppSchema,
 	verifyStateSchema,
 } from "./tool-schemas.js";
+import { ToolUsageRegistry, installToolTiming } from "./tool-timing.js";
 import { type McpServerOptions, type ToolsetProfile, resolveServerOptions, serverInstructionsFor } from "./toolset.js";
 import { registerUtmTools } from "./utm-tools.js";
 import { registerVisualTools } from "./visual-tools.js";
@@ -134,6 +137,7 @@ export function createMcpServer(
 		launcher,
 		systemPromptProbe ?? (computer === undefined ? currentSystemPrompts : undefined),
 		stopGate,
+		options?.hotFramesSource,
 	);
 	const dockSession = new DockGuardSession(options?.dockSource, {
 		allowedBundleIds: allowedBundleIdsFromProcessEnvironment(),
@@ -167,6 +171,8 @@ export function createMcpServer(
 		workers,
 		toolset,
 	);
+	const toolUsage = new ToolUsageRegistry();
+	installToolTiming(server, toolUsage);
 	// The harness is known only after initialize, so read it on demand rather than at construction.
 	const host = () => detectHost(server.server.getClientVersion(), process.env);
 
@@ -284,7 +290,9 @@ export function createMcpServer(
 
 	if (toolset === "full") {
 		registerDesktopMutationTools(server, session, resolvedComputer);
+		registerHandsTools(server, session, resolvedComputer);
 		registerPowerTools(server, session, resolvedComputer);
+		registerDecisionTools(server, session);
 		registerParallelTools(server, session, resolvedComputer);
 		registerWorkerTools(server, workers, () => spawnGuidance(host().name, resolvedComputer.delivery ?? "attended"));
 	}
@@ -299,6 +307,7 @@ export function createMcpServer(
 		toolset,
 		toolNames: toolNamesFor(toolset, iphone, browser, utm),
 		host,
+		toolUsage: () => toolUsage.snapshot(),
 	});
 	registerSkillResources(server);
 	if (browser) {

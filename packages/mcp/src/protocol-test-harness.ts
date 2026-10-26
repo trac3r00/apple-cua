@@ -188,6 +188,8 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	onScrollPage: ((pagesScrolled: number) => void) | undefined;
 	/** Where the drawn agent cursor was asked to glide, in order. */
 	readonly pointerHints: Point[] = [];
+	/** Options passed to typeIntoFocused, in order, for write-settlement tests. */
+	readonly typeOptions: ({ readonly settleWrite?: boolean } | undefined)[] = [];
 	/**
 	 * Every synthetic keyboard and pointer input, with the app and window it went to: the input scope's target when
 	 * it went out, else the default setTarget left, which is where a native computer would deliver it.
@@ -396,7 +398,8 @@ export class FakeGuardedComputer implements GuardedComputerInterface {
 	async pressAtPosition(_pid: number, _position: Point): Promise<boolean> {
 		return false;
 	}
-	async typeIntoFocused(_pid: number, _text: string): Promise<boolean> {
+	async typeIntoFocused(_pid: number, _text: string, options?: { readonly settleWrite?: boolean }): Promise<boolean> {
+		this.typeOptions.push(options);
 		return false;
 	}
 	async click(point: Point, options?: PointerOptions): Promise<void> {

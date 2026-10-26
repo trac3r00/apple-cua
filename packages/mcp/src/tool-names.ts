@@ -8,6 +8,7 @@ export const FULL_ONLY_TOOL_NAMES = [
 	"set_value",
 	"set_fields",
 	"run_steps",
+	"run_hands",
 	"observe_apps",
 	"run_parallel",
 	"manage_workers",
@@ -21,6 +22,7 @@ export const FULL_ONLY_TOOL_NAMES = [
 	"set_window_frame",
 	"clipboard_read",
 	"clipboard_write",
+	"run_decision",
 ] as const;
 
 /** The small observe / script / verify surface registered by `APPLE_CUA_TOOLSET=lean`. */
@@ -32,6 +34,7 @@ export const LEAN_TOOL_NAMES = [
 	"find_elements",
 	"run_script",
 	"get_capabilities",
+	"get_tool_usage",
 	"verify_state",
 	"ask_user",
 	"analyze_screen",

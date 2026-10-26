@@ -132,10 +132,17 @@ function initialize(f: Fixture): void {
 	send(f, { jsonrpc: "2.0", method: "notifications/initialized" });
 }
 
-function reinitialize(child: FakeChild): void {
+function replyToolsProbe(child: FakeChild, result: unknown = { tools: [] }): void {
+	const probe = child.messages.at(-1);
+	expect(probe).toMatchObject({ method: "tools/list" });
+	child.reply({ jsonrpc: "2.0", id: probe?.["id"], result });
+}
+
+function reinitialize(child: FakeChild, completeProbe = true): void {
 	const message = child.messages[0];
 	expect(message).toMatchObject({ method: "initialize", params: { protocolVersion: "2025-03-26" } });
 	child.reply({ jsonrpc: "2.0", id: message?.["id"], result: { capabilities: {} } });
+	if (completeProbe) replyToolsProbe(child);
 }
 
 afterEach(async () => {
@@ -146,6 +153,187 @@ afterEach(async () => {
 });
 
 describe("stdio supervisor", () => {
+	it.each([null, 0, "health"])(
+		"#given an uninitialized transport #when ping has id %s #then replies without forwarding",
+		(id) => {
+			const f = fixture();
+			send(f, { jsonrpc: "2.0", id, method: "ping" });
+			expect(f.messages).toEqual([{ jsonrpc: "2.0", id, result: {} }]);
+			expect(childAt(f, 0).messages).toEqual([]);
+		},
+	);
+
+	it("#given initialize without initialized notification #when the client pings #then replies without forwarding", () => {
+		const f = fixture();
+		send(f, { id: 1, method: "initialize" });
+		childAt(f, 0).reply({ id: 1, result: { capabilities: {} } });
+		send(f, { id: 2, method: "ping" });
+		expect(f.messages.at(-1)).toEqual({ jsonrpc: "2.0", id: 2, result: {} });
+		expect(childAt(f, 0).messages).toEqual([{ id: 1, method: "initialize" }]);
+	});
+
+	it("#given a busy native child #when the client pings #then the supervisor replies without replaying the call", () => {
+		const f = fixture();
+		initialize(f);
+		send(f, { jsonrpc: "2.0", id: 2, method: "tools/call" });
+		send(f, { jsonrpc: "2.0", id: 3, method: "ping" });
+		expect(f.messages.at(-1)).toEqual({ jsonrpc: "2.0", id: 3, result: {} });
+		expect(childAt(f, 0).messages.at(-1)).toMatchObject({ id: 2, method: "tools/call" });
+		expect(f.messages.some((message) => message["id"] === 2)).toBe(false);
+	});
+
+	it("#given a child reinitializing #when the client pings #then replies without waiting or queueing the ping", () => {
+		const f = fixture();
+		initialize(f);
+		f.handle.requestRestart("build-changed");
+		childAt(f, 0).exit();
+		send(f, { jsonrpc: "2.0", id: "health", method: "ping" });
+		expect(f.messages.at(-1)).toEqual({ jsonrpc: "2.0", id: "health", result: {} });
+		const second = childAt(f, 1);
+		reinitialize(second);
+		expect(second.messages.map((message) => message["method"])).toEqual([
+			"initialize",
+			"notifications/initialized",
+			"tools/list",
+		]);
+	});
+
+	it("#given a tools baseline #when restarted tools only reorder object keys #then no list_changed is sent", () => {
+		const f = fixture();
+		initialize(f);
+		send(f, { id: "baseline", method: "tools/list" });
+		childAt(f, 0).reply({
+			id: "baseline",
+			result: { tools: [{ name: "observe", inputSchema: { type: "object", properties: {} } }] },
+		});
+		f.handle.requestRestart("build-changed");
+		childAt(f, 0).exit();
+		const second = childAt(f, 1);
+		reinitialize(second, false);
+		const beforeProbe = [...f.messages];
+		replyToolsProbe(second, { tools: [{ inputSchema: { properties: {}, type: "object" }, name: "observe" }] });
+		expect(f.messages).toEqual(beforeProbe);
+	});
+
+	it("#given a tools baseline #when restarted tool schema changes #then list_changed is sent once", () => {
+		const f = fixture();
+		initialize(f);
+		send(f, { id: "baseline", method: "tools/list" });
+		childAt(f, 0).reply({ id: "baseline", result: { tools: [{ name: "observe", inputSchema: {} }] } });
+		f.handle.requestRestart("build-changed");
+		childAt(f, 0).exit();
+		reinitialize(childAt(f, 1), false);
+		replyToolsProbe(childAt(f, 1), { tools: [{ name: "observe", inputSchema: { type: "object" } }] });
+		expect(f.messages.filter((message) => message["method"] === "notifications/tools/list_changed")).toHaveLength(1);
+	});
+
+	it("#given no tools baseline #when two restarts expose identical tools #then only the first notifies", () => {
+		const f = fixture();
+		initialize(f);
+		for (let index = 0; index < 2; index++) {
+			f.handle.requestRestart("build-changed");
+			childAt(f, index).exit();
+			reinitialize(childAt(f, index + 1));
+		}
+		expect(f.messages.filter((message) => message["method"] === "notifications/tools/list_changed")).toHaveLength(1);
+	});
+
+	it("#given requests queued across reinitialization and probe #when the probe completes #then serves requests in order", () => {
+		const f = fixture();
+		initialize(f);
+		f.handle.requestRestart("build-changed");
+		childAt(f, 0).exit();
+		send(f, { id: "first", method: "tools/call" });
+		const second = childAt(f, 1);
+		reinitialize(second, false);
+		send(f, { id: "second", method: "tools/list" });
+		send(f, { id: "health", method: "ping" });
+		expect(second.messages.map((message) => message["method"])).toEqual([
+			"initialize",
+			"notifications/initialized",
+			"tools/list",
+		]);
+		expect(f.messages.at(-1)).toEqual({ jsonrpc: "2.0", id: "health", result: {} });
+		replyToolsProbe(second);
+		expect(second.messages.slice(3)).toEqual([
+			{ id: "first", method: "tools/call" },
+			{ id: "second", method: "tools/list" },
+		]);
+		second.reply({ id: "first", result: {} });
+		second.reply({ id: "second", result: { tools: [] } });
+		expect(f.messages.slice(-2)).toEqual([
+			{ id: "first", result: {} },
+			{ id: "second", result: { tools: [] } },
+		]);
+	});
+
+	it("#given a pending tools probe #when the child crashes #then queued calls survive the next restart", () => {
+		const f = fixture();
+		initialize(f);
+		f.handle.requestRestart("build-changed");
+		childAt(f, 0).exit();
+		reinitialize(childAt(f, 1), false);
+		send(f, { id: "queued", method: "tools/call" });
+		childAt(f, 1).exit();
+		reinitialize(childAt(f, 2));
+		expect(childAt(f, 2).messages.at(-1)).toEqual({ id: "queued", method: "tools/call" });
+		expect(f.notifications).toHaveBeenCalledTimes(1);
+	});
+
+	it("#given queued calls during a tools probe #when the probe fails #then notifies and releases the queue", () => {
+		const f = fixture();
+		initialize(f);
+		f.handle.requestRestart("build-changed");
+		childAt(f, 0).exit();
+		const second = childAt(f, 1);
+		reinitialize(second, false);
+		const probe = second.messages.at(-1);
+		send(f, { id: "queued", method: "tools/call" });
+		second.reply({ id: probe?.["id"], error: { code: -32603, message: "Unavailable" } });
+		expect(f.messages.at(-1)).toEqual({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
+		expect(second.messages.at(-1)).toEqual({ id: "queued", method: "tools/call" });
+	});
+
+	it("#given a pending tools probe #when the child never answers #then times out, fails queued calls, and restarts", async () => {
+		vi.useFakeTimers();
+		try {
+			const f = fixture();
+			initialize(f);
+			f.handle.requestRestart("build-changed");
+			childAt(f, 0).exit();
+			const second = childAt(f, 1);
+			reinitialize(second, false);
+			send(f, { id: "queued", method: "tools/call" });
+
+			await vi.advanceTimersByTimeAsync(5_000);
+
+			expect(f.logs).toContain("apple-cua tools/list probe timed out");
+			expect(f.messages).toContainEqual({
+				jsonrpc: "2.0",
+				id: "queued",
+				error: { code: -32000, message: "apple-cua re-initialization timed out; observe again before acting" },
+			});
+			expect(second.kills).toEqual(["SIGTERM"]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("#given a pending tools probe #when stdin ends #then shuts down without forwarding queued calls", async () => {
+		const f = fixture();
+		initialize(f);
+		f.handle.requestRestart("build-changed");
+		childAt(f, 0).exit();
+		const second = childAt(f, 1);
+		reinitialize(second, false);
+		send(f, { id: "queued", method: "tools/call" });
+		f.input.end();
+		expect(await f.handle.done).toBe(0);
+		expect(second.stdin.writableEnded).toBe(true);
+		expect(second.kills).toEqual(["SIGTERM"]);
+		expect(second.messages.some((message) => message["id"] === "queued")).toBe(false);
+	});
+
 	it("#given an initialized client #when a child crashes during a call #then errors without replay and serves queued calls", () => {
 		const f = fixture();
 		initialize(f);
@@ -164,6 +352,7 @@ describe("stdio supervisor", () => {
 		expect(second.messages).toMatchObject([
 			{ method: "initialize" },
 			{ method: "notifications/initialized" },
+			{ method: "tools/list" },
 			{ id: 3, method: "tools/list" },
 		]);
 		expect(second.messages.some((message) => message["id"] === 2)).toBe(false);
@@ -195,6 +384,46 @@ describe("stdio supervisor", () => {
 		},
 	);
 
+	it.each([
+		[undefined, 15_000],
+		["", 15_000],
+		["   ", 15_000],
+		["undefined", 15_000],
+		["1.5", 15_000],
+		["-1", 15_000],
+		["0", 0],
+		["250", 250],
+	])("#given drain setting %s #when parsed #then uses %i milliseconds", async (value, expected) => {
+		vi.useFakeTimers();
+		vi.stubEnv("APPLE_CUA_SUPERVISOR_DRAIN_MS", value ?? "");
+		try {
+			const f = fixture();
+			initialize(f);
+			send(f, { jsonrpc: "2.0", id: "call", method: "tools/call" });
+			f.handle.requestRestart("build-changed");
+			if (expected === 15_000) {
+				await vi.advanceTimersByTimeAsync(14_999);
+				expect(f.messages.some((message) => message["id"] === "call")).toBe(false);
+				expect(childAt(f, 0).kills).toEqual([]);
+				await vi.advanceTimersByTimeAsync(1);
+			} else {
+				await vi.advanceTimersByTimeAsync(expected);
+			}
+			expect(f.messages.at(-1)).toMatchObject({
+				id: "call",
+				error: { message: expect.stringContaining("outcome is unknown") },
+			});
+			expect(childAt(f, 0).kills).toEqual(["SIGTERM"]);
+			childAt(f, 0).exit();
+			reinitialize(childAt(f, 1));
+			expect(f.messages.at(-1)).toEqual({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
+			expect(childAt(f, 1).messages.some((message) => message["method"] === "tools/call")).toBe(false);
+		} finally {
+			vi.unstubAllEnvs();
+			vi.useRealTimers();
+		}
+	});
+
 	it("#given initialize capabilities #when the first result arrives #then tools advertise listChanged preserving other fields", () => {
 		const f = fixture();
 		send(f, { id: "init", method: "initialize" });
@@ -216,8 +445,8 @@ describe("stdio supervisor", () => {
 
 	it("#given requests before initialize and reverse RPC #when proxied #then messages pass transparently", () => {
 		const f = fixture();
-		send(f, { id: null, method: "ping" });
-		expect(childAt(f, 0).messages).toEqual([{ id: null, method: "ping" }]);
+		send(f, { id: null, method: "tools/list" });
+		expect(childAt(f, 0).messages).toEqual([{ id: null, method: "tools/list" }]);
 		childAt(f, 0).reply({ id: "server", method: "sampling/createMessage", params: {} });
 		send(f, { id: "server", result: {} });
 		expect(f.messages).toEqual([{ id: "server", method: "sampling/createMessage", params: {} }]);

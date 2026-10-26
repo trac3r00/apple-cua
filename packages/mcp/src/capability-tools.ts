@@ -8,6 +8,7 @@ import { type HostInfo, detectHost, spawnGuidance } from "./host-detection.js";
 import { SERVER_INFO } from "./server-info.js";
 import { toolNamesFor } from "./tool-names.js";
 import { textResult } from "./tool-result.js";
+import type { ToolUsageSnapshot } from "./tool-timing.js";
 import type { ToolsetProfile } from "./toolset.js";
 
 const STOP_CHORD = "Control+Option+Command (hold together)";
@@ -24,6 +25,8 @@ export interface CapabilitySources {
 	readonly toolNames?: readonly string[] | undefined;
 	/** Which agent harness is connected, from the client's initialize clientInfo or its environment. */
 	readonly host?: (() => HostInfo) | undefined;
+	/** This server session's tool-call counts, bytes, and latency quantiles. */
+	readonly toolUsage?: (() => ToolUsageSnapshot) | undefined;
 }
 
 type SessionMode = "console" | "remote" | "locked" | "unknown";
@@ -113,7 +116,30 @@ export function capabilityReport(sources: CapabilitySources): Record<string, unk
 	};
 }
 
+const EMPTY_USAGE: ToolUsageSnapshot = {
+	since: 0,
+	calls: 0,
+	errors: 0,
+	total_bytes: 0,
+	p50_ms: 0,
+	p95_ms: 0,
+	max_ms: 0,
+	slowest_ms: 0,
+	by_tool: {},
+};
+
 export function registerCapabilityTools(server: McpServer, sources: CapabilitySources): void {
+	server.registerTool(
+		"get_tool_usage",
+		{
+			description:
+				"Read-only session usage: tool calls, errors, bytes, p50/p95/max latency, and per-tool counts. The current call is counted after this answer is built. No observation token is needed.",
+			inputSchema: z.object({}),
+			annotations: { readOnlyHint: true, destructiveHint: false },
+		},
+		async () => textResult(JSON.stringify(sources.toolUsage?.() ?? EMPTY_USAGE)),
+	);
+
 	server.registerTool(
 		"get_capabilities",
 		{

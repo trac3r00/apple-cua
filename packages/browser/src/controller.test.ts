@@ -56,6 +56,76 @@ describe("browser task-space RPC", () => {
 		expect(request).toHaveBeenLastCalledWith({ method: "close", tabId: 7 });
 	});
 
+	it("#given several urls #when opening them together #then loads them concurrently and labels pages in order", async () => {
+		const bridge = new BrowserBridge({ status: () => ({ stopped: false }) });
+		const resolvers: ((value: unknown) => void)[] = [];
+		const request = vi.spyOn(bridge, "request").mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolvers.push(resolve);
+					if (resolvers.length === 3)
+						for (const [index, finish] of resolvers.entries()) finish({ tabId: 20 + index });
+				}),
+		);
+		const controller = new BrowserController(bridge);
+		await expect(
+			controller.dispatch({
+				action: "open_many",
+				space: "parallel",
+				urls: ["https://a.test", "https://b.test", "https://c.test"],
+			}),
+		).resolves.toMatchObject({
+			space: "parallel",
+			pages: [
+				{ page: "p1", url: "https://a.test", tab_id: 20 },
+				{ page: "p2", url: "https://b.test", tab_id: 21 },
+				{ page: "p3", url: "https://c.test", tab_id: 22 },
+			],
+			failed: [],
+		});
+		expect(request).toHaveBeenCalledTimes(3);
+	});
+
+	it("#given one failing url #when opening several #then keeps successful pages and reports the failure", async () => {
+		const bridge = new BrowserBridge({ status: () => ({ stopped: false }) });
+		let nextTab = 1;
+		vi.spyOn(bridge, "request").mockImplementation(async (command) => {
+			if (command.method === "open" && command.url.endsWith("/bad")) throw new Error("load failed");
+			return { tabId: nextTab++ };
+		});
+		const controller = new BrowserController(bridge);
+		await expect(
+			controller.dispatch({
+				action: "open_many",
+				space: "partial",
+				urls: ["https://a.test", "https://bad.test/bad"],
+			}),
+		).resolves.toMatchObject({
+			pages: [{ page: "p1", url: "https://a.test" }],
+			failed: [{ url: "https://bad.test/bad", error: "load failed" }],
+		});
+	});
+
+	it("#given a space near its page budget #when opening more pages #then refuses before creating a tab", async () => {
+		const bridge = new BrowserBridge({ status: () => ({ stopped: false }) });
+		let nextTab = 1;
+		const request = vi.spyOn(bridge, "request").mockImplementation(async () => ({ tabId: nextTab++ }));
+		const controller = new BrowserController(bridge);
+		await controller.dispatch({
+			action: "open_many",
+			space: "bounded",
+			urls: Array.from({ length: 8 }, (_, index) => `https://e${index}.test`),
+		});
+		await expect(
+			controller.dispatch({
+				action: "open_many",
+				space: "bounded",
+				urls: Array.from({ length: 5 }, (_, index) => `https://more${index}.test`),
+			}),
+		).rejects.toMatchObject({ code: "busy" });
+		expect(request).toHaveBeenCalledTimes(8);
+	});
+
 	afterEach(async () => {
 		for (const close of cleanup.splice(0)) await close();
 	});

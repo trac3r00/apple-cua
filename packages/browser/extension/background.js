@@ -196,6 +196,17 @@ function validStep(step) {
 	if (!hasRef && !hasTarget) return false;
 	if (step.action === "click") return true;
 	if (step.action === "fill") return typeof step.text === "string" && step.text.length <= 10_000;
+	if (step.action === "select") {
+		const choice = step.choice;
+		if (!isRecord(choice)) return false;
+		const provided = [choice.value, choice.label, choice.index].filter((item) => item !== undefined).length;
+		if (provided !== 1) return false;
+		if (choice.value !== undefined && (typeof choice.value !== "string" || choice.value.length > 2000)) return false;
+		if (choice.label !== undefined && (typeof choice.label !== "string" || choice.label.length > 2000)) return false;
+		if (choice.index !== undefined)
+			return Number.isInteger(choice.index) && choice.index >= 0 && choice.index <= 100_000;
+		return true;
+	}
 	return step.action === "press" && ["Enter", "Tab", "Escape", "ArrowDown", "ArrowUp"].includes(step.key);
 }
 
@@ -599,18 +610,21 @@ async function runSteps(state, command) {
 			}
 			const scrolled = await evaluate(state, "scrollComplete");
 			if (scrolled?.ok !== true) throw new Error("Document scroll was not verified");
+		} else if (step.action === "select") {
+			const selected = await evaluate(state, "selectOption", {
+				revision: command.revision,
+				ref: step.ref,
+				query: step.target,
+				choice: step.choice,
+				allowStaleRevision: true,
+			});
+			if (selected?.ok !== true) throw pageFailure(selected, "Option could not be selected");
 		} else {
-			let ref = step.ref;
-			if (ref === undefined) {
-				const resolved = await evaluate(state, "resolveTarget", { query: step.target });
-				if (!isRecord(resolved) || resolved.ok !== true || !Number.isInteger(resolved.ref))
-					throw new Error("Target query did not resolve to a visible control");
-				ref = resolved.ref;
-			}
 			if (step.action === "fill") {
 				const prepared = await evaluate(state, "prepareFill", {
 					revision: command.revision,
-					ref,
+					ref: step.ref,
+					query: step.target,
 					text: step.text,
 					allowStaleRevision: true,
 				});
@@ -623,7 +637,8 @@ async function runSteps(state, command) {
 			} else {
 				const target = await evaluate(state, "target", {
 					revision: command.revision,
-					ref,
+					ref: step.ref,
+					query: step.target,
 					allowStaleRevision: true,
 				});
 				if (isRecord(target) && target.error !== undefined)
@@ -640,7 +655,8 @@ async function runSteps(state, command) {
 				} else {
 					const focus = await evaluate(state, "focus", {
 						revision: command.revision,
-						ref,
+						ref: step.ref,
+						query: step.target,
 						allowStaleRevision: true,
 					});
 					if (focus?.ok !== true) throw pageFailure(focus, "Focus refused");

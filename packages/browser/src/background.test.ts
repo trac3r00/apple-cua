@@ -14,6 +14,7 @@ const harnessSchema = z.object({
 			windowState: z.string(),
 			removed: z.array(z.number()),
 			inputs: z.number(),
+			evaluates: z.number(),
 			observes: z.number(),
 			tabWindow: z.number(),
 			created: z.number(),
@@ -23,6 +24,7 @@ const harnessSchema = z.object({
 			handoff: z.unknown(),
 		}),
 	}),
+	valid: z.function({ input: z.tuple([z.unknown()]), output: z.boolean() }),
 	move: z.function({ input: z.tuple([]), output: z.void() }),
 	reveal: z.function({ input: z.tuple([]), output: z.void() }),
 	focus: z.function({ input: z.tuple([]), output: z.promise(z.void()) }),
@@ -43,7 +45,7 @@ async function harness(
 	const script = new Script(`
 		const pageRuntime = () => {};
 		const options=${JSON.stringify(options)};
-		let foreground=50, userTab=70, tabWindow=50, inputs=0, created=0, observes=0;
+		let foreground=50, userTab=70, tabWindow=50, inputs=0, evaluates=0, created=0, observes=0;
 		let contextId=0, debuggerListener, checkpointAllowed=true;
 		const removed=[], sent=[], windowUpdates=[];
 		const session={};
@@ -79,6 +81,7 @@ async function harness(
 				attach:async()=>{},
 				sendCommand:async(_target,method,params)=>{
 					if(method.startsWith('Input.'))inputs++;
+					if(method==='Runtime.evaluate')evaluates++;
 					if(method==='Input.dispatchMouseEvent'&&params.type==='mouseReleased'){
 						if(options.navigateAfterClick)debuggerListener({tabId:100},'Runtime.executionContextsCleared');
 						if(options.frameAfterClick)debuggerListener({tabId:100},'Page.frameNavigated',{
@@ -98,6 +101,8 @@ async function harness(
 						return {result:{value:{ok:true}}};
 					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"resolveTarget"'))
 						return {result:{value:{ok:true,ref:1,role:'button',name:'Apply'}}};
+					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"selectOption"'))
+						return {result:{value:{ok:true,value:'ca',label:'Canada'}}};
 					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"revision"'))
 						return {result:{value:'document'+contextId}};
 					if(method==='Runtime.evaluate'&&params.expression.includes('"method":"wait"'))
@@ -129,7 +134,8 @@ async function harness(
 		({
 			dispatch,
 			sent,
-			stats:()=>({foreground,userTab,windowState:window.state,removed,inputs,observes,tabWindow,created,sent:sent.slice(),windowUpdates:windowUpdates.slice(1),badge,handoff:session.handoffRequest}),
+			stats:()=>({foreground,userTab,windowState:window.state,removed,inputs,evaluates,observes,tabWindow,created,sent:sent.slice(),windowUpdates:windowUpdates.slice(1),badge,handoff:session.handoffRequest}),
+			valid:(step)=>validStep(step),
 			move:()=>{tabWindow=50},
 			reveal:()=>{window.focused=true;window.state='normal'},
 			message:async(type)=>new Promise(resolve=>runtimeListener({type},null,resolve)),
@@ -142,6 +148,18 @@ async function harness(
 }
 
 describe("background worker ownership", () => {
+	it("#given two pages #when opening both #then reuses one minimized window without activating it", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com/a" });
+		await worker.dispatch({ command: "open", url: "https://example.com/b" });
+		expect(worker.stats()).toMatchObject({
+			created: 2,
+			foreground: 50,
+			userTab: 70,
+			windowState: "minimized",
+		});
+	});
+
 	it("#given a user window #when opening a page #then keeps the user window and tab unchanged", async () => {
 		const worker = await harness();
 		await worker.dispatch({ command: "open", url: "https://example.com" });
@@ -288,6 +306,53 @@ describe("background worker ownership", () => {
 			}),
 		).resolves.toMatchObject({ completedSteps: 1 });
 		expect(worker.stats().inputs).toBe(2);
+	});
+
+	it("#given a described target #when running a batch #then resolves and acts in the same page round trip", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		const before = worker.stats().evaluates;
+		await expect(
+			worker.dispatch({
+				command: "run",
+				id: "single-resolve",
+				tabId: 100,
+				revision: "document1",
+				limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+				steps: [{ action: "click", target: { role: "button", name: "Apply" } }],
+			}),
+		).resolves.toMatchObject({ completedSteps: 1 });
+		expect(worker.stats().evaluates - before).toBe(3);
+	});
+
+	it("#given a combobox #when selecting by label #then sets it without pointer input", async () => {
+		const worker = await harness();
+		await worker.dispatch({ command: "open", url: "https://example.com" });
+		await expect(
+			worker.dispatch({
+				command: "run",
+				id: "select-label",
+				tabId: 100,
+				revision: "document1",
+				limits: { maxChars: 6000, maxElements: 80, fullPage: false },
+				steps: [
+					{
+						action: "select",
+						target: { role: "combobox", name: "Country" },
+						choice: { label: "Canada" },
+					},
+				],
+			}),
+		).resolves.toMatchObject({ completedSteps: 1 });
+		expect(worker.stats().inputs).toBe(0);
+	});
+
+	it.each([
+		["two choices", { value: "ca", label: "Canada" }],
+		["no choice", {}],
+	] as const)("#given %s #when validating a select step #then refuses it", async (_name, choice) => {
+		const worker = await harness();
+		expect(worker.valid({ action: "select", target: { role: "combobox", name: "Country" }, choice })).toBe(false);
 	});
 
 	it("#given a wait step #when the text is present #then continues the batch without input", async () => {
@@ -478,6 +543,19 @@ describe("page runtime verification and privacy", () => {
 		},
 	);
 
+	it("#given a matching filled value #when completing fill #then waits for DOM quiet and succeeds", async () => {
+		const result = await pageScenario(`
+			elements=[control];
+			const observation=pageRuntime({method:'observe'});
+			pageRuntime({method:'focus',revision:observation.revision,ref:observation.rows[0].ref,selectAll:true,text:'Done'});
+			control.value='Done';
+			const completed=pageRuntime({method:'fillComplete'});
+			for(const callback of timers.values())callback();
+			return await completed;
+		`);
+		expect(result).toEqual({ ok: true });
+	});
+
 	it("#given a huge credentialed URL #when observing #then bounds only its sanitized URL", async () => {
 		const result = observationSchema.parse(
 			await pageScenario(`
@@ -489,5 +567,57 @@ describe("page runtime verification and privacy", () => {
 		expect(result.url).toHaveLength(8192);
 		expect(result.url).toBe(`https://example.com/${"a".repeat(8192 - "https://example.com/".length)}`);
 		expect(observationSchema.safeParse({ ...result, url: `${result.url}a` }).success).toBe(false);
+	});
+});
+
+describe("page runtime select", () => {
+	it("#given a native select #when choosing by label #then sets the option and reports it", async () => {
+		const result = await pageScenario(`
+			const select=new Element(); select.tagName='SELECT';
+			select.options=[
+				{value:'us',label:'United States',disabled:false},
+				{value:'ca',label:'Canada',disabled:false}
+			];
+			select.selectedIndex=0;
+			Object.defineProperty(select,'value',{
+				get(){return this.options[this.selectedIndex].value},
+				set(next){this.selectedIndex=this.options.findIndex((option)=>option.value===next)}
+			});
+			elements=[select];
+			const observation=pageRuntime({method:'observe'});
+			return pageRuntime({method:'selectOption',revision:observation.revision,ref:observation.rows[0].ref,choice:{label:'Canada'}});
+		`);
+		expect(result).toEqual({ ok: true, value: "ca", label: "Canada" });
+	});
+
+	it("#given a label that matches no option #when selecting #then refuses instead of guessing", async () => {
+		const result = await pageScenario(`
+			const select=new Element(); select.tagName='SELECT';
+			select.options=[{value:'us',label:'United States',disabled:false}];
+			select.selectedIndex=0;
+			elements=[select];
+			const observation=pageRuntime({method:'observe'});
+			return pageRuntime({method:'selectOption',revision:observation.revision,ref:observation.rows[0].ref,choice:{label:'Mexico'}});
+		`);
+		expect(result).toEqual({ error: "requested option was not found" });
+	});
+});
+
+describe("page runtime target ranking", () => {
+	it("#given several name matches #when finding #then ranks the exact interactive control first", async () => {
+		const result = await pageScenario(`
+			const loose=new Element(); loose.innerText='Need help to sign in?';
+			const prefix=new Element(); prefix.innerText='Sign in with Google';
+			const exact=new Element(); exact.innerText='Sign in';
+			for(const element of [loose,prefix,exact]) element.getAttribute=()=>null;
+			elements=[loose,prefix,exact];
+			return pageRuntime({method:'find',query:{name:'Sign in'},limit:3});
+		`);
+		const found = z.object({ matches: z.array(z.object({ name: z.string() })) }).parse(result);
+		expect(found.matches.map((match) => match.name)).toEqual([
+			"Sign in",
+			"Sign in with Google",
+			"Need help to sign in?",
+		]);
 	});
 });

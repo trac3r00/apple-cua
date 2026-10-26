@@ -146,6 +146,93 @@ export function pageRuntime(input) {
 		}
 		return true;
 	};
+	const interactiveRoles = new Set([
+		"button",
+		"link",
+		"textbox",
+		"combobox",
+		"checkbox",
+		"radio",
+		"switch",
+		"tab",
+		"menuitem",
+		"option",
+		"searchbox",
+	]);
+	const scoreMatch = (role, name, element, query) => {
+		let score = 0;
+		if (query.role !== undefined) score += 40;
+		if (query.name !== undefined) {
+			const needle = query.name.toLowerCase();
+			const haystack = name.toLowerCase();
+			const index = haystack.indexOf(needle);
+			if (index === 0) score += haystack.length === needle.length ? 120 : 70;
+			else if (index > 0) score += 20;
+			if (index === 0 || /(^|[^a-z0-9])$/.test(haystack.slice(0, Math.max(index, 0)))) score += 15;
+		}
+		if (query.text !== undefined) score += 10;
+		if (interactiveRoles.has(role)) score += 20;
+		if (element.matches?.(":disabled")) score -= 40;
+		return score;
+	};
+	const collectMatches = (query, limit, fullPage) => {
+		const found = [];
+		let order = 0;
+		visit(document, (element) => {
+			const role = roleFor(element);
+			if (role === "" || !visible(element) || !inViewport(element, fullPage)) return true;
+			const name = nameFor(element, 500, true);
+			if (!name || !matchesQuery(role, name, element, query)) return true;
+			const nested = found.some(
+				(match) =>
+					match.role === role &&
+					match.name === name &&
+					(match.element.contains(element) || element.contains(match.element)),
+			);
+			if (nested) return true;
+			const ref = refFor(element);
+			state.refs.set(ref, element);
+			found.push({ element, ref, role, name, score: scoreMatch(role, name, element, query), order: order++ });
+			return true;
+		});
+		found.sort((left, right) => right.score - left.score || left.order - right.order);
+		return { matches: found.slice(0, limit), total: found.length };
+	};
+	const resolveInput = (input) => {
+		if (input.query === undefined) return resolve(input.revision, input.ref, input.allowStaleRevision === true);
+		const best = collectMatches(input.query, 1, true).matches[0];
+		if (best === undefined) return { error: "no visible target matches the query" };
+		return { element: best.element, ref: best.ref };
+	};
+	const isSelectElement = (element) =>
+		String(element?.tagName).toLowerCase() === "select" && element?.options !== undefined;
+	const optionLabel = (option) =>
+		String(option.label ?? option.textContent ?? "")
+			.replace(/\s+/g, " ")
+			.trim();
+	const notifyChange = (element, type) => {
+		const view = element.ownerDocument?.defaultView;
+		const EventConstructor = view?.Event ?? globalThis.Event;
+		if (typeof EventConstructor !== "function") return;
+		element.dispatchEvent(new EventConstructor(type, { bubbles: true }));
+	};
+	const settle = (maxMs) =>
+		new Promise((resolveSettle) => {
+			let quiet;
+			const finish = () => {
+				observer.disconnect();
+				clearTimeout(quiet);
+				clearTimeout(deadline);
+				resolveSettle();
+			};
+			const observer = new MutationObserver(() => {
+				clearTimeout(quiet);
+				quiet = setTimeout(finish, 24);
+			});
+			observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+			quiet = setTimeout(finish, 24);
+			const deadline = setTimeout(finish, maxMs);
+		});
 
 	if (input.method === "revision") return revision();
 
@@ -205,30 +292,14 @@ export function pageRuntime(input) {
 	}
 
 	if (input.method === "find") {
-		const query = input.query || {};
 		const limit = input.limit ?? 10;
-		const matches = [];
-		let truncated = false;
-		visit(document, (element) => {
-			const role = roleFor(element);
-			if (role === "" || !visible(element) || !inViewport(element, false)) return true;
-			const name = nameFor(element, 500, true);
-			if (!name || !matchesQuery(role, name, element, query)) return true;
-			const ref = refFor(element);
-			state.refs.set(ref, element);
-			if (matches.length >= limit) {
-				truncated = true;
-				return false;
-			}
-			matches.push({ ref, role, name });
-			return true;
-		});
+		const found = collectMatches(input.query || {}, limit, false);
 		return {
 			url: `${location.origin}${location.pathname}`.slice(0, 8192),
 			title: document.title.slice(0, 500),
 			revision: revision(),
-			matches,
-			truncated,
+			matches: found.matches.map(({ ref, role, name }) => ({ ref, role, name })),
+			truncated: found.total > limit,
 		};
 	}
 
@@ -308,25 +379,46 @@ export function pageRuntime(input) {
 	}
 
 	if (input.method === "resolveTarget") {
-		const matches = [];
-		visit(document, (element) => {
-			const role = roleFor(element);
-			if (role === "" || !visible(element) || !inViewport(element, true)) return true;
-			const name = nameFor(element, 500, true);
-			if (!name || !matchesQuery(role, name, element, input.query || {})) return true;
-			const ref = refFor(element);
-			state.refs.set(ref, element);
-			matches.push({ ref, role, name });
-			return matches.length < 20;
-		});
-		const match = matches[0];
-		if (!match) return fail("no visible target matches the query");
-		return { ok: true, ...match };
+		const best = collectMatches(input.query || {}, 1, true).matches[0];
+		if (best === undefined) return fail("no visible target matches the query");
+		return { ok: true, ref: best.ref, role: best.role, name: best.name };
+	}
+
+	if (input.method === "selectOption") {
+		state.cache = undefined;
+		const resolved = resolveInput(input);
+		if (resolved.error) return fail(resolved.error);
+		const element = resolved.element;
+		if (!isSelectElement(element)) return fail("target is not a select control");
+		const choice = input.choice || {};
+		const options = Array.from(element.options || []);
+		let option;
+		if (choice.index !== undefined) option = options[choice.index];
+		else if (choice.value !== undefined) option = options.find((item) => item.value === choice.value);
+		else if (choice.label !== undefined) {
+			const wanted = String(choice.label).replace(/\s+/g, " ").trim().toLowerCase();
+			const exact = options.filter((item) => optionLabel(item).toLowerCase() === wanted);
+			option = exact.length === 1 ? exact[0] : undefined;
+			if (option === undefined) {
+				const partial = options.filter((item) => optionLabel(item).toLowerCase().includes(wanted));
+				option = partial.length === 1 ? partial[0] : undefined;
+			}
+		}
+		if (option === undefined) return fail("requested option was not found");
+		if (option.disabled) return fail("requested option is disabled");
+		element.value = option.value;
+		notifyChange(element, "input");
+		notifyChange(element, "change");
+		if (element.value !== option.value) return fail("select control did not accept the option");
+		if (element.selectedIndex !== undefined && element.selectedIndex !== options.indexOf(option))
+			return fail("select control did not accept the option");
+		state.cache = undefined;
+		return { ok: true, value: option.value, label: optionLabel(option) };
 	}
 
 	if (input.method === "target" || input.method === "focus" || input.method === "prepareFill") {
 		state.cache = undefined;
-		const result = resolve(input.revision, input.ref, input.allowStaleRevision === true);
+		const result = resolveInput(input);
 		if (result.error) return fail(result.error);
 		const element = result.element;
 		if (input.method === "prepareFill") {
@@ -385,7 +477,7 @@ export function pageRuntime(input) {
 		const element = state.fillTarget;
 		if (element && !visible(element)) return fail("fill target unavailable");
 		if (element && (element.isContentEditable ? element.textContent : element.value) === state.fillText)
-			return { ok: true };
+			return settle(150).then(() => ({ ok: true }));
 		return state.fillWait ?? fail("no fill is pending");
 	}
 

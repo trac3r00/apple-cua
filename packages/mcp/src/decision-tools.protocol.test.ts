@@ -92,7 +92,7 @@ describe("#given a configured decision endpoint #when run_decision steps through
 		const steps = payload["steps"] as { status: string; operation?: string; detail: string }[];
 		expect(steps).toHaveLength(2);
 		expect(steps[0]).toMatchObject({ status: "ran", operation: "PRESS" });
-		expect(steps[1].detail).toContain("no verifier confirmed");
+		expect(steps[1]?.detail).toContain("no verifier confirmed");
 		const performActions = harness.computer.effects.filter((effect) => effect.kind === "performAction");
 		expect(performActions.length).toBeGreaterThan(0);
 	});

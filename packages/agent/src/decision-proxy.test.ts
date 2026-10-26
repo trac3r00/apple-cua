@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
 	fromGatewayAnswers,
 	handleChatRequest,
@@ -61,7 +61,7 @@ describe("#given a chat body #when the model name carries a prefix #then only th
 describe("#given a systemone answer #when it is wrapped #then the decision layer can read it", () => {
 	it("puts the raw result inside one assistant message", () => {
 		const wrapped = wrapSystemoneAsChat({ answers: { operation: { choice: "PRESS", confidence: 0.9 } } }) as {
-			choices: { message: { content: string } }[];
+			choices: [{ message: { content: string } }];
 		};
 		const decoded = JSON.parse(wrapped.choices[0].message.content) as {
 			answers: { operation: { choice: string } };
@@ -84,7 +84,7 @@ describe("#given the proxy handler #when the upstream answers #then the chat sha
 					})) as typeof fetch,
 			},
 		);
-		const wrapped = payload as { choices: { message: { content: string } }[] };
+		const wrapped = payload as { choices: [{ message: { content: string } }] };
 		expect(JSON.parse(wrapped.choices[0].message.content)).toMatchObject({
 			answers: { operation: { choice: "PRESS" } },
 		});
@@ -120,10 +120,10 @@ describe("#given gateway-decisions mode #when questions are translated #then onl
 			scoreKeys: string[];
 		};
 		expect(scoreKeys).toEqual(["risk"]);
-		expect(questions.risk).toEqual({ type: "noul", instructions: "Rate risk." });
-		expect(questions.operation.instructions).toBe('{"text":"pick"}');
-		expect(questions.operation.criteria).toEqual({ PRESS: '{"when":"press"}', DONE: "Done." });
-		expect(questions.blocked).toEqual(GATEWAY_QUESTIONS.blocked);
+		expect(questions["risk"]).toEqual({ type: "noul", instructions: "Rate risk." });
+		expect(questions["operation"]?.instructions).toBe('{"text":"pick"}');
+		expect(questions["operation"]?.criteria).toEqual({ PRESS: '{"when":"press"}', DONE: "Done." });
+		expect(questions["blocked"]).toEqual(GATEWAY_QUESTIONS.blocked);
 	});
 
 	it("maps the noul answer back to a score and leaves other answers alone", () => {
@@ -152,10 +152,13 @@ describe("#given gateway-decisions mode #when questions are translated #then onl
 		};
 		const raw = JSON.stringify({ model: "sionic-ai/jev-omni", messages: [{ role: "user", content: contract }] });
 		const on = (await handleChatRequest(raw, { ...base, mode: "gateway-decisions" })) as {
-			choices: { message: { content: string } }[];
+			choices: [{ message: { content: string } }];
 		};
 		await handleChatRequest(raw, base);
-		const [gatewayBody, plainBody] = bodies as { model: string; state: unknown; questions: unknown }[];
+		const [gatewayBody, plainBody] = bodies as [
+			{ model: string; state: unknown; questions: unknown },
+			{ model: string; state: unknown; questions: unknown },
+		];
 		expect(gatewayBody.model).toBe("sionic-ai/jev-omni");
 		expect(gatewayBody.state).toEqual(contract.state);
 		expect(JSON.stringify(gatewayBody.questions)).not.toContain('"score"');

@@ -14,3 +14,6 @@ packages/cua-helper/.swiftpm/
 .build/
 Package.resolved
 .gstack/
+
+# Local code-signing keychain and key material (never commit).
+.signing/

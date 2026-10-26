@@ -59,3 +59,9 @@ echo "built ${native_dir}/cursor-overlay ($(lipo -archs "${native_dir}/cursor-ov
 
 (cd "${native_dir}" && shasum -a 256 build.sh sckit.m cursor-overlay.m >build-inputs.sha256)
 echo "recorded input hashes in ${native_dir}/build-inputs.sha256"
+
+# Sign the helpers with the stable identity (see scripts/sign-native.sh): ad-hoc builds change
+# the cdhash every rebuild, which resets macOS TCC consents and re-prompts every app.
+bash "$native_dir/../../../scripts/sign-native.sh" \
+	"$native_dir/libsckit.dylib" \
+	"$native_dir/cursor-overlay"

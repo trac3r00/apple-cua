@@ -35,6 +35,13 @@ server="$repo/packages/mcp/dist/server.js"
 launcher_source="$repo/scripts/tcc-helper-launcher.c"
 icon_source="$repo/packages/mcp/assets/appicon.png"
 node_bin="${APPLE_CUA_NODE:-}"
+# Default to the stable identity when the dedicated keychain exists: ad-hoc rebuilds reset
+# TCC grants (Screen Recording/Accessibility/AppleEvents) and re-prompt every app.
+if [[ -z "${APPLE_CUA_SIGN_IDENTITY:-}" && -f "$repo/.signing/apple-cua-signing.keychain-db" ]]; then
+	if security find-identity -p codesigning -v "$repo/.signing/apple-cua-signing.keychain-db" 2>/dev/null | grep -q 'apple-cua dev'; then
+		APPLE_CUA_SIGN_IDENTITY="apple-cua dev"
+	fi
+fi
 sign_identity="${APPLE_CUA_SIGN_IDENTITY:--}"
 minimum_macos="15.0"
 stamp="Contents/Resources/helper-inputs.sha256"

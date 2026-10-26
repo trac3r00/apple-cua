@@ -10,6 +10,7 @@ const ENDPOINT = GATEWAY_MODE
 	? (process.env.LLM_POOL_GATEWAY_URL ?? "http://127.0.0.1:44771/v1/decisions")
 	: (process.env.TYPESAFE_ENDPOINT ?? "https://api.typesafe.ai/v1/systemone");
 const FALLBACK_MODEL = process.env.TYPESAFE_MODEL ?? (GATEWAY_MODE ? "sionic-ai/jev-omni" : "jev-latest");
+const KEEPALIVE_MS = Number(process.env.LLM_POOL_KEEPALIVE_MS ?? 30000);
 
 function gatewayKeyFromAuth() {
 	try {
@@ -61,6 +62,49 @@ const server = createServer((request, response) => {
 		respondWithError(response, new Error("request stream failed"));
 	});
 });
+
+if (GATEWAY_MODE && KEEPALIVE_MS !== 0) {
+	let gatewayIsWarm = false;
+	let pingInFlight = false;
+	const keepaliveInterval = setInterval(async () => {
+		if (pingInFlight) return;
+		pingInFlight = true;
+		const startedAt = Date.now();
+		try {
+			const response = await fetch(ENDPOINT, {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${apiKey}`,
+				},
+				body: JSON.stringify({
+					model: FALLBACK_MODEL,
+					state: { goal: "keep-alive" },
+					questions: {
+						operation: {
+							type: "choice",
+							instructions: "keep-alive ping; answer any.",
+							criteria: { PRESS: "anything", DONE: "anything" },
+						},
+					},
+				}),
+				signal: AbortSignal.timeout(10000),
+			});
+			if (response.ok) {
+				await response.body?.cancel();
+				if (!gatewayIsWarm) {
+					gatewayIsWarm = true;
+					process.stdout.write(`[llm-pool-systemone] gateway warm (${Date.now() - startedAt}ms)\n`);
+				}
+			}
+		} catch {
+			// A gateway outage must not affect the proxy.
+		} finally {
+			pingInFlight = false;
+		}
+	}, KEEPALIVE_MS);
+	server.on("close", () => clearInterval(keepaliveInterval));
+}
 
 server.listen(PORT, "127.0.0.1", () => {
 	process.stdout.write(

@@ -259,7 +259,7 @@ describe("#given the settle watches a bounded window #when the app stays quiet #
 		const factory: AxWaiterFactory = () => waiter;
 		const settle = settleDeferredOutcome(1234, { waiterFactory: factory, now: () => nowMs });
 		expect(settle.events).toBe(2);
-		expect(settle.settleMs).toBe(90);
+		expect(settle.settleMs).toBe(45);
 	});
 
 	it("reports zero events when the app never answers within the deadline", () => {

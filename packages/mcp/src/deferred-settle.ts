@@ -5,7 +5,7 @@ import { type AxEventWaiter, createAxEventWaiter, waitForAxQuiet } from "@apple-
  * reported: events inside the budget say the input landed, silence says only that nothing was
  * seen. The quiet window keeps a burst of notifications from being cut short.
  */
-export const DEFERRED_SETTLE_QUIET_MS = 30;
+export const DEFERRED_SETTLE_QUIET_MS = 15;
 export const DEFERRED_SETTLE_DEADLINE_MS = 100;
 
 export interface DeferredOutcomeSettle {

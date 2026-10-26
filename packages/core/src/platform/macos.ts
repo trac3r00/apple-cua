@@ -29,6 +29,7 @@ import { type RunningAppInfo, collectAppUsage, getRunningMacOSApps } from "./app
 import { execFileStdout, execFileStdoutBuffer } from "./exec-util.js";
 import { HostComputer, type HostComputerOptions } from "./host.js";
 import { parseImageDimensions, sniffImageMimeType } from "./image-format.js";
+import { InputLock } from "./input-lock.js";
 import { type KeyboardFenceClock, awaitAccessibilityWriteSettled, awaitKeyboardFence } from "./keyboard-fence.js";
 import {
 	currentObservationKey,
@@ -43,6 +44,7 @@ import {
 	pressElementAtScreenPoint,
 	rebaselineObservedElement,
 	releaseAccessibilitySnapshot,
+	releaseSnapshotsForExitedPids,
 	relocatedElementFrame,
 	scrollToVisibleByIndex,
 	setValueByIndex,
@@ -53,7 +55,11 @@ import {
 import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
 import { createAxEventWaiter, waitForAxQuiet } from "./macos-ffi/ax-observer.js";
 import { cursorBackgroundCuesEnabled } from "./macos-ffi/cursor-background-cues.js";
-import type { CursorMotionConfig } from "./macos-ffi/cursor-motion-config.js";
+import {
+	type CursorMotionConfig,
+	cursorMotionFromEnvironment,
+	parseCursorMotion,
+} from "./macos-ffi/cursor-motion-config.js";
 import { NOOP_POINTER_OVERLAY, type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
 import { onlineDisplayInfo } from "./macos-ffi/display-list.js";
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";
@@ -149,6 +155,7 @@ export class MacOSHostComputer extends HostComputer {
 	};
 
 	private readonly input: MacOSInputController;
+	private readonly inputLock = new InputLock();
 	private readonly lastViewportByPid = new Map<number, ScreenshotViewport>();
 	private readonly lastAxTreeByPid = new Map<
 		number,
@@ -170,6 +177,9 @@ export class MacOSHostComputer extends HostComputer {
 		this.appApproval = options.appApproval;
 		this.delivery = options.delivery ?? "background";
 		this.urlBlocklist = options.urlBlocklist ?? [];
+		const cursorMotion =
+			options.cursorMotion !== undefined ? parseCursorMotion(options.cursorMotion) : cursorMotionFromEnvironment();
+		const cursorTravelEnabled = cursorMotion !== undefined;
 		this.overlay =
 			options.overlay ??
 			(this.delivery === "background" && !cursorBackgroundCuesEnabled()
@@ -184,6 +194,8 @@ export class MacOSHostComputer extends HostComputer {
 			this.isLocked,
 			createDisplaySleepAssertion(),
 			this.delivery,
+			undefined,
+			cursorTravelEnabled,
 		);
 		this.displayId = options.display;
 	}
@@ -243,27 +255,27 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async move(position: Point): Promise<void> {
-		await this.input.move(position);
+		await this.inputLock.run(() => this.input.move(position));
 	}
 
 	async click(position: Point, options?: PointerOptions): Promise<void> {
-		await this.input.click(position, "left", options?.modifiers);
+		await this.inputLock.run(() => this.input.click(position, "left", options?.modifiers));
 	}
 
 	async rightClick(position: Point, options?: PointerOptions): Promise<void> {
-		await this.input.click(position, "right", options?.modifiers);
+		await this.inputLock.run(() => this.input.click(position, "right", options?.modifiers));
 	}
 
 	async middleClick(position: Point, options?: PointerOptions): Promise<void> {
-		await this.input.click(position, "middle", options?.modifiers);
+		await this.inputLock.run(() => this.input.click(position, "middle", options?.modifiers));
 	}
 
 	async doubleClick(position: Point, options?: PointerOptions): Promise<void> {
-		await this.input.doubleClick(position, options?.modifiers);
+		await this.inputLock.run(() => this.input.doubleClick(position, options?.modifiers));
 	}
 
 	async type(text: string): Promise<void> {
-		await this.input.typeText(text);
+		await this.inputLock.run(() => this.input.typeText(text));
 	}
 
 	async key(key: string, options?: KeyOptions): Promise<void> {
@@ -515,11 +527,11 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async scroll(options: ScrollOptions): Promise<void> {
-		await this.input.scroll(options);
+		await this.inputLock.run(() => this.input.scroll(options));
 	}
 
 	async drag(options: DragOptions): Promise<void> {
-		await this.input.drag(options);
+		await this.inputLock.run(() => this.input.drag(options));
 	}
 
 	async getCursorPosition(): Promise<Point> {
@@ -616,6 +628,7 @@ export class MacOSHostComputer extends HostComputer {
 		assertScreenUnlocked(this.isLocked());
 		const settleMs = options?.settleMs ?? DEFAULT_APP_STATE_SETTLE_MILLISECONDS;
 		const apps = await getRunningMacOSApps();
+		releaseSnapshotsForExitedPids(apps.map((runningApp) => runningApp.pid));
 		const app = resolveTargetApp(apps, targetPid);
 		this.assertAppApproved(app);
 		await this.assertBrowserUrlAllowed(app, options?.requireWindow === true);
@@ -1102,7 +1115,11 @@ export class MacOSHostComputer extends HostComputer {
 		this.input.showPointer(position, press);
 	}
 
-	async typeIntoFocused(targetPid: number, text: string): Promise<boolean> {
+	async typeIntoFocused(
+		targetPid: number,
+		text: string,
+		options?: { readonly settleWrite?: boolean },
+	): Promise<boolean> {
 		// Keys posted just before (Cmd+A) still wait in the app's event queue, while this write lands at
 		// once: without the fence the text lands at the old caret instead of replacing the selection.
 		await awaitKeyboardFence(
@@ -1124,7 +1141,9 @@ export class MacOSHostComputer extends HostComputer {
 			return false;
 		}
 		this.input.showKeyboard();
-		await this.settleAccessibilityWrite(targetPid);
+		if (options?.settleWrite !== false) {
+			await this.settleAccessibilityWrite(targetPid);
+		}
 		return true;
 	}
 
@@ -1378,11 +1397,28 @@ export async function captureMacOSScreenshot(
 	return await captureWindowScreenshot(targetSize, windowId, format, quality);
 }
 
+const CAPTURE_FAILURE_MARKERS = {
+	sckitLibraryMissing: "libsckit.dylib not found", // macos-ffi/sckit.ts:54
+	screenRecordingPermissionMissing: "Screen Recording permission is not granted", // macos.ts:155
+	windowCaptureFailed: "Native ScreenCaptureKit window capture failed", // macos-ffi/sckit.ts:176; native NULL at native/sckit.m:543-553,617-622
+};
+
+/**
+ * Classifies errors emitted by the window-capture adapter. Its native NULL failure is retryable;
+ * unrecognized errors retain the shell fallback behavior.
+ */
+export function classifyCaptureFailure(error: unknown): "unavailable" | "transient" {
+	const message = error instanceof Error ? error.message : String(error);
+	if (message.includes(CAPTURE_FAILURE_MARKERS.windowCaptureFailed)) {
+		return "transient";
+	}
+	return "unavailable";
+}
+
 /**
  * Prefer in-process ScreenCaptureKit for a single window: it captures the window's own
  * pixels even when occluded, and avoids the two subprocesses (screencapture + sips) plus
- * their temporary files. The shell path stays as the fallback whenever the native path is
- * unavailable (no dylib, missing permission, window not capturable, capture timeout).
+ * their temporary files. Known unavailable cases use the existing shell fallback.
  */
 async function captureWindowScreenshot(
 	targetSize: { readonly width: number; readonly height: number },
@@ -1392,14 +1428,21 @@ async function captureWindowScreenshot(
 ): Promise<Buffer> {
 	try {
 		const captured = captureWindowImage(windowId, targetSize.width, targetSize.height, format, quality);
-		if (captured.data.byteLength > 0) {
-			parseImageDimensions(captured.data);
-			return captured.data;
+		parseImageDimensions(captured.data);
+		return captured.data;
+	} catch (error) {
+		if (classifyCaptureFailure(error) !== "transient") {
+			return await captureWindowScreenshotViaCli(targetSize, windowId, format, quality);
 		}
-	} catch {
-		// Fall through to the shell capture below.
+		try {
+			const retried = captureWindowImage(windowId, targetSize.width, targetSize.height, format, quality);
+			parseImageDimensions(retried.data);
+			return retried.data;
+		} catch {
+			const message = error instanceof Error ? error.message : String(error);
+			throw new Error(`window capture failed (transient): ${message}`);
+		}
 	}
-	return await captureWindowScreenshotViaCli(targetSize, windowId, format, quality);
 }
 
 async function captureWindowScreenshotViaCli(

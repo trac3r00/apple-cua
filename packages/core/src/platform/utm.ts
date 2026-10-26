@@ -9,7 +9,7 @@ import type { Point, Size } from "../types/index.js";
 import { execFileStdout } from "./exec-util.js";
 import { StopSwitch, describeUserStop } from "./stop-switch.js";
 import { windowsGuestDisplay } from "./utm-guest.js";
-import { utmKeyCodes, utmTextCodes } from "./utm-keys.js";
+import { utmKeyCodes, utmTextCodes, utmTextScripts } from "./utm-keys.js";
 import { captureUtmDisplay, mapUtmPoint } from "./utm-visual.js";
 
 export interface UTMObservation {
@@ -95,9 +95,11 @@ export class UTM {
 		}
 		const normalized = text.replaceAll("\r\n", "\n");
 		utmTextCodes(normalized);
-		for (const character of normalized) {
-			const codes = utmTextCodes(character);
-			await this.mutate(vm, `u.inputScanCode(v, {codes:${JSON.stringify(codes)}});`, true);
+		// One osascript per CHUNK of characters: each chunk body keeps the explicit per-character
+		// scan-code make/break pairs (the repeated-characters fix) while dropping the per-character
+		// process spawn; checkpoints inside mutate still run between chunks.
+		for (const chunkBody of utmTextScripts(normalized)) {
+			await this.mutate(vm, chunkBody, true);
 		}
 	}
 

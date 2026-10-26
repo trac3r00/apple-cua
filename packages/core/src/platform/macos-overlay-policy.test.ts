@@ -60,7 +60,14 @@ describe("#given host cursor overlay policy", () => {
 
 	it("#when an overlay is injected #then it is used in either delivery", async () => {
 		const { MacOSHostComputer } = await import("./macos.js");
-		const overlay = { set: vi.fn(), highlight: vi.fn(), setMode: vi.fn(), hide: vi.fn(), close: vi.fn() };
+		const overlay = {
+			state: vi.fn(async () => null),
+			set: vi.fn(),
+			highlight: vi.fn(),
+			setMode: vi.fn(),
+			hide: vi.fn(),
+			close: vi.fn(),
+		};
 
 		new MacOSHostComputer({ delivery: "background", overlay });
 		expect(overlayMock.createCursorOverlay).not.toHaveBeenCalled();

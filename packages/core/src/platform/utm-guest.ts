@@ -1,8 +1,27 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Point, Size } from "../types/index.js";
-import { windowsDisplayScript } from "./utm-windows-script.js";
+import { windowsDisplayDiagnostic, windowsDisplayScript } from "./utm-windows-script.js";
 
 type Script = (body: string) => Promise<string>;
+
+function diagnosticStream(value: unknown): { text: string; truncated: boolean } | null {
+	if (typeof value !== "string") return null;
+	return { text: value.slice(0, 2048), truncated: value.length > 2048 };
+}
+
+function guestDiagnostics(raw: object): string {
+	const stdout = "outputText" in raw ? raw.outputText : undefined;
+	const diagnostics = {
+		stdout: diagnosticStream(typeof stdout === "string" ? windowsDisplayDiagnostic(stdout) : stdout),
+		stderr: diagnosticStream("errorText" in raw ? raw.errorText : undefined),
+	};
+	// JSON quoting prevents guest newlines/ANSI from becoming host log structure.
+	const quoted = JSON.stringify(diagnostics).replace(
+		/[\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/gu,
+		(character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+	);
+	return `; untrusted guest diagnostics (2048 characters per stream): ${quoted}`;
+}
 
 /** Fixed Win32 queries through UTM's guest agent; never operates on the host cursor. */
 export async function windowsGuestDisplay(
@@ -38,7 +57,7 @@ return String(p.id());`),
 					typeof raw.outputText !== "string"
 				) {
 					throw new Error(
-						`Guest display query failed${position === undefined ? "" : ` for cursor ${position.x},${position.y}`}; guest exit code ${"exitCode" in raw ? String(raw.exitCode) : "unavailable"}`,
+						`Guest display query failed${position === undefined ? "" : ` for cursor ${position.x},${position.y}`}; guest exit code ${"exitCode" in raw && typeof raw.exitCode === "number" ? raw.exitCode : "unavailable"}${guestDiagnostics(raw)}`,
 					);
 				}
 				const match = /^(\d+)x(\d+)\s*$/u.exec(raw.outputText);

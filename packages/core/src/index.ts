@@ -28,6 +28,16 @@ export {
 export { resolveScreenPoint } from "./computer/coordinate.js";
 export { currentCursorIdentity, withCursorIdentity } from "./computer/cursor-scope.js";
 export {
+	HandsCoordinator,
+	type HandName,
+	type HandResource,
+	type HandTask,
+	type HandsPolicy,
+	type HandLaneResult,
+	type HandsRunOptions,
+	type HandsRunResult,
+} from "./computer/hands.js";
+export {
 	type InputScope,
 	type InputTarget,
 	InputInterrupted,
@@ -57,6 +67,12 @@ export {
 } from "./platform/macos-top-level-windows.js";
 export { type ListedWindow, listWindows } from "./platform/macos-ffi/window-list.js";
 export {
+	type AxEventWaiter,
+	type AxQuietOutcome,
+	createAxEventWaiter,
+	waitForAxQuiet,
+} from "./platform/macos-ffi/ax-observer.js";
+export {
 	activeSpaceId,
 	managedDisplaySpaces,
 	spaceTypeFor,
@@ -79,6 +95,14 @@ export {
 	screenshotPointToScreen,
 } from "./computer/viewport.js";
 export { type AppApprovalDecision, AppApprovalStore } from "./permission/app-approval.js";
+export { type InputLockRecord, InputLock } from "./platform/input-lock.js";
+export {
+	type HotFrame,
+	type HotFrameSourceOptions,
+	type HotFrameWorker,
+	type HotFrameWorkerSpawner,
+	HotFrameSource,
+} from "./computer/hot-frames.js";
 export { type LockScreenMonitorCallbacks, LockScreenMonitor } from "./platform/lock-screen-monitor.js";
 export { type HostCapabilities, probeHostCapabilities } from "./platform/host-capabilities.js";
 export { getSckitLoadError, isSckitAvailable } from "./platform/macos-ffi/sckit.js";
@@ -227,6 +251,7 @@ export {
 export {
 	type PointerMode,
 	type PointerOverlay,
+	type CursorState,
 	NOOP_POINTER_OVERLAY,
 	createCursorOverlay,
 } from "./platform/macos-ffi/cursor-overlay.js";

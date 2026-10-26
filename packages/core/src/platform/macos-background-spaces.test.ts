@@ -54,6 +54,7 @@ vi.mock("./macos-window-target-fallback.js", () => ({
 }));
 vi.mock("./macos-ffi/accessibility.js", () => ({
 	currentObservationKey: vi.fn(() => "0:background-space-test"),
+	releaseSnapshotsForExitedPids: vi.fn<() => number>(() => 0),
 	elementFrameByIndex: vi.fn(),
 	extractAccessibilityTree: fixture.extractAccessibilityTree,
 	focusedElementFrame: vi.fn(),

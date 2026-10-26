@@ -112,3 +112,31 @@ export function utmTextCodes(text: string): readonly number[] {
 		return index < 0 && shiftIndex >= 0 ? [42, code, code | 128, 170] : [code, code | 128];
 	});
 }
+
+/** Parse APPLE_CUA_UTM_KEY_CHUNK; zero preserves one-character invocations. */
+export function utmKeyChunkSize(value: string | undefined): number {
+	if (value === undefined || !/^\d+$/.test(value.trim())) return 8;
+	const parsed = Number(value.trim());
+	return Number.isSafeInteger(parsed) ? Math.max(1, parsed) : 8;
+}
+
+export interface UTMTextScriptOptions {
+	readonly chunkSize?: number;
+}
+
+/** Each returned script is one invocation; callers retain interruption checkpoints between scripts. */
+export function utmTextScripts(text: string, options: UTMTextScriptOptions = {}): readonly string[] {
+	const configured = options.chunkSize ?? utmKeyChunkSize(process.env["APPLE_CUA_UTM_KEY_CHUNK"]);
+	const chunkSize = Number.isSafeInteger(configured) && configured >= 0 ? Math.max(1, configured) : 8;
+	const characters = [...text];
+	const scripts: string[] = [];
+	for (let offset = 0; offset < characters.length; offset += chunkSize) {
+		scripts.push(
+			characters
+				.slice(offset, offset + chunkSize)
+				.map((character) => `u.inputScanCode(v, {codes:${JSON.stringify(utmTextCodes(character))}});`)
+				.join("\n"),
+		);
+	}
+	return scripts;
+}

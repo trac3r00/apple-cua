@@ -597,6 +597,18 @@ export function releaseAccessibilitySnapshot(pid: number): void {
 	replaceElementSnapshot(pid, undefined);
 }
 
+export function releaseSnapshotsForExitedPids(runningPids: readonly number[]): number {
+	const runningPidSet = new Set(runningPids);
+	let released = 0;
+	for (const pid of elementSnapshots.keys()) {
+		if (!runningPidSet.has(pid)) {
+			releaseAccessibilitySnapshot(pid);
+			released += 1;
+		}
+	}
+	return released;
+}
+
 export function performAction(element: AXUIElementRef, action: string): void {
 	withCFString(action, (actionReference) => {
 		assertAXSuccess("AXUIElementPerformAction", AXUIElementPerformAction(element, actionReference));

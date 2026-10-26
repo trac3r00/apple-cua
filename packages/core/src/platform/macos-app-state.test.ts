@@ -47,6 +47,7 @@ const accessibilityMock = vi.hoisted(() => ({
 		() => { readonly focusedWindowId: number | undefined; readonly sheetOwnerWindowId: number | undefined }
 	>(() => ({ focusedWindowId: undefined, sheetOwnerWindowId: undefined })),
 	releaseAccessibilitySnapshot: vi.fn(),
+	releaseSnapshotsForExitedPids: vi.fn<() => number>(() => 0),
 	currentObservationKey: vi.fn(() => "0:test"),
 	performActionByIndex: vi.fn(),
 	pressElementAtScreenPoint: vi.fn(),

@@ -49,6 +49,7 @@ const accessibilityMock = vi.hoisted(() => ({
 		sheetOwnerWindowId: undefined,
 	})),
 	releaseAccessibilitySnapshot: vi.fn(),
+	releaseSnapshotsForExitedPids: vi.fn<() => number>(() => 0),
 	currentObservationKey: vi.fn(() => "0:test"),
 	performActionByIndex: vi.fn(),
 	pressElementAtScreenPoint: vi.fn(),
@@ -58,6 +59,7 @@ const accessibilityMock = vi.hoisted(() => ({
 const screenshotMock = vi.hoisted(() => ({
 	captureDisplayImage: vi.fn(),
 	getMainDisplayId: vi.fn(() => 1),
+	captureWindowImage: vi.fn<() => { readonly data: Buffer }>(),
 	getMainDisplayLogicalSize: vi.fn(),
 	getMainDisplayNativePixelSize: vi.fn(),
 	screenCaptureAllowed: vi.fn(() => true),
@@ -212,6 +214,8 @@ beforeEach(() => {
 	accessibilityMock.releaseAccessibilitySnapshot.mockReset();
 	screenshotMock.captureDisplayImage.mockReset();
 	screenshotMock.captureDisplayImage.mockReturnValue({ data: fakePng(), width: 800, height: 600 });
+	screenshotMock.captureWindowImage.mockReset();
+	screenshotMock.captureWindowImage.mockReturnValue({ data: fakePng() });
 	screenshotMock.getMainDisplayLogicalSize.mockReset();
 	screenshotMock.getMainDisplayLogicalSize.mockReturnValue({ width: 1440, height: 900 });
 	screenshotMock.getMainDisplayNativePixelSize.mockReset();
@@ -355,6 +359,9 @@ describe("MacOSHostComputer input observations", () => {
 		const computer = approvedComputer();
 		await observe(computer);
 		runtime.screenshotError = new Error("capture failed");
+		screenshotMock.captureWindowImage.mockImplementationOnce(() => {
+			throw new Error("libsckit.dylib not found");
+		});
 
 		await expect(computer.getAppState(TARGET_PID, { settleMs: 0, requireWindow: true })).rejects.toThrow(
 			"capture failed",

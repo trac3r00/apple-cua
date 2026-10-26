@@ -41,7 +41,7 @@ import {
 } from "./macos-ffi/skylight.js";
 import { listOnscreenWindows, listWindows } from "./macos-ffi/window-list.js";
 import { startFocusStealWatch } from "./macos-focus-watch.js";
-import { dragSteps, interpolatePointEased, pointerTravelDuration } from "./macos-input-drag.js";
+import { dragSteps, interpolatePointEased, pointerTravelDuration, scrollEventPlan } from "./macos-input-drag.js";
 import { pointerModifierFlags, withHeldModifiers } from "./macos-input-modifiers.js";
 import {
 	type MousePost,
@@ -304,6 +304,7 @@ export class MacOSInputController {
 		displaySleep: DisplaySleepAssertion = NOOP_DISPLAY_SLEEP,
 		delivery: InputDelivery = "background",
 		backgroundActivation: boolean = backgroundActivationEnabled(),
+		private readonly cursorMotionEnabled = false,
 	) {
 		this.delivery = delivery;
 		this.backgroundActivation = backgroundActivation;
@@ -713,6 +714,32 @@ export class MacOSInputController {
 		this.markPointer(position, call.pid);
 	}
 
+	/** Expand the lease's hover into already-paced travel, after its saved cursor snapshot. */
+	private clickPost(call: InputCall): MousePost {
+		const post = this.mousePost(call);
+		if (this.isBackground || !this.cursorMotionEnabled) {
+			return post;
+		}
+		return async (kind, position, button, clickState, window, flags) => {
+			const from = this.pointerFor(call.pid).position();
+			if (kind === "move" && Math.hypot(position.x - from.x, position.y - from.y) > 8) {
+				const duration = pointerTravelDuration(from, position);
+				const steps = dragSteps(duration);
+				const started = performance.now();
+				for (let step = 1; step <= steps; step += 1) {
+					const remaining = started + (duration * step) / steps - performance.now();
+					if (remaining > 0) await delayMilliseconds(Math.ceil(remaining));
+					this.checkpoint(call);
+					const at = interpolatePointEased(from, position, step / steps);
+					await post("move", at, button, clickState, window, flags);
+					this.trackPointer(at, call.pid);
+				}
+				return;
+			}
+			await post(kind, position, button, clickState, window, flags);
+		};
+	}
+
 	async click(
 		position: Point,
 		button: MouseButton = "left",
@@ -725,10 +752,10 @@ export class MacOSInputController {
 			this.requirePointerWindow(call, targetWindow);
 			// Read after waiting for the gesture before this one and for the window lookup: nothing goes down once stopped.
 			this.checkpoint(call);
-			const post = this.mousePost(call);
+			const post = this.clickPost(call);
 			await this.holdModifiers(call, modifiers, targetWindow, "pointer", async (flags) => {
 				if (call.pid === undefined) {
-					await this.postMove(call, position);
+					await post("move", position, "left", undefined, targetWindow);
 					await postClick(post, position, button, 1, targetWindow, flags);
 					this.markPointer(position);
 				} else if (targetWindow !== undefined) {
@@ -737,7 +764,7 @@ export class MacOSInputController {
 						this.showPointer(position, true, call.pid);
 						return;
 					}
-					await runFocusLeasedClick(targetWindow, position, button, post, flags);
+					await runFocusLeasedClick(targetWindow, position, button, post, flags, { targetPid: call.pid });
 					this.showPointer(position, true, call.pid);
 				}
 			});
@@ -751,10 +778,10 @@ export class MacOSInputController {
 			const targetWindow = await this.pointerWindow(call, position);
 			this.requirePointerWindow(call, targetWindow);
 			this.checkpoint(call);
-			const post = this.mousePost(call);
+			const post = this.clickPost(call);
 			await this.holdModifiers(call, modifiers, targetWindow, "pointer", async (flags) => {
 				if (call.pid === undefined) {
-					await this.postMove(call, position);
+					await post("move", position, "left", undefined, targetWindow);
 					await postDoubleClick(post, position, targetWindow, flags);
 					this.markPointer(position);
 				} else if (targetWindow !== undefined) {
@@ -763,7 +790,7 @@ export class MacOSInputController {
 						this.showPointer(position, true, call.pid);
 						return;
 					}
-					await runFocusLeasedDoubleClick(targetWindow, position, post, flags);
+					await runFocusLeasedDoubleClick(targetWindow, position, post, flags, { targetPid: call.pid });
 					this.showPointer(position, true, call.pid);
 				}
 			});
@@ -916,14 +943,16 @@ export class MacOSInputController {
 			right: [1, 0],
 		};
 		const [ux, uy] = unit[options.direction];
-		// Deliver the total in small steps so it GLIDES smoothly instead of jumping.
-		const perStep = 4;
-		const steps = Math.max(1, Math.ceil(amount / perStep));
+		const plan = scrollEventPlan(amount);
 		await this.holdModifiers(call, options.modifiers, targetWindow, "wheel", async (flags) => {
-			for (let i = 0; i < steps; i++) {
+			const started = performance.now();
+			for (const [index, d] of plan.entries()) {
+				const remaining = started + 14 * index - performance.now();
+				if (remaining > 0) {
+					await delayMilliseconds(Math.ceil(remaining));
+				}
 				this.checkpoint(call);
 				this.assertDeliverable(call.pid);
-				const d = Math.round(((i + 1) * amount) / steps) - Math.round((i * amount) / steps);
 				postScrollEvent({
 					deltaX: d * ux,
 					deltaY: d * uy,
@@ -932,9 +961,6 @@ export class MacOSInputController {
 					flags,
 					position: options.position ?? (targetWindow === undefined ? undefined : position),
 				});
-				if (i < steps - 1) {
-					await delayMilliseconds(14);
-				}
 			}
 		});
 	}

@@ -6,6 +6,7 @@ import { FakeGuardedComputer } from "./protocol-test-harness.js";
 let closeHarness: (() => Promise<void>) | undefined;
 
 afterEach(async () => {
+	vi.useRealTimers();
 	await closeHarness?.();
 	closeHarness = undefined;
 	vi.restoreAllMocks();
@@ -16,21 +17,23 @@ describe("#given a wait condition that never appears #when its deadline expires 
 		const harness = await createHarness(new FakeGuardedComputer(), async () => []);
 		closeHarness = harness.close;
 		const token = await observe(harness);
+		vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
 
 		const startedAt = Date.now();
-		const payload = jsonPayload(
-			await harness.client.callTool({
-				name: "run_steps",
-				arguments: {
-					app: "Finder",
-					observation_token: token,
-					steps: [{ type: "wait_for", window_title: "Missing", timeout_ms: 20 }],
-				},
-			}),
-		);
+		const pending = harness.client.callTool({
+			name: "run_steps",
+			arguments: {
+				app: "Finder",
+				observation_token: token,
+				steps: [{ type: "wait_for", window_title: "Missing", timeout_ms: 20 }],
+			},
+		});
+		await vi.advanceTimersByTimeAsync(20);
+		const payload = jsonPayload(await pending);
 		const elapsedMs = Date.now() - startedAt;
 		const runSteps = payload["runSteps"];
 		expect(runSteps).toMatchObject({ stoppedEarly: true });
+		expect(elapsedMs).toBe(20);
 		expect(elapsedMs).toBeLessThanOrEqual(220);
 	});
 
@@ -112,18 +115,24 @@ describe("#given a wait condition that never appears #when its deadline expires 
 		closeHarness = harness.close;
 		const token = await observe(harness);
 		const baselineCalls = computer.stateOptions.length;
+		// A real timer can wake before Date.now() reaches the deadline and legitimately trigger another read.
+		// Drive the scheduler and its clock together so this test always exercises the expired-deadline path.
+		vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
 
-		const payload = jsonPayload(
-			await harness.client.callTool({
-				name: "run_steps",
-				arguments: {
-					app: "Finder",
-					observation_token: token,
-					steps: [{ type: "wait_for", window_title: "Missing", timeout_ms: 20 }],
-				},
-			}),
-		);
+		const pending = harness.client.callTool({
+			name: "run_steps",
+			arguments: {
+				app: "Finder",
+				observation_token: token,
+				steps: [{ type: "wait_for", window_title: "Missing", timeout_ms: 20 }],
+			},
+		});
+		await vi.advanceTimersByTimeAsync(19);
+		expect(computer.stateOptions).toHaveLength(baselineCalls + 1);
+		await vi.advanceTimersByTimeAsync(1);
+		const payload = jsonPayload(await pending);
 
+		// One wait read before expiry and one batch outcome read; no wait read may start at the deadline.
 		expect(computer.stateOptions).toHaveLength(baselineCalls + 2);
 		expect(payload["runSteps"]).toMatchObject({ stoppedEarly: true });
 	});

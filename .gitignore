@@ -17,3 +17,6 @@ Package.resolved
 
 # Local code-signing keychain and key material (never commit).
 .signing/
+
+# Copied into the mcp package by its prepack script.
+packages/mcp/skills/

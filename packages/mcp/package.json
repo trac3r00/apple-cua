@@ -16,7 +16,8 @@
 	"scripts": {
 		"build": "tsgo",
 		"typecheck": "tsgo --noEmit",
-		"test": "vitest --run"
+		"test": "vitest --run",
+		"prepack": "node scripts/copy-skills.mjs"
 	},
 	"dependencies": {
 		"@apple-cua/agent": "workspace:*",
@@ -32,5 +33,9 @@
 	},
 	"engines": {
 		"node": ">=20.0.0"
+	},
+	"files": ["dist", "!dist/apple-cua-mcp.app", "!dist/appicon.iconset", "assets", "skills", "README.md", "LICENSE"],
+	"publishConfig": {
+		"access": "public"
 	}
 }

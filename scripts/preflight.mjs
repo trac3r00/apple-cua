@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * apple-cua release gate for docs/expectations/parallel-background-cua.md (EXP-001..EXP-019).
+ * apple-cua release gate for docs/internal/expectations/parallel-background-cua.md (EXP-001..EXP-019).
  *
  * Usage:   node scripts/preflight.mjs [--plan] [--no-native] [--only ID[,ID...]] [--help]
  * Needs:   node >= 20, pnpm, git; macOS with the built signed helper for the native check.
@@ -32,7 +32,7 @@ export const BASE = "8880d25";
  * that was absent at review time; its appearance is itself a change to reconcile.
  */
 export const SOURCES = {
-	"docs/expectations/parallel-background-cua.md": "38c506548959949162b527f989418bdc7036ae00971f0ef0d7d1d11ae5ad934c",
+	"docs/internal/expectations/parallel-background-cua.md": "38c506548959949162b527f989418bdc7036ae00971f0ef0d7d1d11ae5ad934c",
 	"AGENTS.md": "a85dbbd04d0778b58d207e9a52a0c84826ac8a6440b73ae616320d67941ccf53",
 	"README.md": "e0c950d899a3af6f600544b0e4ddf9596d37357b2b1aca49f293435127a23401",
 	"package.json": "da53bd76e546b956cc3588812d516d762032c914c75e956e833ace059a365350",
@@ -46,7 +46,7 @@ export const SOURCES = {
  * Any other changed file since BASE, or a different hash here, blocks until the inventory is reconciled.
  */
 export const REVIEWED = {
-	"docs/expectations/parallel-background-cua.md": "38c506548959949162b527f989418bdc7036ae00971f0ef0d7d1d11ae5ad934c",
+	"docs/internal/expectations/parallel-background-cua.md": "38c506548959949162b527f989418bdc7036ae00971f0ef0d7d1d11ae5ad934c",
 	"package.json": "da53bd76e546b956cc3588812d516d762032c914c75e956e833ace059a365350",
 	"packages/browser/extension/DESIGN.md": "548fba1c6c57072519db6e4750e66fa8fce39184aa4d8fc98b3f8d989ed21725",
 	"packages/browser/extension/background.js": "1850a1accf05dba5cc61601037a2c2c0bffb6cd501e7655d3087e6295266c598",
@@ -228,10 +228,10 @@ export function checkScope(root, changed, reviewed) {
 	return problems.length === 0
 		? { status: "PASS", evidence: `${changed.filter(isScopeFile).length} changed files match the reviewed inventory` }
 		: {
-				status: "BLOCKED",
-				evidence: problems.slice(0, 8).join("; "),
-				reason: "implementation changed since scope review",
-			};
+			status: "BLOCKED",
+			evidence: problems.slice(0, 8).join("; "),
+			reason: "implementation changed since scope review",
+		};
 }
 
 /** Run argv with a deadline; the child's process group is killed on timeout or on our own termination. */
@@ -247,7 +247,7 @@ export function run(argv, { cwd = REPO, timeoutMs, env = process.env } = {}) {
 		const kill = () => {
 			try {
 				process.kill(-child.pid, "SIGKILL");
-			} catch {}
+			} catch { }
 		};
 		owned.add(kill);
 		let timedOut = false;

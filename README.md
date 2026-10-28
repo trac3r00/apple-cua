@@ -168,7 +168,7 @@ Day-to-day lifecycle:
 
 These are real captures from a finished-work acceptance run. An agent driving Freeform and Keynote through
 apple-cua built the board and the deck. Nothing here is a mockup.
-([How the run was judged](docs/fluent-workflow-acceptance.md))
+([How the run was judged](docs/internal/fluent-workflow-acceptance.md))
 
 <table>
 <tr>
@@ -319,7 +319,7 @@ before irreversible actions.
 | [Installation guide](skills/apple-cua/references/installation.md) | Permissions walkthrough and manual setup |
 | [Troubleshooting](skills/apple-cua/references/troubleshooting.md) | Common failures and fixes |
 | [iPhone automation](skills/apple-cua/references/ios-automation.md) | Driving a real iPhone through Mirroring |
-| [Design notes](docs/unified-cua.md) | What apple-cua took from Codex, Cua Driver and OmO |
+| [Design notes](docs/internal/unified-cua.md) | What apple-cua took from Codex, Cua Driver and OmO |
 
 ## Development
 

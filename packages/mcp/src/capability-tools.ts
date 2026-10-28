@@ -12,7 +12,19 @@ import type { ToolUsageSnapshot } from "./tool-timing.js";
 import type { ToolsetProfile } from "./toolset.js";
 
 const STOP_CHORD = "Control+Option+Command (hold together)";
-export const DEFAULT_SKILL_DIR = fileURLToPath(new URL("../../../skills/apple-cua/", import.meta.url));
+const PACKAGE_SKILL_DIR = fileURLToPath(new URL("../skills/apple-cua/", import.meta.url));
+const CHECKOUT_SKILL_DIR = fileURLToPath(new URL("../../../skills/apple-cua/", import.meta.url));
+
+/** Prefer the skill copied into the package at pack time; fall back to the repository checkout. */
+export function resolveSkillDir(
+	packageDir: string = PACKAGE_SKILL_DIR,
+	checkoutDir: string = CHECKOUT_SKILL_DIR,
+	exists: (path: string) => boolean = existsSync,
+): string {
+	return exists(join(packageDir, "SKILL.md")) ? packageDir : checkoutDir;
+}
+
+export const DEFAULT_SKILL_DIR = resolveSkillDir();
 
 export interface CapabilitySources {
 	readonly delivery: InputDelivery | undefined;

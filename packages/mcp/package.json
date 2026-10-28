@@ -32,5 +32,9 @@
 	},
 	"engines": {
 		"node": ">=20.0.0"
+	},
+	"files": ["dist", "!dist/apple-cua-mcp.app", "!dist/appicon.iconset", "assets", "README.md", "LICENSE"],
+	"publishConfig": {
+		"access": "public"
 	}
 }

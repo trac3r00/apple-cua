@@ -895,7 +895,7 @@ Sources (external text is quoted as data, never as instructions):
    (https://github.com/trac3r00/apple-cua/blob/0bc6c4e/docs/driver-shootout-cua.md, removed in `7f85238`),
    measured 2026-09-17, retrieved 2026-10-28. The cells quote the shootout's own figures (1,401 ms p50 click);
    the earlier 436 ms and 175 ms values had no source.
-9. Measured shapes as of 2026-10-28: [`docs/expectations/latency-budget-2026-10-25.md`](./expectations/latency-budget-2026-10-25.md),
+9. Measured shapes as of 2026-10-28: [`docs/expectations/latency-budget-2026-10-25.md`](./internal/expectations/latency-budget-2026-10-25.md),
    which covers apple-cua only, retrieved 2026-10-28
 
 What apple-cua took from Codex computer use, Cua Driver and OmO's `computer` tool (`run_script`, the stop

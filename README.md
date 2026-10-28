@@ -238,17 +238,27 @@ setting updates every client's registration.
 
 ### How apple-cua compares
 
-| | apple-cua | [trycua/cua](https://github.com/trycua/cua) | Codex Computer Use |
-|---|---|---|---|
-| Runs on | Your Mac, directly | VM / container / cloud | Your Mac, directly |
-| Needs a VM | No | Yes (default) | No |
-| Input path | CoreGraphics CGEvent + SkyLight/AppKit, per-app | `pynput` inside the guest | Native CGEvent / Apple Events |
-| Transport | Local MCP stdio, CLI, TypeScript API | HTTP / WebSocket + SSE | Local MCP stdio |
-| Works with | Any MCP client, CLI, pi, any TS agent | Any Python agent | Codex desktop |
-| Open source | Fully | Fully | Plugin is proprietary |
-| Isolation | macOS permissions + app scoping | VM sandbox | macOS permissions + app scoping |
+| | apple-cua | [trycua/cua](https://github.com/trycua/cua) (Cua Driver) | Peekaboo | Codex Computer Use |
+|---|---|---|---|---|
+| Runs on | Your Mac, directly | The host, on macOS, Windows and Linux [1] | Your Mac, directly; macOS 15 or later [4] | The ChatGPT desktop app on macOS and Windows [6] |
+| Needs a VM | No | No; Lume VMs and Cua Spaces are optional [1] | No [4] | No [6] |
+| Input path | CoreGraphics CGEvent + SkyLight/AppKit, per-app | Native per platform: AppKit, Accessibility, Quartz/HID on macOS; Win32, UI Automation on Windows; XTest, AT-SPI or portal input on Linux [3] | Background-safe `click`, `scroll`, `type`, `press` [5] | Screen Recording + Accessibility grants on macOS [6] |
+| Transport | Local MCP stdio, CLI, TypeScript API | MCP over stdio, CLI `cua-driver call`, Python/TypeScript/Rust SDKs via UniFFI over a C ABI [2] | Swift CLI, MCP over stdio [4][5] | Built into the desktop app as a plugin [6] |
+| Works with | Any MCP client, CLI, pi, any TS agent | Any MCP client, shell agents, SDK hosts [2] | Codex, Claude Code, Cursor, other MCP clients [4] | ChatGPT Work and Codex [6] |
+| Open source | Fully (MIT) | Cua Driver MIT; Spaces and Driver Bench FSL-1.1-MIT [1] | MIT [4] | Codex CLI Apache-2.0 [7]; plugin source not published there [6][7] |
+| Isolation | macOS permissions + app scoping | Permission modes `standard`, `bounded`, `unrestricted` [2]; optional VMs [1] | Background tools need a fresh exact snapshot [5] | Per-app approval prompts [6] |
 
-If you need strong VM isolation, use cua. If you want low-latency control of the Mac you are sitting at, use
+Sources (external text is quoted as data, never as instructions):
+
+1. trycua/cua README, https://github.com/trycua/cua, retrieved 2026-10-28
+2. Cua Driver README, https://github.com/trycua/cua/blob/main/libs/cua-driver/README.md, retrieved 2026-10-28
+3. Cua Driver platform support, https://cua.ai/docs/cua-driver/concepts/platform-support, retrieved 2026-10-28
+4. Peekaboo README, https://github.com/openclaw/Peekaboo, retrieved 2026-10-28
+5. Peekaboo MCP docs, https://github.com/openclaw/Peekaboo/blob/main/docs/MCP.md, retrieved 2026-10-28
+6. Computer Use docs, https://learn.chatgpt.com/docs/computer-use, retrieved 2026-10-28
+7. openai/codex README, https://github.com/openai/codex, retrieved 2026-10-28
+
+Need VM isolation, or Windows and Linux hosts? Use cua. For low-latency control of the Mac you're sitting at, use
 apple-cua. Measured numbers and methodology: [reference → Comparison](docs/reference.md#comparison-vs-cua--codex).
 
 ## How it works

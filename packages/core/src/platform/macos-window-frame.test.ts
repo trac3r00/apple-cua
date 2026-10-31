@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { defined } from "@apple-cua/test-support";
 import type { AXUIElementRef } from "./macos-ffi/accessibility.js";
 import { type WindowFrameDependencies, framesApproximatelyEqual, setWindowFrame } from "./macos-window-frame.js";
 
@@ -16,7 +17,7 @@ describe("setWindowFrame #given a top-level AX window #when geometry settles in 
 		const result = await setWindowFrame(42, 71, requested, fake.dependencies);
 
 		expect(fake.writes).toEqual(["position:10,20", "size:800,600", "position:10,20"]);
-		expect(result).toEqual({ requested, applied: frames[2], verified: true, attempts: 2 });
+		expect(result).toEqual({ requested, applied: defined(frames[2]), verified: true, attempts: 2 });
 	});
 });
 

@@ -9,9 +9,8 @@ export function allowedBundleIdsFromEnvironment(value: string | undefined): read
 }
 
 /**
- * Background is the default: apple-cua acts in its target app without taking focus or moving the
- * person's cursor, so they can keep using the Mac. "attended" opts into routes that may briefly
- * take the foreground.
+ * The shared-host backend is observation-only. Preserve an explicit attended request so the
+ * constructor rejects it, rather than silently accepting a request to borrow the human desktop.
  */
 function deliveryFromEnvironment(value: string | undefined): InputDelivery {
 	return value?.trim().toLowerCase() === "attended" ? "attended" : "background";
@@ -35,11 +34,11 @@ export function createNativeComputer(): GuardedComputerInterface {
 }
 
 export function createNativeWindowProbe(): WindowProbe | undefined {
-	return process.platform === "darwin"
-		? (options) =>
-				listTopLevelWindows({
-					...options,
-					includeOffscreen: options?.includeOffscreen ?? deliveryFromProcessEnvironment() === "background",
-				})
-		: undefined;
+	if (process.platform !== "darwin") return undefined;
+	return (options) => {
+		return listTopLevelWindows({
+			...options,
+			includeOffscreen: options?.includeOffscreen ?? deliveryFromProcessEnvironment() === "background",
+		});
+	};
 }

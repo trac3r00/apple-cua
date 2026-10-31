@@ -1,7 +1,7 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import { STATE_DIR_ENV, StopSwitch, describeUserStop, resolveStateDir } from "./stop-switch.js";
 
 const directories: string[] = [];

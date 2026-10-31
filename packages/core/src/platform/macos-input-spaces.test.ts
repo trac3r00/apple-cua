@@ -1,7 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
-import { runInInputScope } from "../computer/input-scope.js";
-import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
 
 const TARGET = {
@@ -84,6 +83,9 @@ vi.mock("./macos-ffi/skylight.js", () => ({
 	frontProcessSerialNumber: vi.fn(() => null),
 	setProcessAppActive: native.setProcessAppActive,
 }));
+
+const { runInInputScope } = await import("../computer/input-scope.js");
+const { setOnscreenWindowIdsSourceForTesting } = await import("./macos-input.js");
 
 const noSleep = { acquire: vi.fn(), release: vi.fn() };
 

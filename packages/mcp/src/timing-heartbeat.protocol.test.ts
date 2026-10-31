@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { Deferred } from "./protocol-test-harness.js";
 

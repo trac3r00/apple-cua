@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const state = vi.hoisted(() => ({ front: Buffer.alloc(8, 2) }));
 vi.mock("./macos-ffi/coregraphics.js", () => ({

@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import type { AutomationStatus } from "@apple-cua/core";
-import { describe, expect, it } from "vitest";
 import { PRIVACY_PANES } from "./doctor.js";
 import { type GrantDependencies, type HelperPermissions, grantPermissions } from "./permission-guide.js";
 

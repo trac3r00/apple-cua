@@ -1,9 +1,10 @@
+import { describe, expect, it, setDefaultTimeout } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { nodeExecutable } from "@apple-cua/test-support";
 import { execa } from "execa";
-import { describe, expect, it } from "vitest";
 import { type MirroringSessionState, formatIosStatus } from "./ios.js";
 
 type PackageJson = {
@@ -17,14 +18,14 @@ const cliPath = join(__dirname, "cli.ts");
 const packageJson: PackageJson = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf8")) as PackageJson;
 
 function runCli(args: string[]) {
-	return execa(process.execPath, ["--experimental-strip-types", cliPath, ...args], {
+	return execa(nodeExecutable(), ["--experimental-strip-types", cliPath, ...args], {
 		cwd: workspaceRoot,
 		env: { ...process.env, FORCE_COLOR: "0" },
 	});
 }
 
 function runCliAllowingFailure(args: string[]) {
-	return execa(process.execPath, ["--experimental-strip-types", cliPath, ...args], {
+	return execa(nodeExecutable(), ["--experimental-strip-types", cliPath, ...args], {
 		cwd: workspaceRoot,
 		env: { ...process.env, FORCE_COLOR: "0" },
 		reject: false,
@@ -34,14 +35,14 @@ function runCliAllowingFailure(args: string[]) {
 // Each test spawns its own CLI process and shares no state, so a describe's tests run concurrently.
 // A cold CLI start strips types at load and measures 3.5-5.3 s on CI's Intel macOS 26 runner under concurrent load,
 // so the 5 s default would fail a correct run; every subprocess suite here gets one realistic budget.
-const cliProcessTimeout = { timeout: 30_000 };
+setDefaultTimeout(30_000);
 
-describe.concurrent("apple-cua CLI", cliProcessTimeout, () => {
+describe.concurrent("apple-cua CLI", () => {
 	it("#given default app access #when config registers a client #then its environment omits the app restriction", async () => {
 		const home = mkdtempSync(join(tmpdir(), "apple-cua-default-registration-"));
 		try {
 			const result = await execa(
-				process.execPath,
+				nodeExecutable(),
 				["--experimental-strip-types", cliPath, "config", "--register", "omo"],
 				{
 					cwd: workspaceRoot,
@@ -68,21 +69,23 @@ describe.concurrent("apple-cua CLI", cliProcessTimeout, () => {
 		}
 	});
 
-	it.each([
-		["click", "10", "20"],
-		["right-click", "10", "20"],
-		["middle-click", "10", "20"],
-		["double-click", "10", "20"],
-		["move", "10", "20"],
-		["drag", "10", "20", "30", "40"],
-		["scroll", "--direction", "down"],
-		["type", "must not reach the frontmost app"],
-		["key", "Return"],
-		["keypress", "Return"],
-	])("#given no explicit target #when %j runs #then input is refused", async (...args) => {
+	it.each(
+		[
+			["click", "10", "20"],
+			["right-click", "10", "20"],
+			["middle-click", "10", "20"],
+			["double-click", "10", "20"],
+			["move", "10", "20"],
+			["drag", "10", "20", "30", "40"],
+			["scroll", "--direction", "down"],
+			["type", "must not reach the frontmost app"],
+			["key", "Return"],
+			["keypress", "Return"],
+		].map((row) => [row]),
+	)("#given no explicit target #when %j runs #then input is refused", async (args) => {
 		const stateDir = mkdtempSync(join(tmpdir(), "apple-cua-target-required-"));
 		try {
-			const result = await execa(process.execPath, ["--experimental-strip-types", cliPath, ...args], {
+			const result = await execa(nodeExecutable(), ["--experimental-strip-types", cliPath, ...args], {
 				cwd: workspaceRoot,
 				env: { ...process.env, APPLE_CUA_STATE_DIR: stateDir, FORCE_COLOR: "0" },
 				reject: false,
@@ -178,7 +181,7 @@ describe.concurrent("apple-cua CLI", cliProcessTimeout, () => {
 		try {
 			const env = { ...process.env, HOME: home, APPLE_CUA_HOME: join(home, ".apple-cua"), FORCE_COLOR: "0" };
 			const run = (args: string[]) =>
-				execa(process.execPath, ["--experimental-strip-types", cliPath, ...args], { cwd: workspaceRoot, env });
+				execa(nodeExecutable(), ["--experimental-strip-types", cliPath, ...args], { cwd: workspaceRoot, env });
 
 			const registered = await run([
 				"config",
@@ -215,7 +218,7 @@ describe.concurrent("apple-cua CLI", cliProcessTimeout, () => {
 	}, 60_000);
 });
 
-describe.concurrent("apple-cua CLI iOS commands", cliProcessTimeout, () => {
+describe.concurrent("apple-cua CLI iOS commands", () => {
 	it("#given the iOS command group #when help runs #then every iPhone command is listed", async () => {
 		// given
 		const expectedCommands = [
@@ -282,7 +285,7 @@ describe.concurrent("apple-cua CLI iOS commands", cliProcessTimeout, () => {
 	});
 });
 
-describe.concurrent("apple-cua CLI screenshot capture options", cliProcessTimeout, () => {
+describe.concurrent("apple-cua CLI screenshot capture options", () => {
 	it("#given the screenshot command #when help runs #then region and display selection are documented", async () => {
 		// when
 		const result = await runCli(["screenshot", "--help"]);

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 
 import { type FakeAppleCuaServer, guardedWindowServer, textAnswer } from "../../test/support/fake-apple-cua.js";
 import { McpBridge } from "../mcp-bridge.js";

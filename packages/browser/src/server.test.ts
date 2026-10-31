@@ -1,13 +1,22 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { createServer } from "node:net";
+import { vi } from "@apple-cua/test-support";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { BrowserBridge } from "./bridge.js";
 import * as connection from "./connection.js";
 import { createBrowserMcpServer, main } from "./server.js";
+
+/** Vitest's toHaveResolved: at least one call returned a value or promise that fulfilled. */
+async function resolvedAtLeastOnce(spy: {
+	readonly mock: { readonly results: readonly { readonly value: unknown }[] };
+}): Promise<boolean> {
+	const outcomes = await Promise.allSettled(spy.mock.results.map((result) => result.value));
+	return outcomes.some((outcome) => outcome.status === "fulfilled");
+}
 
 describe("browser MCP contract", () => {
 	const cleanups: (() => Promise<void>)[] = [];
@@ -35,8 +44,8 @@ describe("browser MCP contract", () => {
 		const closeServer = vi.spyOn(McpServer.prototype, "close");
 		const closeTransport = vi.spyOn(StdioServerTransport.prototype, "close");
 		await expect(main()).rejects.toBe(failure);
-		expect(closeServer).toHaveResolved();
-		expect(closeTransport).toHaveResolved();
+		expect(await resolvedAtLeastOnce(closeServer)).toBe(true);
+		expect(await resolvedAtLeastOnce(closeTransport)).toBe(true);
 		const probe = createServer();
 		try {
 			await new Promise<void>((resolve, reject) => {

@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { MacOSHostComputer } from "@apple-cua/core";
-import { describe, expect, it } from "vitest";
 import { buildMacActionSpace } from "./action-space.js";
 import { createDecider } from "./decision.js";
 

@@ -1,7 +1,7 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { LineFramer, nodeSupervisorOptions, startSupervisor } from "./supervisor.js";
+import { vi } from "@apple-cua/test-support";
 
 /** Any report flag: the adapter must pass through exactly what the server gives it. */
 const SELF_CHECK_FLAG = "--report-flag";
@@ -16,6 +16,8 @@ const native = vi.hoisted(() => ({
 }));
 vi.mock("node:child_process", () => ({ spawn: native.spawn }));
 vi.mock("node:fs", () => ({ watch: native.watch, existsSync: () => true }));
+
+const { LineFramer, nodeSupervisorOptions, startSupervisor } = await import("./supervisor.js");
 
 class FakeChild implements SupervisedChild {
 	readonly stdin = new PassThrough();

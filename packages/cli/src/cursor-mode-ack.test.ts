@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 vi.mock("commander", () => ({
 	Command: class {
@@ -55,9 +56,7 @@ vi.mock("./lifecycle-commands.js", () => ({
 	resolveCursorMotion: vi.fn(),
 }));
 vi.mock("./utm.js", () => ({ registerUtmCommands: vi.fn() }));
-vi.mock("@apple-cua/core", async (importOriginal) => await importOriginal<typeof import("@apple-cua/core")>());
-
-import { waitForCursorOverlayAck } from "./cli.js";
+const { waitForCursorOverlayAck } = await import("./cli.js");
 
 interface TestOverlay {
 	state(options?: { readonly deadlineMs?: number }): Promise<{

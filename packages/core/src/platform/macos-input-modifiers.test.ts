@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 import { normalizeModifiers } from "../computer/modifiers.js";
 import { pointerModifierFlags, withHeldModifiers } from "./macos-input-modifiers.js";
@@ -113,7 +114,7 @@ describe("#given a gesture that holds modifiers", () => {
 	});
 
 	it("#when a key cannot be pressed #then only the keys already down are released", async () => {
-		const post = vi.fn((keyCode: number, keyDown: boolean) => {
+		const post = vi.fn((keyCode: number, keyDown: boolean, _flags: number) => {
 			if (keyDown && keyCode === 56) {
 				throw new Error("press failed");
 			}

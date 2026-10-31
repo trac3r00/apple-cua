@@ -1,8 +1,9 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import type { StopStatusSource, UTMObservation } from "@apple-cua/core";
+import { vi } from "@apple-cua/test-support";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod/v4";
 import { UTM } from "../../core/src/platform/utm.js";
 import { createHarness } from "./protocol-client-harness.js";

@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { defined, vi } from "@apple-cua/test-support";
 
 const coreGraphicsMock = vi.hoisted(() => ({
 	getCurrentCursorPosition: vi.fn(() => ({ x: 1, y: 2 })),
@@ -35,19 +36,21 @@ vi.mock("./macos-ffi/skylight.js", () => ({
 	restoreFrontProcessNoWindows: vi.fn(() => true),
 }));
 
-import { currentCursorIdentity, withCursorIdentity } from "../computer/cursor-scope.js";
-import { InputInterrupted, type InputScope, runInInputScope } from "../computer/input-scope.js";
-import * as accessibility from "./macos-ffi/accessibility.js";
-import { NOOP_POINTER_OVERLAY } from "./macos-ffi/cursor-overlay.js";
-import {
+const { currentCursorIdentity, withCursorIdentity } = await import("../computer/cursor-scope.js");
+const { InputInterrupted, runInInputScope } = await import("../computer/input-scope.js");
+const accessibility = await import("./macos-ffi/accessibility.js");
+const { NOOP_POINTER_OVERLAY } = await import("./macos-ffi/cursor-overlay.js");
+const {
 	MacOSInputController,
 	setFocusStealWatcherForTesting,
 	setKeyboardPidResolverForTesting,
 	setKeyboardWindowFocuserForTesting,
 	setOnscreenWindowIdsSourceForTesting,
 	setPointWindowIdsForTesting,
-} from "./macos-input.js";
-import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
+} = await import("./macos-input.js");
+const { setOpenWindowsSourceForTesting } = await import("./macos-open-windows.js");
+
+import type { InputScope } from "../computer/input-scope.js";
 
 const NO_SLEEP = { acquire: () => undefined, release: () => undefined };
 
@@ -72,7 +75,7 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
 	};
 }
 
-function backgroundController(): MacOSInputController {
+function backgroundController(): InstanceType<typeof MacOSInputController> {
 	return new MacOSInputController(undefined, NOOP_POINTER_OVERLAY, () => false, NO_SLEEP, "background");
 }
 
@@ -656,7 +659,7 @@ describe("#given a stop arrives while input is going out #when the call is mid-w
 		expect(overlay.set).toHaveBeenCalled();
 		expect(overlay.setMode).toHaveBeenCalledWith("drag", 42);
 		expect(await runInInputScope(boundTo(42, 12), async () => controller.getCursorPosition())).toEqual(
-			positions.at(-1),
+			defined(positions.at(-1)),
 		);
 		const dragEvents = coreGraphicsMock.postMouseEvent.mock.calls
 			.map(([event]) => event)

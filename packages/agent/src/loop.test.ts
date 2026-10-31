@@ -1,5 +1,6 @@
+import { describe, expect, it } from "bun:test";
 import type { AppState } from "@apple-cua/core";
-import { describe, expect, it, vi } from "vitest";
+import { vi } from "@apple-cua/test-support";
 import { buildMacActionSpace } from "./action-space.js";
 import type { ExecutionResult, Observation, PlatformAdapter } from "./adapter.js";
 import type { Decider } from "./decision.js";

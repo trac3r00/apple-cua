@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const koffiMock = vi.hoisted(() => {
 	const state = { classPresent: true };
@@ -60,24 +61,15 @@ beforeEach(() => {
 	vi.clearAllMocks();
 });
 
-describe("#given SkyLight's authentication message class #when an authenticated event is posted #then the message is attached and the event delivered", () => {
-	it("builds the message for the pid and posts the event to it", async () => {
+describe("#given SkyLight's authentication message class #when an authenticated event is posted #then delivery to the human desktop is refused", () => {
+	it("never reaches the native per-pid post", async () => {
 		const skyLight = await loadSkyLight(true);
 
-		const posted = skyLight.postAuthenticatedSkyLightEventToPid(321, keyEvent);
-
-		expect(posted).toBe(true);
-		expect(koffiMock.objcFunctions.objc_msgSend).toHaveBeenCalledWith(
-			koffiMock.authenticationClass,
-			expect.objectContaining({ name: "messageWithEventRecord:pid:version:" }),
-			{ type: "event-record" },
-			321,
-			0,
+		expect(() => skyLight.postAuthenticatedSkyLightEventToPid(321, keyEvent)).toThrow(
+			/host-window cannot operate on the human desktop/,
 		);
-		expect(koffiMock.skyLightFunctions.SLEventSetAuthenticationMessage).toHaveBeenCalledWith(keyEvent, {
-			type: "authentication-message",
-		});
-		expect(koffiMock.skyLightFunctions.SLEventPostToPid).toHaveBeenCalledWith(321, keyEvent);
+
+		expect(koffiMock.skyLightFunctions.SLEventPostToPid).not.toHaveBeenCalled();
 	});
 });
 
@@ -96,13 +88,12 @@ describe("#given a SkyLight without the authentication message class #when an au
 describe("#given a window-stamped event #when its record is posted in background #then no foreground activation occurs", () => {
 	const window = { id: 11, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 21 };
 
-	it("queues exactly one record to the window owner", async () => {
+	it("refuses to queue a valid record to the window owner", async () => {
 		const skyLight = await loadSkyLight(true);
-		expect(skyLight.postBackgroundEventRecordToWindowOwner(window, keyEvent)).toBe(true);
-		expect(koffiMock.skyLightFunctions.SLPSPostEventRecordTo).toHaveBeenCalledTimes(1);
-		expect(koffiMock.skyLightFunctions.SLPSPostEventRecordTo).toHaveBeenCalledWith(Buffer.alloc(8), {
-			type: "event-record",
-		});
+		expect(() => skyLight.postBackgroundEventRecordToWindowOwner(window, keyEvent)).toThrow(
+			/host-window cannot operate on the human desktop/,
+		);
+		expect(koffiMock.skyLightFunctions.SLPSPostEventRecordTo).not.toHaveBeenCalled();
 		expect(koffiMock.skyLightFunctions.SLPSSetFrontProcessWithOptions).not.toHaveBeenCalled();
 		expect(koffiMock.skyLightFunctions.SLEventPostToPid).not.toHaveBeenCalled();
 	});
@@ -139,12 +130,13 @@ describe("#given a window-stamped event #when its record is posted in background
 		expect(koffiMock.skyLightFunctions.SLPSPostEventRecordTo).not.toHaveBeenCalled();
 	});
 
-	it("reports a rejected record without a fallback or second post", async () => {
+	it("falls back to no other transport when the record post is refused", async () => {
 		const skyLight = await loadSkyLight(true);
-		koffiMock.skyLightFunctions.SLPSPostEventRecordTo.mockReturnValueOnce(-50);
-		expect(skyLight.postBackgroundEventRecordToWindowOwner(window, keyEvent)).toBe(false);
-		expect(koffiMock.skyLightFunctions.SLPSPostEventRecordTo).toHaveBeenCalledTimes(1);
+		expect(() => skyLight.postBackgroundEventRecordToWindowOwner(window, keyEvent)).toThrow(
+			/host-window cannot operate on the human desktop/,
+		);
 		expect(koffiMock.skyLightFunctions.SLPSSetFrontProcessWithOptions).not.toHaveBeenCalled();
 		expect(koffiMock.skyLightFunctions.SLEventPostToPid).not.toHaveBeenCalled();
+		expect(koffiMock.objcFunctions.objc_msgSend).not.toHaveBeenCalled();
 	});
 });

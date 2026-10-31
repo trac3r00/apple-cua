@@ -1,7 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import { setKeyboardWindowFocuserForTesting, setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
-import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 interface TestWindow {
 	readonly id: number;
@@ -33,8 +31,6 @@ const fallbackMock = vi.hoisted(() => ({
 }));
 
 vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
-// The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
-setOpenWindowsSourceForTesting(() => undefined);
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/coregraphics.js", () => ({
 	K_CG_EVENT_FLAG_MASK_ALTERNATE: 0x00080000,
@@ -50,6 +46,11 @@ vi.mock("./macos-ffi/coregraphics.js", () => ({
 vi.mock("./macos-window-target-fallback.js", () => ({
 	selectSystemEventsTargetWindow: fallbackMock.selectSystemEventsTargetWindow,
 }));
+
+const { setKeyboardWindowFocuserForTesting, setOnscreenWindowIdsSourceForTesting } = await import("./macos-input.js");
+const { setOpenWindowsSourceForTesting } = await import("./macos-open-windows.js");
+// The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
+setOpenWindowsSourceForTesting(() => undefined);
 
 describe("#given target windows without owner metadata", () => {
 	beforeEach(() => {

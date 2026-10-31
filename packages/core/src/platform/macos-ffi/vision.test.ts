@@ -1,6 +1,6 @@
+import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
 import {
 	type OcrTextObservation,
 	clampRecognitionRegion,
@@ -33,7 +33,7 @@ function center(box: OcrTextObservation["box"]): { readonly x: number; readonly 
 	return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-describe.runIf(realMac)(
+describe.if(realMac)(
 	"#given a fixture rendered with known text at known anchors #when Vision OCR reads it #then the strings come back with tap-ready pixel boxes",
 	() => {
 		it("recognises every line the generator drew, in image pixel space with a top-left origin", () => {
@@ -87,7 +87,7 @@ describe.runIf(realMac)(
 	},
 );
 
-describe.runIf(realMac)(
+describe.if(realMac)(
 	"#given a region of the image #when Vision OCR reads it #then only that region is read and boxes stay in whole-image pixels",
 	() => {
 		it("returns the text inside the region at the same pixels as an uncropped read, and nothing outside it", () => {
@@ -182,7 +182,7 @@ describe("#given observations of mixed confidence #when the minimum-confidence f
 	});
 });
 
-describe.runIf(process.platform === "darwin")(
+describe.if(process.platform === "darwin")(
 	"#given bytes that are not an image #when Vision OCR is asked to read them #then it refuses instead of reporting an empty screen",
 	() => {
 		it("throws a decode error naming the input", () => {

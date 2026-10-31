@@ -1,21 +1,19 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { EventEmitter } from "node:events";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Socket } from "node:net";
+import { vi } from "@apple-cua/test-support";
 
 vi.mock("node:fs", () => ({ existsSync: () => true }));
-// Nobody listens on the socket: every connection fails, so each command asks for a daemon.
-vi.mock("node:net", () => ({
-	connect: () => {
-		const socket = Object.assign(new EventEmitter(), {
-			write: () => true,
-			end: () => undefined,
-			destroy: () => undefined,
-		});
-		queueMicrotask(() => socket.emit("error", new Error("ECONNREFUSED")));
-		return socket;
-	},
-}));
 
-import { defaultSocketTransport } from "./cursor-overlay.js";
+const { defaultSocketTransport } = await import("./cursor-overlay.js");
+
+// Nobody listens on the socket: every connection fails, so each command asks for a daemon.
+function refusedConnection(): Socket {
+	const socket = new Socket();
+	queueMicrotask(() => socket.destroy(new Error("ECONNREFUSED")));
+	return socket;
+}
+const SOCKET_PATH = "apple-cua-overlay-test.sock";
 
 beforeEach(() => {
 	vi.useFakeTimers();
@@ -43,7 +41,7 @@ describe("#given the overlay binary cannot be spawned #when a command is sent #t
 	it("handles the async spawn error instead of leaving it unhandled, and reports it once on stderr", async () => {
 		const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 		const { calls, spawnProcess } = failingSpawn();
-		const transport = defaultSocketTransport(() => 0, spawnProcess);
+		const transport = defaultSocketTransport(() => 0, spawnProcess, undefined, SOCKET_PATH, refusedConnection);
 		const uncaught: Error[] = [];
 		const onUncaught = (error: Error) => uncaught.push(error);
 		process.on("uncaughtException", onUncaught);
@@ -65,7 +63,7 @@ describe("#given the overlay binary cannot be spawned #when a command is sent #t
 		const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 		const { calls, spawnProcess } = failingSpawn();
 		let time = 0;
-		const transport = defaultSocketTransport(() => time, spawnProcess);
+		const transport = defaultSocketTransport(() => time, spawnProcess, undefined, SOCKET_PATH, refusedConnection);
 
 		transport.send("set 10 10\n");
 		await vi.runAllTimersAsync();

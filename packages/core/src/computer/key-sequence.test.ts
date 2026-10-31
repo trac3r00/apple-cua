@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 import type { ComputerInterface } from "./interface.js";
 import { pressKeySequence } from "./key-sequence.js";

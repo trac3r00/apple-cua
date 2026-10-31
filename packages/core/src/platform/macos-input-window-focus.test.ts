@@ -1,8 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import { runInInputScope } from "../computer/input-scope.js";
-import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
-import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const accessibilityMock = vi.hoisted(() => ({
 	focusedElementInWebArea: vi.fn(() => false),
@@ -41,6 +38,10 @@ vi.mock("./macos-ffi/coregraphics.js", () => ({
 	postUnicodeText: coreGraphicsMock.postUnicodeText,
 	warpCursorPosition: coreGraphicsMock.warpCursorPosition,
 }));
+
+const { runInInputScope } = await import("../computer/input-scope.js");
+const { setOnscreenWindowIdsSourceForTesting } = await import("./macos-input.js");
+const { setOpenWindowsSourceForTesting } = await import("./macos-open-windows.js");
 
 const A_TXT = { id: 71, bounds: { x: 100, y: 100, width: 600, height: 400 } };
 const B_TXT = { id: 72, bounds: { x: 140, y: 130, width: 600, height: 400 } };

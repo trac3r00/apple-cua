@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type ClientContext, registerClient } from "./clients.js";
 import { type Layout, resolveLayout } from "./layout.js";
 import { DEFAULT_SETTINGS, desiredRegistration, saveSettings } from "./settings.js";

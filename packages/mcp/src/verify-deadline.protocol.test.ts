@@ -1,5 +1,6 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import type { AppState, AppStateOptions, TopLevelWindow } from "@apple-cua/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { vi } from "@apple-cua/test-support";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 

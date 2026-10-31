@@ -1,20 +1,23 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const native = vi.hoisted(() => ({ activateApplication: vi.fn() }));
 
-vi.mock("./macos-ffi/workspace.js", async (original) => ({
-	...(await original<typeof import("./macos-ffi/workspace.js")>()),
+const actualWorkspace = { ...(await import("./macos-ffi/workspace.js")) };
+vi.mock("./macos-ffi/workspace.js", () => ({
+	...actualWorkspace,
 	activateApplication: native.activateApplication,
 }));
-vi.mock("./macos-top-level-windows.js", async (original) => ({
-	...(await original<typeof import("./macos-top-level-windows.js")>()),
+const actualMacosTopLevelWindows = { ...(await import("./macos-top-level-windows.js")) };
+vi.mock("./macos-top-level-windows.js", () => ({
+	...actualMacosTopLevelWindows,
 	listTopLevelWindows: vi.fn(async () => [
 		{ id: 1, ownerPid: 4242, bounds: { x: 100, y: 200, width: 300, height: 600 } },
 	]),
 }));
 vi.mock("node:timers/promises", () => ({ setTimeout: vi.fn(async () => undefined) }));
 
-import { requireMirroringWindowAt } from "./ios-mirroring.js";
+const { requireMirroringWindowAt } = await import("./ios-mirroring.js");
 
 beforeEach(() => {
 	native.activateApplication.mockClear();

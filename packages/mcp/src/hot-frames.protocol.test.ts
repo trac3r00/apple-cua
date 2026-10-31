@@ -1,6 +1,7 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import type { HotFrameWorker } from "@apple-cua/core";
 import { HotFrameSource } from "@apple-cua/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { vi } from "@apple-cua/test-support";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 

@@ -1,17 +1,21 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { EventEmitter, once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
-import { type Server, createServer } from "node:net";
+import { type Server, type Socket, connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { vi } from "@apple-cua/test-support";
 
-const endpoint = vi.hoisted(() => ({ path: "" }));
-vi.mock("node:net", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("node:net")>();
-	return { ...actual, connect: () => actual.connect(endpoint.path) };
-});
+import { type OverlayTransportFactory, createCursorOverlay, defaultSocketTransport } from "./cursor-overlay.js";
 
-import { createCursorOverlay, defaultSocketTransport } from "./cursor-overlay.js";
+// Each renderer test serves its own socket; the human desktop's overlay daemon is never started or reached.
+const endpoint = { path: "" };
+function refuseSpawn(): never {
+	throw new Error("A renderer test attempted to start the overlay daemon.");
+}
+const connectEndpoint = (): Socket => connect(endpoint.path);
+const endpointTransport: OverlayTransportFactory = (_identity, _owner, motion) =>
+	defaultSocketTransport(Date.now, refuseSpawn, motion, endpoint.path, connectEndpoint);
 
 let directory: string | undefined;
 let server: Server | undefined;
@@ -66,7 +70,7 @@ describe("#given renderer motion defaults #when a cursor moves #then optional sa
 			server.listen(endpoint.path);
 			await listening;
 			const hidden = once(events, "hidden", { signal: AbortSignal.timeout(5_000) });
-			const overlay = createCursorOverlay(undefined, motion);
+			const overlay = createCursorOverlay(endpointTransport, motion);
 
 			overlay.set({ x: 640, y: 360 });
 			overlay.hide();
@@ -115,7 +119,13 @@ describe("#given configured motion over a real socket #when commands arrive toge
 		server.listen(endpoint.path);
 		await listening;
 		const hidden = once(events, "hidden", { signal: AbortSignal.timeout(5_000) });
-		const transport = defaultSocketTransport(Date.now, undefined, { style: "magnetic" });
+		const transport = defaultSocketTransport(
+			Date.now,
+			refuseSpawn,
+			{ style: "magnetic" },
+			endpoint.path,
+			connectEndpoint,
+		);
 
 		transport.send("set 640 360\n");
 		transport.send("mode thinking\n");
@@ -169,7 +179,13 @@ describe("#given configured motion over a real socket #when commands arrive toge
 		server.listen(endpoint.path);
 		await listening;
 		const hidden = once(events, "hidden", { signal: AbortSignal.timeout(5_000) });
-		const transport = defaultSocketTransport(Date.now, undefined, { style: "signature_arc" });
+		const transport = defaultSocketTransport(
+			Date.now,
+			refuseSpawn,
+			{ style: "signature_arc" },
+			endpoint.path,
+			connectEndpoint,
+		);
 
 		transport.send("set 640 360\n");
 		transport.send("hide\n");
@@ -207,7 +223,7 @@ describe("#given configured motion over a real socket #when commands arrive toge
 		server.listen(endpoint.path);
 		await listening;
 		const complete = once(events, "complete", { signal: AbortSignal.timeout(5_000) });
-		const transport = defaultSocketTransport(Date.now, undefined, { style });
+		const transport = defaultSocketTransport(Date.now, refuseSpawn, { style }, endpoint.path, connectEndpoint);
 
 		transport.send("set 640 360\n", 321);
 		transport.send("mode thinking\n", 321);
@@ -251,7 +267,13 @@ describe("#given configured motion over a real socket #when commands arrive toge
 		server.listen(endpoint.path);
 		await listening;
 		const complete = once(events, "complete", { signal: AbortSignal.timeout(5_000) });
-		const transport = defaultSocketTransport(Date.now, undefined, { style: "magnetic" });
+		const transport = defaultSocketTransport(
+			Date.now,
+			refuseSpawn,
+			{ style: "magnetic" },
+			endpoint.path,
+			connectEndpoint,
+		);
 
 		transport.send("set 10 20\n", 321, true);
 		transport.send("set 30 40\n", 321, true);

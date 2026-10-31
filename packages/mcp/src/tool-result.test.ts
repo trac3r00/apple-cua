@@ -1,5 +1,6 @@
+import { describe, expect, it } from "bun:test";
 import type { AXTreeElement, AppState } from "@apple-cua/core";
-import { describe, expect, it } from "vitest";
+import { copyForMatch } from "@apple-cua/test-support";
 import { observedActionResult, observedRunStepsResult, observedSetFieldsResult, stateResult } from "./tool-result.js";
 
 const state: AppState = {
@@ -160,7 +161,7 @@ describe("#given a post-action state #when the tree was omitted #then the payloa
 		expect(payload).toHaveProperty("observation_token", "token-1");
 		expect(payload["note"]).toEqual(expect.stringContaining("full_state=true"));
 		const changes = payload["axChanges"];
-		expect(changes).toMatchObject({ added: expect.any(Array) });
+		expect(copyForMatch(changes)).toMatchObject({ added: expect.any(Array) });
 		expect(arrayLength(changes, "added")).toBe(25);
 		expect(payload["axChangesOmitted"]).toEqual({ added: 35, removed: 0, changed: 0 });
 		expect(firstChange(changes, "added")).toEqual({

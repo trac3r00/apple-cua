@@ -1,6 +1,6 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { InputInterrupted, currentInputScope } from "@apple-cua/core";
 import type { PreflightResult, StopStatus, StopStatusSource } from "@apple-cua/core";
-import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { Deferred, FakeGuardedComputer } from "./protocol-test-harness.js";
 import type { Effect } from "./protocol-test-harness.js";

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { createHarness, observe } from "./protocol-client-harness.js";
 
 describe("#given standard MCP discovery #when reading action schemas #then coordinates have JSON numeric types", () => {

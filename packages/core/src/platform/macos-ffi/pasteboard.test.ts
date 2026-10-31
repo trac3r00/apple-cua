@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { type PasteboardAccess, readClipboard, writeClipboard } from "./pasteboard.js";
 
 describe("readClipboard #given mixed pasteboard content #when reading #then all native types and supported values are returned", () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { createHarness, jsonText } from "./protocol-client-harness.js";
 import { Deferred } from "./protocol-test-harness.js";
 

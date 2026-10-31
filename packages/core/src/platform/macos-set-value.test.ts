@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const accessibilityMock = vi.hoisted(() => ({
 	extractAccessibilityTree: vi.fn(),
@@ -38,7 +39,7 @@ vi.mock("./macos-input.js", () => ({
 	MacOSInputController: inputControllerMock.MacOSInputController,
 }));
 
-import { MacOSHostComputer } from "./macos.js";
+const { MacOSHostComputer } = await import("./macos.js");
 
 beforeEach(() => {
 	accessibilityMock.extractAccessibilityTree.mockReset();
@@ -55,17 +56,19 @@ function firstInputController(): (typeof inputControllerMock.instances)[number] 
 	return controller;
 }
 
-describe("#given MacOSHostComputer.setValue #when called #then it writes through accessibility only", () => {
-	it("calls setValueByIndex with the requested value", async () => {
+const HOST_REFUSAL = /host-window cannot operate on the human desktop/;
+
+describe("#given MacOSHostComputer.setValue on the human desktop #when called #then it is refused before any write or input", () => {
+	it("refuses before the accessibility write and keyboard feedback", async () => {
 		// given
 		const computer = new MacOSHostComputer();
 
 		// when
-		await computer.setValue(1234, 7, "updated");
+		await expect(computer.setValue(1234, 7, "updated")).rejects.toThrow(HOST_REFUSAL);
 
 		// then
-		expect(accessibilityMock.setValueByIndex).toHaveBeenCalledWith(1234, 7, "updated");
-		expect(firstInputController().showKeyboard).toHaveBeenCalledOnce();
+		expect(accessibilityMock.setValueByIndex).not.toHaveBeenCalled();
+		expect(firstInputController().showKeyboard).not.toHaveBeenCalled();
 	});
 
 	it("never falls back to synthetic keyboard input that would hijack the user", async () => {
@@ -73,7 +76,7 @@ describe("#given MacOSHostComputer.setValue #when called #then it writes through
 		const computer = new MacOSHostComputer();
 
 		// when
-		await computer.setValue(1234, 7, "updated");
+		await expect(computer.setValue(1234, 7, "updated")).rejects.toThrow(HOST_REFUSAL);
 
 		// then
 		const input = firstInputController();

@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const ffiMock = vi.hoisted(() => {
 	const poolAllocation = { type: "pool-allocation" };
@@ -90,7 +91,7 @@ const ffiMock = vi.hoisted(() => {
 
 vi.mock("koffi", () => ffiMock.module);
 
-import { findRunningApplication, getRunningApplications } from "./workspace.js";
+const { findRunningApplication, getRunningApplications } = await import("./workspace.js");
 
 beforeEach(() => {
 	ffiMock.send.mockClear();

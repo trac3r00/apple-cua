@@ -1,12 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 import type { InputObservation } from "../computer/guarded-interface.js";
-import { AppApprovalStore } from "../permission/app-approval.js";
-import { setRunningApplicationLookupForTesting } from "./app-list.js";
-import { NOOP_POINTER_OVERLAY } from "./macos-ffi/cursor-overlay.js";
-import { MacOSInputController, setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
-import { MacOSHostComputer } from "./macos.js";
-import { setSystemPromptWindowSourceForTesting } from "./system-prompts.js";
 
 const fixture = vi.hoisted(() => ({
 	currentWindows: [
@@ -89,6 +84,27 @@ vi.mock("./macos-ffi/screenshot.js", () => ({
 	screenCaptureAllowed: vi.fn(() => true),
 }));
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
+vi.mock("./macos-ffi/cursor-overlay.js", () => ({
+	NOOP_POINTER_OVERLAY: {
+		state: async () => null,
+		set: () => undefined,
+		track: () => undefined,
+		highlight: () => undefined,
+		setMode: () => undefined,
+		setScrollMode: () => undefined,
+		keyPress: () => undefined,
+		hide: () => undefined,
+		close: () => undefined,
+	},
+	createCursorOverlay: vi.fn(),
+}));
+
+const { AppApprovalStore } = await import("../permission/app-approval.js");
+const { setRunningApplicationLookupForTesting } = await import("./app-list.js");
+const { NOOP_POINTER_OVERLAY } = await import("./macos-ffi/cursor-overlay.js");
+const { MacOSInputController, setOnscreenWindowIdsSourceForTesting } = await import("./macos-input.js");
+const { MacOSHostComputer } = await import("./macos.js");
+const { setSystemPromptWindowSourceForTesting } = await import("./system-prompts.js");
 
 const PID = 1234;
 const BUNDLE_ID = "com.example.fixture";
@@ -110,7 +126,9 @@ function fakePng(width: number, height: number): Buffer {
 	return data;
 }
 
-function approvedBackgroundComputer(delivery: "background" | "attended" = "background"): MacOSHostComputer {
+function approvedBackgroundComputer(
+	delivery: "background" | "attended" = "background",
+): InstanceType<typeof MacOSHostComputer> {
 	return new MacOSHostComputer({
 		appApproval: new AppApprovalStore([BUNDLE_ID]),
 		delivery,
@@ -118,7 +136,7 @@ function approvedBackgroundComputer(delivery: "background" | "attended" = "backg
 	});
 }
 
-async function observeOffSpace(computer: MacOSHostComputer): Promise<InputObservation> {
+async function observeOffSpace(computer: InstanceType<typeof MacOSHostComputer>): Promise<InputObservation> {
 	await computer.getAppState(PID, {
 		settleMs: 0,
 		requireWindow: true,
@@ -184,7 +202,7 @@ describe("#given an explicit window on another Space #when the background host o
 		}
 	});
 
-	it("tries current-Space windows first, falls back to all-Spaces, and captures the exact id", async () => {
+	it("tries current-Space windows first, falls back to all-Spaces, and binds the exact id without capturing it", async () => {
 		const computer = approvedBackgroundComputer();
 		try {
 			const state = await computer.getAppState(PID, {
@@ -205,10 +223,14 @@ describe("#given an explicit window on another Space #when the background host o
 				fixture.currentWindows,
 			);
 			expect(state.windowCandidates?.map((window) => window.id)).toEqual([10, OFFSPACE_ID]);
-			expect(fixture.captureWindowImage).toHaveBeenCalledWith(OFFSPACE_ID, 800, 600, "jpeg", 72);
+			expect(fixture.captureWindowImage).not.toHaveBeenCalled();
+			expect(state.screenshotUnavailable).toBe("isolated-session-required");
 			expect(fixture.openWindowsForTargeting.mock.calls[0]).toEqual([]);
 			expect(fixture.openWindowsForTargeting.mock.calls[1]?.[1]).toEqual({ includeOffscreen: true });
-			expect(await computer.preflightInput(observation ?? failObservation())).toEqual({ ok: true });
+			expect(await computer.preflightInput(observation ?? failObservation())).toEqual({
+				ok: false,
+				reason: "isolated-session-required",
+			});
 		} finally {
 			await computer.close();
 		}
@@ -250,26 +272,10 @@ describe("#given an explicit window on another Space #when the background host o
 	});
 });
 
-describe("#given attended delivery #when an explicit window exists only off-Space #then it is rejected", () => {
-	it("does not query the all-Spaces source", async () => {
-		vi.useFakeTimers();
-		const computer = approvedBackgroundComputer("attended");
-		try {
-			const result = computer.getAppState(PID, {
-				settleMs: 0,
-				requireWindow: true,
-				windowId: OFFSPACE_ID,
-			});
-			const rejection = expect(result).rejects.toThrow(/No visible target window/);
-			await vi.advanceTimersByTimeAsync(3_000);
-			await rejection;
-			expect(fixture.openWindowsForTargeting.mock.calls.every((call) => call[1]?.includeOffscreen !== true)).toBe(
-				true,
-			);
-		} finally {
-			vi.useRealTimers();
-			await computer.close();
-		}
+describe("#given attended delivery #when the host computer is built #then it is refused before any window query", () => {
+	it("does not query the all-Spaces source", () => {
+		expect(() => approvedBackgroundComputer("attended")).toThrow(/global-input cannot operate on the human desktop/);
+		expect(fixture.openWindowsForTargeting).not.toHaveBeenCalled();
 	});
 });
 

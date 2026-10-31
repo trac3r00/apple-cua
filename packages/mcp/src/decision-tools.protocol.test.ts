@@ -1,10 +1,11 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import type { Server } from "node:http";
 import { createServer } from "node:http";
 import type { HotFrameWorker } from "@apple-cua/core";
 import { HotFrameSource } from "@apple-cua/core";
 import * as core from "@apple-cua/core";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { vi } from "@apple-cua/test-support";
 import { latestDecisionFrame } from "./decision-frame.js";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";

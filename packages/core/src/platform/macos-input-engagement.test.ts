@@ -1,10 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 import type { Point } from "../types/index.js";
-import { NOOP_POINTER_OVERLAY } from "./macos-ffi/cursor-overlay.js";
-import { MacOSInputController, setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
-import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
-import { needsActivationEngagement, runFocusLeasedGesture } from "./macos-targeted-gesture.js";
-import { MacOSHostComputer } from "./macos.js";
 
 const window = { id: 99, bounds: { x: 0, y: 0, width: 500, height: 500 } };
 const native = vi.hoisted(() => {
@@ -41,6 +37,12 @@ vi.mock("./macos-ffi/coregraphics.js", () => ({
 	K_CG_EVENT_FLAG_MASK_CONTROL: 0x00040000,
 	K_CG_EVENT_FLAG_MASK_SHIFT: 0x00020000,
 }));
+
+const { NOOP_POINTER_OVERLAY } = await import("./macos-ffi/cursor-overlay.js");
+const { MacOSInputController, setOnscreenWindowIdsSourceForTesting } = await import("./macos-input.js");
+const { setOpenWindowsSourceForTesting } = await import("./macos-open-windows.js");
+const { needsActivationEngagement, runFocusLeasedGesture } = await import("./macos-targeted-gesture.js");
+const { MacOSHostComputer } = await import("./macos.js");
 
 beforeEach(() => {
 	vi.clearAllMocks();
@@ -103,29 +105,25 @@ describe("#given focus engagement state", () => {
 
 describe("#given attended click travel", () => {
 	it.each([
-		[undefined, "signature_arc", true],
-		[null, "signature_arc", false],
-		[undefined, "off", false],
-		[{ style: "spring_settle" }, "off", true],
+		[undefined, "signature_arc"],
+		[null, "signature_arc"],
+		[undefined, "off"],
+		[{ style: "spring_settle" }, "off"],
 	] as const)(
-		"#when host motion option is %s and environment is %s #then travel is enabled %s",
-		async (cursorMotion, environmentMotion, enabled) => {
+		"#when the host computer is asked for attended delivery with motion option %s and environment %s #then it is refused before any move",
+		(cursorMotion, environmentMotion) => {
 			vi.stubEnv("APPLE_CUA_CURSOR_MOTION", environmentMotion);
-			const computer = new MacOSHostComputer({
-				defaultTargetPid: 1234,
-				delivery: "attended",
-				overlay: NOOP_POINTER_OVERLAY,
-				isLocked: () => false,
-				cursorMotion,
-			});
-			try {
-				const completion = computer.click({ x: 100, y: 0 });
-				await vi.runAllTimersAsync();
-				await completion;
-				expect(native.post.mock.calls.filter(([event]) => event.kind === "move").length > 1).toBe(enabled);
-			} finally {
-				computer.close();
-			}
+			expect(
+				() =>
+					new MacOSHostComputer({
+						defaultTargetPid: 1234,
+						delivery: "attended",
+						overlay: NOOP_POINTER_OVERLAY,
+						isLocked: () => false,
+						cursorMotion,
+					}),
+			).toThrow(/global-input cannot operate on the human desktop/);
+			expect(native.post).not.toHaveBeenCalled();
 		},
 	);
 

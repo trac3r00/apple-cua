@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const browser = vi.hoisted(() => ({
 	doctorBrowserService: vi.fn(),
@@ -20,7 +21,7 @@ vi.mock("node:child_process", () => ({
 	}),
 }));
 
-import { browserSetupInstructions, setupBrowser } from "./browser-commands.js";
+const { browserSetupInstructions, setupBrowser } = await import("./browser-commands.js");
 
 const paths = {
 	launchAgent: "/tmp/agent.plist",

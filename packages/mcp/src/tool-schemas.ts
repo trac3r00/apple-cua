@@ -644,7 +644,15 @@ export const runHandsSchema = z
 	});
 
 const workerAssignmentsSchema = z
-	.array(z.object({ worker_id: z.string().min(1), task: z.string().min(1), app: appSchema }))
+	.array(
+		z.object({
+			worker_id: z.string().min(1),
+			task: z.string().min(1),
+			app: appSchema,
+			agent_name: z.string().trim().min(1).max(128).optional(),
+			parent_agent_name: z.string().trim().min(1).max(128).optional(),
+		}),
+	)
 	.min(1)
 	.max(6);
 

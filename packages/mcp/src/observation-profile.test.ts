@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { profileDefaults } from "./observation-profile.js";
 
 describe("#given an observation profile #when resolving defaults #then the fast path avoids pixels and the visual path avoids a tree walk", () => {

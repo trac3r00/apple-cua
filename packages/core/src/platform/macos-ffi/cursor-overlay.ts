@@ -1,11 +1,12 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { connect } from "node:net";
+import { type Socket, connect } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { currentCursorIdentity } from "../../computer/cursor-scope.js";
+import { type CursorOwner, currentCursorIdentity, currentCursorOwner } from "../../computer/cursor-scope.js";
+import { denyHostInteraction } from "../../computer/host-interaction-policy.js";
 import type { Point, Rect } from "../../types/index.js";
 import {
 	CURSOR_MOTION_ENV,
@@ -45,7 +46,12 @@ export interface OverlayTransport {
 	close(): void;
 }
 
-export type OverlayTransportFactory = (identity?: string) => OverlayTransport | undefined;
+/** Builds the transport for one cursor identity; motion is the overlay's resolved renderer configuration. */
+export type OverlayTransportFactory = (
+	identity?: string,
+	owner?: CursorOwner,
+	motion?: CursorMotionConfig,
+) => OverlayTransport | undefined;
 
 export const NOOP_POINTER_OVERLAY: PointerOverlay = {
 	state(): Promise<CursorState | null> {
@@ -106,6 +112,7 @@ export function createCursorOverlay(
 	transportFactory?: OverlayTransportFactory,
 	motion?: CursorMotionConfig | null,
 ): PointerOverlay {
+	if (transportFactory === undefined) denyHostInteraction("host-overlay");
 	const environmentMotion = process.env[CURSOR_MOTION_ENV]?.trim();
 	// Default the renderer, not the shared parser used by persisted CLI settings.
 	const configuration =
@@ -118,8 +125,8 @@ export function createCursorOverlay(
 	const pidsByIdentity = new Map<string | undefined, Set<number>>();
 	const factory =
 		transportFactory ??
-		((scopedIdentity) =>
-			defaultSocketTransport(Date.now, spawn, configuration, cursorOverlaySocketPath(scopedIdentity)));
+		((scopedIdentity, _owner, scopedMotion) =>
+			defaultSocketTransport(Date.now, spawn, scopedMotion, cursorOverlaySocketPath(scopedIdentity)));
 
 	function send(command: string, pid?: number, direct = false): void {
 		const identity = currentCursorIdentity();
@@ -132,7 +139,7 @@ export function createCursorOverlay(
 			pids.add(pid);
 		}
 		if (!transportsByIdentity.has(identity)) {
-			transportsByIdentity.set(identity, safeTransport(factory, identity));
+			transportsByIdentity.set(identity, safeTransport(factory, identity, configuration));
 		}
 		try {
 			transportsByIdentity.get(identity)?.send(command, pid, direct);
@@ -145,7 +152,7 @@ export function createCursorOverlay(
 		state(options?: { readonly deadlineMs?: number }): Promise<CursorState | null> {
 			const identity = currentCursorIdentity();
 			if (!transportsByIdentity.has(identity)) {
-				transportsByIdentity.set(identity, safeTransport(factory, identity));
+				transportsByIdentity.set(identity, safeTransport(factory, identity, configuration));
 			}
 			const transport = transportsByIdentity.get(identity);
 			if (transport === undefined) return Promise.resolve(null);
@@ -200,9 +207,13 @@ export function createCursorOverlay(
 	};
 }
 
-function safeTransport(factory: OverlayTransportFactory, identity: string | undefined): OverlayTransport | undefined {
+function safeTransport(
+	factory: OverlayTransportFactory,
+	identity: string | undefined,
+	motion: CursorMotionConfig | undefined,
+): OverlayTransport | undefined {
 	try {
-		return factory(identity);
+		return factory(identity, currentCursorOwner(), motion);
 	} catch {
 		return undefined;
 	}
@@ -214,6 +225,9 @@ function overlayBinaryPath(): string | undefined {
 
 // Default transport: send each command over a short-lived connection to the shared
 // overlay daemon, spawning the daemon (detached) whenever no one is listening.
+/** Opens the overlay daemon socket; only the path form of net.connect is used. */
+export type ConnectOverlaySocket = (path: string) => Socket;
+
 export type SpawnOverlayProcess = (
 	command: string,
 	args: readonly string[],
@@ -228,7 +242,9 @@ export function defaultSocketTransport(
 	spawnProcess: SpawnOverlayProcess = spawn,
 	motion?: CursorMotionConfig,
 	socketPath = cursorOverlaySocketPath(),
+	connectSocket: ConnectOverlaySocket = connect,
 ): OverlayTransport {
+	if (spawnProcess === spawn || connectSocket === connect) denyHostInteraction("host-overlay");
 	let lastSpawnAt = Number.NEGATIVE_INFINITY;
 	// A binary that cannot be executed (ENOENT/EACCES) will not become executable by retrying every
 	// second, so one failure turns daemon spawning off; the overlay then stays a silent no-op.
@@ -240,7 +256,7 @@ export function defaultSocketTransport(
 			if (remaining !== undefined && remaining <= 0) return null;
 			const attemptTimeout = remaining === undefined ? 2_000 : Math.min(2_000, remaining);
 			try {
-				return await querySocketState(socketPath, attemptTimeout);
+				return await querySocketState(socketPath, attemptTimeout, connectSocket);
 			} catch {
 				if (attempt < 2) {
 					const remainingAfterAttempt = deadline === undefined ? undefined : deadline - Date.now();
@@ -288,7 +304,7 @@ export function defaultSocketTransport(
 	function deliver(command: string, attempt: number, finished?: () => void, direct = false): void {
 		let socket: ReturnType<typeof connect>;
 		try {
-			socket = connect(socketPath);
+			socket = connectSocket(socketPath);
 		} catch {
 			ensureDaemon();
 			finished?.();
@@ -367,9 +383,13 @@ export function defaultSocketTransport(
 	};
 }
 
-function querySocketState(socketPath: string, timeoutMs: number): Promise<CursorState> {
+function querySocketState(
+	socketPath: string,
+	timeoutMs: number,
+	connectSocket: ConnectOverlaySocket,
+): Promise<CursorState> {
 	return new Promise((resolve, reject) => {
-		const socket = connect(socketPath);
+		const socket = connectSocket(socketPath);
 		let response = "";
 		const timeout = setTimeout(() => socket.destroy(new Error("Cursor overlay state request timed out")), timeoutMs);
 		const cleanup = (): void => {

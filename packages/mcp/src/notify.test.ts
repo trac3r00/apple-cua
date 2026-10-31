@@ -1,5 +1,6 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { EventEmitter } from "node:events";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { vi } from "@apple-cua/test-support";
 import { createNotifier, notificationsEnabled, parseNotificationsEnabled } from "./notify.js";
 import type { NotificationDependencies, NotificationProcess } from "./notify.js";
 

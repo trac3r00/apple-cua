@@ -1,5 +1,6 @@
+import { describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { describe, expect, it, vi } from "vitest";
 
 import { FAKE_TOOLS } from "../test/support/fake-apple-cua.js";
 import type { CallOptions } from "./mcp-bridge.js";

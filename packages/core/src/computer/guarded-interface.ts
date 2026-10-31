@@ -15,20 +15,23 @@ export interface InputObservation {
 	readonly observedElementIds: ReadonlySet<number>;
 }
 
-export type PreflightResult =
-	| { readonly ok: true }
-	| {
-			readonly ok: false;
-			readonly reason:
-				| "app-not-frontmost"
-				| "app-not-approved"
-				| "url-blocked"
-				| "url-unavailable"
-				| "window-missing"
-				| "window-changed"
-				| "window-bounds-changed"
-				| "observation-replaced";
-	  };
+type PreflightRefusalReason =
+	| "isolated-session-required"
+	| "app-not-frontmost"
+	| "app-not-approved"
+	| "url-blocked"
+	| "url-unavailable"
+	| "window-missing"
+	| "window-changed"
+	| "window-bounds-changed"
+	| "observation-replaced";
+
+interface PreflightRefusal {
+	readonly ok: false;
+	readonly reason: PreflightRefusalReason;
+}
+
+export type PreflightResult = { readonly ok: true } | PreflightRefusal;
 
 export interface PreflightOptions {
 	/**

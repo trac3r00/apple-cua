@@ -34,6 +34,9 @@ const OMITTED_ELEMENTS_NOTE =
 const WINDOW_CONTENT_UNAVAILABLE_NOTE =
 	"this session does not own the Mac's physical screen (Screen Sharing or fast user switching), so the app's window content is not reachable over accessibility: ocrText is the window read from pixels, with screen frames. Keyboard input (type_text, press_keys) still reaches the app; pointer clicks and window-level menu items such as Save do not. Use keyboard routes, and call ask_user when a step needs a click or Save.";
 
+const ISOLATED_CAPTURE_NOTE =
+	"no image: apple-cua never captures the person's desktop. Elements and ids come from accessibility. For pixels, use an agent-owned isolated desktop.";
+
 const SCREENSHOT_UNAVAILABLE_NOTE =
 	"no image: the process running apple-cua lacks macOS Screen Recording permission, so no capture was attempted (it would raise a permission prompt over the person's screen). Elements and ids are complete and actions work. If pixels are needed, ask the user to grant Screen Recording to the app that launches this server and restart it.";
 
@@ -761,7 +764,10 @@ function stateToolResult(
 		payload["windowContentNote"] = WINDOW_CONTENT_UNAVAILABLE_NOTE;
 	}
 	if (state.screenshotUnavailable !== undefined) {
-		payload["screenshotNote"] = SCREENSHOT_UNAVAILABLE_NOTE;
+		payload["screenshotNote"] =
+			state.screenshotUnavailable === "isolated-session-required"
+				? ISOLATED_CAPTURE_NOTE
+				: SCREENSHOT_UNAVAILABLE_NOTE;
 	}
 	if (state.systemPrompts !== undefined && state.systemPrompts.length > 0) {
 		payload["systemPrompts"] = state.systemPrompts.map(describeSystemPrompt);

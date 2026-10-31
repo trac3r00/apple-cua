@@ -1,0 +1,22 @@
+export type HostInteraction =
+	| "physical-pointer"
+	| "global-input"
+	| "host-focus"
+	| "host-clipboard"
+	| "host-spaces"
+	| "host-window"
+	| "host-overlay";
+
+export class HostInteractionDenied extends Error {
+	readonly code = "HOST_INTERACTION_FORBIDDEN";
+
+	constructor(readonly operation: HostInteraction) {
+		super(`${operation} cannot operate on the human desktop; use an agent-owned isolated session.`);
+		this.name = "HostInteractionDenied";
+	}
+}
+
+/** No delivery flag or caller-provided identity can authorize the human's peripherals. */
+export function denyHostInteraction(operation: HostInteraction): never {
+	throw new HostInteractionDenied(operation);
+}

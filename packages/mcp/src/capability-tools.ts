@@ -47,31 +47,29 @@ function adviceFor(
 	allowed: readonly string[] | undefined,
 	stop: StopStatus | undefined,
 ): string[] {
-	const advice: string[] = [];
+	const advice: string[] = [
+		"Native host input and capture are disabled. Use an agent-owned isolated desktop; background delivery is not isolation.",
+	];
 	if (stop?.stopped === true) {
 		advice.push(
 			"The user stopped computer use. Do not act or retry; tell the user. Only they resume (apple-cua resume).",
 		);
 	}
 	if (!host.permissions.accessibility) {
-		advice.push(
-			"Accessibility is not granted to the process that launched this server: no observation or input will work. Ask the user to grant it in System Settings > Privacy & Security > Accessibility, then restart the server.",
-		);
+		advice.push("Host accessibility observation is unavailable. Permissions inside an isolated guest are separate.");
 	}
 	if (!host.permissions.screenRecording) {
-		advice.push(
-			"Screen Recording is not granted: screenshots are unavailable, but accessibility observation and element actions still work.",
-		);
+		advice.push("Host screenshots are unavailable. This does not determine whether guest capture is available.");
 	}
 	if (allowed?.length === 0) {
-		advice.push("No app is approved for observation or input. The user sets APPLE_CUA_ALLOWED_BUNDLE_IDS.");
+		advice.push("No host app is approved for observation. The user sets APPLE_CUA_ALLOWED_BUNDLE_IDS.");
 	}
 	if (mode === "locked") {
 		advice.push("The screen is locked: windows report no content. Use ask_user with reason screen_locked.");
 	}
 	if (mode === "remote") {
 		advice.push(
-			"This session is reached remotely while another user owns the console: Save/Open panels and some web content may not render. Prefer accessibility actions and report needs-user for steps that cannot be reached.",
+			"This host observer is outside the console session. Do not borrow console focus; use the isolated guest.",
 		);
 	}
 	return advice;
@@ -81,7 +79,7 @@ export function capabilityReport(sources: CapabilitySources): Record<string, unk
 	const host = sources.probeHost();
 	const mode = sessionMode(host);
 	const stop = sources.stop?.status();
-	const delivery = sources.delivery ?? "attended";
+	const delivery = "background";
 	const toolNames = sources.toolNames ?? toolNamesFor("full", false);
 	const agentHost = sources.host?.() ?? detectHost(undefined, process.env);
 	return {
@@ -93,17 +91,17 @@ export function capabilityReport(sources: CapabilitySources): Record<string, unk
 		},
 		host: { ...agentHost, workers: spawnGuidance(agentHost.name, delivery) },
 		platform: process.platform,
-		backend: "macos-native",
+		backend: "macos-host-observer",
+		input: { supported: false, reason: "isolated-session-required", scope: "human-desktop" },
+		capture: { supported: false, reason: "isolated-session-required", scope: "human-desktop" },
 		permissions: host.permissions,
 		session: { ...host.session, mode },
 		mainDisplay: host.mainDisplay,
 		delivery: {
 			mode: delivery,
-			modes: ["background", "attended"],
-			focusGuard:
-				delivery === "background"
-					? "input goes to the target window; the front app, its focused window and the pointer are left alone and restored if the target takes front"
-					: "input may bring the target app forward",
+			requestedMode: sources.delivery ?? "background",
+			modes: ["background"],
+			focusGuard: "Native host input is disabled; no focus borrowing or physical pointer dispatch is permitted.",
 		},
 		approval: { allowedBundleIds: sources.allowedBundleIds ?? null },
 		stop: {

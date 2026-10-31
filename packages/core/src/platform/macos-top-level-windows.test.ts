@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 import { type TopLevelWindow, fillWindowTitles } from "./macos-top-level-windows.js";
 

@@ -1,12 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
-const coreGraphicsMock = vi.hoisted(() => ({
+const coreGraphicsMock = {
 	getCurrentCursorPosition: vi.fn(() => ({ x: 11, y: 22 })),
 	postKeyboardEvent: vi.fn(),
 	postMouseEvent: vi.fn(),
 	postScrollEvent: vi.fn(),
 	warpCursorPosition: vi.fn(),
-}));
+};
 
 vi.mock("./macos-ffi/coregraphics.js", () => ({
 	K_CG_EVENT_FLAG_MASK_ALTERNATE: 0x00080000,

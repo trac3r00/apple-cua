@@ -1,7 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
-import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const WINDOW = { id: 99, bounds: { x: 10, y: 20, width: 300, height: 200 } };
 const OTHER_WINDOW = { id: 98, bounds: { x: 400, y: 20, width: 300, height: 200 } };
@@ -42,7 +40,6 @@ vi.mock("get-windows", () => ({
 		),
 	),
 }));
-setOpenWindowsSourceForTesting(() => undefined);
 // The focus-lease and primer pauses only give a real app time to react; no assertion here depends on them.
 vi.mock("node:timers/promises", () => ({ setTimeout: () => Promise.resolve() }));
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
@@ -63,6 +60,10 @@ vi.mock("./macos-ffi/coregraphics.js", () => ({
 	postUnicodeText: coreGraphicsMock.postUnicodeText,
 	warpCursorPosition: coreGraphicsMock.warpCursorPosition,
 }));
+
+const { setOnscreenWindowIdsSourceForTesting } = await import("./macos-input.js");
+const { setOpenWindowsSourceForTesting } = await import("./macos-open-windows.js");
+setOpenWindowsSourceForTesting(() => undefined);
 
 interface MouseCall {
 	readonly kind: string;
@@ -526,7 +527,7 @@ describe("#given a window command (a menu item or key equivalent) for one window
 describe("#given an app behind the person's that background input told it is active (idle release)", () => {
 	beforeEach(async () => {
 		await resetDesktop();
-		vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] });
+		vi.useFakeTimers();
 	});
 
 	afterEach(() => {

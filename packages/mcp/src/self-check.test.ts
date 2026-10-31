@@ -1,6 +1,7 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import type { HostCapabilities } from "@apple-cua/core";
 import type { AutomationStatus } from "@apple-cua/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { vi } from "@apple-cua/test-support";
 import { parsePermissionRequests, requestPermissions, selfCheckReport } from "./self-check.js";
 
 const HOST_WITHOUT_ACCESSIBILITY: HostCapabilities = {
@@ -35,7 +36,7 @@ describe("#given a helper process without Accessibility #when the self-check rep
 			stop: { stopped: false },
 		});
 		expect(report["advice"]).toEqual(
-			expect.arrayContaining([expect.stringContaining("Accessibility is not granted")]),
+			expect.arrayContaining([expect.stringContaining("Host accessibility observation is unavailable")]),
 		);
 		expect(JSON.parse(JSON.stringify(report))).toEqual(report);
 	});

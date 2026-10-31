@@ -1,6 +1,7 @@
+import { describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
-import { describe, expect, it, vi } from "vitest";
+import { vi } from "@apple-cua/test-support";
 
 describe("manual browser connection options", () => {
 	it.each(["", "a".repeat(63), "a".repeat(65), "g".repeat(64), "ab", "A".repeat(64), "0".repeat(64)])(
@@ -39,7 +40,9 @@ describe("manual browser connection options", () => {
 			Reflect.apply(submit, undefined, [{ preventDefault: vi.fn() }]);
 
 			if (/^[0-9a-f]{64}$/i.test(token)) {
-				expect(save).toHaveBeenCalledWith({ port: 47953, token }, expect.any(Function));
+				expect(save).toHaveBeenCalledWith({ port: 47953, token }, expect.anything());
+				// The callback comes from the options page realm, where Bun's expect.any(Function) does not match.
+				expect(typeof save.mock.calls.at(-1)?.[1]).toBe("function");
 			} else {
 				expect(save).not.toHaveBeenCalled();
 				expect(sendMessage).not.toHaveBeenCalled();

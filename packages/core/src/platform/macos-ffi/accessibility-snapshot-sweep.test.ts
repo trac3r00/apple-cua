@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { defined, vi } from "@apple-cua/test-support";
 
 const fixture = vi.hoisted(() => {
 	const firstWindow = { role: "AXWindow" };
@@ -32,16 +33,16 @@ const fixture = vi.hoisted(() => {
 	};
 });
 
-vi.mock("./koffi.js", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("./koffi.js")>();
+const actualKoffi = { ...(await import("./koffi.js")) };
+vi.mock("./koffi.js", () => {
 	return {
 		koffi: {
-			...actual.koffi,
-			opaque: actual.koffi.opaque ?? (() => ({})),
-			pointer: actual.koffi.pointer ?? ((_name: string, value: unknown) => value),
+			...actualKoffi.koffi,
+			opaque: actualKoffi.koffi.opaque ?? (() => ({})),
+			pointer: actualKoffi.koffi.pointer ?? ((_name: string, value: unknown) => value),
 			struct: (_name: string, fields: object) => fields,
 			load: (path: string) => {
-				if (!path.includes("ApplicationServices.framework")) return actual.koffi.load(path);
+				if (!path.includes("ApplicationServices.framework")) return actualKoffi.koffi.load(path);
 				return {
 					func: (prototype: string) => {
 						const name = prototype.match(/\s([A-Za-z_][A-Za-z0-9_]*)\(/)?.[1] ?? prototype;
@@ -111,7 +112,6 @@ vi.mock("./coregraphics.js", () => ({
 	getCursorPosition: vi.fn(() => ({ x: 0, y: 0 })),
 }));
 
-vi.mock("./accessibility.js", async (importOriginal) => importOriginal<typeof import("./accessibility.js")>());
 vi.mock("./window-list.js", () => ({ listWindows: vi.fn(() => []), listOnscreenWindows: vi.fn(() => []) }));
 vi.mock("./display-list.js", () => ({ onlineDisplayInfo: vi.fn(() => []) }));
 vi.mock("./lock-screen.js", () => ({ isScreenLocked: () => false }));
@@ -127,9 +127,9 @@ vi.mock("./screenshot.js", () => ({
 	captureDisplayRegionImage: vi.fn(),
 }));
 
-import { setOnscreenWindowIdsSourceForTesting } from "../macos-input.js";
-import { MacOSHostComputer } from "../macos.js";
-import * as accessibility from "./accessibility.js";
+const { setOnscreenWindowIdsSourceForTesting } = await import("../macos-input.js");
+const { MacOSHostComputer } = await import("../macos.js");
+const accessibility = await import("./accessibility.js");
 
 setOnscreenWindowIdsSourceForTesting(() => []);
 
@@ -164,10 +164,10 @@ describe("#given retained accessibility snapshots #when sweeping exited pids #th
 		expect(accessibility.releaseSnapshotsForExitedPids([])).toBe(2);
 
 		expect(fixture.release.mock.calls.map(([reference]) => reference)).toEqual([
-			fixture.applications.get(41001),
+			defined(fixture.applications.get(41001)),
 			fixture.firstWindow,
 			fixture.secondWindow,
-			fixture.applications.get(41003),
+			defined(fixture.applications.get(41003)),
 			...(fixture.applications.get(41003)?.children ?? []),
 		]);
 		expect(accessibility.currentObservationKey(41001)).toBeUndefined();
@@ -186,7 +186,7 @@ describe("#given retained accessibility snapshots #when sweeping exited pids #th
 		expect(accessibility.releaseSnapshotsForExitedPids([41002, 41002, 49999])).toBe(1);
 
 		expect(fixture.release.mock.calls.map(([reference]) => reference)).toEqual([
-			fixture.applications.get(41001),
+			defined(fixture.applications.get(41001)),
 			fixture.firstWindow,
 			fixture.secondWindow,
 		]);
@@ -198,7 +198,7 @@ describe("#given retained accessibility snapshots #when sweeping exited pids #th
 		expect(fixture.release).not.toHaveBeenCalled();
 		accessibility.releaseAccessibilitySnapshot(41002);
 		expect(fixture.release.mock.calls.map(([reference]) => reference)).toEqual([
-			fixture.applications.get(41002),
+			defined(fixture.applications.get(41002)),
 			fixture.thirdWindow,
 		]);
 	});

@@ -1,7 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
-import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 interface TestWindow {
 	readonly id: number;
@@ -45,8 +43,6 @@ const skyLightMock = vi.hoisted(() => {
 });
 
 vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
-// The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
-setOpenWindowsSourceForTesting(() => undefined);
 // The focus-lease and primer pauses only give a real app time to react; no assertion here depends on them.
 vi.mock("node:timers/promises", () => ({ setTimeout: () => Promise.resolve() }));
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
@@ -68,6 +64,11 @@ vi.mock("./macos-ffi/coregraphics.js", () => ({
 	postUnicodeText: coreGraphicsMock.postUnicodeText,
 	warpCursorPosition: coreGraphicsMock.warpCursorPosition,
 }));
+
+const { setOnscreenWindowIdsSourceForTesting } = await import("./macos-input.js");
+const { setOpenWindowsSourceForTesting } = await import("./macos-open-windows.js");
+// The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
+setOpenWindowsSourceForTesting(() => undefined);
 
 function callOrderAt(orders: readonly number[], index: number, label: string): number {
 	const order = orders[index];

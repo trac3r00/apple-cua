@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { type HeartbeatTimer, TimingHeartbeat, ToolUsageRegistry, mergeTiming } from "./tool-timing.js";
 
 describe("#given a tool usage registry #when samples exceed its bounded ring #then counters remain exact", () => {

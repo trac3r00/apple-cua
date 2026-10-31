@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const state = vi.hoisted(() => ({
 	bundleId: "com.apple.finder",
@@ -22,25 +23,25 @@ vi.mock("./app-list.js", () => ({
 		},
 	],
 }));
-vi.mock("./macos-menu.js", async () => {
-	const actual = await vi.importActual<typeof import("./macos-menu.js")>("./macos-menu.js");
-	return {
-		...actual,
-		applicationIsFrontmost: () => state.frontmost,
-		findMenuKeyEquivalent: () => (state.itemVisible ? { path: state.path, enabled: true } : undefined),
-		pressMenuItem: menu.pressMenuItem,
-		invokeMenu: menu.invokeMenu,
-	};
-});
+const actualMacosMenu = { ...(await import("./macos-menu.js")) };
+vi.mock("./macos-menu.js", () => ({
+	...actualMacosMenu,
+	applicationIsFrontmost: () => state.frontmost,
+	findMenuKeyEquivalent: () => (state.itemVisible ? { path: state.path, enabled: true } : undefined),
+	pressMenuItem: menu.pressMenuItem,
+	invokeMenu: menu.invokeMenu,
+}));
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 
-import { runInInputScope } from "../computer/input-scope.js";
-import { NOOP_POINTER_OVERLAY } from "./macos-ffi/cursor-overlay.js";
-import { MacOSInputController } from "./macos-input.js";
-import { MacOSHostComputer } from "./macos.js";
+const { runInInputScope } = await import("../computer/input-scope.js");
+const { NOOP_POINTER_OVERLAY } = await import("./macos-ffi/cursor-overlay.js");
+const { MacOSInputController } = await import("./macos-input.js");
+const { MacOSHostComputer } = await import("./macos.js");
+
+const HOST_REFUSAL = /host-window cannot operate on the human desktop/;
 
 describe("#given Finder commands that activate their app", () => {
-	let computer: MacOSHostComputer;
+	let computer: InstanceType<typeof MacOSHostComputer>;
 	beforeEach(() => {
 		vi.clearAllMocks();
 		state.bundleId = "com.apple.finder";
@@ -96,20 +97,20 @@ describe("#given Finder commands that activate their app", () => {
 		expect(menu.invokeMenu).not.toHaveBeenCalled();
 	});
 
-	it("#when another Finder menu command is requested #then preserves its native menu route", async () => {
-		await computer.invokeMenu(4242, ["File", "New Folder"]);
-		expect(menu.invokeMenu).toHaveBeenCalledWith(4242, ["File", "New Folder"]);
+	it("#when another Finder menu command is requested #then the human desktop refuses its native menu route too", async () => {
+		await expect(computer.invokeMenu(4242, ["File", "New Folder"])).rejects.toThrow(HOST_REFUSAL);
+		expect(menu.invokeMenu).not.toHaveBeenCalled();
 	});
 
-	it("#when Finder is already the person's front app #then keeps the existing key route", async () => {
+	it("#when Finder is already the person's front app #then the key route is refused rather than typed into their app", async () => {
 		state.frontmost = true;
-		await goToFolder();
-		expect(MacOSInputController.prototype.pressKey).toHaveBeenCalledWith("g", { modifiers: ["shift", "cmd"] });
+		await expect(goToFolder()).rejects.toThrow(HOST_REFUSAL);
+		expect(MacOSInputController.prototype.pressKey).not.toHaveBeenCalled();
 	});
 
-	it("#when another app uses the same chord #then keeps its existing menu route", async () => {
+	it("#when another app uses the same chord #then its menu route is refused as well", async () => {
 		state.bundleId = "com.example.editor";
-		await goToFolder();
-		expect(menu.pressMenuItem).toHaveBeenCalledWith(4242, ["Go", "Go to Folder…"]);
+		await expect(goToFolder()).rejects.toThrow(HOST_REFUSAL);
+		expect(menu.pressMenuItem).not.toHaveBeenCalled();
 	});
 });

@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 import { withCursorIdentity } from "../../computer/cursor-scope.js";
 import { type OverlayTransport, createCursorOverlay } from "./cursor-overlay.js";

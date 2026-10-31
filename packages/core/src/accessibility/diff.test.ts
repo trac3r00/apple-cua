@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { defined } from "@apple-cua/test-support";
 
 import { diffAxTreeChanges, diffAxTrees, diffAxTreesByKey } from "./diff.js";
 import type { AXTreeElement } from "./types.js";
@@ -83,8 +84,8 @@ describe("#given repeated controls #when diffed by key #then counts are compared
 
 		expect(diffAxTreesByKey(one, two)).toEqual({ added: 1, removed: 0, changed: 0 });
 		expect(diffAxTreesByKey(two, one)).toEqual({ added: 0, removed: 1, changed: 0 });
-		expect(diffAxTreeChanges(one, two).added).toEqual([two[1]]);
-		expect(diffAxTreeChanges(two, one).removed).toEqual([two[1]]);
+		expect(diffAxTreeChanges(one, two).added).toEqual([defined(two[1])]);
+		expect(diffAxTreeChanges(two, one).removed).toEqual([defined(two[1])]);
 	});
 
 	it("still reports a value change among repeated controls", () => {

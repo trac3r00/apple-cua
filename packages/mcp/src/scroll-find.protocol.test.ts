@@ -1,5 +1,6 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import type { StopStatus, StopStatusSource } from "@apple-cua/core";
-import { afterEach, describe, expect, it } from "vitest";
+import { copyForMatch } from "@apple-cua/test-support";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
@@ -150,7 +151,7 @@ describe("scroll-until-found #given a list longer than its window #when a click 
 		]);
 
 		expect(report.stoppedEarly).toBe(true);
-		expect(report.steps[0]).toMatchObject({
+		expect(copyForMatch(report.steps[0])).toMatchObject({
 			status: "skipped",
 			reason: expect.stringContaining("reached the end of the content"),
 			found: { pages_scrolled: 3 },

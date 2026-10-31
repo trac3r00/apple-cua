@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 import type { ListedWindow } from "./macos-ffi/window-list.js";
 import * as windowListing from "./macos-ffi/window-list.js";

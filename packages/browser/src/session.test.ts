@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { whenSettled } from "@apple-cua/test-support";
 import type { BrowserTransport } from "./bridge.js";
 import { type BrowserCommand, BrowserError, limitsSchema, stepSchema } from "./protocol.js";
 import { BrowserSession } from "./session.js";
@@ -78,7 +79,7 @@ describe("BrowserSession", () => {
 		cancellation.abort();
 		transport.response = {};
 		transport.resolve({ tabId: 7 });
-		await expect(opening).resolves.toEqual({ tabId: 7 });
+		await whenSettled(opening, (settled) => expect(settled).resolves.toEqual({ tabId: 7 }));
 		await session.close(7);
 		expect(transport.commands).toEqual([
 			{ method: "open", url: "https://example.com" },
@@ -189,7 +190,7 @@ describe("BrowserSession", () => {
 		const pending = session.observe(7);
 		await expect(session.observe(7)).rejects.toMatchObject({ code: "busy" });
 		transport.resolve(observation("r1"));
-		await expect(pending).resolves.toMatchObject({ format: "full" });
+		await whenSettled(pending, (settled) => expect(settled).resolves.toMatchObject({ format: "full" }));
 	});
 
 	it.each(["resolve", "reject"] as const)(
@@ -225,7 +226,7 @@ describe("BrowserSession", () => {
 		transport.response = undefined;
 		const failedRun = session.run(7, first.observation_token, [{ action: "click", ref: 1 }], undefined);
 		transport.reject(new BrowserError("disconnected", "gone"));
-		await expect(failedRun).rejects.toMatchObject({ code: "disconnected" });
+		await whenSettled(failedRun, (settled) => expect(settled).rejects.toMatchObject({ code: "disconnected" }));
 		await expect(
 			session.run(7, first.observation_token, [{ action: "click", ref: 1 }], undefined),
 		).rejects.toMatchObject({ code: "stale" });

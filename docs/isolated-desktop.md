@@ -12,7 +12,8 @@ isolated execution session.
 
 ## Requirements
 
-- An Apple-silicon Mac that can run the configured macOS VM through Tart.
+- An Apple-silicon Mac running macOS 26 (Tahoe) or newer that can run the configured macOS VM
+  through Tart. Tart refuses the required `--net-host` run argument on earlier releases.
 - A separately provisioned Tart guest with the Tart Guest Agent installed.
 - Guest Accessibility permission for input and guest screen-capture permission.
   Host permissions do not satisfy these requirements.
@@ -59,19 +60,6 @@ the corresponding executable is `apple-cua-isolated-mcp`.
 Allow at least 210 seconds for a client's initial `start` request. Startup has
 a bounded 180-second guest-agent readiness window. Normal guest commands have
 a 30-second deadline.
-
-The desktop provisioned and verified by this implementation is retained at
-`~/.apple-cua/desktops/01a18a77` and is stopped at handoff. From this checkout:
-
-```sh
-bun --tsconfig-override=tsconfig.isolated.json \
-  packages/mcp/src/isolated-server.ts \
-  "$HOME/.apple-cua/desktops/01a18a77" OmO apple-cua-isolation-01a18a77
-```
-
-No global MCP configuration was replaced. Use this source entrypoint, or package
-these changes before using the installed executable. Older installed clients
-have not been upgraded by this task.
 
 ## Protocol
 

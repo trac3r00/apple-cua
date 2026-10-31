@@ -24,7 +24,7 @@
 - Never run tests that post input to the host desktop; use fake-only seams or
   an explicitly owned virtual workspace
 - Test naming: `#given #when #then` pattern
-- Coverage through Bun's native v8 coverage reporter
+- Coverage: `bun test --coverage` (`--coverage-reporter=text` or `lcov`)
 
 ## macOS Native APIs
 - Screenshot: ScreenCaptureKit/IOSurface (preferred) or `screencapture` CLI fallback

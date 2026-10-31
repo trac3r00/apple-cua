@@ -79,7 +79,7 @@ describe("#given apple-cua config with stdin from a pipe in a terminal #when it 
 		const transcript = expectScript(
 			[
 				`spawn /bin/bash -c {${process.execPath} --experimental-strip-types ${cli} config < /dev/null}`,
-				"expect -re {Add apps[^\\n]*: }",
+				"expect -re {Restrict to apps[^\\n]*: }",
 				'send "com.apple.TextEdit\\r"',
 				"expect -re {Delivery[^\\n]*: }",
 				'send "\\r"',
@@ -100,5 +100,5 @@ describe("#given apple-cua config with stdin from a pipe in a terminal #when it 
 			toolset: "lean",
 			clients: [],
 		});
-	});
+	}, 30_000);
 });

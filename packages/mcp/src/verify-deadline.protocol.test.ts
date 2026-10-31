@@ -107,6 +107,21 @@ describe("#given a wait condition that never appears #when its deadline expires 
 	});
 
 	it("does not start a wait observation after the instant-read deadline expires", async () => {
+		// The poll sleep advances this clock by exactly what it asked for, so waking at the deadline no longer
+		// depends on whether the timer or Date.now() ticks first.
+		let now = Date.now();
+		vi.spyOn(Date, "now").mockImplementation(() => now);
+		const schedule = globalThis.setTimeout;
+		const advancing = (...args: Parameters<typeof setTimeout>) => {
+			const delay = args[1] ?? 0;
+			if (delay > 0 && delay <= 150) {
+				now += delay;
+			}
+			return schedule(...args);
+		};
+		vi.spyOn(globalThis, "setTimeout").mockImplementation(
+			Object.assign(advancing, { __promisify__: schedule.__promisify__ }),
+		);
 		const computer = new FakeGuardedComputer();
 		const harness = await createHarness(computer, async () => []);
 		closeHarness = harness.close;

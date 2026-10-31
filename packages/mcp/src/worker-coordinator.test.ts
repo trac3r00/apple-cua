@@ -1,5 +1,6 @@
+import { describe, expect, it } from "bun:test";
 import { currentCursorIdentity, currentInputScope } from "@apple-cua/core";
-import { describe, expect, it, vi } from "vitest";
+import { copyForMatch, vi, whenSettled } from "@apple-cua/test-support";
 import { GuardedSession } from "./guarded-session.js";
 import * as notify from "./notify.js";
 import { Deferred, FakeGuardedComputer } from "./protocol-test-harness.js";
@@ -29,7 +30,7 @@ describe("WorkerCoordinator #given a failed assignment #when sibling reads remai
 			{ worker_id: "one", task: "first", app: "Finder" },
 			{ worker_id: "two", task: "second", app: "Other" },
 		]);
-		const failure = expect(assignment).rejects.toThrow("first app unavailable");
+		const failure = whenSettled(assignment, (settled) => expect(settled).rejects.toThrow("first app unavailable"));
 		try {
 			await reading.promise;
 			await expect(coordinator.assign([{ worker_id: "three", task: "overlapping", app: "Other" }])).rejects.toThrow(
@@ -340,7 +341,7 @@ describe("WorkerCoordinator #given a run produces no successor token #when the w
 			const run = await coordinator.run("one", worker.observation_token, steps, undefined);
 			expect(run.observation_token).toBeUndefined();
 			const observed = await coordinator.observe("one", { includeScreenshot: false, maxElements: 4 });
-			expect(observed).toMatchObject({
+			expect(copyForMatch(observed)).toMatchObject({
 				worker_id: "one",
 				task: "edit note",
 				app: "Finder",

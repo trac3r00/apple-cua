@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { resolveAppPid, withCursorIdentity } from "@apple-cua/core";
-import type { GuardedComputerInterface } from "@apple-cua/core";
+import type { CursorOwner, GuardedComputerInterface } from "@apple-cua/core";
 import type {
 	GuardedSession,
 	MutationOptions,
@@ -17,10 +17,13 @@ export type WorkerAssignmentInput = {
 	readonly worker_id: string;
 	readonly task: string;
 	readonly app: string;
+	readonly agent_name?: string | undefined;
+	readonly parent_agent_name?: string | undefined;
 };
 
 export type WorkerAssignment = WorkerAssignmentInput & {
 	readonly cursor_id: string;
+	readonly cursor_owner: CursorOwner;
 	readonly observation_token?: string;
 	readonly observation?: ToolResult;
 };
@@ -48,6 +51,7 @@ export type WorkerObservation = {
 	readonly task: string;
 	readonly app: string;
 	readonly cursor_id: string;
+	readonly cursor_owner: CursorOwner;
 	readonly observation_token?: string;
 	readonly result: ToolResult;
 };
@@ -57,6 +61,7 @@ export type WorkerRunResult = {
 	readonly task: string;
 	readonly app: string;
 	readonly cursor_id: string;
+	readonly cursor_owner: CursorOwner;
 	readonly observation_token?: string;
 	readonly result: ToolResult;
 };
@@ -64,6 +69,7 @@ export type WorkerRunResult = {
 type WorkerState = {
 	assignment: WorkerAssignmentInput & {
 		readonly cursor_id: string;
+		readonly cursor_owner: CursorOwner;
 		observation_token: string | undefined;
 		observation: ToolResult | undefined;
 	};
@@ -85,6 +91,7 @@ function payload(result: ToolResult): Record<string, unknown> {
 }
 
 export class WorkerCoordinator {
+	private readonly sessionId = randomUUID();
 	private readonly workers = new Map<string, WorkerState>();
 	private attendedTail: Promise<void> = Promise.resolve();
 	private closed = false;
@@ -123,6 +130,13 @@ export class WorkerCoordinator {
 				assignment: {
 					...assignment,
 					cursor_id: randomUUID(),
+					cursor_owner: {
+						agentName: assignment.agent_name ?? assignment.worker_id,
+						sessionId: this.sessionId,
+						...(assignment.parent_agent_name === undefined
+							? {}
+							: { parentAgentName: assignment.parent_agent_name }),
+					},
 					observation_token: undefined,
 					observation: undefined,
 				},
@@ -158,12 +172,13 @@ export class WorkerCoordinator {
 					observation: observed.result,
 				};
 				worker.busy = false;
-				const { worker_id, task, app, cursor_id } = worker.assignment;
+				const { worker_id, task, app, cursor_id, cursor_owner } = worker.assignment;
 				return {
 					worker_id,
 					task,
 					app,
 					cursor_id,
+					cursor_owner,
 					...(observed.observation_token === undefined ? {} : { observation_token: observed.observation_token }),
 					observation: observed.result,
 				};
@@ -211,6 +226,7 @@ export class WorkerCoordinator {
 					task: assignment.task,
 					app: assignment.app,
 					cursor_id: assignment.cursor_id,
+					cursor_owner: assignment.cursor_owner,
 					...(assignment.observation_token === undefined
 						? {}
 						: { observation_token: assignment.observation_token }),
@@ -257,16 +273,19 @@ export class WorkerCoordinator {
 		const startedAt = new Date().toISOString();
 		try {
 			const dispatch = () =>
-				withCursorIdentity(worker.assignment.cursor_id, () =>
-					this.session.runSteps(
-						token,
-						String(worker.pid),
-						steps,
-						expect,
-						createRunStepDriver(this.computer),
-						resultOptions,
-						executionOptions,
-					),
+				withCursorIdentity(
+					worker.assignment.cursor_id,
+					() =>
+						this.session.runSteps(
+							token,
+							String(worker.pid),
+							steps,
+							expect,
+							createRunStepDriver(this.computer),
+							resultOptions,
+							executionOptions,
+						),
+					worker.assignment.cursor_owner,
 				);
 			const pending = this.computer.delivery === "background" ? dispatch() : this.attendedTail.then(dispatch);
 			if (this.computer.delivery !== "background") {
@@ -298,12 +317,13 @@ export class WorkerCoordinator {
 				...(typeof resultPayload["bundleId"] === "string" ? { bundleId: resultPayload["bundleId"] } : {}),
 				...(resultText?.type === "text" ? { text: resultText.text.trim().slice(0, 2000) } : {}),
 			};
-			const { worker_id, task, app, cursor_id } = worker.assignment;
+			const { worker_id, task, app, cursor_id, cursor_owner } = worker.assignment;
 			return {
 				worker_id,
 				task,
 				app,
 				cursor_id,
+				cursor_owner,
 				...(typeof nextToken === "string" ? { observation_token: nextToken } : {}),
 				result,
 			};
@@ -345,26 +365,30 @@ export class WorkerCoordinator {
 		) {
 			throw new Error(`worker "${worker.assignment.worker_id}" app process changed; release and reassign it`);
 		}
-		const result = await withCursorIdentity(worker.assignment.cursor_id, () =>
-			this.session.observe({
-				...options,
-				app: String(worker.pid),
-				diffOnly: false,
-				includeAccessibilityTree: true,
-				includeScreenshot: options.includeScreenshot ?? false,
-			}),
+		const result = await withCursorIdentity(
+			worker.assignment.cursor_id,
+			() =>
+				this.session.observe({
+					...options,
+					app: String(worker.pid),
+					diffOnly: false,
+					includeAccessibilityTree: true,
+					includeScreenshot: options.includeScreenshot ?? false,
+				}),
+			worker.assignment.cursor_owner,
 		);
 		const previous = worker.assignment.observation;
 		if (previous !== undefined && payload(previous)["bundleId"] !== payload(result)["bundleId"]) {
 			throw new Error(`worker "${worker.assignment.worker_id}" app identity changed; release and reassign it`);
 		}
 		const token = payload(result)["observation_token"];
-		const { worker_id, task, app, cursor_id } = worker.assignment;
+		const { worker_id, task, app, cursor_id, cursor_owner } = worker.assignment;
 		return {
 			worker_id,
 			task,
 			app,
 			cursor_id,
+			cursor_owner,
 			...(typeof token === "string" ? { observation_token: token } : {}),
 			result,
 		};

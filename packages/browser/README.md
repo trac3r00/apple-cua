@@ -61,22 +61,20 @@ implementation to fork, so this package does not claim Codex-derived code.
 See [installation](../../skills/apple-cua-browser/references/installation.md)
 and [the skill](../../skills/apple-cua-browser/SKILL.md).
 
-## Bun development lane (optional)
+## Tests on Bun
 
-The shipped daemon, CLI, MCP server, helper app, installer, and LaunchAgent stay on
-Node. Bun is an optional fast local lane for this package only:
+The shipped daemon, CLI, MCP server, helper app, installer, and LaunchAgent run on
+Node. Every test suite in the repository runs on Bun's native runner:
 
 ```sh
-bun run test:browser:bun     # browser Vitest suite under Bun
+bun run test:browser:bun     # this package's tests
 bun run smoke:browser:bun    # TypeScript source doctor, plus dist doctor when built
 ```
 
-The root `vitest.config.ts` detects Bun and inlines `zod` for Vitest's loader; Node
-runs keep the externalized path. The smoke command is read-only and does not start
-the daemon or require the extension. It proves the package's TypeScript source and
-built CLI load under Bun; it is not the real-browser verifier and does not cover the
-MCP, CLI, or core suites, which are not yet green under Bun. Do not use Bun to run
-`setup.sh`, the LaunchAgent, or the bundled helper app.
+The smoke command is read-only and does not start the daemon or require the
+extension. It proves the package's TypeScript source and built CLI load under Bun;
+it is not the real-browser verifier. Do not use Bun to run `setup.sh`, the
+LaunchAgent, or the bundled helper app.
 
 ## Contract
 

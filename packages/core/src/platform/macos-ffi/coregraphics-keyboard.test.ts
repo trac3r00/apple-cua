@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const koffiMock = vi.hoisted(() => {
 	const sourceReference = { type: "source" };

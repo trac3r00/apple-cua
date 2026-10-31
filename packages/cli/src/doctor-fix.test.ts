@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { type FixDependencies, type FixOptions, planRepairs, runDoctorFix } from "./doctor-fix.js";
 import { type DoctorFacts, HELPER_DISPLAY_NAME, PRIVACY_PANES, evaluateDoctor } from "./doctor.js";
 

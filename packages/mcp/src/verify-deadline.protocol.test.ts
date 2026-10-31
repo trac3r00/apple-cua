@@ -1,9 +1,30 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import type { AppState, AppStateOptions, TopLevelWindow } from "@apple-cua/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { vi } from "@apple-cua/test-support";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 
 let closeHarness: (() => Promise<void>) | undefined;
+
+/**
+ * Date.now() moves only when the code under test sleeps for a poll interval or less, by exactly the delay it asked
+ * for, so deadlines are measured on the waits the code chose instead of on how fast the runner is.
+ */
+function useAdvancingClock(): void {
+	let now = Date.now();
+	vi.spyOn(Date, "now").mockImplementation(() => now);
+	const schedule = globalThis.setTimeout;
+	const advancing = (...args: Parameters<typeof setTimeout>) => {
+		const delay = args[1] ?? 0;
+		if (delay > 0 && delay <= 150) {
+			now += delay;
+		}
+		return schedule(...args);
+	};
+	vi.spyOn(globalThis, "setTimeout").mockImplementation(
+		Object.assign(advancing, { __promisify__: schedule.__promisify__ }),
+	);
+}
 
 afterEach(async () => {
 	await closeHarness?.();
@@ -16,6 +37,7 @@ describe("#given a wait condition that never appears #when its deadline expires 
 		const harness = await createHarness(new FakeGuardedComputer(), async () => []);
 		closeHarness = harness.close;
 		const token = await observe(harness);
+		useAdvancingClock();
 
 		const startedAt = Date.now();
 		const payload = jsonPayload(
@@ -107,6 +129,7 @@ describe("#given a wait condition that never appears #when its deadline expires 
 	});
 
 	it("does not start a wait observation after the instant-read deadline expires", async () => {
+		useAdvancingClock();
 		const computer = new FakeGuardedComputer();
 		const harness = await createHarness(computer, async () => []);
 		closeHarness = harness.close;

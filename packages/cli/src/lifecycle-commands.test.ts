@@ -1,9 +1,9 @@
+import { describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CursorMotionConfig } from "@apple-cua/core";
 import { Command } from "commander";
-import { describe, expect, it } from "vitest";
 import {
 	askForChanges,
 	asksToSkip,

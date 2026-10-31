@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { InputInterrupted } from "../computer/input-scope.js";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const native = vi.hoisted(() => ({
 	findRunningApplication: vi.fn(),
@@ -13,39 +13,47 @@ const native = vi.hoisted(() => ({
 	windowTitlesForPid: vi.fn(),
 }));
 
-vi.mock("./macos-ffi/workspace.js", async (importOriginal) => ({
-	...(await importOriginal<typeof import("./macos-ffi/workspace.js")>()),
+const actualWorkspace = { ...(await import("./macos-ffi/workspace.js")) };
+vi.mock("./macos-ffi/workspace.js", () => ({
+	...actualWorkspace,
 	findRunningApplication: native.findRunningApplication,
 	getRunningApplications: native.getRunningApplications,
 	activateApplication: native.activateApplication,
 }));
 vi.mock("./macos-top-level-windows.js", () => ({ listTopLevelWindows: native.listTopLevelWindows }));
-vi.mock("./ios-input.js", async (importOriginal) => ({
-	...(await importOriginal<typeof import("./ios-input.js")>()),
+const actualIosInput = { ...(await import("./ios-input.js")) };
+vi.mock("./ios-input.js", () => ({
+	...actualIosInput,
 	scrollMirroring: native.scroll,
 }));
-vi.mock("./macos-ffi/window-list.js", async (importOriginal) => ({
-	...(await importOriginal<typeof import("./macos-ffi/window-list.js")>()),
+const actualWindowList = { ...(await import("./macos-ffi/window-list.js")) };
+vi.mock("./macos-ffi/window-list.js", () => ({
+	...actualWindowList,
 	listWindows: native.listWindows,
 }));
-vi.mock("./macos-ffi/accessibility.js", async (importOriginal) => ({
-	...(await importOriginal<typeof import("./macos-ffi/accessibility.js")>()),
+const actualAccessibility = { ...(await import("./macos-ffi/accessibility.js")) };
+vi.mock("./macos-ffi/accessibility.js", () => ({
+	...actualAccessibility,
 	windowTitlesForPid: native.windowTitlesForPid,
 	createApplicationElement: vi.fn(() => {
 		throw new Error("no accessibility in tests");
 	}),
 }));
-vi.mock("./macos-ffi/screenshot.js", async (importOriginal) => ({
-	...(await importOriginal<typeof import("./macos-ffi/screenshot.js")>()),
+const actualScreenshot = { ...(await import("./macos-ffi/screenshot.js")) };
+vi.mock("./macos-ffi/screenshot.js", () => ({
+	...actualScreenshot,
 	captureWindowPng: native.captureWindowPng,
 }));
-vi.mock("./macos-ffi/vision.js", async (importOriginal) => ({
-	...(await importOriginal<typeof import("./macos-ffi/vision.js")>()),
+const actualVision = { ...(await import("./macos-ffi/vision.js")) };
+vi.mock("./macos-ffi/vision.js", () => ({
+	...actualVision,
 	readImagePixelSize: vi.fn(() => ({ width: 600, height: 1200 })),
 	recognizeTextInImage: native.recognizeTextInImage,
 }));
 
-import { IPhoneMirroring } from "./ios-mirroring.js";
+const { InputInterrupted } = await import("../computer/input-scope.js");
+
+const { IPhoneMirroring } = await import("./ios-mirroring.js");
 
 const PID = 9001;
 const BOUNDS = { x: 100, y: 200, width: 300, height: 600 };

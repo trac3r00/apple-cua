@@ -16,9 +16,15 @@
 - `skills/`: Agent skill definitions
 
 ## Testing
-- Vitest for all tests
+- Bun's native test runner for all package and script tests (`bun test --isolate`)
+- Use Bun's `bun:test` APIs; shared Vitest compatibility helpers live only in
+  `scripts/test-support/bun.ts`
+- Register `mock.module` fakes before dynamically importing code that binds
+  native, process, or network dependencies
+- Never run tests that post input to the host desktop; use fake-only seams or
+  an explicitly owned virtual workspace
 - Test naming: `#given #when #then` pattern
-- Coverage via v8 provider
+- Coverage: `bun test --coverage` (`--coverage-reporter=text` or `lcov`)
 
 ## macOS Native APIs
 - Screenshot: ScreenCaptureKit/IOSurface (preferred) or `screencapture` CLI fallback

@@ -1,5 +1,6 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { AppApprovalStore } from "@apple-cua/core";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { vi } from "@apple-cua/test-support";
 import { allowedBundleIdsFromEnvironment } from "./native-policy.js";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import type { FakeGuardedComputer } from "./protocol-test-harness.js";

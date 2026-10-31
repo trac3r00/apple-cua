@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import { resolveTargetWindow, toTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";

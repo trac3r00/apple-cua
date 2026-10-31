@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
+import { copyForMatch, vi } from "@apple-cua/test-support";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 
 let closeHarness: (() => Promise<void>) | undefined;
@@ -147,7 +148,10 @@ describe("post-action observation #given dispatched input #when capture outcome 
 			}),
 		);
 
-		expect(payload["timing_ms"]).toMatchObject({ total: expect.any(Number), handler: expect.any(Number) });
+		expect(copyForMatch(payload["timing_ms"])).toMatchObject({
+			total: expect.any(Number),
+			handler: expect.any(Number),
+		});
 		expect(payload["timing_ms"]).not.toHaveProperty("capture");
 	});
 

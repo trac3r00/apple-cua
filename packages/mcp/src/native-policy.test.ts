@@ -1,15 +1,15 @@
-import { AppApprovalStore, listTopLevelWindows } from "@apple-cua/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	allowedBundleIdsFromProcessEnvironment,
-	createNativeWindowProbe,
-	deliveryFromProcessEnvironment,
-} from "./native-policy.js";
+import { afterEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
-vi.mock("@apple-cua/core", async (importOriginal) => ({
-	...(await importOriginal<typeof import("@apple-cua/core")>()),
+const actualCore = { ...(await import("@apple-cua/core")) };
+vi.mock("@apple-cua/core", () => ({
+	...actualCore,
 	listTopLevelWindows: vi.fn(async () => []),
 }));
+
+const { AppApprovalStore, listTopLevelWindows } = await import("@apple-cua/core");
+const { allowedBundleIdsFromProcessEnvironment, createNativeWindowProbe, deliveryFromProcessEnvironment } =
+	await import("./native-policy.js");
 
 afterEach(() => {
 	vi.unstubAllEnvs();

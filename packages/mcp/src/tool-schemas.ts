@@ -643,8 +643,35 @@ export const runHandsSchema = z
 		message: "run_hands needs at least one of keyboard, pointer, or vision",
 	});
 
+function hasControlCharacter(value: string): boolean {
+	return Array.from(value).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
+}
+
+/** Worker names become cursor owners, so they follow the same rule withCursorIdentity enforces. */
+const workerIdSchema = z
+	.string()
+	.min(1)
+	.max(128)
+	.refine((value) => value.trim().length > 0 && !hasControlCharacter(value), {
+		message: "must not be blank or contain control characters",
+	});
+const agentNameSchema = z
+	.string()
+	.trim()
+	.min(1)
+	.max(128)
+	.refine((value) => !hasControlCharacter(value), { message: "must not contain control characters" });
+
 const workerAssignmentsSchema = z
-	.array(z.object({ worker_id: z.string().min(1), task: z.string().min(1), app: appSchema }))
+	.array(
+		z.object({
+			worker_id: workerIdSchema,
+			task: z.string().min(1),
+			app: appSchema,
+			agent_name: agentNameSchema.optional(),
+			parent_agent_name: agentNameSchema.optional(),
+		}),
+	)
 	.min(1)
 	.max(6);
 

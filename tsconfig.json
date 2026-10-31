@@ -3,6 +3,14 @@
 		"target": "ES2022",
 		"module": "Node16",
 		"moduleResolution": "Node16",
+		"paths": {
+			"@apple-cua/agent": ["./packages/agent/src/index.ts"],
+			"@apple-cua/browser": ["./packages/browser/src/index.ts"],
+			"@apple-cua/core": ["./packages/core/src/index.ts"],
+			"@apple-cua/core/isolated": ["./packages/core/src/platform/isolated.ts"],
+			"@apple-cua/core/stop": ["./packages/core/src/platform/stop-switch.ts"],
+			"@apple-cua/test-support": ["./scripts/test-support/bun.ts"]
+		},
 		"lib": ["ES2022"],
 		"types": ["node"],
 		"strict": true,

@@ -1,8 +1,9 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import type { DockSnapshot, DockSource, HostCapabilities, MenuExtraSnapshot, StopStatus } from "@apple-cua/core";
+import { vi } from "@apple-cua/test-support";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 import { createMcpServer } from "./server.js";
 

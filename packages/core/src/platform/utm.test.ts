@@ -1,5 +1,6 @@
+import { beforeEach, describe, expect, it } from "bun:test";
 import { runInNewContext } from "node:vm";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { vi } from "@apple-cua/test-support";
 
 type Callback = (error: Error | null, stdout: string, stderr: string) => void;
 const native = vi.hoisted(() => ({
@@ -17,8 +18,10 @@ vi.mock("./stop-switch.js", () => ({
 	describeUserStop: () => "stopped",
 }));
 
-import { runInInputScope } from "../computer/input-scope.js";
-import { UTM, UTMError, type UTMObservation } from "./utm.js";
+const { runInInputScope } = await import("../computer/input-scope.js");
+const { UTM, UTMError } = await import("./utm.js");
+
+import type { UTMObservation } from "./utm.js";
 
 const id = "vm-123";
 const guest = {

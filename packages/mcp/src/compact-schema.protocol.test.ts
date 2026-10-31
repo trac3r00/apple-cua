@@ -1,13 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 import { createHarness, observe } from "./protocol-client-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
 import { compactStepSchema, runStepSchema } from "./tool-schemas.js";
 
 /** Budgets for the serialized tools/list answer, so tool-list bloat cannot creep back. */
 const LEAN_BUDGET_BYTES = 10_500;
-// 35,000 is a measured revision of the 32,000 cap for run_hands + get_tool_usage (34,556 bytes
-// on 2026-10-25); the full list still omits the repeated per-type step schema.
-const FULL_BUDGET_BYTES = 36_000;
+// Measured revisions of the 32,000 cap: run_hands + get_tool_usage (34,556 bytes on 2026-10-25), then the named
+// cursor-owner fields on manage_workers (36,097 bytes on 2026-10-31). The full list still omits the repeated per-type
+// step schema.
+const FULL_BUDGET_BYTES = 36_500;
 
 let closeHarness: (() => Promise<void>) | undefined;
 

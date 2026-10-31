@@ -1,9 +1,10 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { nodeExecutable } from "@apple-cua/test-support";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const setup = join(repo, "scripts/setup.sh");
@@ -78,8 +79,8 @@ describe("#given apple-cua config with stdin from a pipe in a terminal #when it 
 	it("asks on the terminal and saves the answers", () => {
 		const transcript = expectScript(
 			[
-				`spawn /bin/bash -c {${process.execPath} --experimental-strip-types ${cli} config < /dev/null}`,
-				"expect -re {Add apps[^\\n]*: }",
+				`spawn /bin/bash -c {${nodeExecutable()} --experimental-strip-types ${cli} config < /dev/null}`,
+				"expect -re {Restrict to apps[^\\n]*: }",
 				'send "com.apple.TextEdit\\r"',
 				"expect -re {Delivery[^\\n]*: }",
 				'send "\\r"',
@@ -100,5 +101,5 @@ describe("#given apple-cua config with stdin from a pipe in a terminal #when it 
 			toolset: "lean",
 			clients: [],
 		});
-	});
+	}, 30_000);
 });

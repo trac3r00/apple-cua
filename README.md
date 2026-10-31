@@ -330,17 +330,18 @@ pnpm check             # lint, typecheck, tests
 pnpm doctor            # is this Mac ready?
 ```
 
-The codebase uses strict TypeScript, ESM, Biome and Vitest; [`AGENTS.md`](AGENTS.md) has the conventions. CI runs
+The codebase uses strict TypeScript, ESM, Biome and Bun's test runner; [`AGENTS.md`](AGENTS.md) has the conventions. CI runs
 setup and `pnpm check` on macOS 15 and macOS 26, each on Apple Silicon and Intel.
 
-The shipped runtime is Node. Bun is an optional local lane for the browser package only:
+The shipped runtime is Node; the tests run on Bun. `pnpm check` and `pnpm test` need Bun 1.4.4 (the version CI
+uses), which `setup.sh` does not install. The browser package also has a read-only Bun load check:
 
 ```bash
 bun run test:browser:bun
 bun run smoke:browser:bun
 ```
 
-It does not change `setup.sh`, the LaunchAgent, or the bundled helper app.
+Bun does not run `setup.sh`, the LaunchAgent, or the bundled helper app.
 
 ## License
 

@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import { IPHONE_TOOL_NAMES, LEAN_TOOL_NAMES, TOOL_NAMES, toolNamesFor } from "./tool-names.js";
 import type { McpServerOptions } from "./toolset.js";
@@ -37,8 +38,9 @@ describe("lean toolset #given toolset=lean #when tools are listed #then exactly 
 		expect(names).toHaveLength(LEAN_TOOL_NAMES.length);
 		const instructions = harness.client.getInstructions() ?? "";
 		const mentioned = mentionedTools(instructions);
+		const leanNames: readonly string[] = LEAN_TOOL_NAMES;
 		for (const name of mentioned) {
-			expect(LEAN_TOOL_NAMES).toContain(name);
+			expect(leanNames).toContain(name);
 		}
 		expect(mentioned).toEqual(
 			expect.arrayContaining(["get_app_state", "find_elements", "run_script", "verify_state"]),

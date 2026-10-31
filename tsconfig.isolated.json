@@ -1,0 +1,13 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"paths": {
+			"@apple-cua/core": ["./packages/core/src/index.ts"],
+			"@apple-cua/core/stop": ["./packages/core/src/platform/stop-switch.ts"],
+			"@apple-cua/core/isolated": ["./packages/core/src/platform/isolated.ts"]
+		}
+	},
+	"include": ["packages/core/src/**/*.ts", "packages/mcp/src/**/*.ts"],
+	"exclude": ["**/*.test.ts"]
+}

@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 import type { AXTreeElement, AppState } from "../accessibility/types.js";
 import type { AppStateOptions, Rect, Size } from "../types/index.js";
 import type { OcrTextObservation, RecognizeTextOptions } from "./macos-ffi/vision.js";
 import type { WorkspaceRunningApplication } from "./macos-ffi/workspace.js";
-import { captureUtmDisplay, mapGuestPoint, mapUtmPoint } from "./utm-visual.js";
 
 const native = vi.hoisted(() => ({
 	findRunningApplication: vi.fn<(bundleId: string) => WorkspaceRunningApplication | undefined>(),
@@ -20,6 +20,8 @@ vi.mock("./macos.js", () => ({
 	},
 }));
 vi.mock("./macos-ffi/vision.js", () => ({ recognizeTextInImage: native.recognizeTextInImage }));
+
+const { captureUtmDisplay, mapGuestPoint, mapUtmPoint } = await import("./utm-visual.js");
 
 const displayRect: Rect = { x: 40, y: 80, width: 1200, height: 800 };
 const guestSize: Size = { width: 1600, height: 900 };
@@ -149,7 +151,7 @@ describe("#given an exact UTM window #when capturing #then only its display is r
 		expect(native.close).toHaveBeenCalledTimes(1);
 	});
 
-	it.each([
+	it.each<Partial<ReturnType<typeof state>>>([
 		{ windowId: 43 },
 		{ pid: 999 },
 		{ screenshotBase64: "" },

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { StopChordDetector, startStopChordDetector } from "./stop-chord.js";
 import type { StopStatus } from "./stop-switch.js";
 

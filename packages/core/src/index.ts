@@ -26,7 +26,12 @@ export {
 	type ComputerUseMouseButton,
 } from "./computer/actions.js";
 export { resolveScreenPoint } from "./computer/coordinate.js";
-export { currentCursorIdentity, withCursorIdentity } from "./computer/cursor-scope.js";
+export {
+	type CursorOwner,
+	currentCursorIdentity,
+	currentCursorOwner,
+	withCursorIdentity,
+} from "./computer/cursor-scope.js";
 export {
 	HandsCoordinator,
 	type HandName,

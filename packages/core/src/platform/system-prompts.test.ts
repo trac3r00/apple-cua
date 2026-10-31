@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 import type { ListedWindow } from "./macos-ffi/window-list.js";
 import {
 	classifySystemPrompts,

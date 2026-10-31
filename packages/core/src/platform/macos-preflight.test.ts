@@ -1,11 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { InputInterrupted, runInInputScope } from "../computer/input-scope.js";
-import { setRunningApplicationLookupForTesting } from "./app-list.js";
-import * as coregraphics from "./macos-ffi/coregraphics.js";
-import * as skylight from "./macos-ffi/skylight.js";
-import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi, whenSettled } from "@apple-cua/test-support";
 import type { InputDelivery } from "./macos-input.js";
-import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
 
 interface TestWindow {
 	readonly id: number;
@@ -71,16 +66,22 @@ vi.mock("./macos-ffi/window-list.js", () => ({
 	listWindows: windowListMock.listWindows,
 	listOnscreenWindows: vi.fn(() => []),
 }));
-// The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
-setOpenWindowsSourceForTesting(() => undefined);
 vi.mock("./macos-ffi/accessibility.js", () => accessibilityMock);
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/screenshot.js", () => screenshotMock);
 
+const { runInInputScope } = await import("../computer/input-scope.js");
+const { setRunningApplicationLookupForTesting } = await import("./app-list.js");
+const coregraphics = await import("./macos-ffi/coregraphics.js");
+const { setOnscreenWindowIdsSourceForTesting } = await import("./macos-input.js");
+const { setOpenWindowsSourceForTesting } = await import("./macos-open-windows.js");
+const { AppApprovalStore } = await import("../permission/app-approval.js");
+const { NOOP_POINTER_OVERLAY } = await import("./macos-ffi/cursor-overlay.js");
+const { MacOSHostComputer } = await import("./macos.js");
+// The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
+setOpenWindowsSourceForTesting(() => undefined);
+
 import type { InputObservation } from "../computer/guarded-interface.js";
-import { AppApprovalStore } from "../permission/app-approval.js";
-import { NOOP_POINTER_OVERLAY } from "./macos-ffi/cursor-overlay.js";
-import { MacOSHostComputer } from "./macos.js";
 
 const TARGET_PID = 1234;
 const BUNDLE_ID = "com.apple.finder";
@@ -96,31 +97,12 @@ function fakePng(width = 800, height = 600): Buffer {
 	return data;
 }
 
-function deferred<T>(): {
-	readonly promise: Promise<T>;
-	readonly resolve: (value: T) => void;
-} {
-	let resolvePromise: ((value: T) => void) | undefined;
-	const promise = new Promise<T>((resolve) => {
-		resolvePromise = resolve;
-	});
-	return {
-		promise,
-		resolve(value: T): void {
-			if (resolvePromise === undefined) {
-				throw new Error("deferred promise was not initialized");
-			}
-			resolvePromise(value);
-		},
-	};
-}
-
 function approvedComputer(
 	options: {
 		readonly urlBlocklist?: readonly string[];
 		readonly delivery?: InputDelivery;
 	} = {},
-): MacOSHostComputer {
+): InstanceType<typeof MacOSHostComputer> {
 	return new MacOSHostComputer({
 		appApproval: new AppApprovalStore([BUNDLE_ID]),
 		overlay: NOOP_POINTER_OVERLAY,
@@ -128,7 +110,7 @@ function approvedComputer(
 	});
 }
 
-async function observe(computer: MacOSHostComputer, diffOnly = false): Promise<InputObservation> {
+async function observe(computer: InstanceType<typeof MacOSHostComputer>, diffOnly = false): Promise<InputObservation> {
 	await computer.getAppState(TARGET_PID, { settleMs: 0, diffOnly, requireWindow: true });
 	const observation = computer.getInputObservation(TARGET_PID);
 	if (observation === undefined) {
@@ -223,37 +205,23 @@ beforeEach(() => {
 });
 
 describe("MacOSHostComputer input observations", () => {
-	it("#given default background drag suspended on window lookup #when closed #then no native input resumes", async () => {
+	it("#given default background drag on the human desktop #when requested #then it is refused before any window lookup or native input", async () => {
 		const computer = approvedComputer();
 		await observe(computer);
-		const queryStarted = deferred<void>();
-		const windowQuery = deferred<readonly TestWindow[]>();
 		const postMouse = vi.spyOn(coregraphics, "postMouseEvent").mockImplementation(() => undefined);
-		const focusGuard = vi.spyOn(skylight, "focusGuardFor").mockReturnValue(null);
-		windowMock.openWindows.mockImplementationOnce(() => {
-			queryStarted.resolve();
-			return windowQuery.promise;
-		});
-		const drag = runInInputScope({ target: { pid: TARGET_PID, windowId: 99 } }, () =>
-			computer.drag({ from: { x: 150, y: 100 }, to: { x: 200, y: 150 }, duration: 0 }),
-		);
-		const result = drag.then(
-			() => undefined,
-			(error: unknown) => error,
-		);
+		const windowReads = windowMock.openWindows.mock.calls.length;
 		try {
-			await queryStarted.promise;
-			await computer.close();
-			windowQuery.resolve([{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
+			await expect(
+				runInInputScope({ target: { pid: TARGET_PID, windowId: 99 } }, () =>
+					computer.drag({ from: { x: 150, y: 100 }, to: { x: 200, y: 150 }, duration: 0 }),
+				),
+			).rejects.toThrow(/host-window cannot operate on the human desktop/);
 
-			expect(await result).toBeInstanceOf(InputInterrupted);
+			expect(windowMock.openWindows).toHaveBeenCalledTimes(windowReads);
 			expect(postMouse).not.toHaveBeenCalled();
 		} finally {
-			windowQuery.resolve([{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
-			await result;
 			await computer.close();
 			postMouse.mockRestore();
-			focusGuard.mockRestore();
 		}
 	});
 
@@ -298,14 +266,14 @@ describe("MacOSHostComputer input observations", () => {
 		expect(accessibilityMock.extractAccessibilityTree).toHaveBeenCalledTimes(axReads);
 	});
 
-	it("does not create an observation for the low-level full-display fallback", async () => {
+	it("does not create an observation or capture the display for the low-level full-display fallback", async () => {
 		windowMock.openWindows.mockResolvedValue([]);
 		const computer = approvedComputer();
 
 		await computer.getAppState(TARGET_PID, { settleMs: 0 });
 
 		expect(computer.getInputObservation(TARGET_PID)).toBeUndefined();
-		expect(screenshotMock.captureDisplayImage).toHaveBeenCalledOnce();
+		expect(screenshotMock.captureDisplayImage).not.toHaveBeenCalled();
 	});
 
 	it("requires a visible window before guarded capture and invalidates the prior observation", async () => {
@@ -316,11 +284,10 @@ describe("MacOSHostComputer input observations", () => {
 		const axReads = accessibilityMock.extractAccessibilityTree.mock.calls.length;
 
 		// getAppState waits a bounded real time for the window to appear; fake the clock so that wait is not real.
-		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+		vi.useFakeTimers();
 		try {
-			const refusal = expect(computer.getAppState(TARGET_PID, { settleMs: 0, requireWindow: true })).rejects.toThrow(
-				/visible target window/i,
-			);
+			const pending = computer.getAppState(TARGET_PID, { settleMs: 0, requireWindow: true });
+			const refusal = whenSettled(pending, (settled) => expect(settled).rejects.toThrow(/visible target window/i));
 			await vi.advanceTimersByTimeAsync(WINDOW_APPEAR_WAIT_MILLISECONDS);
 			await refusal;
 		} finally {
@@ -355,20 +322,18 @@ describe("MacOSHostComputer input observations", () => {
 		},
 	);
 
-	it("invalidates an observation when a later capture fails and on close", async () => {
+	it("invalidates an observation when a later observation fails and on close", async () => {
 		const computer = approvedComputer();
 		await observe(computer);
-		runtime.screenshotError = new Error("capture failed");
-		screenshotMock.captureWindowImage.mockImplementationOnce(() => {
-			throw new Error("libsckit.dylib not found");
+		accessibilityMock.extractAccessibilityTree.mockImplementationOnce(() => {
+			throw new Error("accessibility walk failed");
 		});
 
 		await expect(computer.getAppState(TARGET_PID, { settleMs: 0, requireWindow: true })).rejects.toThrow(
-			"capture failed",
+			"accessibility walk failed",
 		);
 		expect(computer.getInputObservation(TARGET_PID)).toBeUndefined();
 
-		runtime.screenshotError = undefined;
 		await observe(computer);
 		await computer.close();
 		expect(computer.getInputObservation(TARGET_PID)).toBeUndefined();
@@ -376,18 +341,20 @@ describe("MacOSHostComputer input observations", () => {
 	});
 });
 
-describe("MacOSHostComputer preflightInput", () => {
-	it("#given no app restriction #when observing a named app #then preflight authorizes its observed context", async () => {
+const ISOLATED_REFUSAL = { ok: false, reason: "isolated-session-required" } as const;
+
+describe("MacOSHostComputer preflightInput on the human desktop #given any observed context #then input is never authorized", () => {
+	it("#given no app restriction #when observing a named app #then preflight still refuses its observed context", async () => {
 		const computer = new MacOSHostComputer({
 			appApproval: new AppApprovalStore(),
 			overlay: NOOP_POINTER_OVERLAY,
 		});
 		const expected = await observe(computer);
 
-		expect(await computer.preflightInput(expected)).toEqual({ ok: true });
+		expect(await computer.preflightInput(expected)).toEqual(ISOLATED_REFUSAL);
 	});
 
-	it("#given default app authorization #when observation is replaced #then stale context remains refused", async () => {
+	it("#given default app authorization #when observation is replaced #then stale context is refused", async () => {
 		const computer = new MacOSHostComputer({
 			appApproval: new AppApprovalStore(),
 			overlay: NOOP_POINTER_OVERLAY,
@@ -395,64 +362,49 @@ describe("MacOSHostComputer preflightInput", () => {
 		const expected = await observe(computer);
 		await observe(computer);
 
-		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason: "observation-replaced" });
+		expect(await computer.preflightInput(expected)).toEqual(ISOLATED_REFUSAL);
 	});
 
-	it("approves an unchanged, approved current context using read-only queries", async () => {
+	it("refuses an unchanged, approved current context without any native read", async () => {
 		const computer = approvedComputer();
 		const expected = await observe(computer);
+		const appReads = childProcessMock.execFile.mock.calls.length;
+		const windowReads = windowMock.openWindows.mock.calls.length;
 
-		expect(await computer.preflightInput(expected)).toEqual({ ok: true });
+		expect(await computer.preflightInput(expected)).toEqual(ISOLATED_REFUSAL);
+		expect(childProcessMock.execFile).toHaveBeenCalledTimes(appReads);
+		expect(windowMock.openWindows).toHaveBeenCalledTimes(windowReads);
 	});
 
-	it("rejects approval revoked after the observation", async () => {
+	it("refuses approval revoked after the observation", async () => {
 		const approval = new AppApprovalStore([BUNDLE_ID]);
 		const computer = new MacOSHostComputer({ appApproval: approval, overlay: NOOP_POINTER_OVERLAY });
 		const expected = await observe(computer);
 		approval.deny(BUNDLE_ID);
 
-		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason: "app-not-approved" });
+		expect(await computer.preflightInput(expected)).toEqual(ISOLATED_REFUSAL);
 	});
 
-	it("re-checks approval after the awaited window query before authorizing", async () => {
+	it("refuses before any window query, so a revoked approval cannot race authorization", async () => {
 		const approval = new AppApprovalStore([BUNDLE_ID]);
-		const computer = new MacOSHostComputer({
-			appApproval: approval,
-			delivery: "attended",
-			overlay: NOOP_POINTER_OVERLAY,
-		});
+		const computer = new MacOSHostComputer({ appApproval: approval, overlay: NOOP_POINTER_OVERLAY });
 		const expected = await observe(computer);
-		const queryStarted = deferred<void>();
-		const windowQuery = deferred<readonly TestWindow[]>();
-		windowMock.openWindows.mockImplementationOnce(() => {
-			queryStarted.resolve();
-			return windowQuery.promise;
-		});
+		const windowReads = windowMock.openWindows.mock.calls.length;
 
 		const result = computer.preflightInput(expected);
-		await queryStarted.promise;
 		approval.deny(BUNDLE_ID);
-		windowQuery.resolve([{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
 
-		expect(await result).toEqual({ ok: false, reason: "app-not-approved" });
+		expect(await result).toEqual(ISOLATED_REFUSAL);
+		expect(windowMock.openWindows).toHaveBeenCalledTimes(windowReads);
 	});
 
-	it("re-checks generation after the awaited window query before authorizing", async () => {
-		const computer = approvedComputer({ delivery: "attended" });
+	it("refuses before any window query, so a newer observation cannot race authorization", async () => {
+		const computer = approvedComputer();
 		const expected = await observe(computer);
-		const queryStarted = deferred<void>();
-		const windowQuery = deferred<readonly TestWindow[]>();
-		windowMock.openWindows.mockImplementationOnce(() => {
-			queryStarted.resolve();
-			return windowQuery.promise;
-		});
+		const windowReads = windowMock.openWindows.mock.calls.length;
 
-		const result = computer.preflightInput(expected);
-		await queryStarted.promise;
-		await observe(computer);
-		windowQuery.resolve([{ id: 99, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]);
-
-		expect(await result).toEqual({ ok: false, reason: "observation-replaced" });
+		expect(await computer.preflightInput(expected)).toEqual(ISOLATED_REFUSAL);
+		expect(windowMock.openWindows).toHaveBeenCalledTimes(windowReads);
 	});
 
 	it("fails closed when no approval store is configured", async () => {
@@ -466,29 +418,26 @@ describe("MacOSHostComputer preflightInput", () => {
 		}
 
 		expect(expected.bundleId).toBe(unguardedObservation.bundleId);
-		expect(await unguarded.preflightInput(unguardedObservation)).toEqual({
-			ok: false,
-			reason: "app-not-approved",
-		});
+		expect(await unguarded.preflightInput(unguardedObservation)).toEqual(ISOLATED_REFUSAL);
 	});
 
-	it("rejects when the observed app is no longer frontmost", async () => {
-		const computer = approvedComputer({ delivery: "attended" });
+	it("refuses when the observed app is no longer frontmost", async () => {
+		const computer = approvedComputer();
 		const expected = await observe(computer);
 		runtime.apps = [{ name: "Finder", bundleId: BUNDLE_ID, pid: TARGET_PID, isActive: false }];
 
-		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason: "app-not-frontmost" });
+		expect(await computer.preflightInput(expected)).toEqual(ISOLATED_REFUSAL);
 	});
 
-	it("approves a target that is not frontmost when delivery is background", async () => {
+	it("refuses a target that is not frontmost even in background delivery", async () => {
 		const computer = approvedComputer({ delivery: "background" });
 		const expected = await observe(computer);
 		runtime.apps = [{ name: "Finder", bundleId: BUNDLE_ID, pid: TARGET_PID, isActive: false }];
 
-		expect(await computer.preflightInput(expected)).toEqual({ ok: true });
+		expect(await computer.preflightInput(expected)).toEqual(ISOLATED_REFUSAL);
 	});
 
-	it("still rejects a revoked approval in background delivery when the app is not frontmost", async () => {
+	it("refuses a revoked approval in background delivery when the app is not frontmost", async () => {
 		const approval = new AppApprovalStore([BUNDLE_ID]);
 		const computer = new MacOSHostComputer({
 			appApproval: approval,
@@ -499,10 +448,10 @@ describe("MacOSHostComputer preflightInput", () => {
 		runtime.apps = [{ name: "Finder", bundleId: BUNDLE_ID, pid: TARGET_PID, isActive: false }];
 		approval.deny(BUNDLE_ID);
 
-		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason: "app-not-approved" });
+		expect(await computer.preflightInput(expected)).toEqual(ISOLATED_REFUSAL);
 	});
 
-	it("still rejects a changed window in background delivery when the app is not frontmost", async () => {
+	it("refuses a changed window in background delivery when the app is not frontmost", async () => {
 		const computer = approvedComputer({ delivery: "background" });
 		const expected = await observe(computer);
 		runtime.apps = [{ name: "Finder", bundleId: BUNDLE_ID, pid: TARGET_PID, isActive: false }];
@@ -513,10 +462,10 @@ describe("MacOSHostComputer preflightInput", () => {
 			{ id: 99, ownerPid: TARGET_PID, layer: 0, bounds: { ...WINDOW_BOUNDS, width: 801 } },
 		]);
 
-		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason: "window-bounds-changed" });
+		expect(await computer.preflightInput(expected)).toEqual(ISOLATED_REFUSAL);
 	});
 
-	it("#given input that does not map screen points #when the same window moved #then it is still allowed", async () => {
+	it("#given input that does not map screen points #when the same window moved #then it is still refused", async () => {
 		const computer = approvedComputer({ delivery: "background" });
 		const expected = await observe(computer);
 		windowMock.openWindows.mockResolvedValue([
@@ -526,7 +475,7 @@ describe("MacOSHostComputer preflightInput", () => {
 			{ id: 99, ownerPid: TARGET_PID, layer: 0, bounds: { ...WINDOW_BOUNDS, width: 801 } },
 		]);
 
-		expect(await computer.preflightInput(expected, { requireSameBounds: false })).toEqual({ ok: true });
+		expect(await computer.preflightInput(expected, { requireSameBounds: false })).toEqual(ISOLATED_REFUSAL);
 	});
 
 	it("#given input that does not map screen points #when a different window replaced it #then it is refused", async () => {
@@ -537,20 +486,14 @@ describe("MacOSHostComputer preflightInput", () => {
 			{ id: 100, ownerPid: TARGET_PID, layer: 0, bounds: WINDOW_BOUNDS },
 		]);
 
-		expect(await computer.preflightInput(expected, { requireSameBounds: false })).toEqual({
-			ok: false,
-			reason: "window-changed",
-		});
+		expect(await computer.preflightInput(expected, { requireSameBounds: false })).toEqual(ISOLATED_REFUSAL);
 	});
 
 	it.each([
-		[[], "window-missing"],
-		[[{ id: 100, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }], "window-changed"],
-		[
-			[{ id: 99, owner: { processId: TARGET_PID }, bounds: { ...WINDOW_BOUNDS, width: 801 } }],
-			"window-bounds-changed",
-		],
-	] as const)("rejects changed window context with %s", async (windows, reason) => {
+		[[]],
+		[[{ id: 100, owner: { processId: TARGET_PID }, bounds: WINDOW_BOUNDS }]],
+		[[{ id: 99, owner: { processId: TARGET_PID }, bounds: { ...WINDOW_BOUNDS, width: 801 } }]],
+	] as const)("refuses changed window context with %j", async (windows) => {
 		const computer = approvedComputer();
 		const expected = await observe(computer);
 		windowMock.openWindows.mockResolvedValue(windows);
@@ -563,10 +506,10 @@ describe("MacOSHostComputer preflightInput", () => {
 			})),
 		);
 
-		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason });
+		expect(await computer.preflightInput(expected)).toEqual(ISOLATED_REFUSAL);
 	});
 
-	it("rejects a URL that becomes blocked after observation", async () => {
+	it("refuses a URL that becomes blocked after observation", async () => {
 		runtime.apps = [{ name: "Safari", bundleId: "com.apple.Safari", pid: TARGET_PID, isActive: true }];
 		const approval = new AppApprovalStore(["com.apple.Safari"]);
 		const computer = new MacOSHostComputer({
@@ -577,7 +520,7 @@ describe("MacOSHostComputer preflightInput", () => {
 		const expected = await observe(computer);
 		runtime.browserUrl = "https://blocked.example/account";
 
-		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason: "url-blocked" });
+		expect(await computer.preflightInput(expected)).toEqual(ISOLATED_REFUSAL);
 	});
 
 	it("fails closed when a configured browser URL cannot be queried", async () => {
@@ -590,15 +533,15 @@ describe("MacOSHostComputer preflightInput", () => {
 		const expected = await observe(computer);
 		runtime.browserUrlError = new Error("Apple Events denied");
 
-		expect(await computer.preflightInput(expected)).toEqual({ ok: false, reason: "url-unavailable" });
+		expect(await computer.preflightInput(expected)).toEqual(ISOLATED_REFUSAL);
 	});
 
-	it("rejects an observation replaced by a newer successful read", async () => {
+	it("refuses an observation replaced by a newer successful read", async () => {
 		const computer = approvedComputer();
 		const replaced = await observe(computer);
 		await observe(computer);
 
-		expect(await computer.preflightInput(replaced)).toEqual({ ok: false, reason: "observation-replaced" });
+		expect(await computer.preflightInput(replaced)).toEqual(ISOLATED_REFUSAL);
 	});
 
 	it("does not capture, extract AX, or rebind the remembered target while checking", async () => {

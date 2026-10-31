@@ -60,6 +60,9 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
 
       - name: Runner is the expected macOS and CPU
         run: |

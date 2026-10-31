@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { fetchDouble } from "@apple-cua/test-support";
 import { createDecider, questionsFor, validate } from "./decision.js";
 import type { ActionSpace } from "./types.js";
 
@@ -160,7 +161,7 @@ describe("createDecider", () => {
 		const decide = createDecider({
 			endpoint: "http://127.0.0.1:9/v1/chat/completions",
 			model: "typesafe/jev-latest",
-			fetchImpl: async (input, init) => {
+			fetchImpl: fetchDouble(async (input, init) => {
 				seen = { url: String(input), body: JSON.parse(String(init?.body)) };
 				return new Response(
 					JSON.stringify(
@@ -177,7 +178,7 @@ describe("createDecider", () => {
 					),
 					{ status: 200 },
 				);
-			},
+			}),
 		});
 
 		const outcome = await decide({ space, goal: "save the note", history: [] });
@@ -195,7 +196,7 @@ describe("createDecider", () => {
 		const decide = createDecider({
 			endpoint: "http://127.0.0.1:9/v1/chat/completions",
 			model: "typesafe/jev-latest",
-			fetchImpl: async () => new Response("boom", { status: 500 }),
+			fetchImpl: fetchDouble(async () => new Response("boom", { status: 500 })),
 		});
 
 		await expect(decide({ space, goal: "save the note", history: [] })).rejects.toThrow(/HTTP 500/);

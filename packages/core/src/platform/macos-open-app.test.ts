@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import type { AppInfo } from "../accessibility/types.js";
 import { type AppLister, type AppOpenLauncher, openApplication, openArguments } from "./macos-open-app.js";

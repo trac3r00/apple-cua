@@ -1,5 +1,6 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { once } from "node:events";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { vi, whenSettled } from "@apple-cua/test-support";
 import { WebSocket } from "ws";
 import { z } from "zod";
 import { BrowserBridge } from "./bridge.js";
@@ -186,7 +187,7 @@ describe("browser task-space RPC", () => {
 		const returned = once(bridge, "control");
 		socket.send(JSON.stringify({ event: "control", owner: "agent" }));
 		await returned;
-		await expect(waiting).resolves.toMatchObject({ control: "agent" });
+		await whenSettled(waiting, (settled) => expect(settled).resolves.toMatchObject({ control: "agent" }));
 	});
 
 	it("#given human control #when controller waits to timeout #then reports current owner", async () => {
@@ -375,7 +376,9 @@ describe("browser task-space RPC", () => {
 		await openingReceived;
 		cancellation.abort();
 		releaseOpen();
-		await expect(opening).resolves.toMatchObject({ space: "default", page: "p1", cursor_id: expect.any(String) });
+		await whenSettled(opening, (settled) =>
+			expect(settled).resolves.toMatchObject({ space: "default", page: "p1", cursor_id: expect.any(String) }),
+		);
 		expect(await controller.dispatch({ action: "status" })).toMatchObject({
 			spaces: [{ space: "default", pages: ["p1"] }],
 		});

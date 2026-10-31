@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { dragSteps, easedProgress, interpolatePointEased } from "./macos-input-drag.js";
 
 describe("#given an explicit drag duration", () => {

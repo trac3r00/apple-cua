@@ -1,14 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import * as core from "./index.js";
 
 describe("#given macos host computer", () => {
 	describe("#when instantiated", () => {
-		it("#then has correct capabilities", () => {
+		it("#then it reports observation-only capabilities", () => {
 			const computer = new core.MacOSHostComputer();
-			expect(computer.capabilities.supportsScreenshot).toBe(true);
-			expect(computer.capabilities.supportsInput).toBe(true);
+			expect(computer.capabilities.supportsScreenshot).toBe(false);
+			expect(computer.capabilities.supportsInput).toBe(false);
 			expect(computer.capabilities.supportsAccessibility).toBe(true);
-			expect(computer.capabilities.supportsClipboard).toBe(true);
+			expect(computer.capabilities.supportsClipboard).toBe(false);
 		});
 	});
 });

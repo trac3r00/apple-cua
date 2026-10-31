@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { InputInterrupted, runInInputScope } from "../computer/input-scope.js";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 import type { Point } from "../types/index.js";
 
 const native = vi.hoisted(() => ({
@@ -34,14 +34,10 @@ vi.mock("./macos-ffi/skylight.js", () => ({
 }));
 vi.mock("./macos-ffi/pasteboard.js", () => ({ readClipboard: vi.fn(), writeClipboard: vi.fn() }));
 
-import {
-	longPressMirroring,
-	pressMirroringCombo,
-	scrollMirroring,
-	swipeMirroring,
-	tapMirroring,
-	typeIntoMirroring,
-} from "./ios-input.js";
+const { InputInterrupted, runInInputScope } = await import("../computer/input-scope.js");
+
+const { longPressMirroring, pressMirroringCombo, scrollMirroring, swipeMirroring, tapMirroring, typeIntoMirroring } =
+	await import("./ios-input.js");
 
 const target = {
 	pid: 1,

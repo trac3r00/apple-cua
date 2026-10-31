@@ -1,6 +1,7 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { once } from "node:events";
 import type { StopStatusSource } from "@apple-cua/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { vi, whenSettled } from "@apple-cua/test-support";
 import { WebSocket } from "ws";
 import { z } from "zod";
 import { BrowserBridge } from "./bridge.js";
@@ -75,7 +76,7 @@ describe("BrowserBridge", () => {
 		const packet = await nextJson(socket);
 		expect(packet.command).toEqual({ method: "open", url: "https://example.com" });
 		socket.send(JSON.stringify({ id: packet.id, ok: true, value: { tabId: 1 } }));
-		await expect(request).resolves.toEqual({ tabId: 1 });
+		await whenSettled(request, (settled) => expect(settled).resolves.toEqual({ tabId: 1 }));
 	});
 
 	it("#given human control #when opening and running #then rejects input but permits observation", async () => {
@@ -118,7 +119,7 @@ describe("BrowserBridge", () => {
 		await returned;
 		expect(bridge.control).toBe("agent");
 		socket.send(JSON.stringify({ id: packet.id, ok: true, value: {} }));
-		await expect(observed).resolves.toEqual({});
+		await whenSettled(observed, (settled) => expect(settled).resolves.toEqual({}));
 	});
 
 	it("#given a pending run #when human control begins #then rejects it with human control", async () => {
@@ -137,7 +138,9 @@ describe("BrowserBridge", () => {
 			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
 		});
 		await nextJson(socket);
-		const rejected = expect(request).rejects.toMatchObject({ code: "human_control" });
+		const rejected = whenSettled(request, (settled) =>
+			expect(settled).rejects.toMatchObject({ code: "human_control" }),
+		);
 		const changed = once(bridge, "control");
 		socket.send(JSON.stringify({ event: "control", owner: "human", reason: "window_revealed" }));
 		await changed;
@@ -189,7 +192,7 @@ describe("BrowserBridge", () => {
 		const returned = once(bridge, "control");
 		socket.send(JSON.stringify({ event: "control", owner: "agent" }));
 		await returned;
-		await expect(waiting).resolves.toBe(true);
+		await whenSettled(waiting, (settled) => expect(settled).resolves.toBe(true));
 		const request = bridge.request({
 			method: "run",
 			tabId: 1,
@@ -200,7 +203,7 @@ describe("BrowserBridge", () => {
 		});
 		const packet = await nextJson(socket);
 		socket.send(JSON.stringify({ id: packet.id, ok: true, value: {} }));
-		await expect(request).resolves.toEqual({});
+		await whenSettled(request, (settled) => expect(settled).resolves.toEqual({}));
 	});
 
 	it("#given an authenticated extension #when handoff is requested #then sends its reason and records it", async () => {
@@ -241,7 +244,7 @@ describe("BrowserBridge", () => {
 		const returned = once(bridge, "control");
 		socket.send(JSON.stringify({ event: "control", owner: "agent" }));
 		await returned;
-		await expect(waiting).resolves.toBe(true);
+		await whenSettled(waiting, (settled) => expect(settled).resolves.toBe(true));
 	});
 
 	it("#given human control #when waiting times out #then returns false", async () => {
@@ -270,7 +273,7 @@ describe("BrowserBridge", () => {
 		const cancellation = new AbortController();
 		const waiting = bridge.waitForAgentControl(1000, cancellation.signal);
 		cancellation.abort();
-		await expect(waiting).resolves.toBe(false);
+		await whenSettled(waiting, (settled) => expect(settled).resolves.toBe(false));
 	});
 
 	it("#given a pending request #when the extension disconnects #then rejects without replay", async () => {
@@ -289,7 +292,9 @@ describe("BrowserBridge", () => {
 			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
 		});
 		expect((await nextJson(socket)).command).toMatchObject({ method: "run" });
-		const rejected = expect(request).rejects.toMatchObject({ code: "disconnected" });
+		const rejected = whenSettled(request, (settled) =>
+			expect(settled).rejects.toMatchObject({ code: "disconnected" }),
+		);
 		socket.terminate();
 		await rejected;
 		expect(socket.readyState).not.toBe(WebSocket.OPEN);
@@ -324,7 +329,7 @@ describe("BrowserBridge", () => {
 		const packet = await nextJson(socket);
 		expect(packet.command).toMatchObject({ method: "observe" });
 		socket.send(JSON.stringify({ id: packet.id, ok: true, value: {} }));
-		await expect(observation).resolves.toEqual({});
+		await whenSettled(observation, (settled) => expect(settled).resolves.toEqual({}));
 	});
 
 	it("#given a shared stop state #when a checkpoint arrives #then denies it", async () => {
@@ -348,7 +353,7 @@ describe("BrowserBridge", () => {
 		socket.send(JSON.stringify({ event: "checkpoint", id: String(packet.id), step: 0 }));
 		expect(await nextJson(socket)).toEqual({ checkpoint: packet.id, allowed: false });
 		socket.send(JSON.stringify({ id: packet.id, ok: true, value: {} }));
-		await expect(run).resolves.toEqual({});
+		await whenSettled(run, (settled) => expect(settled).resolves.toEqual({}));
 	});
 
 	it("#given a short command timeout #when a reply never arrives #then rejects and signals stop", async () => {
@@ -358,7 +363,7 @@ describe("BrowserBridge", () => {
 		clients.push(socket);
 		socket.send(JSON.stringify({ token: "secret" }));
 		await nextJson(socket);
-		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		vi.useFakeTimers();
 		const incoming = nextJson(socket);
 		const request = bridge.request({
 			method: "observe",
@@ -366,7 +371,7 @@ describe("BrowserBridge", () => {
 			limits: { maxChars: 6000, maxElements: 80, fullPage: false, profile: "interactive", maxNameChars: 120 },
 		});
 		const packet = await incoming;
-		const rejected = expect(request).rejects.toMatchObject({ code: "timeout" });
+		const rejected = whenSettled(request, (settled) => expect(settled).rejects.toMatchObject({ code: "timeout" }));
 		const stopPacket = nextJson(socket);
 		await vi.advanceTimersByTimeAsync(25);
 		await rejected;
@@ -395,7 +400,7 @@ describe("BrowserBridge", () => {
 			}),
 		);
 		const packet = await incoming;
-		const rejected = expect(request).rejects.toMatchObject({ code: "stopped" });
+		const rejected = whenSettled(request, (settled) => expect(settled).rejects.toMatchObject({ code: "stopped" }));
 		cancellation.abort();
 		await rejected;
 		const denied = nextJson(socket);

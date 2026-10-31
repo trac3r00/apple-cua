@@ -1,11 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 import type { Point, Rect } from "../types/index.js";
-import { type MousePost, type ScreenLayout, postDragSequence, primerPosition } from "./macos-input-pointer.js";
+import type { MousePost, ScreenLayout } from "./macos-input-pointer.js";
 
 vi.mock("node:timers/promises", () => ({
 	setTimeout: (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)),
 }));
+
+const { postDragSequence, primerPosition } = await import("./macos-input-pointer.js");
 
 const MAIN: Rect = { x: 0, y: 0, width: 1920, height: 1080 };
 const MENU_BAR: Rect = { x: 0, y: 0, width: 1920, height: 25 };
@@ -102,7 +105,7 @@ describe("#given a drag path #when it traverses waypoints #then one selected but
 	);
 
 	it("#when a default path returns to its start #then its total travel sets the duration", async () => {
-		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+		vi.useFakeTimers();
 		const post = vi.fn<MousePost>(async () => undefined);
 		const drag = postDragSequence(
 			post,
@@ -116,7 +119,7 @@ describe("#given a drag path #when it traverses waypoints #then one selected but
 	});
 
 	it("#when one millisecond crosses one hundred waypoints #then waits do not accumulate per segment", async () => {
-		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+		vi.useFakeTimers();
 		const started = performance.now();
 		const post = vi.fn<MousePost>(async () => undefined);
 		const drag = postDragSequence(

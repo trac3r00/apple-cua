@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 type ExecFileCallback = (error: Error | null, stdout: string | Buffer, stderr: string) => void;
 type ExecFileMock = (
@@ -24,17 +25,17 @@ vi.mock("node:child_process", () => ({
 
 // The real adapter would attempt a live ScreenCaptureKit capture; pin it to the classified
 // unavailable class so the CLI-fallback routing stays provable under the retry contract.
-vi.mock("./macos-ffi/screenshot.js", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("./macos-ffi/screenshot.js")>();
-	return {
-		...actual,
-		captureWindowImage: sckitMock.captureWindowImage,
-	};
-});
+const actualScreenshot = { ...(await import("./macos-ffi/screenshot.js")) };
+vi.mock("./macos-ffi/screenshot.js", () => ({
+	...actualScreenshot,
+	captureWindowImage: sckitMock.captureWindowImage,
+}));
 
-import { parseRunningApps } from "./app-list.js";
-import { parseImageDimensions, parsePngDimensions } from "./image-format.js";
-import { captureMacOSScreenshot, getMacOSLogicalScreenSize, parseSystemProfilerLogicalScreenSize } from "./macos.js";
+const { parseRunningApps } = await import("./app-list.js");
+const { parseImageDimensions, parsePngDimensions } = await import("./image-format.js");
+const { captureMacOSScreenshot, getMacOSLogicalScreenSize, parseSystemProfilerLogicalScreenSize } = await import(
+	"./macos.js"
+);
 
 function createFakePng(): Buffer {
 	const data = globalThis.Buffer.alloc(24);

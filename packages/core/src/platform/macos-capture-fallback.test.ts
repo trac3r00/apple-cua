@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 type ExecFileCallback = (error: Error | null, stdout: string | Buffer, stderr: string) => void;
 type ExecFileMock = (
@@ -27,7 +28,7 @@ vi.mock("./macos-ffi/screenshot.js", () => ({
 	screenCaptureAllowed: vi.fn(() => true),
 }));
 
-import { captureMacOSScreenshot, classifyCaptureFailure } from "./macos.js";
+const { captureMacOSScreenshot, classifyCaptureFailure } = await import("./macos.js");
 
 function createFakePng(): Buffer {
 	const data = Buffer.alloc(24);

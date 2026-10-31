@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { CURSOR_MOTION_STYLES, cursorMotionFromEnvironment, parseCursorMotion } from "./cursor-motion-config.js";
+import { describe, expect, it } from "bun:test";
+import {
+	CURSOR_MOTION_STYLES,
+	type CursorMotionConfig,
+	cursorMotionFromEnvironment,
+	parseCursorMotion,
+} from "./cursor-motion-config.js";
 
 describe("parseCursorMotion", () => {
 	it.each(CURSOR_MOTION_STYLES)("#given style %s #when parsed #then returns only that style", (style) => {
@@ -24,7 +29,7 @@ describe("parseCursorMotion", () => {
 	});
 
 	it("#given a full object #when parsed #then keeps every field", () => {
-		const full = {
+		const full: CursorMotionConfig = {
 			style: "spring_settle",
 			timing: "fitts",
 			glideDurationMs: 800,
@@ -87,7 +92,7 @@ describe("parseCursorMotion", () => {
 describe("cursorMotionFromEnvironment", () => {
 	const key = "APPLE_CUA_CURSOR_MOTION";
 
-	it.each([{}, { [key]: undefined }, { [key]: "" }, { [key]: "  " }])(
+	it.each<Readonly<Record<string, string | undefined>>>([{}, { [key]: undefined }, { [key]: "" }, { [key]: "  " }])(
 		"#given absent environment setting %j #when read #then preserves the optional configuration",
 		(environment) => {
 			expect(cursorMotionFromEnvironment(environment)).toBeUndefined();

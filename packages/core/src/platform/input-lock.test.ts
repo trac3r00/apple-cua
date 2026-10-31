@@ -1,6 +1,6 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import { InputLock } from "./input-lock.js";
 
 let stateDir: string | undefined;

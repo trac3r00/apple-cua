@@ -1,5 +1,5 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import type { AxEventWaiter } from "@apple-cua/core";
-import { afterEach, describe, expect, it } from "vitest";
 import {
 	type AxWaiterFactory,
 	DEFERRED_SETTLE_DEADLINE_MS,

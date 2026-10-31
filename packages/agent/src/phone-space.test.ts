@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import type { MirroringObservation } from "@apple-cua/core";
-import { describe, expect, it } from "vitest";
 import { buildPhoneActionSpace } from "./phone-space.js";
 
 function observation(texts: MirroringObservation["texts"]): MirroringObservation {

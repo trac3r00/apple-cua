@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const native = vi.hoisted(() => ({
 	root: {},
@@ -12,13 +13,15 @@ const native = vi.hoisted(() => ({
 }));
 
 vi.mock("node:timers/promises", () => ({ setTimeout: vi.fn(async () => undefined) }));
-vi.mock("./macos-ffi/workspace.js", async (original) => ({
-	...(await original<typeof import("./macos-ffi/workspace.js")>()),
+const actualWorkspace = { ...(await import("./macos-ffi/workspace.js")) };
+vi.mock("./macos-ffi/workspace.js", () => ({
+	...actualWorkspace,
 	findRunningApplication: vi.fn(() => ({ pid: 9001, name: "iPhone Mirroring" })),
 	activateApplication: vi.fn(),
 }));
-vi.mock("./macos-ffi/window-list.js", async (original) => ({
-	...(await original<typeof import("./macos-ffi/window-list.js")>()),
+const actualWindowList = { ...(await import("./macos-ffi/window-list.js")) };
+vi.mock("./macos-ffi/window-list.js", () => ({
+	...actualWindowList,
 	listWindows: vi.fn(() => [
 		{ id: 5, ownerPid: 9001, layer: 0, ownerName: "iPhone Mirroring", title: "", bounds: native.bounds },
 	]),
@@ -26,8 +29,9 @@ vi.mock("./macos-ffi/window-list.js", async (original) => ({
 vi.mock("./macos-top-level-windows.js", () => ({
 	listTopLevelWindows: vi.fn(async () => [{ id: 5, ownerPid: 9001, bounds: native.bounds }]),
 }));
-vi.mock("./macos-ffi/accessibility.js", async (original) => ({
-	...(await original<typeof import("./macos-ffi/accessibility.js")>()),
+const actualAccessibility = { ...(await import("./macos-ffi/accessibility.js")) };
+vi.mock("./macos-ffi/accessibility.js", () => ({
+	...actualAccessibility,
 	createApplicationElement: vi.fn(() => native.root),
 	copyAttributeValue: vi.fn(() => native.windows),
 	copyOptionalAttributeValue: vi.fn(() => native.front),
@@ -41,8 +45,9 @@ vi.mock("./macos-ffi/accessibility.js", async (original) => ({
 		if (native.raiseFails) throw new Error("AXRaise failed");
 	}),
 }));
-vi.mock("./macos-ffi/corefoundation.js", async (original) => ({
-	...(await original<typeof import("./macos-ffi/corefoundation.js")>()),
+const actualCorefoundation = { ...(await import("./macos-ffi/corefoundation.js")) };
+vi.mock("./macos-ffi/corefoundation.js", () => ({
+	...actualCorefoundation,
 	isCFArray: vi.fn((reference: object) => reference === native.windows),
 	cfArrayLength: vi.fn(() => 1),
 	cfArrayValueAt: vi.fn(() => native.window),
@@ -57,7 +62,7 @@ vi.mock("./macos-ffi/corefoundation.js", async (original) => ({
 	fromCFBoolean: vi.fn(() => true),
 }));
 
-import { activateMirroring } from "./ios-mirroring.js";
+const { activateMirroring } = await import("./ios-mirroring.js");
 
 beforeEach(() => {
 	native.references = 1;

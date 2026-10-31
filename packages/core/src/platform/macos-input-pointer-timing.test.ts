@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 
 const key = "APPLE_CUA_GESTURE_PRIMER_SETTLE_MS";
 

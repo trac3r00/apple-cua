@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
 
@@ -6,6 +7,7 @@ let closeHarness: (() => Promise<void>) | undefined;
 
 afterEach(async () => {
 	vi.useRealTimers();
+	setSystemTime();
 	if (closeHarness !== undefined) {
 		await closeHarness();
 		closeHarness = undefined;
@@ -301,6 +303,12 @@ function preDispatchReads(harness: Awaited<ReturnType<typeof start>>): number {
 }
 
 describe("run_script #given consecutive query-target actions #when the outcome read is still fresh #then it stands in for the next pre-dispatch read", () => {
+	// Read reuse is bounded by Date.now(); a frozen clock (timers stay real) keeps these read counts independent of
+	// how fast the runner is. Only the reuse-bound test moves it, on purpose.
+	beforeEach(() => {
+		setSystemTime(new Date());
+	});
+
 	it("resolves the next target against the previous outcome read without walking the UI again", async () => {
 		const harness = await start();
 
@@ -358,7 +366,6 @@ describe("run_script #given consecutive query-target actions #when the outcome r
 	});
 
 	it("walks the UI again once the outcome read is older than the reuse bound", async () => {
-		vi.useFakeTimers({ toFake: ["Date"] });
 		const harness = await start();
 		// Time passes between the first click's outcome read and the second click's preflight.
 		const preflight = harness.computer.preflightInput.bind(harness.computer);
@@ -575,7 +582,7 @@ describe("run_script #given a script that blocks its thread #when the deadline p
 		harness.computer.onStateCall = () => release();
 		// Only the run_script deadline is faked, so it cannot fire until the test advances it: the 20 rounds below
 		// always run while the script is still running, however slow the machine is.
-		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		vi.useFakeTimers();
 		let settled = false;
 		const script = harness.client
 			.callTool({

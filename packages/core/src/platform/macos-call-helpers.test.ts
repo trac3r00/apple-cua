@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { isDiscoverableApplication } from "./macos-call-helpers.js";
 
 describe("#given background call helpers #when discovering apps #then only verified system helpers are included", () => {

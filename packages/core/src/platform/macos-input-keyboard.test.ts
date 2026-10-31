@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const coreGraphicsMock = vi.hoisted(() => ({
 	getCurrentCursorPosition: vi.fn(() => ({ x: 1, y: 2 })),

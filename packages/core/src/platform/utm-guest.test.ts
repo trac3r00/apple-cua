@@ -1,5 +1,6 @@
+import { describe, expect, it } from "bun:test";
 import { runInNewContext } from "node:vm";
-import { describe, expect, it, vi } from "vitest";
+import { vi, whenSettled } from "@apple-cua/test-support";
 import { windowsGuestDisplay } from "./utm-guest.js";
 
 describe("#given a guest process #when its completed display query is read #then dimensions are parsed", () => {
@@ -77,7 +78,7 @@ describe("#given a guest process #when its completed display query is read #then
 	});
 
 	it("captures separate outer streams through the same process identity without killing an exited query", async () => {
-		const execute = vi.fn(() => ({ id: () => 42 }));
+		const execute = vi.fn((..._invocation: readonly unknown[]) => ({ id: () => 42 }));
 		const byId = vi.fn((id: number) => id);
 		const getResult = vi.fn(() => ({
 			exited: true,
@@ -326,7 +327,7 @@ describe("#given a guest process #when its completed display query is read #then
 			rejected = true;
 			throw error;
 		});
-		const assertion = expect(result).rejects.toThrow("stopped");
+		const assertion = whenSettled(result, (settled) => expect(settled).rejects.toThrow("stopped"));
 		await cleanupReached;
 		expect(rejected).toBe(false);
 		release(JSON.stringify({ exited: true, exitCode: 0 }));

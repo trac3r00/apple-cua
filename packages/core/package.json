@@ -20,14 +20,18 @@
 		"./stop": {
 			"types": "./dist/platform/stop-switch.d.ts",
 			"import": "./dist/platform/stop-switch.js"
+		},
+		"./isolated": {
+			"types": "./dist/platform/isolated.d.ts",
+			"import": "./dist/platform/isolated.js"
 		}
 	},
 	"scripts": {
-		"build": "pnpm run build:native && tsgo",
-		"build:ts": "tsgo",
+		"build": "pnpm run build:native && tsgo -p tsconfig.build.json",
+		"build:ts": "tsgo -p tsconfig.build.json",
 		"build:native": "./native/build.sh",
 		"typecheck": "tsgo --noEmit",
-		"test": "vitest --run"
+		"test": "bun test --isolate --parallel=4"
 	},
 	"files": [
 		"dist",
@@ -49,7 +53,6 @@
 	},
 	"devDependencies": {
 		"typescript": "^5.7.0",
-		"vitest": "^2.1.0",
 		"@types/node": "^20.0.0"
 	}
 }

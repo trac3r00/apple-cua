@@ -1,8 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import { runInInputScope } from "../computer/input-scope.js";
-import { setOnscreenWindowIdsSourceForTesting } from "./macos-input.js";
-import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 interface TestWindow {
 	readonly id: number;
@@ -46,8 +43,6 @@ const skyLightMock = vi.hoisted(() => {
 });
 
 vi.mock("get-windows", () => ({ openWindows: windowMock.openWindows }));
-// The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
-setOpenWindowsSourceForTesting(() => undefined);
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/skylight.js", () => ({
 	// Background gestures first ask whether the target sits behind the person's app; here it is frontmost.
@@ -70,6 +65,12 @@ vi.mock("./macos-ffi/coregraphics.js", () => ({
 	postUnicodeText: coreGraphicsMock.postUnicodeText,
 	warpCursorPosition: coreGraphicsMock.warpCursorPosition,
 }));
+
+const { runInInputScope } = await import("../computer/input-scope.js");
+const { setOnscreenWindowIdsSourceForTesting } = await import("./macos-input.js");
+const { setOpenWindowsSourceForTesting } = await import("./macos-open-windows.js");
+// The in-process WindowServer listing is pinned away so the get-windows fixtures above stay authoritative.
+setOpenWindowsSourceForTesting(() => undefined);
 
 function callOrderAt(orders: readonly number[], index: number, label: string): number {
 	const order = orders[index];

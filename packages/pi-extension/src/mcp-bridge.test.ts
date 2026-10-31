@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 import { FAKE_TOOLS, FakeAppleCuaServer, textAnswer } from "../test/support/fake-apple-cua.js";
 import { McpBridge } from "./mcp-bridge.js";

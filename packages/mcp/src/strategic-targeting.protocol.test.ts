@@ -1,5 +1,5 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import type { AppOpenLauncher } from "@apple-cua/core";
-import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 

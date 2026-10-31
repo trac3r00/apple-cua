@@ -1,6 +1,7 @@
+import { describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { Script } from "node:vm";
-import { describe, expect, it } from "vitest";
+import { whenSettled } from "@apple-cua/test-support";
 import { z } from "zod";
 import { observationSchema } from "./protocol.js";
 
@@ -407,10 +408,10 @@ describe("background worker ownership", () => {
 				],
 			});
 			if (frameAfterClick === "child") {
-				await expect(running).resolves.toMatchObject({ completedSteps: 2 });
+				await whenSettled(running, (settled) => expect(settled).resolves.toMatchObject({ completedSteps: 2 }));
 				expect(worker.stats().inputs).toBe(4);
 			} else {
-				await expect(running).rejects.toBeDefined();
+				await whenSettled(running, (settled) => expect(settled).rejects.toBeDefined());
 				expect(worker.stats().inputs).toBe(2);
 			}
 		},

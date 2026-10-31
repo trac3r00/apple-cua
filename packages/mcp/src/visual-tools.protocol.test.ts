@@ -1,5 +1,6 @@
+import { afterEach, describe, expect, it } from "bun:test";
+import { copyForMatch } from "@apple-cua/test-support";
 import type { CreateMessageRequest, CreateMessageResult } from "@modelcontextprotocol/sdk/types.js";
-import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 
@@ -74,7 +75,7 @@ describe("#given an approved observed window #when analyze_screen samples it #th
 		expect(request?.params.maxTokens).toBe(16_000);
 		expect(request?.params).not.toHaveProperty("tools");
 		expect(harness.computer.stateOptions.at(-1)).toMatchObject({ windowId: 71 });
-		expect(payload["visualAnalysis"]).toMatchObject({
+		expect(copyForMatch(payload["visualAnalysis"])).toMatchObject({
 			elements: expect.arrayContaining([
 				expect.objectContaining({ label: "Icon-only back", frame: { x: 2, y: 2, width: 10, height: 10 } }),
 				expect.objectContaining({ label: "Bottom action", frame: { x: 20, y: 370, width: 40, height: 20 } }),

@@ -1,7 +1,9 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import type { Mock } from "bun:test";
 import { writeFileSync } from "node:fs";
 import type { UTM } from "@apple-cua/core";
+import { vi } from "@apple-cua/test-support";
 import { Command } from "commander";
-import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const core = vi.hoisted(() => {
 	const methods = {
@@ -33,7 +35,7 @@ const core = vi.hoisted(() => {
 vi.mock("@apple-cua/core", () => ({ UTM: core.UTM }));
 vi.mock("node:fs", () => ({ writeFileSync: vi.fn() }));
 
-import { registerUtmCommands } from "./utm.js";
+const { registerUtmCommands } = await import("./utm.js");
 
 const machines = [{ id: "vm-123", name: "Linux guest", status: "started", backend: "QEMU" }];
 const observation: Awaited<ReturnType<UTM["observe"]>> = {
@@ -44,7 +46,7 @@ const observation: Awaited<ReturnType<UTM["observe"]>> = {
 	texts: [{ text: "Settings", confidence: 0.98, box: { x: 101, y: 203, width: 50, height: 25 } }],
 	cursor: { x: 12, y: 34 },
 };
-let stdout: MockInstance<typeof process.stdout.write>;
+let stdout: Mock<typeof process.stdout.write>;
 
 function createProgram(): Command {
 	const program = new Command()
@@ -351,10 +353,12 @@ describe("#given UTM commands #when Commander parses them #then calls route to c
 });
 
 describe("#given invalid UTM arguments #when Commander parses them #then core is untouched", () => {
-	it.each([
-		["--button", "right"],
-		["--monitor", "2"],
-	])("rejects unsupported screenshot click options %j", async (...flags) => {
+	it.each(
+		[
+			["--button", "right"],
+			["--monitor", "2"],
+		].map((row) => [row]),
+	)("rejects unsupported screenshot click options %j", async (flags) => {
 		await expect(
 			createProgram().parseAsync(["utm", "click", "vm-123", "-x", "0", "-y", "0", "--image-coordinates", ...flags], {
 				from: "user",
@@ -413,20 +417,22 @@ describe("#given invalid UTM arguments #when Commander parses them #then core is
 		expect(core.UTM).not.toHaveBeenCalled();
 	});
 
-	it.each([
-		["start"],
-		["suspend"],
-		["stop"],
-		["type", "vm-123"],
-		["key", "vm-123"],
-		["click", "vm-123", "-x", "0"],
-		["click", "vm-123", "-y", "0"],
-		["screenshot", "vm-123"],
-		["observe"],
-		["move", "vm-123", "-x", "0"],
-		["move", "vm-123", "-y", "0"],
-		["click-text", "vm-123"],
-	])("requires missing arguments for %j", async (...args) => {
+	it.each(
+		[
+			["start"],
+			["suspend"],
+			["stop"],
+			["type", "vm-123"],
+			["key", "vm-123"],
+			["click", "vm-123", "-x", "0"],
+			["click", "vm-123", "-y", "0"],
+			["screenshot", "vm-123"],
+			["observe"],
+			["move", "vm-123", "-x", "0"],
+			["move", "vm-123", "-y", "0"],
+			["click-text", "vm-123"],
+		].map((row) => [row]),
+	)("requires missing arguments for %j", async (args) => {
 		await expect(createProgram().parseAsync(["utm", ...args], { from: "user" })).rejects.toThrow();
 
 		expect(core.UTM).not.toHaveBeenCalled();

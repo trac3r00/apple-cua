@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const ffi = vi.hoisted(() => {
 	type Ref = {
@@ -80,13 +81,9 @@ vi.mock("./corefoundation.js", () => ({
 	withCFString: <T>(value: string, callback: (reference: { value: string }) => T): T => callback({ value }),
 }));
 
-import {
-	activeSpaceId,
-	managedDisplaySpaces,
-	parseWindowSpaceResults,
-	spaceTypeFor,
-	spacesForWindows,
-} from "./sls-spaces.js";
+const { activeSpaceId, managedDisplaySpaces, parseWindowSpaceResults, spaceTypeFor, spacesForWindows } = await import(
+	"./sls-spaces.js"
+);
 
 beforeEach(() => {
 	ffi.managedResult = ffi.ref.array(

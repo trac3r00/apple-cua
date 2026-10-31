@@ -1,9 +1,9 @@
+import { describe, expect, it } from "bun:test";
 import { EventEmitter, once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
-import { type Server, createServer } from "node:net";
+import { type Server, connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
 
 import { withCursorIdentity } from "../../computer/cursor-scope.js";
 import { createCursorOverlay, cursorOverlaySocketPath, defaultSocketTransport } from "./cursor-overlay.js";
@@ -123,8 +123,12 @@ describe("#given cursor identities #when resolving daemon sockets #then routing 
 				await listening;
 			}
 
-			const first = defaultSocketTransport(Date.now, undefined, undefined, paths[0]);
-			const second = defaultSocketTransport(Date.now, undefined, undefined, paths[1]);
+			// Only these owned sockets are reached; the human desktop's overlay daemon is never started.
+			const refuseSpawn = (): never => {
+				throw new Error("An identity test attempted to start the overlay daemon.");
+			};
+			const first = defaultSocketTransport(Date.now, refuseSpawn, undefined, paths[0], (path) => connect(path));
+			const second = defaultSocketTransport(Date.now, refuseSpawn, undefined, paths[1], (path) => connect(path));
 			const firstHidden = once(events, "data-0");
 			first.send("hide\n");
 			await firstHidden;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { chooseMirroringWindow } from "./ios-mirroring.js";
 import type { TopLevelWindow } from "./macos-top-level-windows.js";
 

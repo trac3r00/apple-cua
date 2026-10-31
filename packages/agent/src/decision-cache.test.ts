@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { type FetchHandler, fetchDouble, vi } from "@apple-cua/test-support";
 import type { PrefetchStatus } from "./decision-cache.js";
 import { DecisionCache } from "./decision-cache.js";
 import { createDecider } from "./decision.js";
@@ -44,11 +45,11 @@ function fixture() {
 	let now = 0;
 	let frame: DecisionFrame | undefined = { hash: "frame-a", image: "aW1hZ2U=", surface: "1234:71" };
 	const events: PrefetchStatus[] = [];
-	const fetchImpl = vi.fn<typeof fetch>(async () => response());
+	const fetchImpl = vi.fn<FetchHandler>(async () => response());
 	const decide = createDecider({
 		endpoint: "https://decision.invalid",
 		model: "test",
-		fetchImpl,
+		fetchImpl: fetchDouble(fetchImpl),
 		now: () => now,
 		latestFrame: () => frame,
 		onPrefetch: (status) => events.push(status),
@@ -73,7 +74,7 @@ describe("frame decision cache", () => {
 			endpoint: "https://decision.invalid",
 			model: "test",
 			latestFrame,
-			fetchImpl: async () => response(),
+			fetchImpl: fetchDouble(async () => response()),
 		});
 		await decide(request);
 		latestFrame.mockClear();

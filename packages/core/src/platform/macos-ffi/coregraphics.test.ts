@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 const koffiMock = vi.hoisted(() => {
 	const sourceReference = { type: "source" };
@@ -115,16 +116,18 @@ describe("#given CoreGraphics koffi bindings", () => {
 	});
 
 	describe("#when posting mouse events without a target pid", () => {
-		it("#then posts through the global HID event tap", async () => {
+		it("#then refuses the global HID event tap and releases the event", async () => {
 			const { postMouseEvent } = await import("./coregraphics.js");
 
-			postMouseEvent({
-				kind: "down",
-				position: { x: 100, y: 200 },
-				button: "right",
-				clickState: 1,
-				targetPid: undefined,
-			});
+			expect(() =>
+				postMouseEvent({
+					kind: "down",
+					position: { x: 100, y: 200 },
+					button: "right",
+					clickState: 1,
+					targetPid: undefined,
+				}),
+			).toThrow(/global-input cannot operate on the human desktop/);
 
 			expect(koffiMock.coreGraphicsFunctions.CGEventCreateMouseEvent).toHaveBeenCalledWith(
 				koffiMock.sourceReference,
@@ -137,7 +140,8 @@ describe("#given CoreGraphics koffi bindings", () => {
 				1,
 				1,
 			);
-			expect(koffiMock.coreGraphicsFunctions.CGEventPost).toHaveBeenCalledWith(0, koffiMock.mouseEvent);
+			expect(koffiMock.coreGraphicsFunctions.CGEventPost).not.toHaveBeenCalled();
+			expect(koffiMock.coreFoundationFunctions.CFRelease).toHaveBeenCalledWith(koffiMock.mouseEvent);
 		});
 	});
 
@@ -227,28 +231,33 @@ describe("#given CoreGraphics koffi bindings", () => {
 			expect(koffiMock.coreGraphicsFunctions.CGWarpMouseCursorPosition).not.toHaveBeenCalled();
 		});
 
-		it("#then untargeted events also leave the real cursor alone", async () => {
+		it("#then untargeted events are refused and leave the real cursor alone", async () => {
 			const { postMouseEvent } = await import("./coregraphics.js");
 
-			postMouseEvent({
-				kind: "down",
-				position: { x: 100, y: 200 },
-				button: "left",
-				clickState: 1,
-				targetPid: undefined,
-			});
+			expect(() =>
+				postMouseEvent({
+					kind: "down",
+					position: { x: 100, y: 200 },
+					button: "left",
+					clickState: 1,
+					targetPid: undefined,
+				}),
+			).toThrow(/global-input cannot operate on the human desktop/);
 
 			expect(koffiMock.coreGraphicsFunctions.CGWarpMouseCursorPosition).not.toHaveBeenCalled();
+			expect(koffiMock.coreGraphicsFunctions.CGEventPost).not.toHaveBeenCalled();
 		});
 	});
 
 	describe("#when explicitly warping the cursor position", () => {
-		it("#then calls the CoreGraphics cursor warp binding", async () => {
+		it("#then refuses before any CoreGraphics warp", async () => {
 			const { warpCursorPosition } = await import("./coregraphics.js");
 
-			warpCursorPosition({ x: 33, y: 44 });
+			expect(() => warpCursorPosition({ x: 33, y: 44 })).toThrow(
+				/physical-pointer cannot operate on the human desktop/,
+			);
 
-			expect(koffiMock.coreGraphicsFunctions.CGWarpMouseCursorPosition).toHaveBeenCalledWith({ x: 33, y: 44 });
+			expect(koffiMock.coreGraphicsFunctions.CGWarpMouseCursorPosition).not.toHaveBeenCalled();
 		});
 	});
 
@@ -368,16 +377,18 @@ describe("#given CoreGraphics koffi bindings", () => {
 	});
 
 	describe("#when posting a scroll event with held modifiers at a point", () => {
-		it("#then the wheel event carries the flags and is located at that point", async () => {
+		it("#then the wheel event carries the flags and location while the untargeted post is refused", async () => {
 			const { K_CG_EVENT_FLAG_MASK_ALTERNATE, postScrollEvent } = await import("./coregraphics.js");
 
-			postScrollEvent({
-				deltaX: 0,
-				deltaY: -4,
-				targetPid: undefined,
-				flags: K_CG_EVENT_FLAG_MASK_ALTERNATE,
-				position: { x: 300, y: 400 },
-			});
+			expect(() =>
+				postScrollEvent({
+					deltaX: 0,
+					deltaY: -4,
+					targetPid: undefined,
+					flags: K_CG_EVENT_FLAG_MASK_ALTERNATE,
+					position: { x: 300, y: 400 },
+				}),
+			).toThrow(/global-input cannot operate on the human desktop/);
 
 			const scrollEvent = koffiMock.coreGraphicsFunctions.CGEventCreateScrollWheelEvent.mock.results[0]?.value;
 			expect(koffiMock.coreGraphicsFunctions.CGEventSetFlags).toHaveBeenCalledWith(
@@ -388,6 +399,7 @@ describe("#given CoreGraphics koffi bindings", () => {
 				x: 300,
 				y: 400,
 			});
+			expect(koffiMock.coreGraphicsFunctions.CGEventPost).not.toHaveBeenCalled();
 		});
 	});
 

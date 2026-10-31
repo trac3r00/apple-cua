@@ -14,9 +14,9 @@
 		"apple-cua": "./dist/cli.js"
 	},
 	"scripts": {
-		"build": "tsgo",
+		"build": "tsgo -p tsconfig.build.json",
 		"typecheck": "tsgo --noEmit",
-		"test": "vitest --run"
+		"test": "bun test --isolate --parallel=4"
 	},
 	"dependencies": {
 		"@apple-cua/browser": "workspace:*",
@@ -27,8 +27,7 @@
 	"devDependencies": {
 		"@types/node": "^20.0.0",
 		"execa": "9.6.0",
-		"typescript": "^5.7.0",
-		"vitest": "^2.1.0"
+		"typescript": "^5.7.0"
 	},
 	"engines": {
 		"node": ">=20.0.0"

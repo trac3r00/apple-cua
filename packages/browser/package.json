@@ -12,9 +12,9 @@
 		".": "./dist/index.js"
 	},
 	"scripts": {
-		"build": "tsgo",
+		"build": "tsgo -p tsconfig.build.json",
 		"typecheck": "tsgo --noEmit",
-		"test": "vitest --run --root ../.. packages/browser",
+		"test": "bun test --isolate",
 		"verify:browser": "node scripts/verify.mjs"
 	},
 	"dependencies": {

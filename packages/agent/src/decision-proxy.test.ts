@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { fetchDouble } from "@apple-cua/test-support";
 import {
 	fromGatewayAnswers,
 	handleChatRequest,
@@ -78,10 +79,12 @@ describe("#given the proxy handler #when the upstream answers #then the chat sha
 				fallbackModel: "jev-latest",
 				systemoneEndpoint: "https://stub.typesafe.invalid/v1/systemone",
 				apiKey: "test-key",
-				fetchImpl: (async () =>
-					new Response(JSON.stringify({ answers: { operation: { choice: "PRESS", confidence: 0.9 } } }), {
-						status: 200,
-					})) as typeof fetch,
+				fetchImpl: fetchDouble(
+					async () =>
+						new Response(JSON.stringify({ answers: { operation: { choice: "PRESS", confidence: 0.9 } } }), {
+							status: 200,
+						}),
+				),
 			},
 		);
 		const wrapped = payload as { choices: [{ message: { content: string } }] };
@@ -97,7 +100,7 @@ describe("#given the proxy handler #when the upstream answers #then the chat sha
 				fallbackModel: "jev-latest",
 				systemoneEndpoint: "https://stub.typesafe.invalid/v1/systemone",
 				apiKey: "test-key",
-				fetchImpl: (async () => new Response("Cannot authenticate", { status: 401 })) as typeof fetch,
+				fetchImpl: fetchDouble(async () => new Response("Cannot authenticate", { status: 401 })),
 			});
 		} catch (error) {
 			raised = error;
@@ -148,7 +151,7 @@ describe("#given gateway-decisions mode #when questions are translated #then onl
 			fallbackModel: "jev-latest",
 			systemoneEndpoint: "https://stub.invalid/v1",
 			apiKey: "k",
-			fetchImpl,
+			fetchImpl: fetchDouble(fetchImpl),
 		};
 		const raw = JSON.stringify({ model: "sionic-ai/jev-omni", messages: [{ role: "user", content: contract }] });
 		const on = (await handleChatRequest(raw, { ...base, mode: "gateway-decisions" })) as {
@@ -172,7 +175,7 @@ describe("#given gateway-decisions mode #when questions are translated #then onl
 			systemoneEndpoint: "https://stub.invalid/v1",
 			apiKey: "k",
 			mode: "gateway-decisions" as const,
-			fetchImpl: (async () => new Response(JSON.stringify({ answers: {} }), { status: 200 })) as typeof fetch,
+			fetchImpl: fetchDouble(async () => new Response(JSON.stringify({ answers: {} }), { status: 200 })),
 		};
 		const requestFor = (size: number): string =>
 			JSON.stringify({
@@ -200,12 +203,12 @@ describe("#given gateway-decisions mode #when questions are translated #then onl
 				systemoneEndpoint: "https://stub.invalid/v1",
 				apiKey: "test-key",
 				mode: "gateway-decisions",
-				fetchImpl: (async (_url: unknown, init?: RequestInit) => {
+				fetchImpl: fetchDouble(async (_url: unknown, init?: RequestInit) => {
 					postedModel = (JSON.parse(String(init?.body)) as { model: string }).model;
 					return new Response(JSON.stringify({ answers: { operation: { choice: "PRESS" } } }), {
 						status: 200,
 					});
-				}) as typeof fetch,
+				}),
 			},
 		);
 		expect(postedModel).toBe("sionic-ai/jev-omni");

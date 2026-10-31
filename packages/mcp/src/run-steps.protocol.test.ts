@@ -1,5 +1,5 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import type { TopLevelWindow } from "@apple-cua/core";
-import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
 import { MAX_RUN_STEPS } from "./tool-schemas.js";

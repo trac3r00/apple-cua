@@ -83,7 +83,7 @@ export function registerWorkerTools(
 		"manage_workers",
 		{
 			description:
-				"Assign disjoint app tasks, observe a worker for a fresh token, inspect assignments, or release an idle worker. Cursor ids are server-created.",
+				"Assign disjoint app tasks, observe a worker for a fresh token, inspect assignments, or release an idle worker. agent_name and parent_agent_name name the cursor owner (default worker_id); cursor ids are opaque server keys.",
 			inputSchema: manageWorkersSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true },
 		},

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { comboParts, gesturePath, swipeDurationMs, typingPlan } from "./ios-input.js";
 
 describe("#given a swipe between two points #when the gesture path is built #then it eases like a finger and lands exactly on the target", () => {

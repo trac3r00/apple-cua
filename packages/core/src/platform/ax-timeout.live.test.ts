@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { describe, expect, it } from "vitest";
 import { MacOSHostComputer } from "./macos.js";
 
 /**

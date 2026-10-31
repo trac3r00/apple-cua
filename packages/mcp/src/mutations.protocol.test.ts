@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
+import { copyForMatch, defined } from "@apple-cua/test-support";
 import { createHarness, jsonPayload, jsonText, observe } from "./protocol-client-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
 
@@ -145,7 +146,7 @@ describe("post-action payload #given a mutation that changes many controls #when
 
 		expect(payload["elements"]).toBeUndefined();
 		expect(payload["axChangesOmitted"]).toMatchObject({ added: 275 });
-		expect(payload["axChanges"]).toMatchObject({ added: expect.any(Array) });
+		expect(copyForMatch(payload["axChanges"])).toMatchObject({ added: expect.any(Array) });
 		expect((payload["axChanges"] as { added: unknown[] }).added).toHaveLength(25);
 		expect(text.length).toBeLessThan(6000);
 	});
@@ -236,7 +237,7 @@ describe("native preflight #given recorded metadata #when policy revokes input #
 			escalation: { target: "human", reason: "needs_user" },
 			paused: true,
 		});
-		expect(harness.computer.preflightExpected).toEqual([before]);
+		expect(harness.computer.preflightExpected).toEqual([defined(before)]);
 		expect(harness.computer.getInputObservation(1234)).toBe(before);
 		expect(inputEffects(harness.computer.effects)).toEqual([]);
 	});

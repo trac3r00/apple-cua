@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { vi } from "@apple-cua/test-support";
 
 import { withTargetedApp } from "./actions.js";
 import { InputInterrupted, assertInputMayContinue, currentInputScope, runInInputScope } from "./input-scope.js";

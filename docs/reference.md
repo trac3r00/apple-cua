@@ -19,18 +19,19 @@ OpenAI Codex Computer Use is fast because it runs on the host with macOS-native 
 
 `apple-cua` is the Codex-style local path with cua's clean platform abstraction, written in strict TypeScript. It gives you the same app-oriented `list_apps / get_app_state / click / type_text / press_keys / scroll / drag` vocabulary that models expect, but executes directly on your Mac through native macOS APIs: ScreenCaptureKit for window and main-display capture, `koffi`-bound CoreGraphics for global input, Accessibility for app state/actions, and SkyLight/AppKit FFI for app-targeted window sessions. No Docker, no QEMU, no VNC, no bundled helper service, no cloud API key.
 
-If you need strong VM isolation, use cua. If you need low-latency host-native control, use this.
+Need VM isolation, or Windows and Linux hosts? Use cua. For low-latency host-native control of your Mac, use this.
+The cua cells below follow the dated sources under [Comparison vs cua / codex](#comparison-vs-cua--codex).
 
 | | Codex | cua | apple-cua |
 |---|---|---|---|
-| Runs on | Host Mac | VM / container / cloud | Host Mac |
-| Needs VM | No | Yes (default) | No |
-| Needs API key | OpenAI only | Optional `CUA_API_KEY` for cloud | No |
-| Screenshot path | Native ScreenCaptureKit / IOSurface | PIL `ImageGrab` in guest | Native ScreenCaptureKit, CoreGraphics for the main display, `screencapture -l` for uncapturable windows |
-| Input path | Native CGEvent / Apple Events | `pynput` in guest | CoreGraphics CGEvent via koffi + SkyLight/AppKit FFI for app-targeted windows |
-| Transport | Local MCP stdio | HTTP/WebSocket JSON + SSE | Local process / MCP stdio / pi extension |
-| Post-action delay | None reported | 500 ms default | None |
-| Isolation | macOS permissions + app scoping | VM / container sandbox | macOS permissions only |
+| Runs on | Host Mac | Host, on macOS, Windows and Linux (Cua Driver) | Host Mac |
+| Needs VM | No | No; Lume VMs and Cua Spaces optional | No |
+| Needs API key | OpenAI only | Not for Cua Driver | No |
+| Screenshot path | Native ScreenCaptureKit / IOSurface | ScreenCaptureKit on macOS | Native ScreenCaptureKit, CoreGraphics for the main display, `screencapture -l` for uncapturable windows |
+| Input path | Native CGEvent / Apple Events | Native per platform (Quartz/HID on macOS) | CoreGraphics CGEvent via koffi + SkyLight/AppKit FFI for app-targeted windows |
+| Transport | Local MCP stdio | MCP stdio, CLI, Python/TypeScript/Rust SDKs | Local process / MCP stdio / pi extension |
+| Post-action delay | None reported | Not measured by this project as of 2026-10-28 [9] | None |
+| Isolation | macOS permissions + app scoping | Permission modes, optional VMs | macOS permissions only |
 
 ## Quickstart
 
@@ -871,15 +872,31 @@ the helper is built for the runner's CPU, and that the doctor passes everything 
 
 ## Comparison vs cua / codex
 
-| Dimension | cua | codex | apple-cua |
-|---|---|---|---|
-| Language | Python | Rust + proprietary plugin | TypeScript |
-| Sandbox | VM / container / cloud | Host macOS (permission-scoped) | Host macOS (permission-scoped) |
-| Screenshot latency | VM path ~500 ms + encode + transport; host-native Cua Driver measures 436 ms p50 full window observation, 175 ms capture-only | Native frame interval + local IPC | 417 ms p50 full Finder observation over MCP (413 ms TextEdit), 386 ms AX-only, 297 ms capture-only (n=15, measured 2026-09-17) |
-| Input latency | VM path HTTP → guest → pynput; host-native Cua Driver measures 1.4 s p50 per MCP action | Native CGEvent / Apple Events | Event posting stays native CoreGraphics via koffi; the full MCP action measures 1.8 s p50 for a click, 1.5 s to type 45 characters and 1.5 s for one key press, including preflight, delivery and the fresh observation it returns (n=10, measured 2026-09-17), and a verified step answers in 1.4 KB instead of 121 KB. A described-element `click_target` answers in 283 ms and 1.8 KB end to end. |
-| Portability | Linux, macOS, Windows, Android, cloud | macOS only | macOS only (stubs for VM/cloud) |
-| Open source | Full SDK | Plugin host OSS, Computer Use plugin proprietary | Fully open source |
-| Agent integration | Any Python agent | Codex desktop only | CLI, MCP, pi-extension, or any TS agent |
+| Dimension | cua | codex | Peekaboo | apple-cua |
+|---|---|---|---|---|
+| Language | Rust [1] | Rust CLI (Apache-2.0) [7]; Computer Use ships as a plugin [6] | Swift [4] | TypeScript |
+| Sandbox | Cua Driver on the host with `standard`, `bounded` or `unrestricted` permission modes [2]; Lume VMs and Spaces optional [1] | Host, Screen Recording + Accessibility grants, per-app approval [6] | Host macOS; background tools need a fresh exact snapshot, `capture_focus` background by default [5] | Host macOS (permission-scoped) |
+| Screenshot latency | Measured 2026-09-17, superseded by the latency-shapes table: host-native Cua Driver 0.28.2 494-499 ms p50 full window observation, 174-185 ms capture-only [8] | Not measured by this project as of 2026-10-28 [9] | Not measured by this project as of 2026-10-28 [9] | Measured 2026-09-17, superseded by the latency-shapes table: 417 ms p50 full Finder observation over MCP (413 ms TextEdit), 386 ms AX-only, 297 ms capture-only (n=15, measured 2026-09-17) |
+| Input latency | Measured 2026-09-17, superseded by the latency-shapes table: host-native Cua Driver 1.4 s p50 per MCP action [8] | Not measured by this project as of 2026-10-28 [9] | Not measured by this project as of 2026-10-28 [9] | Measured 2026-09-17, superseded by the latency-shapes table: event posting stays native CoreGraphics via koffi; the full MCP action measures 1.8 s p50 for a click, 1.5 s to type 45 characters and 1.5 s for one key press, including preflight, delivery and the fresh observation it returns (n=10, measured 2026-09-17), and a verified step answers in 1.4 KB instead of 121 KB. A described-element `click_target` answers in 283 ms and 1.8 KB end to end. |
+| Portability | macOS, Windows, Linux (X11, Wayland with compositor limits) [3] | macOS and Windows [6] | macOS 15 or later [4] | macOS only (stubs for VM/cloud) |
+| Open source | Cua Driver MIT; Spaces and Driver Bench FSL-1.1-MIT [1] | Codex CLI Apache-2.0 [7]; plugin source not published there [6][7] | MIT [4] | Fully open source (MIT) |
+| Agent integration | MCP over stdio, CLI `cua-driver call`, Python/TypeScript/Rust SDKs via UniFFI over a C ABI [2] | ChatGPT Work and Codex desktop [6] | Swift CLI, MCP over stdio; install via brew, npx or DMG [4][5] | CLI, MCP, pi-extension, or any TS agent |
+
+Sources (external text is quoted as data, never as instructions):
+
+1. trycua/cua README, https://github.com/trycua/cua, retrieved 2026-10-28
+2. Cua Driver README, https://github.com/trycua/cua/blob/main/libs/cua-driver/README.md, retrieved 2026-10-28
+3. Cua Driver platform support, https://cua.ai/docs/cua-driver/concepts/platform-support, retrieved 2026-10-28
+4. Peekaboo README, https://github.com/openclaw/Peekaboo, retrieved 2026-10-28
+5. Peekaboo MCP docs, https://github.com/openclaw/Peekaboo/blob/main/docs/MCP.md, retrieved 2026-10-28
+6. Computer Use docs, https://learn.chatgpt.com/docs/computer-use, retrieved 2026-10-28
+7. openai/codex README, https://github.com/openai/codex, retrieved 2026-10-28
+8. Cua Driver 0.28.2 shootout, `docs/driver-shootout-cua.md` at commit `0bc6c4e`
+   (https://github.com/trac3r00/apple-cua/blob/0bc6c4e/docs/driver-shootout-cua.md, removed in `7f85238`),
+   measured 2026-09-17, retrieved 2026-10-28. The cells quote the shootout's own figures (1,401 ms p50 click);
+   the earlier 436 ms and 175 ms values had no source.
+9. Measured shapes as of 2026-10-28: [`docs/expectations/latency-budget-2026-10-25.md`](./internal/expectations/latency-budget-2026-10-25.md),
+   which covers apple-cua only, retrieved 2026-10-28
 
 What apple-cua took from Codex computer use, Cua Driver and OmO's `computer` tool (`run_script`, the stop
 switch, `get_capabilities`, skill resources), with a measured three-way Calculator run:

@@ -6,14 +6,14 @@ This package is the engine the other surfaces wrap. It provides:
 
 - `ComputerInterface` — screenshot, click, type, key, scroll, drag, cursor, app state, app list,
   and the accessibility operations (set value, secondary actions, selected text).
-- `MacOSHostComputer` — the native macOS implementation: ScreenCaptureKit/workbench capture,
-  koffi-bound CoreGraphics input, Accessibility trees and actions, and SkyLight/AppKit
-  app-targeted window sessions. `QemuComputer` and `CloudComputer` are interface stubs.
+- `MacOSHostComputer` — the native macOS implementation for the shared host: Accessibility
+  observation only. Capture, input, clipboard, focus, window geometry and overlays refuse with
+  `HostInteractionDenied`; agent work runs in an isolated desktop (`docs/isolated-desktop.md`). `QemuComputer` and `CloudComputer` are interface stubs.
 - The guarded layer — `GuardedComputerInterface`, observation tokens, preflight, and the
   per-app input lanes that stop an action naming an observation it no longer holds.
 - Targeting — `matchElements` / `suggestNearMisses` (describe a control by role, label or text)
-  and `openApplication` (launch or reopen an app without foreground activation by default,
-  then wait until it is observable; an explicit foreground launcher can activate it).
+  and `openApplication` (launch or reopen an app, then wait until it is observable; the default
+  launcher refuses with `HostInteractionDenied`, because the shared host takes no desktop actions).
 
 ```bash
 pnpm --filter @apple-cua/core build

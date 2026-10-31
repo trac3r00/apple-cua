@@ -8,10 +8,16 @@ It exposes 33 tools over MCP: observation (`get_app_state`, `list_apps`, `list_w
 `invoke_menu`, `set_window_frame`, `clipboard_read`, `clipboard_write`), lifecycle (`open_app`) and
 the iPhone Mirroring tools (`ios_*`).
 
+On the shared host the server only observes through Accessibility. Anything that would act on or capture the
+human desktop is refused with `isolated-session-required`: input, the clipboard, window geometry
+(`set_window_frame`), app launch and activation (`open_app`), overlays, screenshots, and iPhone Mirroring input,
+because the Mirroring window is part of that desktop. Agent work runs in an agent-owned isolated desktop; see
+[docs/isolated-desktop.md](../../docs/isolated-desktop.md).
+
 The three targeting tools are the ones to reach for when a caller knows *what* it wants but not
 where it is: `find_elements` resolves a description (role, label, text) to ranked element ids,
-`click_target` resolves, waits, clicks and verifies in one call, and `open_app` brings an app
-forward or launches it.
+`click_target` resolves, waits, clicks and verifies in one call, and `open_app` launches or reopens an app; on the
+shared host the last two are refused like every other action.
 
 ```bash
 pnpm --filter @apple-cua/core --filter @apple-cua/mcp build

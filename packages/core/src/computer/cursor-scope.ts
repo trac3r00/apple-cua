@@ -22,7 +22,9 @@ export function withCursorIdentity<T>(identity: string, callback: () => T, owner
 				name.length > 128 ||
 				Array.from(name).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))
 		) {
-			throw new TypeError("Cursor owner names and session IDs must be nonempty and contain no control characters.");
+			throw new TypeError(
+				"Cursor owner names and session IDs must be nonempty, at most 128 characters, and contain no control characters.",
+			);
 		}
 	}
 	const snapshot: CursorOwner = Object.freeze({

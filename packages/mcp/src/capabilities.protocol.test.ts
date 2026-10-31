@@ -31,6 +31,7 @@ async function connect(register: (server: McpServer) => void): Promise<Client> {
 }
 
 const reportSchema = z.object({
+	host: z.object({ workers: z.object({ concurrent: z.boolean() }) }),
 	backend: z.string(),
 	input: z.object({ supported: z.boolean(), reason: z.string(), scope: z.string() }),
 	capture: z.object({ supported: z.boolean(), reason: z.string(), scope: z.string() }),
@@ -96,6 +97,7 @@ describe("#given a fully permitted console session #when capabilities are read #
 		expect(body.approval).toEqual({ allowedBundleIds: ["com.apple.calculator"] });
 		expect(body.stop).toMatchObject({ stopped: false, armed: true });
 		expect(body.input.supported).toBe(false);
+		expect(body.host.workers.concurrent).toBe(false);
 		expect(body.advice).toHaveLength(1);
 	});
 

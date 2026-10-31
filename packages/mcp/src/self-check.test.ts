@@ -36,7 +36,7 @@ describe("#given a helper process without Accessibility #when the self-check rep
 			stop: { stopped: false },
 		});
 		expect(report["advice"]).toEqual(
-			expect.arrayContaining([expect.stringContaining("Host accessibility observation is unavailable")]),
+			expect.arrayContaining([expect.stringContaining("Accessibility is not granted")]),
 		);
 		expect(JSON.parse(JSON.stringify(report))).toEqual(report);
 	});

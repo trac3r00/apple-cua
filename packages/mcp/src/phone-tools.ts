@@ -21,7 +21,8 @@ import {
 
 const READ_ONLY_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false } as const;
 const MUTATION_ANNOTATIONS = { readOnlyHint: false, destructiveHint: true } as const;
-const TOKEN = "Requires the one-use observation_token from ios_observe or the previous mutation result.";
+const TOKEN =
+	"Requires the one-use observation_token from ios_observe or the previous mutation result. On the shared host iPhone Mirroring input is refused (isolated-session-required), because the Mirroring window is part of the human desktop.";
 
 export function registerPhoneTools(server: McpServer, guard: PhoneGuardSession, source: PhoneToolSource): void {
 	server.registerTool(

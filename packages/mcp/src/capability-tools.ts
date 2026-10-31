@@ -56,7 +56,9 @@ function adviceFor(
 		);
 	}
 	if (!host.permissions.accessibility) {
-		advice.push("Host accessibility observation is unavailable. Permissions inside an isolated guest are separate.");
+		advice.push(
+			"Accessibility is not granted to the process that launched this server, so host observation is unavailable. Ask the user to grant it in System Settings > Privacy & Security > Accessibility, then restart the server. Permissions inside an isolated guest are separate.",
+		);
 	}
 	if (!host.permissions.screenRecording) {
 		advice.push("Host screenshots are unavailable. This does not determine whether guest capture is available.");
@@ -82,6 +84,7 @@ export function capabilityReport(sources: CapabilitySources): Record<string, unk
 	const delivery = "background";
 	const toolNames = sources.toolNames ?? toolNamesFor("full", false);
 	const agentHost = sources.host?.() ?? detectHost(undefined, process.env);
+	const spawn = spawnGuidance(agentHost.name, delivery);
 	return {
 		server: {
 			name: SERVER_INFO.name,
@@ -89,7 +92,15 @@ export function capabilityReport(sources: CapabilitySources): Record<string, unk
 			toolset: sources.toolset ?? "full",
 			tools: toolNames.length,
 		},
-		host: { ...agentHost, workers: spawnGuidance(agentHost.name, delivery) },
+		host: {
+			...agentHost,
+			// Host input is disabled, so workers cannot act on this desktop at all, let alone concurrently.
+			workers: {
+				...spawn,
+				concurrent: false,
+				instructions: `${spawn.instructions} Host input is disabled, so workers act only through an agent-owned isolated desktop, where actions are serialized.`,
+			},
+		},
 		platform: process.platform,
 		backend: "macos-host-observer",
 		input: { supported: false, reason: "isolated-session-required", scope: "human-desktop" },

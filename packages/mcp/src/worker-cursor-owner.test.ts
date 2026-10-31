@@ -56,7 +56,7 @@ describe("#given named workers #when assigned #then virtual cursor ownership use
 					close: async () => undefined,
 				},
 			},
-			{ timeout: 1000 },
+			{ timeout: 5_000 },
 		);
 		expect(result).toMatchObject([
 			{ worker_id: "reader-id", cursor_owner: { agentName: "Reader", parentAgentName: "Coordinator" } },

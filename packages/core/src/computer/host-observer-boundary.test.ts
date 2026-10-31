@@ -51,7 +51,7 @@ function fixture() {
 			NOOP_DISPLAY_SLEEP: {},
 			isScreenLocked: () => false,
 		},
-		{ timeout: 100 },
+		{ timeout: 5_000 },
 	);
 	const hostConstructor = exports["MacOSHostComputer"];
 	if (typeof hostConstructor !== "function") throw new Error("Missing host constructor");

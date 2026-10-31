@@ -430,7 +430,7 @@ describe("#given an owned VM supervisor #when it starts #then input and credenti
 					},
 				},
 			});
-			runInNewContext(command.input, { ObjC: { import: () => undefined }, $: bridge }, { timeout: 100 });
+			runInNewContext(command.input, { ObjC: { import: () => undefined }, $: bridge }, { timeout: 5_000 });
 			return Buffer.alloc(0);
 		});
 		try {

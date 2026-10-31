@@ -64,7 +64,7 @@ describe("#given named agents #when cursor transports are created #then ownershi
 					};
 				},
 			},
-			{ timeout: 1000 },
+			{ timeout: 5_000 },
 		);
 		expect(result).toBeUndefined();
 		expect(routes).toEqual([

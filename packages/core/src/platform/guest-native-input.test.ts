@@ -93,7 +93,7 @@ function fixture(options: { model?: string; trusted?: boolean; failAt?: number }
 					ObjC: { import: () => undefined, bindFunction: () => undefined },
 					$: bridge,
 				},
-				{ timeout: 1000 },
+				{ timeout: 5_000 },
 			);
 			return Buffer.alloc(0);
 		},

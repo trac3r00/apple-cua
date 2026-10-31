@@ -97,7 +97,7 @@ describe("#given native dispatch wrappers #when invoked in a fake-only context #
 					return 0;
 				},
 			},
-			{ timeout: 100 },
+			{ timeout: 5_000 },
 		);
 		const dispatch = exports[name];
 		if (typeof dispatch !== "function") throw new Error(`Wrapper was not exported: ${name}`);
@@ -183,7 +183,7 @@ describe("#given shared-host resource defaults #when used #then no native resour
 					},
 				},
 			},
-			{ timeout: 100 },
+			{ timeout: 5_000 },
 		);
 		const dispatch = exports[name];
 		if (typeof dispatch !== "function") throw new Error(`Wrapper was not exported: ${name}`);

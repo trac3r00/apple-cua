@@ -19,6 +19,7 @@ function fixture(options: { model?: string; trusted?: boolean; failAt?: number }
 	const clipboard: string[] = [];
 	let attempts = 0;
 	let commands = 0;
+	let hardwareChecks = 0;
 	const event = (kind: number): Event => ({ kind, flags: -1, timestamp: -1, fields: {} });
 	const bridge = Object.assign((value: string) => value, {
 		AXIsProcessTrusted: () => options.trusted ?? true,
@@ -83,7 +84,10 @@ function fixture(options: { model?: string; trusted?: boolean; failAt?: number }
 				{
 					Application: {
 						currentApplication: () => ({
-							doShellScript: () => options.model ?? "VirtualMac2,1",
+							doShellScript: () => {
+								hardwareChecks++;
+								return options.model ?? "VirtualMac2,1";
+							},
 						}),
 					},
 					ObjC: { import: () => undefined, bindFunction: () => undefined },
@@ -94,10 +98,45 @@ function fixture(options: { model?: string; trusted?: boolean; failAt?: number }
 			return Buffer.alloc(0);
 		},
 	});
-	return { input, events, clipboard, commands: () => commands };
+	return { input, events, clipboard, commands: () => commands, hardwareChecks: () => hardwareChecks };
 }
 
 describe("private guest native input", () => {
+	it("#given the left button held #when the right button is pressed #then the left button is released first", async () => {
+		const f = fixture();
+		await f.input.pointer(10, 10, 1, 1024, 768);
+		await f.input.pointer(10, 10, 4, 1024, 768);
+		expect(f.events.map(({ kind, button }) => [kind, button])).toEqual([
+			[1, 0],
+			[2, 0],
+			[3, 1],
+		]);
+	});
+
+	it("#given a button held by a pointer event #when a pointer sequence runs #then it drags with that button and leaves nothing held", async () => {
+		const f = fixture();
+		await f.input.pointer(10, 10, 1, 1024, 768);
+		await f.input.pointers(
+			[
+				{ x: 20, y: 20, buttons: 1 },
+				{ x: 30, y: 30, buttons: 0 },
+			],
+			1024,
+			768,
+		);
+		await f.input.pointer(40, 40, 0, 1024, 768);
+		expect(f.events.map(({ kind }) => kind)).toEqual([1, 6, 2, 5]);
+	});
+
+	it("#given a verified virtual Mac #when more input follows #then the hardware check is not repeated", async () => {
+		const f = fixture();
+		await f.input.pointer(10, 10, 0, 1024, 768);
+		await f.input.pointer(20, 20, 0, 1024, 768);
+		await f.input.chord([0x61]);
+		expect(f.commands()).toBe(3);
+		expect(f.hardwareChecks()).toBe(1);
+	});
+
 	it("#given an untrusted guest #when readiness is checked #then input remains unavailable", async () => {
 		const f = fixture({ trusted: false });
 		await expect(f.input.checkPermissions()).rejects.toThrow("permission");

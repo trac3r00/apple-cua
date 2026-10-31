@@ -37,6 +37,8 @@ export interface IsolatedServerOptions {
 	readonly start?: () => Promise<IsolatedDesktopSource>;
 }
 
+/** Distinct actors one server accepts; only an observation introduces one. */
+const MAX_ACTORS = 64;
 const coordinate = z.number().int().nonnegative();
 const point = z.object({ x: coordinate, y: coordinate }).strict();
 const button = z.enum(["left", "middle", "right"]).default("left");
@@ -228,6 +230,9 @@ export function createIsolatedMcpServer(options: IsolatedServerOptions): McpServ
 					let actor = actors.get(actorId);
 					if (actor !== undefined && actor.agentName !== name) throw new Error("actor-name-changed");
 					if (actor === undefined) {
+						// An actor that never observed cannot hold a token, so an action never registers one.
+						if (request.op === "act") throw new Error("observation-required");
+						if (actors.size >= MAX_ACTORS) throw new Error("too-many-actors");
 						actor = Object.freeze({
 							agentName: name,
 							sessionId: owner.sessionId,

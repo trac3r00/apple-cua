@@ -9,7 +9,6 @@ export interface GuestPointerStep {
 }
 
 const SPECIAL_KEYS = new Map<number, string>([
-	[0x20, "space"],
 	[0xff08, "backspace"],
 	[0xff09, "tab"],
 	[0xff0d, "return"],
@@ -35,6 +34,8 @@ export class GuestNativeInput {
 	private readonly transport: Pick<TartGuestTransport, "execute">;
 	private heldButton = 0;
 	private clickCount = 0;
+	private lastPointer: { x: number; y: number; width: number; height: number } | undefined;
+	private virtualMacVerified = false;
 	private readonly heldKeys = new Map<number, { code: number; flag: number }>();
 
 	constructor(transport: Pick<TartGuestTransport, "execute">) {
@@ -64,6 +65,9 @@ export class GuestNativeInput {
 			y >= height
 		)
 			throw new Error("Invalid guest pointer event.");
+		// One button at a time: release the held button here before pressing a different one.
+		if (buttons !== 0 && this.heldButton !== 0 && this.heldButton !== buttons)
+			await this.pointer(x, y, 0, width, height);
 		const previous = this.heldButton;
 		const releasing = buttons === 0 && previous !== 0;
 		const mask = releasing ? previous : buttons;
@@ -87,6 +91,7 @@ post(event, 0);`);
 		if (releasing) await runInInputScope({}, send);
 		else await send();
 		this.heldButton = buttons;
+		this.lastPointer = { x, y, width, height };
 	}
 
 	async key(keysym: number, down: boolean): Promise<void> {
@@ -128,11 +133,17 @@ post(event, ${flags});`);
 			)
 		)
 			throw new Error("Invalid guest pointer sequence.");
-		await this.run(`
+		// Continue from a button that pointer() left held; the script releases everything before it returns.
+		const last = this.lastPointer;
+		const seed =
+			this.heldButton !== 0 && last !== undefined
+				? `let held = ${this.heldButton};\nlet last = $.CGPointMake(${last.x} * screen.width / ${last.width}, ${last.y} * screen.height / ${last.height});`
+				: "let held = 0;\nlet last = null;";
+		try {
+			await this.run(`
 const steps = ${JSON.stringify(steps)};
 const screen = $.NSScreen.mainScreen.frame.size;
-let held = 0;
-let last = null;
+${seed}
 let clickCount = 0;
 function mouse(kind, point, button, count) {
 	const event = $.CGEventCreateMouseEvent(source, kind, point, button);
@@ -173,6 +184,11 @@ try {
 		}
 	}
 } finally { release(); }`);
+		} finally {
+			this.heldButton = 0;
+		}
+		const end = steps[steps.length - 1];
+		if (end !== undefined) this.lastPointer = { x: end.x, y: end.y, width, height };
 	}
 
 	async chord(keysyms: readonly number[]): Promise<void> {
@@ -197,13 +213,17 @@ ${pasteChord}`);
 	}
 
 	private async run(body: string): Promise<void> {
+		// The pinned transport cannot change machines, so one passing hardware check covers later events.
+		const hardware = this.virtualMacVerified
+			? ""
+			: `
+if (!/^VirtualMac[0-9]+,[0-9]+$/.test(self.doShellScript("/usr/sbin/sysctl -n hw.model").trim()))
+	throw new Error("Guest input requires a virtual Mac.");`;
 		await this.transport.execute(
 			["/usr/bin/osascript", "-l", "JavaScript"],
 			`
 const self = Application.currentApplication();
-self.includeStandardAdditions = true;
-if (!/^VirtualMac[0-9]+,[0-9]+$/.test(self.doShellScript("/usr/sbin/sysctl -n hw.model").trim()))
-	throw new Error("Guest input requires a virtual Mac.");
+self.includeStandardAdditions = true;${hardware}
 ObjC.import("AppKit");
 ObjC.import("ApplicationServices");
 ObjC.import("CoreGraphics");
@@ -217,6 +237,7 @@ function post(event, flags) {
 }
 ${body}`,
 		);
+		this.virtualMacVerified = true;
 	}
 }
 

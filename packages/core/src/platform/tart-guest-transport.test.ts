@@ -95,6 +95,17 @@ describe("#given an owned macOS guest #when commands run #then the host is never
 		transport.close();
 	});
 
+	it("rejects the owned session under another agent name without dispatch", async () => {
+		const run = vi.fn(async () => Buffer.from("VirtualMac2,1\n"));
+		const transport = await TartGuestTransport.open(directory, owner, run);
+		const impostor = { agentName: "Impostor", sessionId: owner.sessionId };
+		await expect(
+			withCursorIdentity("impostor-cursor", () => transport.execute(["/usr/bin/true"]), impostor),
+		).rejects.toThrow(/does not own/);
+		expect(run).toHaveBeenCalledTimes(1);
+		transport.close();
+	});
+
 	it("checks cancellation when a queued guest command reaches dispatch", async () => {
 		let releaseFirst: () => void = () => {
 			throw new Error("First command gate was not initialized.");

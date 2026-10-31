@@ -243,4 +243,38 @@ describe("#given the isolated MCP entrypoint #when used #then only the owned gue
 		expect(body(result)["message"]).toBe("actor-name-changed");
 		expect(test.screenshot).toHaveBeenCalledTimes(1);
 	});
+
+	it("does not register an actor that acts without observing", async () => {
+		const test = await fixture();
+		await test.call({ op: "start" });
+		const forged = await test.call({
+			op: "act",
+			actor: { id: "ghost", name: "Ghost" },
+			observation_token: "forged",
+			action: { type: "move", x: 0, y: 0 },
+		});
+		expect(body(forged)["message"]).toBe("observation-required");
+		expect(test.move).not.toHaveBeenCalled();
+		const observed = await test.call({ op: "observe", actor: { id: "ghost", name: "Renamed" } });
+		expect(observed.isError).not.toBe(true);
+		expect(body(observed)["actor"]).toEqual({
+			agentName: "Renamed",
+			parentAgentName: "OmO",
+			sessionId: "fixture-session",
+		});
+	});
+
+	it("refuses a new actor once the server holds its limit of 64", async () => {
+		const test = await fixture();
+		await test.call({ op: "start" });
+		// The coordinator itself holds one of the 64 places.
+		for (let index = 1; index < 64; index += 1) {
+			const observed = await test.call({ op: "observe", actor: { id: `worker-${index}`, name: `Worker ${index}` } });
+			expect(observed.isError).not.toBe(true);
+		}
+		const refused = await test.call({ op: "observe", actor: { id: "worker-64", name: "Worker 64" } });
+		expect(body(refused)["message"]).toBe("too-many-actors");
+		const known = await test.call({ op: "observe", actor: { id: "worker-1", name: "Worker 1" } });
+		expect(known.isError).not.toBe(true);
+	});
 });

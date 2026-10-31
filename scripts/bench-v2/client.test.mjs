@@ -29,7 +29,8 @@ const startFixture = async (source) => {
 test("#given an exiting MCP process #when initializing #then pending and later requests fail on exit", async () => {
 	const client = new McpClient({
 		command: process.execPath,
-		args: ["-e", "process.exit(7)"],
+		// It exits once it has read initialize, so the request is always written before the exit settles it.
+		args: ["-e", 'process.stdin.once("data", () => process.exit(7));'],
 		env: {},
 		timeoutMs: 30000,
 	});

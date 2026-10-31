@@ -9,15 +9,27 @@
 // An older hand-written MCP entry named apple-cua has to go: Codex lets it shadow the plugin's server, and Claude Code
 // would run both. It is removed when it runs this checkout or nothing at all; another live installation's entry is
 // left alone and reported, because removing it would break that installation.
+//
+// Both clients ask before every call of an MCP tool marked destructive, one tool at a time, so a person approving
+// apple-cua's tools would be asked again for each one. Installing also records that the plugin's server may run its
+// tools without asking, unless the person already chose otherwise in that client's config.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { MARKETPLACE_NAME, PLUGIN_NAME } from "./bundle.js";
-import { type RegisteredEntry, entryAlive, entryRunsCheckout } from "./clients.js";
+import { type RegisteredEntry, entryAlive, entryRunsCheckout, writeConfigFile } from "./clients.js";
 import { canonicalPath } from "./layout.js";
 
 export const PLUGIN_ID = `${PLUGIN_NAME}@${MARKETPLACE_NAME}`;
+/** The MCP server's name inside the plugin (the key in the bundle's .mcp.json). */
+const PLUGIN_SERVER_NAME = "apple-cua";
+/** Codex's table for the plugin server's settings, and the value that runs its tools without asking. */
+export const CODEX_APPROVAL_TABLE = `[plugins."${PLUGIN_ID}".mcp_servers.${PLUGIN_SERVER_NAME}]`;
+const CODEX_APPROVAL_KEY = "default_tools_approval_mode";
+const CODEX_APPROVE = "approve";
+/** Claude Code's permission rule covering every tool of the plugin's server. */
+export const CLAUDE_ALLOW_RULE = `mcp__plugin_${PLUGIN_NAME}_${PLUGIN_SERVER_NAME}`;
 const CLI_TIMEOUT_MS = 120_000;
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -74,6 +86,13 @@ export type PluginStep =
 	  }
 	| { readonly kind: "mkdir"; readonly path: string; readonly describe: string }
 	| { readonly kind: "delete"; readonly path: string; readonly describe: string }
+	| {
+			readonly kind: "edit";
+			readonly path: string;
+			/** Applied to the file as it is when the step runs, after the client's CLI has written it. */
+			readonly edit: (text: string) => string;
+			readonly describe: string;
+	  }
 	| { readonly kind: "remove-legacy"; readonly describe: string };
 
 export interface PluginPlan {
@@ -99,6 +118,8 @@ export interface CodexState {
 	readonly plugin: { readonly enabled: boolean } | undefined;
 	/** The plugin versions in Codex's cache. */
 	readonly cachedVersions: readonly string[];
+	/** default_tools_approval_mode of the plugin's server; undefined when the person never set one. */
+	readonly toolsApproval: string | undefined;
 	readonly legacy: RegisteredEntry | undefined;
 }
 
@@ -164,14 +185,78 @@ export function readCodexState(home: string, env: Env, legacy: RegisteredEntry |
 	}
 	const marketplace = tomlTable(text, new RegExp(`^\\s*\\[\\s*marketplaces\\s*\\.\\s*"?${MARKETPLACE_NAME}"?\\s*\\]`));
 	const plugin = tomlTable(text, new RegExp(`^\\s*\\[\\s*plugins\\s*\\.\\s*"${PLUGIN_ID}"\\s*\\]`));
+	const approval = tomlTable(text, CODEX_APPROVAL_HEADER);
 	return {
 		codexHome,
 		homeExists: existsSync(codexHome),
 		marketplaceSource: marketplace === undefined ? undefined : tomlStringValue(marketplace, "source"),
 		plugin: plugin === undefined ? undefined : { enabled: tomlBooleanValue(plugin, "enabled") ?? true },
 		cachedVersions: listDirectories(join(codexHome, "plugins/cache", MARKETPLACE_NAME, PLUGIN_NAME)),
+		toolsApproval: approval === undefined ? undefined : tomlRawString(approval, CODEX_APPROVAL_KEY),
 		legacy,
 	};
+}
+
+/** A key's value with either TOML string quoting removed; any other value is returned as written. */
+function tomlRawString(body: readonly string[], key: string): string | undefined {
+	for (const line of body) {
+		const match = new RegExp(`^\\s*${key}\\s*=\\s*("[^"]*"|'[^']*'|[^\\s#]+)`).exec(line);
+		if (match?.[1] !== undefined) {
+			return match[1].replace(/^(["'])(.*)\1$/, "$2");
+		}
+	}
+	return undefined;
+}
+
+const CODEX_APPROVAL_HEADER = new RegExp(
+	`^\\s*\\[\\s*plugins\\s*\\.\\s*"${PLUGIN_ID}"\\s*\\.\\s*mcp_servers\\s*\\.\\s*"?${PLUGIN_SERVER_NAME}"?\\s*\\]`,
+);
+
+/** Sets the plugin server's default_tools_approval_mode to approve, adding its table when there is none. */
+export function approveCodexTools(text: string): string {
+	const lines = text.split("\n");
+	const header = lines.findIndex((line) => CODEX_APPROVAL_HEADER.test(line));
+	const setting = `${CODEX_APPROVAL_KEY} = "${CODEX_APPROVE}"`;
+	if (header !== -1) {
+		lines.splice(header + 1, 0, setting);
+		return lines.join("\n");
+	}
+	const body = text.replace(/\n*$/, "");
+	return `${body === "" ? "" : `${body}\n\n`}${CODEX_APPROVAL_TABLE}\n${setting}\n`;
+}
+
+/**
+ * Removes the approve setting approveCodexTools writes, and the table too when nothing else is left in it (with the
+ * blank line before it). Another mode, and any other key of the table, stays.
+ */
+export function removeCodexApproval(text: string): string {
+	const lines = text.split("\n");
+	const header = lines.findIndex((line) => CODEX_APPROVAL_HEADER.test(line));
+	if (header === -1) {
+		return text;
+	}
+	let end = header + 1;
+	while (end < lines.length && !/^\s*\[/.test(lines[end] ?? "")) {
+		end += 1;
+	}
+	const setting = lines
+		.slice(header + 1, end)
+		.findIndex((line) => tomlRawString([line], CODEX_APPROVAL_KEY) === CODEX_APPROVE);
+	if (setting === -1) {
+		return text;
+	}
+	lines.splice(header + 1 + setting, 1);
+	end -= 1;
+	if (lines.slice(header + 1, end).some((line) => line.trim() !== "")) {
+		return lines.join("\n");
+	}
+	let start = header;
+	while (start > 0 && (lines[start - 1] ?? "").trim() === "") {
+		start -= 1;
+	}
+	const tail = lines.slice(end);
+	const head = lines.slice(0, start);
+	return tail.length === 0 ? `${head.join("\n")}\n` : [...head, "", ...tail].join("\n");
 }
 
 export function planCodexInstall(state: CodexState, target: PluginTarget): PluginPlan {
@@ -218,6 +303,14 @@ export function planCodexInstall(state: CodexState, target: PluginTarget): Plugi
 			describe: `installed the ${PLUGIN_NAME} plugin ${target.version}`,
 		});
 	}
+	if (state.toolsApproval === undefined) {
+		steps.push({
+			kind: "edit",
+			path: join(state.codexHome, "config.toml"),
+			edit: approveCodexTools,
+			describe: `let the ${PLUGIN_NAME} tools run without asking (${CODEX_APPROVAL_KEY} = "${CODEX_APPROVE}")`,
+		});
+	}
 	const installed = state.plugin !== undefined && state.cachedVersions.length > 0;
 	return { steps, outcome: steps.length === 0 ? "unchanged" : installed ? "updated" : "added" };
 }
@@ -232,6 +325,14 @@ export function planCodexRemove(state: CodexState, checkout: string): PluginPlan
 			kind: "run",
 			args: ["plugin", "marketplace", "remove", MARKETPLACE_NAME],
 			describe: `removed the ${MARKETPLACE_NAME} marketplace`,
+		});
+	}
+	if (state.toolsApproval === CODEX_APPROVE) {
+		steps.push({
+			kind: "edit",
+			path: join(state.codexHome, "config.toml"),
+			edit: removeCodexApproval,
+			describe: `removed the ${PLUGIN_NAME} tool approval setting`,
 		});
 	}
 	if (legacyVerdict(state.legacy, checkout) === "migrate") {
@@ -254,6 +355,12 @@ export interface ClaudeState {
 	readonly installedVersion: string | undefined;
 	/** enabledPlugins["apple-cua@apple-cua-local"] in settings.json; undefined when not mentioned. */
 	readonly enabled: boolean | undefined;
+	/** The permissions list that names the plugin server's tools; undefined when none does. */
+	readonly toolsRule: "allow" | "ask" | "deny" | undefined;
+	/** Whether permissions.allow holds the exact rule allowClaudeTools adds. */
+	readonly allowsServer: boolean;
+	/** False when settings.json exists but is not a JSON object, so apple-cua must not rewrite it. */
+	readonly settingsReadable: boolean;
 	readonly legacy: RegisteredEntry | undefined;
 }
 
@@ -286,7 +393,8 @@ function field(value: unknown, ...path: readonly string[]): unknown {
 
 export function readClaudeState(home: string, env: Env, legacy: RegisteredEntry | undefined): ClaudeState {
 	const configDir = claudeConfigDirOf(home, env);
-	const settings = readJsonObject(join(configDir, "settings.json"));
+	const settingsPath = join(configDir, "settings.json");
+	const settings = readJsonObject(settingsPath);
 	const installed = field(readJsonObject(join(configDir, "plugins/installed_plugins.json")), "plugins", PLUGIN_ID);
 	const userInstall = Array.isArray(installed)
 		? installed.find((entry) => field(entry, "scope") === "user")
@@ -294,13 +402,80 @@ export function readClaudeState(home: string, env: Env, legacy: RegisteredEntry 
 	const marketplacePath = field(settings, "extraKnownMarketplaces", MARKETPLACE_NAME, "source", "path");
 	const enabled = field(settings, "enabledPlugins", PLUGIN_ID);
 	const version = field(userInstall, "version");
+	const namesServer = (rule: unknown) =>
+		rule === CLAUDE_ALLOW_RULE || (typeof rule === "string" && rule.startsWith(`${CLAUDE_ALLOW_RULE}__`));
+	const lists = ["deny", "ask", "allow"] as const;
+	const toolsRule = lists.find((list) => {
+		const rules = field(settings, "permissions", list);
+		return Array.isArray(rules) && rules.some(namesServer);
+	});
+	const allowRules = field(settings, "permissions", "allow");
 	return {
 		configDir,
 		marketplacePath: typeof marketplacePath === "string" ? marketplacePath : undefined,
 		installedVersion: typeof version === "string" ? version : undefined,
 		enabled: typeof enabled === "boolean" ? enabled : undefined,
+		toolsRule,
+		allowsServer: Array.isArray(allowRules) && allowRules.includes(CLAUDE_ALLOW_RULE),
+		settingsReadable: isJsonObjectFile(settingsPath),
 		legacy,
 	};
+}
+
+function isJsonObjectFile(path: string): boolean {
+	if (!existsSync(path)) {
+		return true;
+	}
+	try {
+		const text = readFileSync(path, "utf8");
+		if (text.trim() === "") {
+			return true;
+		}
+		const parsed: unknown = JSON.parse(text);
+		return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
+	} catch {
+		return false;
+	}
+}
+
+function editSettingsJson(text: string, change: (settings: Record<string, unknown>) => void): string {
+	const parsed: unknown = text.trim() === "" ? {} : JSON.parse(text);
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		throw new Error("settings.json is not a JSON object");
+	}
+	const settings = parsed as Record<string, unknown>;
+	change(settings);
+	return `${JSON.stringify(settings, null, 2)}\n`;
+}
+
+function permissionsOf(settings: Record<string, unknown>): Record<string, unknown> {
+	const current = settings["permissions"];
+	if (typeof current === "object" && current !== null && !Array.isArray(current)) {
+		return current as Record<string, unknown>;
+	}
+	const created: Record<string, unknown> = {};
+	settings["permissions"] = created;
+	return created;
+}
+
+/** Adds the rule that lets every tool of the plugin's server run without asking. */
+export function allowClaudeTools(text: string): string {
+	return editSettingsJson(text, (settings) => {
+		const permissions = permissionsOf(settings);
+		const allow = Array.isArray(permissions["allow"]) ? permissions["allow"] : [];
+		permissions["allow"] = allow.includes(CLAUDE_ALLOW_RULE) ? allow : [...allow, CLAUDE_ALLOW_RULE];
+	});
+}
+
+/** Removes the rule allowClaudeTools adds, and nothing else. */
+export function removeClaudeAllow(text: string): string {
+	return editSettingsJson(text, (settings) => {
+		const permissions = permissionsOf(settings);
+		const allow = permissions["allow"];
+		if (Array.isArray(allow)) {
+			permissions["allow"] = allow.filter((rule) => rule !== CLAUDE_ALLOW_RULE);
+		}
+	});
 }
 
 export function planClaudeInstall(state: ClaudeState, target: PluginTarget, explicit: boolean): PluginPlan {
@@ -357,6 +532,14 @@ export function planClaudeInstall(state: ClaudeState, target: PluginTarget, expl
 	if (state.enabled === false && explicit) {
 		steps.push({ kind: "run", args: ["plugin", "enable", PLUGIN_ID], describe: `enabled the ${PLUGIN_NAME} plugin` });
 	}
+	if (state.settingsReadable && state.toolsRule === undefined) {
+		steps.push({
+			kind: "edit",
+			path: join(state.configDir, "settings.json"),
+			edit: allowClaudeTools,
+			describe: `let the ${PLUGIN_NAME} tools run without asking (allow ${CLAUDE_ALLOW_RULE})`,
+		});
+	}
 	return {
 		steps,
 		outcome: steps.length === 0 ? "unchanged" : state.installedVersion === undefined ? "added" : "updated",
@@ -377,6 +560,14 @@ export function planClaudeRemove(state: ClaudeState, checkout: string): PluginPl
 			kind: "run",
 			args: ["plugin", "marketplace", "remove", MARKETPLACE_NAME],
 			describe: `removed the ${MARKETPLACE_NAME} marketplace`,
+		});
+	}
+	if (state.settingsReadable && state.allowsServer) {
+		steps.push({
+			kind: "edit",
+			path: join(state.configDir, "settings.json"),
+			edit: removeClaudeAllow,
+			describe: `removed the ${CLAUDE_ALLOW_RULE} permission rule`,
 		});
 	}
 	if (legacyVerdict(state.legacy, checkout) === "migrate") {
@@ -418,6 +609,14 @@ export function runSteps(plan: PluginPlan, runner: StepRunner): string[] {
 			case "delete":
 				rmSync(step.path, { recursive: true, force: true });
 				break;
+			case "edit": {
+				const current = existsSync(step.path) ? readFileSync(step.path, "utf8") : "";
+				const next = step.edit(current);
+				if (next !== current) {
+					writeConfigFile(step.path, next, new Date());
+				}
+				break;
+			}
 			case "remove-legacy":
 				runner.removeLegacy();
 				break;

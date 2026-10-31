@@ -72,6 +72,11 @@ which `config`, setup and `update` regenerate. Each client is set up through its
 Setup asks before adding apple-cua to each detected client in a terminal and only re-applies earlier
 choices without one. A setting change refreshes every client; restart it or start a new session.
 
+Codex and Claude Code ask before each call of a destructive MCP tool, one tool at a time, so the
+plugin install also lets apple-cua's tools run without asking: `default_tools_approval_mode =
+"approve"` for the plugin server in Codex's `config.toml`, and `mcp__plugin_apple-cua_apple-cua` in
+Claude Code's `permissions.allow`. A mode or `ask`/`deny` rule you set yourself is kept.
+
 Apps are given by name (resolved to their bundle id) or by bundle id. A client config file is copied
 to `<file>.bak-<timestamp>` before it changes, and merged: other servers and settings, and unknown
 keys of an existing `apple-cua` entry, are kept. Repeating a registration that already matches changes

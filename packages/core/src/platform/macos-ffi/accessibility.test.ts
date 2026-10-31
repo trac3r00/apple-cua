@@ -44,7 +44,6 @@ const koffiMock = vi.hoisted(() => {
 		AXValueGetTypeID: vi.fn(() => 5),
 		AXValueGetType: vi.fn(),
 		AXValueGetValue: vi.fn(),
-		AXUIElementPerformAction: vi.fn(() => 0),
 		AXUIElementSetAttributeValue: vi.fn(() => 0),
 		AXUIElementCopyAttributeValue: vi.fn((_element: object, _attribute: object, outValue: Array<object | null>) => {
 			outValue[0] = copiedValue;
@@ -126,7 +125,6 @@ describe("#given Accessibility AXUIElement koffi bindings", () => {
 
 			expect(element).toBe(koffiMock.applicationElement);
 			expect(koffiMock.accessibilityFunctions.AXUIElementCreateApplication).toHaveBeenCalledWith(2468);
-			expect(koffiMock.accessibilityFunctions.AXUIElementPerformAction).not.toHaveBeenCalled();
 			expect(koffiMock.accessibilityFunctions.AXUIElementCopyAttributeValue).toHaveBeenCalledWith(
 				koffiMock.applicationElement,
 				koffiMock.attributeReference,

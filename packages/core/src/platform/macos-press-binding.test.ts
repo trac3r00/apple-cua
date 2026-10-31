@@ -35,19 +35,24 @@ describe("#given an accessibility press at a screen point on the human desktop #
 		// given
 		const computer = new MacOSHostComputer({ overlay: NOOP_POINTER_OVERLAY, delivery: "background" });
 
-		// when
-		await expect(
-			runInInputScope({ target: { pid: 1234, windowId: 12 } }, () => computer.pressAtPosition(1234, { x: 5, y: 6 })),
-		).rejects.toThrow(HOST_REFUSAL);
-		await expect(computer.pressAtPosition(1234, { x: 7, y: 8 })).rejects.toThrow(HOST_REFUSAL);
-		await expect(
-			runInInputScope({ target: { pid: 5678, windowId: 99 } }, () =>
-				computer.pressAtPosition(1234, { x: 9, y: 10 }),
-			),
-		).rejects.toThrow(HOST_REFUSAL);
+		try {
+			// when
+			await expect(
+				runInInputScope({ target: { pid: 1234, windowId: 12 } }, () =>
+					computer.pressAtPosition(1234, { x: 5, y: 6 }),
+				),
+			).rejects.toThrow(HOST_REFUSAL);
+			await expect(computer.pressAtPosition(1234, { x: 7, y: 8 })).rejects.toThrow(HOST_REFUSAL);
+			await expect(
+				runInInputScope({ target: { pid: 5678, windowId: 99 } }, () =>
+					computer.pressAtPosition(1234, { x: 9, y: 10 }),
+				),
+			).rejects.toThrow(HOST_REFUSAL);
 
-		// then
-		expect(accessibilityMock.pressElementAtScreenPoint).not.toHaveBeenCalled();
-		await computer.close();
+			// then
+			expect(accessibilityMock.pressElementAtScreenPoint).not.toHaveBeenCalled();
+		} finally {
+			await computer.close();
+		}
 	});
 });

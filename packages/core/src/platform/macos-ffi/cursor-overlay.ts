@@ -123,10 +123,7 @@ export function createCursorOverlay(
 				: cursorMotionFromEnvironment();
 	const transportsByIdentity = new Map<string | undefined, OverlayTransport | undefined>();
 	const pidsByIdentity = new Map<string | undefined, Set<number>>();
-	const factory =
-		transportFactory ??
-		((scopedIdentity, _owner, scopedMotion) =>
-			defaultSocketTransport(Date.now, spawn, scopedMotion, cursorOverlaySocketPath(scopedIdentity)));
+	const factory = transportFactory;
 
 	function send(command: string, pid?: number, direct = false): void {
 		const identity = currentCursorIdentity();

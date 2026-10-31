@@ -375,9 +375,9 @@ describe("#given a window that appears just after the first look #when a window 
 	});
 });
 
-describe("#given the human desktop without Screen Recording permission #when get_app_state is asked for an image #then it observes without capturing", () => {
-	it("returns the elements and the isolation reason, and never starts a capture that could raise a permission prompt", async () => {
-		screenshotMock.screenCaptureAllowed.mockReturnValue(false);
+describe("#given Screen Recording granted on the human desktop #when get_app_state is asked for an image #then it still observes without capturing", () => {
+	it("returns the elements and the isolation reason, and never starts a capture", async () => {
+		screenshotMock.screenCaptureAllowed.mockReturnValue(true);
 		const capturesBefore = screenshotMock.captureWindowImage.mock.calls.length;
 		const subprocessesBefore = childProcessMock.execFile.mock.calls.length;
 		try {

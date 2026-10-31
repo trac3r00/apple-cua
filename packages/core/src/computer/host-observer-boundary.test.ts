@@ -24,6 +24,7 @@ const compiled = ts.transpileModule(declaration.getText(source), {
 function fixture() {
 	const exports: Record<string, unknown> = {};
 	let effects = 0;
+	let controllers = 0;
 	const effect = () => {
 		effects++;
 	};
@@ -36,6 +37,9 @@ function fixture() {
 				run = effect;
 			},
 			MacOSInputController: class {
+				constructor() {
+					controllers++;
+				}
 				move = effect;
 				click = effect;
 				typeText = effect;
@@ -53,7 +57,7 @@ function fixture() {
 	if (typeof hostConstructor !== "function") throw new Error("Missing host constructor");
 	const instance: unknown = Reflect.construct(hostConstructor, []);
 	if (typeof instance !== "object" || instance === null) throw new Error("Missing host instance");
-	return { hostConstructor, instance, effects: () => effects };
+	return { hostConstructor, instance, effects: () => effects, controllers: () => controllers };
 }
 
 describe("#given the shared host #when input is requested #then it remains observation-only", () => {
@@ -69,8 +73,10 @@ describe("#given the shared host #when input is requested #then it remains obser
 	});
 
 	it("rejects attended construction before creating an input controller", () => {
-		const { hostConstructor, effects } = fixture();
+		const { hostConstructor, effects, controllers } = fixture();
+		const built = controllers();
 		expect(() => Reflect.construct(hostConstructor, [{ delivery: "attended" }])).toThrow(HostInteractionDenied);
+		expect(controllers()).toBe(built);
 		expect(effects()).toBe(0);
 	});
 

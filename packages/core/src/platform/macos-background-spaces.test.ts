@@ -258,18 +258,24 @@ describe("#given an explicit window on another Space #when the background host o
 	it.each([
 		["minimized", true],
 		["unknown", undefined],
-	] as const)("refuses an off-Space target whose minimized status is %s", async (_name, status) => {
-		const computer = approvedBackgroundComputer();
-		try {
-			fixture.minimizedStatus = false;
-			const observation = await observeOffSpace(computer);
-			fixture.minimizedStatus = status;
+	] as const)(
+		"refuses an off-Space target for isolation whatever its minimized status (%s)",
+		async (_name, status) => {
+			const computer = approvedBackgroundComputer();
+			try {
+				fixture.minimizedStatus = false;
+				const observation = await observeOffSpace(computer);
+				fixture.minimizedStatus = status;
 
-			expect((await computer.preflightInput(observation)).ok).toBe(false);
-		} finally {
-			await computer.close();
-		}
-	});
+				expect(await computer.preflightInput(observation)).toEqual({
+					ok: false,
+					reason: "isolated-session-required",
+				});
+			} finally {
+				await computer.close();
+			}
+		},
+	);
 });
 
 describe("#given attended delivery #when the host computer is built #then it is refused before any window query", () => {

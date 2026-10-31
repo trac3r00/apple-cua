@@ -11,7 +11,6 @@ const koffiMock = vi.hoisted(() => {
 	};
 	const skyLightFunctions = {
 		SLEventSetAuthenticationMessage: vi.fn(),
-		SLEventPostToPid: vi.fn(),
 		SLSGetWindowOwner: vi.fn(() => 0),
 		SLSGetConnectionPSN: vi.fn(() => 0),
 		SLPSPostEventRecordTo: vi.fn(() => 0),
@@ -68,8 +67,6 @@ describe("#given SkyLight's authentication message class #when an authenticated 
 		expect(() => skyLight.postAuthenticatedSkyLightEventToPid(321, keyEvent)).toThrow(
 			/host-window cannot operate on the human desktop/,
 		);
-
-		expect(koffiMock.skyLightFunctions.SLEventPostToPid).not.toHaveBeenCalled();
 	});
 });
 
@@ -81,7 +78,6 @@ describe("#given a SkyLight without the authentication message class #when an au
 
 		expect(posted).toBe(false);
 		expect(koffiMock.objcFunctions.objc_msgSend).not.toHaveBeenCalled();
-		expect(koffiMock.skyLightFunctions.SLEventPostToPid).not.toHaveBeenCalled();
 	});
 });
 
@@ -95,7 +91,6 @@ describe("#given a window-stamped event #when its record is posted in background
 		);
 		expect(koffiMock.skyLightFunctions.SLPSPostEventRecordTo).not.toHaveBeenCalled();
 		expect(koffiMock.skyLightFunctions.SLPSSetFrontProcessWithOptions).not.toHaveBeenCalled();
-		expect(koffiMock.skyLightFunctions.SLEventPostToPid).not.toHaveBeenCalled();
 	});
 
 	it("does not post if ownership cannot be resolved", async () => {
@@ -136,7 +131,6 @@ describe("#given a window-stamped event #when its record is posted in background
 			/host-window cannot operate on the human desktop/,
 		);
 		expect(koffiMock.skyLightFunctions.SLPSSetFrontProcessWithOptions).not.toHaveBeenCalled();
-		expect(koffiMock.skyLightFunctions.SLEventPostToPid).not.toHaveBeenCalled();
 		expect(koffiMock.objcFunctions.objc_msgSend).not.toHaveBeenCalled();
 	});
 });

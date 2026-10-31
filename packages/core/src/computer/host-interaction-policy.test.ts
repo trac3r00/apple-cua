@@ -82,7 +82,6 @@ describe("#given native dispatch wrappers #when invoked in a fake-only context #
 			{
 				exports,
 				denyHostInteraction,
-				K_CG_HID_EVENT_TAP: 0,
 				CGEventPost: () => nativeEffects++,
 				CGWarpMouseCursorPosition: () => nativeEffects++,
 				Buffer,

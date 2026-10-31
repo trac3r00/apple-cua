@@ -10,7 +10,10 @@ import { type OverlayTransportFactory, createCursorOverlay, defaultSocketTranspo
 
 // Each renderer test serves its own socket; the human desktop's overlay daemon is never started or reached.
 const endpoint = { path: "" };
+// cursor-overlay swallows a failed daemon start, so each attempt is recorded and checked after every test.
+const spawnAttempts: string[] = [];
 function refuseSpawn(): never {
+	spawnAttempts.push("overlay daemon");
 	throw new Error("A renderer test attempted to start the overlay daemon.");
 }
 const connectEndpoint = (): Socket => connect(endpoint.path);
@@ -33,6 +36,7 @@ afterEach(async () => {
 	}
 	vi.restoreAllMocks();
 	vi.unstubAllEnvs();
+	expect(spawnAttempts.splice(0)).toEqual([]);
 });
 
 describe("#given renderer motion defaults #when a cursor moves #then optional saved settings stay independent", () => {

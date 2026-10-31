@@ -808,7 +808,7 @@ Full walkthrough: [`skills/apple-cua/references/installation.md`](../skills/appl
 | [`packages/cli`](../packages/cli) | The `apple-cua` command line |
 | [`packages/pi-extension`](../packages/pi-extension) | Pi coding-agent bridge to the MCP server, including native Anthropic/OpenAI computer-use shapes |
 | [`skills/apple-cua`](../skills/apple-cua) | The portable agent skill: workflow, usage, permissions, harness setup |
-| [`docs`](../docs) | Design notes: what apple-cua took from Codex computer use, Cua Driver and OmO ([unified-cua.md](./unified-cua.md)) |
+| [`docs`](../docs) | Design notes: what apple-cua took from Codex computer use, Cua Driver and OmO ([unified-cua.md](./internal/unified-cua.md)) |
 | [`scripts`](../scripts) | `setup.sh` (sets up a checkout; [`install.sh`](../install.sh) at the root clones one and runs it), the signed helper build, the task benchmark ([`bench-v2`](../scripts/bench-v2/README.md)), and fixture generators |
 
 ## Roadmap
@@ -883,7 +883,7 @@ the helper is built for the runner's CPU, and that the doctor passes everything 
 
 What apple-cua took from Codex computer use, Cua Driver and OmO's `computer` tool (`run_script`, the stop
 switch, `get_capabilities`, skill resources), with a measured three-way Calculator run:
-[`docs/unified-cua.md`](./unified-cua.md).
+[`docs/internal/unified-cua.md`](./internal/unified-cua.md).
 
 ## License
 

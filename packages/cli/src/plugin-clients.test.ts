@@ -1,16 +1,22 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	CLAUDE_ALLOW_RULE,
+	CODEX_APPROVAL_TABLE,
 	type CliRunner,
 	type PluginTarget,
+	allowClaudeTools,
+	approveCodexTools,
 	planClaudeInstall,
 	planClaudeRemove,
 	planCodexInstall,
 	planCodexRemove,
 	readClaudeState,
 	readCodexState,
+	removeClaudeAllow,
+	removeCodexApproval,
 	runSteps,
 } from "./plugin-clients.js";
 
@@ -53,7 +59,7 @@ describe("#given a fresh Codex #when apple-cua is installed #then CODEX_HOME, th
 		const plan = planCodexInstall(readCodexState(home, env, undefined), target);
 
 		expect(plan.outcome).toBe("added");
-		expect(plan.steps.map((step) => step.kind)).toEqual(["mkdir", "run", "run"]);
+		expect(plan.steps.map((step) => step.kind)).toEqual(["mkdir", "run", "run", "edit"]);
 		expect(plan.steps[1]).toMatchObject({ args: ["plugin", "marketplace", "add", target.bundleDir] });
 		expect(plan.steps[2]).toMatchObject({ args: ["plugin", "add", "apple-cua@apple-cua-local"] });
 	});
@@ -63,7 +69,7 @@ describe("#given Codex already at the target #when apple-cua is installed again 
 	it("reads the marketplace, the plugin and the cached version from Codex's own files", () => {
 		write(
 			join(home, ".codex/config.toml"),
-			`model = "x"\n\n[marketplaces.apple-cua-local]\nsource_type = "local"\nsource = "${target.bundleDir}"\n\n[plugins."apple-cua@apple-cua-local"]\nenabled = true\n`,
+			`model = "x"\n\n[marketplaces.apple-cua-local]\nsource_type = "local"\nsource = "${target.bundleDir}"\n\n[plugins."apple-cua@apple-cua-local"]\nenabled = true\n\n${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = "approve"\n`,
 		);
 		mkdirSync(join(home, ".codex/plugins/cache/apple-cua-local/apple-cua", target.version), { recursive: true });
 
@@ -83,7 +89,10 @@ describe("#given Codex already at the target #when apple-cua is installed again 
 		const plan = planCodexInstall(readCodexState(home, {}, undefined), target);
 
 		expect(plan.outcome).toBe("updated");
-		expect(steps(plan)).toEqual([`installed the apple-cua plugin ${target.version}`]);
+		expect(steps(plan)).toEqual([
+			`installed the apple-cua plugin ${target.version}`,
+			'let the apple-cua tools run without asking (default_tools_approval_mode = "approve")',
+		]);
 	});
 });
 
@@ -93,7 +102,7 @@ describe("#given a client that records the bundle path with symlinks resolved #w
 		const resolved = realpathSync(target.bundleDir);
 		write(
 			join(home, ".codex/config.toml"),
-			`[marketplaces.apple-cua-local]\nsource = "${resolved}"\n\n[plugins."apple-cua@apple-cua-local"]\nenabled = true\n`,
+			`[marketplaces.apple-cua-local]\nsource = "${resolved}"\n\n[plugins."apple-cua@apple-cua-local"]\nenabled = true\n\n${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = "approve"\n`,
 		);
 		mkdirSync(join(home, ".codex/plugins/cache/apple-cua-local/apple-cua", target.version), { recursive: true });
 		const linkedHome = join(tmpdir(), `apple-cua-linked-${process.pid}`);
@@ -139,6 +148,7 @@ describe("#given Claude Code #when apple-cua is installed or updated #then its o
 		expect(plan.steps.map((step) => (step.kind === "run" ? step.args.join(" ") : step.kind))).toEqual([
 			`plugin marketplace add ${target.bundleDir}`,
 			"plugin install apple-cua@apple-cua-local --scope user -y",
+			"edit",
 		]);
 	});
 
@@ -166,8 +176,9 @@ describe("#given Claude Code #when apple-cua is installed or updated #then its o
 		expect(steps(refresh)).toEqual([
 			"refreshed the apple-cua-local marketplace",
 			`updated the apple-cua plugin 0.1.0+codex.old -> ${target.version}`,
+			`let the apple-cua tools run without asking (allow ${CLAUDE_ALLOW_RULE})`,
 		]);
-		expect(steps(explicit).at(-1)).toBe("enabled the apple-cua plugin");
+		expect(steps(explicit)).toContain("enabled the apple-cua plugin");
 	});
 });
 
@@ -194,6 +205,71 @@ describe("#given an installed plugin client #when apple-cua is removed #then the
 		]);
 		rmSync(join(home, ".codex"), { recursive: true });
 		expect(planCodexRemove(readCodexState(home, {}, undefined), checkout).outcome).toBe("absent");
+	});
+});
+
+describe("#given the per-tool approval prompts of Codex and Claude Code #when apple-cua is installed and removed #then one setting covers every tool", () => {
+	it("adds the Codex approval table once, keeps the rest of config.toml, and removes only that table", () => {
+		const original = `model = "x"\n\n[plugins."apple-cua@apple-cua-local"]\nenabled = true\n`;
+		const approved = approveCodexTools(original);
+
+		expect(approved).toBe(`${original}\n${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = "approve"\n`);
+		write(join(home, ".codex/config.toml"), approved);
+		expect(readCodexState(home, {}, undefined).toolsApproval).toBe("approve");
+		expect(removeCodexApproval(approved)).toBe(original);
+		expect(removeCodexApproval(`${approved}\n[tui]\nx = 1\n`)).toBe(`${original}\n[tui]\nx = 1\n`);
+		expect(approveCodexTools(`${CODEX_APPROVAL_TABLE}\nother = 1\n`)).toBe(
+			`${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = "approve"\nother = 1\n`,
+		);
+	});
+
+	it("leaves a mode the person chose in Codex alone and plans its removal on uninstall", () => {
+		write(
+			join(home, ".codex/config.toml"),
+			`[marketplaces.apple-cua-local]\nsource = "${target.bundleDir}"\n\n[plugins."apple-cua@apple-cua-local"]\nenabled = true\n\n${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = "prompt"\n`,
+		);
+		mkdirSync(join(home, ".codex/plugins/cache/apple-cua-local/apple-cua", target.version), { recursive: true });
+		const state = readCodexState(home, {}, undefined);
+
+		expect(planCodexInstall(state, target).outcome).toBe("unchanged");
+		expect(steps(planCodexRemove(state, checkout))).toContain("removed the apple-cua tool approval setting");
+	});
+
+	it("adds the Claude Code allow rule once, keeps other settings, and never overrides an ask or deny rule", () => {
+		const original = JSON.stringify({ model: "x", permissions: { allow: ["Read"] } });
+		const allowed = allowClaudeTools(original);
+
+		expect(JSON.parse(allowed)).toEqual({ model: "x", permissions: { allow: ["Read", CLAUDE_ALLOW_RULE] } });
+		expect(allowClaudeTools(allowed)).toBe(allowed);
+		expect(JSON.parse(removeClaudeAllow(allowed))).toEqual(JSON.parse(original));
+		expect(JSON.parse(allowClaudeTools(""))).toEqual({ permissions: { allow: [CLAUDE_ALLOW_RULE] } });
+		expect(() => allowClaudeTools("[1]")).toThrow(/not a JSON object/);
+
+		write(
+			join(home, ".claude/settings.json"),
+			JSON.stringify({ permissions: { ask: [`${CLAUDE_ALLOW_RULE}__click`] } }),
+		);
+		const asked = readClaudeState(home, {}, undefined);
+		expect(asked.toolsRule).toBe("ask");
+		expect(planClaudeInstall(asked, target, false).steps.some((step) => step.kind === "edit")).toBe(false);
+	});
+
+	it("writes the Claude Code rule when the plan runs, after the CLI steps, with a backup of the old file", () => {
+		const settings = join(home, ".claude/settings.json");
+		write(settings, JSON.stringify({ theme: "dark" }));
+		const plan = planClaudeInstall(readClaudeState(home, {}, undefined), target, false);
+		const run: CliRunner = () => ({ status: 0, stdout: "", stderr: "" });
+
+		runSteps(plan, { cli: "claude", env: {}, run, removeLegacy: () => {} });
+
+		expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({
+			theme: "dark",
+			permissions: { allow: [CLAUDE_ALLOW_RULE] },
+		});
+		expect(readClaudeState(home, {}, undefined).toolsRule).toBe("allow");
+		expect(steps(planClaudeRemove(readClaudeState(home, {}, undefined), checkout))).toContain(
+			`removed the ${CLAUDE_ALLOW_RULE} permission rule`,
+		);
 	});
 });
 

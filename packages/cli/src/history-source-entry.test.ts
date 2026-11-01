@@ -33,7 +33,16 @@ describe("#given Node type stripping #when history commands load from source #th
 		const directory = await mkdtemp(join(tmpdir(), "history-source-ui-"));
 		const child = execa(
 			nodeExecutable(),
-			["--experimental-strip-types", cli, "history", "open", "--web", "--no-open", "--skills-dir", join(directory, "skills")],
+			[
+				"--experimental-strip-types",
+				cli,
+				"history",
+				"open",
+				"--web",
+				"--no-open",
+				"--skills-dir",
+				join(directory, "skills"),
+			],
 			{
 				env: { ...process.env, OPENCUA_STATE_DIR: directory },
 				timeout: 15_000,

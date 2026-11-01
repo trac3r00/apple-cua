@@ -297,7 +297,8 @@ bundle_refusal() {
 # The official Node.js LTS for this Mac's architecture in $OPENCUA_HOME/node, downloaded once and verified against
 # SHASUMS256.txt. Its bin/node is self-contained, so it can also be bundled into the helper.
 ensure_managed_node() {
-	if [[ -x "$managed_node_dir/bin/node" ]] && node_is_usable "$managed_node_dir/bin/node"; then
+	if [[ -x "$managed_node_dir/bin/node" ]] && node_is_node "$managed_node_dir/bin/node" &&
+		node_is_usable "$managed_node_dir/bin/node"; then
 		info "reusing $managed_node_dir ($("$managed_node_dir/bin/node" --version))"
 		return 0
 	fi

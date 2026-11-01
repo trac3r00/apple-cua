@@ -156,6 +156,8 @@ arch_of_node() {
 
 resolve_node_bin() {
 	if [[ -n "$node_bin" ]]; then
+		node_is_real_node "$node_bin" ||
+			{ echo "OPENCUA_NODE=$node_bin is Bun or Deno pretending to be node; the bundled helper needs a real node from https://nodejs.org" >&2; return 1; }
 		printf '%s\n' "$node_bin"
 		return 0
 	fi

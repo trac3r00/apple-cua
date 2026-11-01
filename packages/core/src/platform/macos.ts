@@ -131,7 +131,7 @@ const SETTLE_SIGNATURE_MAX_ELEMENTS = 250;
 export interface MacOSHostComputerOptions extends HostComputerOptions {
 	defaultTargetPid?: number;
 	overlay?: PointerOverlay;
-	/** Omit to use APPLE_CUA_CURSOR_MOTION; null keeps the original native glide. */
+	/** Omit to use OPENCUA_CURSOR_MOTION; null keeps the original native glide. */
 	readonly cursorMotion?: CursorMotionConfig | null | undefined;
 	appApproval?: AppApprovalStore;
 	urlBlocklist?: readonly string[];
@@ -210,7 +210,7 @@ export class MacOSHostComputer extends HostComputer {
 		if (!this.capabilities.supportsScreenshot) denyHostInteraction("host-window");
 		if (!screenCaptureAllowed()) {
 			throw new Error(
-				"Screen Recording permission is not granted to the process running apple-cua, so no image was captured (capturing would raise macOS's permission prompt). Grant it in System Settings > Privacy & Security > Screen Recording to the app that launches this server, then restart the server.",
+				"Screen Recording permission is not granted to the process running opencua, so no image was captured (capturing would raise macOS's permission prompt). Grant it in System Settings > Privacy & Security > Screen Recording to the app that launches this server, then restart the server.",
 			);
 		}
 		const size = options?.targetSize ?? (await this.getScreenSize());
@@ -1352,9 +1352,9 @@ function sameObservation(left: InputObservation, right: InputObservation): boole
 	);
 }
 
-/** The drawn agent cursor is on unless APPLE_CUA_CURSOR turns it off (off, 0, false, no). */
+/** The drawn agent cursor is on unless OPENCUA_CURSOR turns it off (off, 0, false, no). */
 export function agentCursorEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
-	const value = environment["APPLE_CUA_CURSOR"]?.trim().toLowerCase();
+	const value = environment["OPENCUA_CURSOR"]?.trim().toLowerCase();
 	return !(value === "off" || value === "0" || value === "false" || value === "no");
 }
 
@@ -1488,12 +1488,12 @@ async function captureWindowScreenshotViaCli(
 			: 'sips -z "$2" "$1" "$tmp" --out "$out" >/dev/null';
 	const script = [
 		"set -eu",
-		'tmp=$(mktemp "${TMPDIR:-/tmp}/apple-cua-shot.XXXXXX")',
+		'tmp=$(mktemp "${TMPDIR:-/tmp}/opencua-shot.XXXXXX")',
 		'out=""',
 		'cleanup() { rm -f "$tmp"; if [ -n "$out" ]; then rm -f "$out"; fi; }',
 		"trap cleanup EXIT",
 		captureCommand,
-		'out=$(mktemp "${TMPDIR:-/tmp}/apple-cua-shot-resized.XXXXXX")',
+		'out=$(mktemp "${TMPDIR:-/tmp}/opencua-shot-resized.XXXXXX")',
 		resizeCommand,
 		'cat "$out"',
 	].join("\n");
@@ -1502,7 +1502,7 @@ async function captureWindowScreenshotViaCli(
 		[
 			"-c",
 			script,
-			"apple-cua-screenshot",
+			"opencua-screenshot",
 			String(targetSize.width),
 			String(targetSize.height),
 			format,

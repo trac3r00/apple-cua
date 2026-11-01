@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 import type { Point, Rect } from "../types/index.js";
 import type { MousePost, ScreenLayout } from "./macos-input-pointer.js";

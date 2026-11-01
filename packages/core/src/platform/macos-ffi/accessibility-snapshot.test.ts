@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 /** Host AX mutations are refused before any native call; observation keeps working. */
 const HOST_WINDOW_REFUSAL = /host-window cannot operate on the human desktop/;

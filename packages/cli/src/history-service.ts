@@ -4,15 +4,16 @@ import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { historyPaths, readHistoryState, resolveHistoryRecorderBinary, writeHistoryState } from "@apple-cua/core";
-import { resolveStateDir } from "@apple-cua/core/stop";
+import { historyPaths, readHistoryState, resolveHistoryRecorderBinary, writeHistoryState } from "@opencua/core";
+import { resolveStateDir } from "@opencua/core/stop";
 import { resolveLayout } from "./layout.js";
 
 const execFileAsync = promisify(execFile);
 
-export const HISTORY_SERVICE_LABEL = "com.apple_cua.cua_history";
+export const HISTORY_SERVICE_LABEL = "com.opencua.cua_history";
+const LEGACY_HISTORY_SERVICE_LABEL = "com.apple_cua.cua_history";
 
-/** The LaunchAgent `apple-cua history start` installs; its presence means the watcher is set up. */
+/** The LaunchAgent `opencua history start` installs; its presence means the watcher is set up. */
 export function historyLaunchAgentPath(homeDirectory: string): string {
 	return join(homeDirectory, "Library", "LaunchAgents", `${HISTORY_SERVICE_LABEL}.plist`);
 }
@@ -71,9 +72,9 @@ export function renderHistoryLaunchAgent(paths: HistoryServicePaths): string {
 		"\t</dict>",
 		"\t<key>EnvironmentVariables</key>",
 		"\t<dict>",
-		"\t\t<key>APPLE_CUA_STATE_DIR</key>",
+		"\t\t<key>OPENCUA_STATE_DIR</key>",
 		`\t\t<string>${escapeXml(paths.stateDirectory)}</string>`,
-		"\t\t<key>APPLE_CUA_HISTORY_LAUNCHER</key>",
+		"\t\t<key>OPENCUA_HISTORY_LAUNCHER</key>",
 		`\t\t<string>${escapeXml(paths.launcher ?? resolveLayout().launcherPath)}</string>`,
 		"\t</dict>",
 		"\t<key>StandardOutPath</key>",
@@ -121,7 +122,27 @@ function serviceContext(options: HistoryServiceOptions) {
 	};
 	const uid = options.uid ?? userInfo().uid;
 	const launchctl = options.launchctl ?? runLaunchctl;
-	return { paths, domain: `gui/${uid}`, serviceTarget: `gui/${uid}/${HISTORY_SERVICE_LABEL}`, launchctl };
+	return {
+		paths,
+		homeDirectory,
+		domain: `gui/${uid}`,
+		serviceTarget: `gui/${uid}/${HISTORY_SERVICE_LABEL}`,
+		launchctl,
+	};
+}
+
+async function removeLegacyService(context: ReturnType<typeof serviceContext>): Promise<void> {
+	const target = `${context.domain}/${LEGACY_HISTORY_SERVICE_LABEL}`;
+	const status = await context.launchctl(["print", target]);
+	if (status.code === 0) {
+		const unloaded = await context.launchctl(["bootout", target]);
+		if (unloaded.code !== 0) throw new Error(`Could not stop the legacy history LaunchAgent: ${unloaded.stderr}`);
+	} else if (status.code !== 113) {
+		throw new Error(`Could not inspect the legacy history LaunchAgent: ${status.stderr}`);
+	}
+	await rm(join(context.homeDirectory, "Library", "LaunchAgents", `${LEGACY_HISTORY_SERVICE_LABEL}.plist`), {
+		force: true,
+	});
 }
 
 function ensureMac(options: HistoryServiceOptions): void {
@@ -133,6 +154,7 @@ function ensureMac(options: HistoryServiceOptions): void {
 export async function installHistoryService(options: HistoryServiceOptions = {}): Promise<HistoryServicePaths> {
 	ensureMac(options);
 	const context = serviceContext(options);
+	await removeLegacyService(context);
 	await mkdir(context.paths.logDirectory, { recursive: true, mode: 0o700 });
 	for (const log of [context.paths.stdoutLog, context.paths.stderrLog]) {
 		await writeFile(log, "", { flag: "a", mode: 0o600 });
@@ -159,6 +181,7 @@ export async function installHistoryService(options: HistoryServiceOptions = {})
 export async function uninstallHistoryService(options: HistoryServiceOptions = {}): Promise<HistoryServicePaths> {
 	ensureMac(options);
 	const context = serviceContext(options);
+	await removeLegacyService(context);
 	const status = await context.launchctl(["print", context.serviceTarget]);
 	if (status.code === 0) {
 		const unloaded = await context.launchctl(["bootout", context.serviceTarget]);

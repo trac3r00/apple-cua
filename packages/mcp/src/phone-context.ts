@@ -1,5 +1,5 @@
-import { describeMirroringState, describeUserStop } from "@apple-cua/core";
-import type { MirroringObservation, StopStatus } from "@apple-cua/core";
+import { describeMirroringState, describeUserStop } from "@opencua/core";
+import type { MirroringObservation, StopStatus } from "@opencua/core";
 
 export interface PhoneContextFailure {
 	readonly reason: string;

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 type ExecFileCallback = (error: Error | null, stdout: string | Buffer, stderr: string) => void;
 type ExecFileMock = (
@@ -99,7 +99,7 @@ describe("#given window-targeted screenshot capture #when a windowId is provided
 		expect(result).toBe(fakePng);
 		expect(childProcessMock.execFile).toHaveBeenCalledWith(
 			"sh",
-			expect.arrayContaining(["apple-cua-screenshot", "1920", "1080"]),
+			expect.arrayContaining(["opencua-screenshot", "1920", "1080"]),
 			expect.objectContaining({ encoding: "buffer" }),
 			expect.any(Function),
 		);

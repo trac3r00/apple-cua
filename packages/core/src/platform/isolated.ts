@@ -1,3 +1,4 @@
+import "../env-compat.js";
 // This entrypoint must remain free of native host UI, permission and input imports.
 export {
 	type CursorOwner,

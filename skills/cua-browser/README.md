@@ -69,7 +69,7 @@ The tool adds free text automatically.
 AskUserQuestion({
   questions: [
     {
-      question: "Which Chromium browser should apple-cua control?",
+      question: "Which Chromium browser should opencua control?",
       header: "Browser",
       multiSelect: false,
       options: [
@@ -107,11 +107,11 @@ AskUserQuestion({
 If the person chooses **Show changes first**, print these before continuing:
 
 ```text
-Build:    pnpm --filter @apple-cua/browser build
+Build:    pnpm --filter @opencua/browser build
 Install:  /opt/homebrew/bin/node packages/browser/dist/cli.js install
 LaunchAgent: ~/Library/LaunchAgents/com.browser_skill_omo.daemon.plist
 Native host: ~/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.browser_skill_omo.bridge.json
-State:    ~/.apple-cua (owner-only browser-connection.json)
+State:    ~/.opencua (owner-only browser-connection.json)
 Logs:     ~/Library/Logs/Browser-Skill-OmO/
 Then ask again before running them.
 ```
@@ -122,11 +122,11 @@ with the printed port and token. Do not place the token in chat.
 
 ## 2. Build, install, and pair
 
-Run from the apple-cua checkout. The browser package must be built before `setup`; `setup` is
+Run from the OpenCUA checkout. The browser package must be built before `setup`; `setup` is
 not a build and fails if `packages/browser/dist/cli.js` is missing.
 
 ```sh
-pnpm --filter @apple-cua/browser build
+pnpm --filter @opencua/browser build
 test -f packages/browser/dist/cli.js
 /opt/homebrew/bin/node packages/browser/dist/cli.js install
 ```
@@ -141,16 +141,16 @@ Native host: /Users/<you>/Library/Application Support/BraveSoftware/Brave-Browse
 ```
 
 Then pair the extension. `setup` copies the extension folder to the clipboard, opens the
-extensions page in the background, and waits when `APPLE_CUA_BROWSER_WAIT=1` is set:
+extensions page in the background, and waits when `OPENCUA_BROWSER_WAIT=1` is set:
 
 ```sh
-APPLE_CUA_BROWSER_WAIT=1 apple-cua browser setup --browser "Brave"
+OPENCUA_BROWSER_WAIT=1 opencua browser setup --browser "Brave"
 ```
 
-If `apple-cua` is not on `PATH`, use:
+If `opencua` is not on `PATH`, use:
 
 ```sh
-APPLE_CUA_BROWSER_WAIT=1 node packages/cli/dist/cli.js browser setup --browser "Brave"
+OPENCUA_BROWSER_WAIT=1 node packages/cli/dist/cli.js browser setup --browser "Brave"
 ```
 
 Do not use `--no-wait` unless the person is going to load the extension later.
@@ -184,7 +184,7 @@ AskUserQuestion({
 })
 ```
 
-After an apple-cua upgrade, reload the unpacked extension. A stale extension keeps the old
+After an OpenCUA upgrade, reload the unpacked extension. A stale extension keeps the old
 worker even when the daemon is new.
 
 ## 4. Verify the connection
@@ -192,8 +192,8 @@ worker even when the daemon is new.
 Run the human-readable status, then the JSON status:
 
 ```sh
-apple-cua browser status
-apple-cua browser status --json
+opencua browser status
+opencua browser status --json
 ```
 
 Require all of these:
@@ -231,7 +231,7 @@ node skills/cua-browser/scripts/browser.mjs call \
   '{"action":"finish","space":"setup-check"}'
 ```
 
-Then confirm `spaces: 0` in `apple-cua browser status --json`.
+Then confirm `spaces: 0` in `opencua browser status --json`.
 
 The smoke test does not click, fill, select, upload, or open a popup. Do not add such a step
 without asking.
@@ -273,7 +273,7 @@ Port:           local only; never print the pairing token
 Smoke test:     open_many p1+p2, wait matched, finish, spaces 0
 Window check:   no window appeared / failed / unverified
 Limits:         native popups may activate Brave; Chrome/Edge/Arc/Vivaldi need manual native-host registration
-Uninstall:      apple-cua browser uninstall, then remove the unpacked extension
+Uninstall:      opencua browser uninstall, then remove the unpacked extension
 ```
 
 ## Recovery
@@ -281,16 +281,16 @@ Uninstall:      apple-cua browser uninstall, then remove the unpacked extension
 | Signal | Action |
 |---|---|
 | `node -v` says Bun | Use `/opt/homebrew/bin/node` for `install` and the daemon command; reinstall so the LaunchAgent records real Node |
-| `browser package is not built` | Run `pnpm --filter @apple-cua/browser build` |
-| `apple-cua: command not found` | Use `node packages/cli/dist/cli.js` or install the CLI package |
+| `browser package is not built` | Run `pnpm --filter @opencua/browser build` |
+| `opencua: command not found` | Use `node packages/cli/dist/cli.js` or install the CLI package |
 | `extension: not connected` | Reload the unpacked extension; confirm the native host JSON exists; read the `StandardErrorPath` in `~/Library/LaunchAgents/com.browser_skill_omo.daemon.plist`. The installer creates `~/Library/Logs/Browser-Skill-OmO/`; if that directory is missing, `mkdir -p` it and restart the agent with `launchctl kickstart -k gui/$(id -u)/com.browser_skill_omo.daemon` |
-| Port 47953 already in use | `lsof -nP -iTCP:47953 -sTCP:LISTEN`; do not kill an unrelated process; use a manual daemon on `APPLE_CUA_BROWSER_PORT` |
-| Wrong browser selected | `apple-cua browser uninstall`, load the extension in the intended browser, then repeat with `--browser` |
+| Port 47953 already in use | `lsof -nP -iTCP:47953 -sTCP:LISTEN`; do not kill an unrelated process; use a manual daemon on `OPENCUA_BROWSER_PORT` |
+| Wrong browser selected | `opencua browser uninstall`, load the extension in the intended browser, then repeat with `--browser` |
 | Page moved to a user window | Stop. The extension pauses input on a move; do not move it back silently |
 | Human took over | Ask the person to use **Give back** in the extension popup; then observe again before acting |
 
 Uninstall removes the LaunchAgent and native host registration only. Remove the unpacked
-extension from the browser manually. The pairing key in `~/.apple-cua/browser-connection.json`
+extension from the browser manually. The pairing key in `~/.opencua/browser-connection.json`
 is retained by design.
 
 ## Copy-paste prompt

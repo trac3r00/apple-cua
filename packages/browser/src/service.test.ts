@@ -70,7 +70,7 @@ describe("browser service artifacts", () => {
 		expect(paths.stateDirectory).toBe(stateDirectory);
 		expect(paths.nativeHostLauncher).toBe(join(stateDirectory, "browser-native-host"));
 		expect(await readFile(paths.launchAgent, "utf8")).toContain(`<string>${stateDirectory}</string>`);
-		expect(await readFile(paths.nativeHostLauncher, "utf8")).toContain(`APPLE_CUA_STATE_DIR='${stateDirectory}'`);
+		expect(await readFile(paths.nativeHostLauncher, "utf8")).toContain(`OPENCUA_STATE_DIR='${stateDirectory}'`);
 		const registration = nativeManifestSchema.parse(JSON.parse(await readFile(paths.nativeHostManifest, "utf8")));
 		expect(registration.path).toBe(paths.nativeHostLauncher);
 		expect(await readConnection(stateDirectory)).toMatchObject({ port: DEFAULT_PORT });
@@ -332,7 +332,7 @@ describe("browser service artifacts", () => {
 			await mkdir(paths.stateDirectory);
 			await writeFile(
 				hostProgram,
-				"process.stdout.write(JSON.stringify({origin:process.argv[2],state:process.env.APPLE_CUA_STATE_DIR,extensionId:process.env.APPLE_CUA_BROWSER_EXTENSION_ID}));",
+				"process.stdout.write(JSON.stringify({origin:process.argv[2],state:process.env.OPENCUA_STATE_DIR,extensionId:process.env.OPENCUA_BROWSER_EXTENSION_ID}));",
 			);
 			await writeFile(paths.nativeHostLauncher, renderNativeHostLauncher(paths, process.execPath, extensionId));
 			await chmod(paths.nativeHostLauncher, 0o700);

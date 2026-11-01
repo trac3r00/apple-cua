@@ -26,7 +26,7 @@ export interface HistoryAgentOptions {
 type StopReason = "abort" | "timeout" | "oversize";
 
 function defaultExecutable(): string {
-	const configured = process.env["APPLE_CUA_HISTORY_AGENT"];
+	const configured = process.env["OPENCUA_HISTORY_AGENT"];
 	if (configured) {
 		return configured;
 	}

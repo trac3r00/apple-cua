@@ -1,10 +1,34 @@
 # Create a skill from computer history
 
-The recorder's **Open history...** menu item opens a local timeline. The same
-interface is available through:
+OpenCUA spots workflows you repeat and offers them as skill suggestions, inside your agent chat.
+
+## In your agent (recommended)
+
+Ask your agent "what skills could I make from my history?". With `OPENCUA_HISTORY=1` it calls
+`cua_history_suggest_skills`, which scans recent segments locally: no model call, nothing leaves the
+machine, and typed text is never included. It shows a numbered list of repeated workflows. Pick one, the
+agent drafts the SKILL.md in the chat, and after you approve the draft it saves it with
+`cua_history_save_skill` to `~/.agents/skills/<name>/SKILL.md`. Existing skills are never overwritten.
+
+## From the terminal or menu bar
 
 ```sh
-apple-cua history open
+opencua history suggest            # numbered list of repeated workflows
+opencua history record start       # mark one deliberate run
+opencua history record stop        # prints the prompt to give your agent
+```
+
+The menu-bar item lists the same suggestions. Choosing one copies the agent prompt to the clipboard.
+
+A suggestion is a detected repeat, not a verified macro. The agent must observe fresh app state before
+acting when it later runs the skill.
+
+## Legacy timeline page
+
+The older localhost page is still available:
+
+```sh
+opencua history open --web
 ```
 
 Select recorded segments, preview the evidence, and describe the reusable
@@ -16,7 +40,7 @@ Skills are saved under `~/.agents/skills/<name>/SKILL.md`. Existing skills are
 never overwritten. For a separate output directory:
 
 ```sh
-apple-cua history open --skills-dir /absolute/path/to/skills
+opencua history open --web --skills-dir /absolute/path/to/skills
 ```
 
 `--no-open` prints the local session URL without opening a browser. Treat that
@@ -46,7 +70,7 @@ restart it immediately; launchd restarts it after an unexpected exit.
 While the watcher is running, its timer expires raw segments even when recording
 is paused or idle. A stopped or uninstalled process cannot expire files; retained
 history stays on disk until the watcher runs again or the user removes it.
-Full `apple-cua uninstall` stops and unregisters this checkout's history service
+Full `opencua uninstall` stops and unregisters this checkout's history service
 before removing its helper. Another checkout's service is left alone. Recorded
 history and summaries are deliberately retained, and the uninstall plan lists
 their paths; uninstall does not silently erase them.
@@ -54,7 +78,7 @@ their paths; uninstall does not silently erase them.
 ## Model requirements
 
 Generation uses the installed OmO CLI in ephemeral, tool-free mode. It uses
-OmO's configured model and authentication. `APPLE_CUA_HISTORY_AGENT` can select
+OmO's configured model and authentication. `OPENCUA_HISTORY_AGENT` can select
 an alternative path to an OmO-compatible executable. No model is bundled.
 Unavailable credentials or executables produce an error, not a fake draft.
 
@@ -76,7 +100,7 @@ which outlive expiring raw events.
 
 **Workflow suggestions** has a separate, persistent opt-in for automatic model
 sharing. When enabled, the recorder checks each ten-minute window and invokes
-`apple-cua history digest` for one completed segment. Structured summaries and
+`opencua history digest` for one completed segment. Structured summaries and
 optional skill suggestions are stored in `summaries/auto-<segment>.json`.
 Already-summarized segments do not cause another model call. The interface
 shows the last background result; failures do not stop recording.
@@ -103,4 +127,4 @@ The new menu item requires a recorder rebuilt from the updated source. Updating
 TypeScript alone does not change the already-running native menu. Run the
 project's normal installation/update process and restart the history watcher
 when ready. A refreshed LaunchAgent includes the exact installed CLI launcher
-path; a manually launched recorder falls back to `~/.local/bin/apple-cua`.
+path; a manually launched recorder falls back to `~/.local/bin/opencua`.

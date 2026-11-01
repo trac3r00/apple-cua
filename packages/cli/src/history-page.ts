@@ -2,7 +2,7 @@
 export function historyPage(): string {
 	return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Computer history | apple-cua</title>
+<title>Computer history | opencua</title>
 <style>
 :root{color-scheme:light dark;--bg:#f5f5f7;--panel:#fff;--text:#1d1d1f;--muted:#56565c;--line:#86868b;--action:#0066cc;--on-action:#fff;--error:#ad2020;--radius:8px;--space:16px}
 @media(prefers-color-scheme:dark){:root{--bg:#171719;--panel:#262629;--text:#f5f5f7;--muted:#c4c4ca;--line:#8d8d94;--action:#8bc5ff;--on-action:#111;--error:#ffabab}}
@@ -26,7 +26,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.6 ui-monospace,monos
 .stack{display:grid;gap:24px}.hidden,[hidden]{display:none!important}
 @media(max-width:720px){header{padding:20px}main{grid-template-columns:minmax(0,1fr);padding:20px;gap:24px}.panel{padding:20px}}
 </style></head><body>
-<header><div><h1>Computer history</h1><small>apple-cua</small></div><div class="row"><span id="recording-state">Reading recorder state...</span><button id="refresh">Refresh</button><button id="close">Close history</button></div></header>
+<header><div><h1>Computer history</h1><small>opencua</small></div><div class="row"><span id="recording-state">Reading recorder state...</span><button id="refresh">Refresh</button><button id="close">Close history</button></div></header>
 <main><aside><h2>Recent activity</h2><label for="filter">Find an app or time</label><input id="filter" type="search" placeholder="Search recorded sessions">
 <p class="muted">Select up to 12 recorded segments. Raw activity expires; saved summaries and skills remain.</p>
 <ul id="timeline"><li>Loading activity...</li></ul></aside>
@@ -76,7 +76,7 @@ function draw(){
  const previous=new Set(selected());const list=byId('timeline');list.replaceChildren();
  const query=byId('filter').value.toLowerCase();
  const filtered=entries.filter(entry=>(entry.apps.join(' ')+' '+entry.startedAt).toLowerCase().includes(query));
- if(!filtered.length){const li=document.createElement('li');li.textContent=entries.length?'No matching activity.':'No recorded activity yet. Start recording from the apple-cua menu, then return here.';list.append(li)}
+ if(!filtered.length){const li=document.createElement('li');li.textContent=entries.length?'No matching activity.':'No recorded activity yet. Start recording from the opencua menu, then return here.';list.append(li)}
  for(const entry of filtered){
   const li=document.createElement('li'),label=document.createElement('label'),input=document.createElement('input'),span=document.createElement('span'),strong=document.createElement('strong'),small=document.createElement('small');
   input.type='checkbox';input.value=entry.id;input.checked=previous.has(entry.id);input.onchange=()=>{demonstrationId=undefined;suggestionId=undefined;clearEvidence()};
@@ -101,7 +101,7 @@ async function refreshAutomation(){
   list.append(section);
  }
 }
-async function refresh(){const data=await api('timeline');entries=data.entries;byId('recording-state').textContent='Recorder: '+data.state;byId('record-start').dataset.unavailable=String(data.state!=='running');if(!recordingId&&!demonstrationId)byId('record-status').textContent=data.state==='running'?'Ready to record a focused demonstration.':'Start or resume the recorder from the apple-cua menu before demonstrating.';draw();await refreshSummaries();await refreshAutomation()}
+async function refresh(){const data=await api('timeline');entries=data.entries;byId('recording-state').textContent='Recorder: '+data.state;byId('record-start').dataset.unavailable=String(data.state!=='running');if(!recordingId&&!demonstrationId)byId('record-status').textContent=data.state==='running'?'Ready to record a focused demonstration.':'Start or resume the recorder from the opencua menu before demonstrating.';draw();await refreshSummaries();await refreshAutomation()}
 function generationInput(){
  const ids=selectionInput().ids;if(!ids.length)throw new Error('Select recorded activity or a saved suggestion first.');
  if(ids.length>12)throw new Error('Select no more than 12 segments.');

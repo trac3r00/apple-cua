@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 const state = vi.hoisted(() => ({ front: Buffer.alloc(8, 2) }));
 vi.mock("./macos-ffi/coregraphics.js", () => ({
@@ -14,10 +14,10 @@ vi.mock("./macos-ffi/skylight.js", () => ({
 }));
 
 const timingKeys = [
-	"APPLE_CUA_GESTURE_FOCUS_SETTLE_MS",
-	"APPLE_CUA_GESTURE_HOVER_MS",
-	"APPLE_CUA_GESTURE_PRIMER_TO_CLICK_MS",
-	"APPLE_CUA_GESTURE_CLICK_DRAIN_MS",
+	"OPENCUA_GESTURE_FOCUS_SETTLE_MS",
+	"OPENCUA_GESTURE_HOVER_MS",
+	"OPENCUA_GESTURE_PRIMER_TO_CLICK_MS",
+	"OPENCUA_GESTURE_CLICK_DRAIN_MS",
 ] as const;
 
 afterEach(() => {
@@ -44,7 +44,7 @@ describe("#given gesture timing environment values #when parsing them #then inva
 		["  ", 25],
 		["40", 40],
 	])("parses %j as %i", async (value, expected) => {
-		process.env["APPLE_CUA_GESTURE_FOCUS_SETTLE_MS"] = value;
+		process.env["OPENCUA_GESTURE_FOCUS_SETTLE_MS"] = value;
 		const { gestureFocusSettleMilliseconds } = await import("./macos-targeted-gesture.js");
 		expect(gestureFocusSettleMilliseconds()).toBe(expected);
 	});
@@ -69,10 +69,10 @@ describe("#given target focus observations #when deciding engagement #then only 
 
 describe("#given a focus-leased gesture #when sleeping is injected #then only nonzero waits are recorded in order", () => {
 	it("skips zero waits and keeps the fixed primer gap", async () => {
-		process.env["APPLE_CUA_GESTURE_FOCUS_SETTLE_MS"] = "0";
-		process.env["APPLE_CUA_GESTURE_HOVER_MS"] = "0";
-		process.env["APPLE_CUA_GESTURE_PRIMER_TO_CLICK_MS"] = "40";
-		process.env["APPLE_CUA_GESTURE_CLICK_DRAIN_MS"] = "0";
+		process.env["OPENCUA_GESTURE_FOCUS_SETTLE_MS"] = "0";
+		process.env["OPENCUA_GESTURE_HOVER_MS"] = "0";
+		process.env["OPENCUA_GESTURE_PRIMER_TO_CLICK_MS"] = "40";
+		process.env["OPENCUA_GESTURE_CLICK_DRAIN_MS"] = "0";
 		const { runFocusLeasedGesture } = await import("./macos-targeted-gesture.js");
 		const waits: number[] = [];
 		const post = vi.fn(async (_kind: string) => undefined);

@@ -2,7 +2,7 @@ import { afterEach, expect, it } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 afterEach(() => vi.useRealTimers());
 
@@ -24,7 +24,7 @@ it("#given an async fake-timer callback #when virtual time advances #then its co
 });
 
 it("#given an evaluated module with a mocked dependency #when modules reset #then the next import is fresh and still mocked", async () => {
-	const directory = realpathSync(mkdtempSync(join(tmpdir(), "apple-cua-reset-modules-")));
+	const directory = realpathSync(mkdtempSync(join(tmpdir(), "opencua-reset-modules-")));
 	try {
 		writeFileSync(join(directory, "dependency.ts"), 'export const source = (): string => "real";\n');
 		writeFileSync(
@@ -46,7 +46,7 @@ it("#given an evaluated module with a mocked dependency #when modules reset #the
 });
 
 it("#given a partial module mock #when a dependent imports omitted exports #then it links and reads them as undefined", async () => {
-	const directory = realpathSync(mkdtempSync(join(tmpdir(), "apple-cua-partial-mock-")));
+	const directory = realpathSync(mkdtempSync(join(tmpdir(), "opencua-partial-mock-")));
 	try {
 		writeFileSync(join(directory, "more.ts"), 'export const more = (): string => "real-more";\n');
 		writeFileSync(

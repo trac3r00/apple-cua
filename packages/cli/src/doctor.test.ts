@@ -45,7 +45,7 @@ function readyFacts(): DoctorFacts {
 		nativeInputs: { matches: true, detail: "build-inputs.sha256 matches" },
 		server: { path: "/repo/server.js", present: true },
 		helper: {
-			app: "/repo/apple-cua-mcp.app",
+			app: "/repo/opencua-mcp.app",
 			present: true,
 			signature: { valid: true, detail: "valid" },
 			bundledNode: { version: "v22.23.2" },
@@ -64,7 +64,7 @@ function readyFacts(): DoctorFacts {
 		},
 		stop: { stopped: false },
 		config: {
-			path: "/home/.apple-cua/config.json",
+			path: "/home/.opencua/config.json",
 			saved: true,
 			clients: [
 				{ client: "omo", state: "current", path: "/home/.omo/agent/mcp.json", detail: "registered, up to date" },
@@ -270,7 +270,7 @@ describe("#given MCP client registrations #when the doctor evaluates them #then 
 
 		expect(withClient("stale")).toMatchObject({
 			status: "fail",
-			fix: expect.stringContaining("apple-cua doctor --fix"),
+			fix: expect.stringContaining("opencua doctor --fix"),
 		});
 		expect(withClient("missing")?.status).toBe("fail");
 		expect(withClient("unreadable")).toMatchObject({ status: "fail", fix: expect.stringContaining("by hand") });
@@ -280,7 +280,7 @@ describe("#given MCP client registrations #when the doctor evaluates them #then 
 		expect(none.ready).toBe(true);
 		expect(none.checks.find((item) => item.id === "clients")).toMatchObject({
 			status: "warn",
-			fix: expect.stringContaining("apple-cua config --register"),
+			fix: expect.stringContaining("opencua config --register"),
 		});
 		expect(
 			statusOf(

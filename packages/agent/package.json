@@ -1,8 +1,8 @@
 {
-	"name": "@apple-cua/agent",
+	"name": "@opencua/agent",
 	"version": "0.1.0",
 	"type": "module",
-	"description": "Decision-layer agent: an indexed action space over apple-cua observations and one fan-out decision per step",
+	"description": "Decision-layer agent: an indexed action space over opencua observations and one fan-out decision per step",
 	"keywords": ["computer-use", "agent", "decision", "systemone", "jev", "macos", "ios", "accessibility"],
 	"license": "MIT",
 	"repository": {
@@ -24,7 +24,7 @@
 		"test": "bun test --isolate --parallel=4"
 	},
 	"dependencies": {
-		"@apple-cua/core": "workspace:*"
+		"@opencua/core": "workspace:*"
 	},
 	"devDependencies": {
 		"@types/node": "^20.0.0",

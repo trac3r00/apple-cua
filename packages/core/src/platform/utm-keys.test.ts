@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 import { UTMKeyError, utmKeyChunkSize, utmKeyCodes, utmTextCodes, utmTextScripts } from "./utm-keys.js";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -34,7 +34,7 @@ describe("#given text #when planned in chunks #then each character retains its o
 		[9, 2],
 		[33, 5],
 	])("batches %i characters into %i invocations by default", (length, count) => {
-		vi.stubEnv("APPLE_CUA_UTM_KEY_CHUNK", undefined);
+		vi.stubEnv("OPENCUA_UTM_KEY_CHUNK", undefined);
 		const scripts = utmTextScripts("a".repeat(length));
 		expect(scripts).toHaveLength(count);
 		expect(scripts.flatMap((script) => script.split("\n"))).toEqual(
@@ -75,7 +75,7 @@ describe("#given text #when planned in chunks #then each character retains its o
 	});
 
 	it("uses the environment configuration and permits an explicit override", () => {
-		vi.stubEnv("APPLE_CUA_UTM_KEY_CHUNK", "2");
+		vi.stubEnv("OPENCUA_UTM_KEY_CHUNK", "2");
 		expect(utmTextScripts("abc")).toHaveLength(2);
 		expect(utmTextScripts("abc", { chunkSize: 1 })).toHaveLength(3);
 	});
@@ -114,7 +114,7 @@ describe("#given chunk configuration #when parsed #then invalid values use eight
 		[" 2 ", 2],
 	])("parses %j as %i", (value, expected) => {
 		expect(utmKeyChunkSize(value)).toBe(expected);
-		vi.stubEnv("APPLE_CUA_UTM_KEY_CHUNK", value);
+		vi.stubEnv("OPENCUA_UTM_KEY_CHUNK", value);
 		expect(utmTextScripts("a".repeat(33))).toHaveLength(Math.ceil(33 / expected));
 	});
 });

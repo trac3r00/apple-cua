@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 const overlayMock = vi.hoisted(() => ({
 	createCursorOverlay: vi.fn(() => ({
@@ -33,8 +33,8 @@ describe("#given host cursor overlay policy", () => {
 
 	it("#when background delivery has background cues disabled #then it does not create a default overlay", async () => {
 		const { MacOSHostComputer } = await import("./macos.js");
-		const previous = process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"];
-		process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = "off";
+		const previous = process.env["OPENCUA_CURSOR_BACKGROUND_CUES"];
+		process.env["OPENCUA_CURSOR_BACKGROUND_CUES"] = "off";
 		try {
 			const host = new MacOSHostComputer({ delivery: "background" });
 
@@ -42,9 +42,9 @@ describe("#given host cursor overlay policy", () => {
 			await host.close();
 		} finally {
 			if (previous === undefined) {
-				Reflect.deleteProperty(process.env, "APPLE_CUA_CURSOR_BACKGROUND_CUES");
+				Reflect.deleteProperty(process.env, "OPENCUA_CURSOR_BACKGROUND_CUES");
 			} else {
-				process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = previous;
+				process.env["OPENCUA_CURSOR_BACKGROUND_CUES"] = previous;
 			}
 		}
 	});

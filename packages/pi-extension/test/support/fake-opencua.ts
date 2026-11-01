@@ -22,7 +22,7 @@ const DRAFT_07 = "http://json-schema.org/draft-07/schema#";
 function tool(name: string, properties: Record<string, object>, required: string[] = []): Tool {
 	return {
 		name,
-		description: `apple-cua ${name}`,
+		description: `opencua ${name}`,
 		inputSchema: { type: "object", properties, required, $schema: DRAFT_07 },
 	};
 }
@@ -31,7 +31,7 @@ const app = { type: "string", minLength: 1 };
 const token = { type: "string", minLength: 1 };
 const coordinate = { type: "number" };
 
-/** Tools shaped like apple-cua-mcp's: JSON Schema draft-07 input schemas carrying a $schema marker. */
+/** Tools shaped like opencua-mcp's: JSON Schema draft-07 input schemas carrying a $schema marker. */
 export const FAKE_TOOLS: readonly Tool[] = [
 	tool("list_apps", {}),
 	tool(
@@ -66,10 +66,10 @@ export function textAnswer(payload: unknown): CallToolResult {
 }
 
 /**
- * An in-memory stand-in for apple-cua-mcp: real MCP protocol over a linked transport pair, scripted tool answers,
+ * An in-memory stand-in for opencua-mcp: real MCP protocol over a linked transport pair, scripted tool answers,
  * every call recorded. Each connect is a fresh server, like a respawned process.
  */
-export class FakeAppleCuaServer {
+export class FakeOpenCuaServer {
 	readonly calls: RecordedCall[] = [];
 	connections = 0;
 	closedConnections = 0;
@@ -95,7 +95,7 @@ export class FakeAppleCuaServer {
 		this.connections += 1;
 		const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 		const server = new Server(
-			{ name: "apple-cua", version: "0.1.0" },
+			{ name: "opencua", version: "0.1.0" },
 			{
 				capabilities: { tools: {} },
 				...(this.instructions === undefined ? {} : { instructions: this.instructions }),
@@ -137,10 +137,10 @@ export interface GuardedWindowOptions {
 }
 
 /**
- * A fake that guards like apple-cua-mcp: get_app_state issues a one-use token with a window screenshot, each
+ * A fake that guards like opencua-mcp: get_app_state issues a one-use token with a window screenshot, each
  * mutation needs the newest token and answers with the next one, and a stale token is refused.
  */
-export function guardedWindowServer(options: GuardedWindowOptions = {}): FakeAppleCuaServer {
+export function guardedWindowServer(options: GuardedWindowOptions = {}): FakeOpenCuaServer {
 	let issued = 0;
 	let current: string | undefined;
 	const issue = () => {
@@ -148,7 +148,7 @@ export function guardedWindowServer(options: GuardedWindowOptions = {}): FakeApp
 		current = `token-${issued}`;
 		return current;
 	};
-	const fake = new FakeAppleCuaServer(FAKE_TOOLS, options.instructions);
+	const fake = new FakeOpenCuaServer(FAKE_TOOLS, options.instructions);
 	fake.handle("get_app_state", (args) => ({
 		content: [
 			{ type: "image", data: "d2luZG93", mimeType: "image/jpeg" },

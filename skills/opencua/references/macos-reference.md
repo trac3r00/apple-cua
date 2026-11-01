@@ -1,9 +1,8 @@
----
-name: apple-cua
-description: "Operate an explicitly authorized macOS app, or a real iPhone through iPhone Mirroring, using the context-first apple-cua MCP server. Observe before input, use the returned observation token and element IDs, verify the intended result, and stop on uncertainty. Works with MCP-capable harnesses including OpenClaw and Hermes Agent; direct CLI use is a lower-level alternative, not a way around the guard."
----
+# OpenCUA on macOS: full reference
 
-# apple-cua: context before input
+The complete macOS and iPhone guidance. SKILL.md links here for detail.
+
+# opencua: context before input
 
 Use this skill when the user actually asks you to operate their Mac. A request to explain,
 inspect code, or suggest an action is not permission to perform that action. Prefer an
@@ -11,7 +10,7 @@ appropriate read-only API, file reader, or existing purpose-built tool when desk
 is unnecessary.
 
 **Use the guarded stdio MCP server for autonomous operation.** No Pi-specific extension,
-embedded model, extra agent framework, cloud service, or API key is required by apple-cua.
+embedded model, extra agent framework, cloud service, or API key is required by opencua.
 The MCP server must run on the Mac being controlled, in a logged-in graphical session.
 The harness supplies the model, task reasoning and user-confirmation channel.
 
@@ -55,7 +54,7 @@ The server drives two kinds of thing, and they are not interchangeable:
   the capture (the phone image is a video stream, so accessibility sees nothing inside it) and
   hands are synthesized events delivered to that window's own process. The phone is driven
   without bringing its window forward. The `ios_*` tools exist only when the host started the
-  server with `APPLE_CUA_IPHONE=1`; if they are missing, the phone is not available to you.
+  server with `OPENCUA_IPHONE=1`; if they are missing, the phone is not available to you.
 
 Use the phone only when the task genuinely needs the phone: an iOS-only app, something tied to
 the user's phone number or 2FA, or checking how something looks on the device. If a Mac app or a
@@ -89,7 +88,7 @@ Keep one controller for the desktop.
 
 1. **Discover only as needed.** `list_apps` reports running apps. Listing an app does not
    authorize reading or controlling it. Explicitly name the app needed for the user's task;
-   no manual whitelist is required by default. If the host sets `APPLE_CUA_ALLOWED_BUNDLE_IDS`,
+   no manual whitelist is required by default. If the host sets `OPENCUA_ALLOWED_BUNDLE_IDS`,
    respect that restriction and never widen it yourself. When the app the
    task needs is not running, `open_app` activates it in place or launches it and waits until it
    is observable — opening an app is not authorization either, so observe it before acting.
@@ -255,8 +254,8 @@ instead — re-observe after `stale_observation`, pick the window again after `n
 and stop for `permission_required` rather than working around policy.
 
 `reason: "user-stopped"` means the person pressed the stop switch (holding Control+Option+Command,
-or `apple-cua stop`): stop acting at once, do not retry, and tell them. Only they resume, with
-`apple-cua resume`. When a call fails for a reason you cannot explain, call `get_capabilities`
+or `opencua stop`): stop acting at once, do not retry, and tell them. Only they resume, with
+`opencua resume`. When a call fails for a reason you cannot explain, call `get_capabilities`
 once: it reports permissions, a locked or remote session, the delivery mode, the approved apps,
 the stop state, and `advice` naming what to tell the person.
 
@@ -275,12 +274,12 @@ when the needed target cannot be established.
   Inspect a specific missing signal, resolve a visible blocker, or stop and explain what is
   uncertain. Do not loop through guessed variants or repeatedly refresh identical state.
 7. **Stay out of the way.** The MCP server uses background delivery by default (the CLI takes
-   `--background`; `APPLE_CUA_DELIVERY=attended` opts out): input goes to the app's own window,
+   `--background`; `OPENCUA_DELIVERY=attended` opts out): input goes to the app's own window,
    the frontmost app and the person's cursor are left alone, `open_app` launches without bringing
    the app forward, and an action that would need the foreground is refused rather than taking
    over the machine. Background work draws no cursor, highlight, or click ripple. Attended
    delivery can show an adaptive agent cursor without moving the real pointer for semantic
-   actions (`APPLE_CUA_CURSOR=off` hides that feedback).
+   actions (`OPENCUA_CURSOR=off` hides that feedback).
 
 - Do not bypass a denied/stale/paused MCP action using the raw CLI, AppleScript, shell input
   synthesis, another computer tool or another MCP connection. Those would evade the guard.
@@ -352,7 +351,7 @@ window tokens. The host must explicitly approve `com.apple.dock`; mutations
 require attended delivery on an unlocked console. Background Dock interaction
 is refused rather than taking focus, and agents must not widen approval.
 
-Cursor overlays are process-isolated by default. Distinct `APPLE_CUA_CURSOR_ID`
+Cursor overlays are process-isolated by default. Distinct `OPENCUA_CURSOR_ID`
 values give separate visible overlays; reusing a value reconnects/shares that
 overlay. These are visual cursors, not independent OS mice. Shared app, menu,
 and Dock state still needs serialized control; separate cursor identities do
@@ -432,7 +431,7 @@ The stdio server supervises itself: a crash, a rebuilt or updated server, or a
 newly granted permission restarts it behind the same connection and sends
 `notifications/tools/list_changed`, so no session restart is needed. A call that was
 running during a crash fails with "outcome is unknown": observe again, never replay it.
-Tokens from before a restart are invalid. `APPLE_CUA_SUPERVISOR=off` serves directly.
+Tokens from before a restart are invalid. `OPENCUA_SUPERVISOR=off` serves directly.
 
 Screen Recording, Accessibility and, where needed, Automation/Apple Events permissions
 must be granted to the actual process chain launching the server. Do not assume another

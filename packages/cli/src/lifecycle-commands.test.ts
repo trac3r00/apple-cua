@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CursorMotionConfig } from "@apple-cua/core";
+import type { CursorMotionConfig } from "@opencua/core";
 import { Command } from "commander";
 import {
 	askForChanges,
@@ -33,7 +33,7 @@ function scripted(answers: readonly string[]) {
 	};
 }
 
-describe("#given a person at the terminal #when apple-cua config asks #then Enter keeps a value and each answer becomes the change", () => {
+describe("#given a person at the terminal #when opencua config asks #then Enter keeps a value and each answer becomes the change", () => {
 	it("turns answers into a change and asks again after an answer it cannot use", async () => {
 		const session = scripted(["TextEdit, com.apple.finder", "", "lean", "maybe", "on", "omo,windsurf", "omo,codex"]);
 
@@ -132,16 +132,16 @@ describe("#given cursor motion flags #when the config change is built #then they
 });
 
 describe("#given saved and environment cursor motion #when the low-level commands resolve it #then the environment wins", () => {
-	it("reads the saved motion unless APPLE_CUA_CURSOR_MOTION is set, where off disables", () => {
-		const directory = mkdtempSync(join(tmpdir(), "apple-cua-motion-"));
+	it("reads the saved motion unless OPENCUA_CURSOR_MOTION is set, where off disables", () => {
+		const directory = mkdtempSync(join(tmpdir(), "opencua-motion-"));
 		try {
 			const configPath = join(directory, "config.json");
 			expect(resolveCursorMotion(configPath, {})).toBeNull();
 			saveSettings(configPath, { ...DEFAULT_SETTINGS, cursorMotion: SAVED_MOTION });
 			expect(resolveCursorMotion(configPath, {})).toEqual(SAVED_MOTION);
-			expect(resolveCursorMotion(configPath, { APPLE_CUA_CURSOR_MOTION: "" })).toBeNull();
-			expect(resolveCursorMotion(configPath, { APPLE_CUA_CURSOR_MOTION: "off" })).toBeNull();
-			expect(resolveCursorMotion(configPath, { APPLE_CUA_CURSOR_MOTION: "classic" })).toEqual({ style: "classic" });
+			expect(resolveCursorMotion(configPath, { OPENCUA_CURSOR_MOTION: "" })).toBeNull();
+			expect(resolveCursorMotion(configPath, { OPENCUA_CURSOR_MOTION: "off" })).toBeNull();
+			expect(resolveCursorMotion(configPath, { OPENCUA_CURSOR_MOTION: "classic" })).toEqual({ style: "classic" });
 		} finally {
 			rmSync(directory, { recursive: true, force: true });
 		}

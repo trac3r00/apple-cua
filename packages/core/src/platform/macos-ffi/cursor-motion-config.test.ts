@@ -90,7 +90,7 @@ describe("parseCursorMotion", () => {
 });
 
 describe("cursorMotionFromEnvironment", () => {
-	const key = "APPLE_CUA_CURSOR_MOTION";
+	const key = "OPENCUA_CURSOR_MOTION";
 
 	it.each<Readonly<Record<string, string | undefined>>>([{}, { [key]: undefined }, { [key]: "" }, { [key]: "  " }])(
 		"#given absent environment setting %j #when read #then preserves the optional configuration",

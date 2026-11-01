@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { AXTreeElement, AppState } from "@apple-cua/core";
-import { copyForMatch } from "@apple-cua/test-support";
+import type { AXTreeElement, AppState } from "@opencua/core";
+import { copyForMatch } from "@opencua/test-support";
 import { observedActionResult, observedRunStepsResult, observedSetFieldsResult, stateResult } from "./tool-result.js";
 
 const state: AppState = {

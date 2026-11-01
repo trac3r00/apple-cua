@@ -18,8 +18,8 @@ const appleServer = {
 	command: "node",
 	args: [path.join(repo, "packages/mcp/dist/server.js")],
 	env: {
-		APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.finder,com.apple.TextEdit",
-		APPLE_CUA_DELIVERY: "background",
+		OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.finder,com.apple.TextEdit",
+		OPENCUA_DELIVERY: "background",
 	},
 };
 const cuaServer = {
@@ -36,8 +36,8 @@ const ROUTES = {
 	},
 	"omo-apple": {
 		client: "omo",
-		hand: "Use the apple-cua MCP tools for every app interaction. Use background delivery only. Do not drive apps with shell commands or other computer-use tools.",
-		mcpServers: { "apple-cua": appleServer },
+		hand: "Use the opencua MCP tools for every app interaction. Use background delivery only. Do not drive apps with shell commands or other computer-use tools.",
+		mcpServers: { opencua: appleServer },
 	},
 	"omo-cua": {
 		client: "omo",
@@ -56,8 +56,8 @@ const ROUTES = {
 	},
 	"codex-apple": {
 		client: "codex",
-		hand: "Use the apple-cua MCP tools for every app interaction. Use background delivery only. Do not use shell commands or other computer-use tools.",
-		mcpServers: { "apple-cua": appleServer },
+		hand: "Use the opencua MCP tools for every app interaction. Use background delivery only. Do not use shell commands or other computer-use tools.",
+		mcpServers: { opencua: appleServer },
 		disableComputerUse: true,
 	},
 	"codex-cua": {
@@ -179,14 +179,14 @@ export function parseAgentTranscript(route, text) {
 
 export function agentServerSpecs(route, taskBundles) {
 	const servers = ROUTES[route].mcpServers;
-	if (!taskBundles || !servers["apple-cua"]) return servers;
+	if (!taskBundles || !servers["opencua"]) return servers;
 	return {
 		...servers,
-		"apple-cua": {
-			...servers["apple-cua"],
+		opencua: {
+			...servers["opencua"],
 			env: {
-				...servers["apple-cua"].env,
-				APPLE_CUA_ALLOWED_BUNDLE_IDS: taskBundles.join(","),
+				...servers["opencua"].env,
+				OPENCUA_ALLOWED_BUNDLE_IDS: taskBundles.join(","),
 			},
 		},
 	};
@@ -212,7 +212,7 @@ function createWorkspace(route, taskBundles) {
 	const servers = JSON.stringify(
 		{
 			mcpServers: {
-				"apple-cua": off,
+				opencua: off,
 				"cua-driver": off,
 				"codex-cu": off,
 				"llm-pool-systemone": off,
@@ -313,7 +313,7 @@ export function runAgentRoute({ route, task, signal, browserSession, taskBundles
 	const startedAt = performance.now();
 	const child = spawn(command, args, {
 		cwd: workspace,
-		env: { ...process.env, APPLE_CUA_DELIVERY: "background" },
+		env: { ...process.env, OPENCUA_DELIVERY: "background" },
 		stdio: ["ignore", "pipe", "pipe"],
 		detached: true,
 	});

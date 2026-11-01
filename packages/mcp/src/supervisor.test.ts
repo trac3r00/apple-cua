@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 /** Any report flag: the adapter must pass through exactly what the server gives it. */
 const SELF_CHECK_FLAG = "--report-flag";
@@ -309,11 +309,11 @@ describe("stdio supervisor", () => {
 
 			await vi.advanceTimersByTimeAsync(5_000);
 
-			expect(f.logs).toContain("apple-cua tools/list probe timed out");
+			expect(f.logs).toContain("opencua tools/list probe timed out");
 			expect(f.messages).toContainEqual({
 				jsonrpc: "2.0",
 				id: "queued",
-				error: { code: -32000, message: "apple-cua re-initialization timed out; observe again before acting" },
+				error: { code: -32000, message: "opencua re-initialization timed out; observe again before acting" },
 			});
 			expect(second.kills).toEqual(["SIGTERM"]);
 		} finally {
@@ -343,7 +343,7 @@ describe("stdio supervisor", () => {
 		f.handle.requestRestart("build changed");
 		childAt(f, 0).exit();
 		expect(f.notifications).toHaveBeenCalledWith(
-			"apple-cua",
+			"opencua",
 			"Server restarted after a child crash (build changed); observe again before acting.",
 		);
 		expect(f.messages.at(-1)).toMatchObject({ id: 2, error: { code: -32000 } });
@@ -397,7 +397,7 @@ describe("stdio supervisor", () => {
 		["250", 250],
 	])("#given drain setting %s #when parsed #then uses %i milliseconds", async (value, expected) => {
 		vi.useFakeTimers();
-		vi.stubEnv("APPLE_CUA_SUPERVISOR_DRAIN_MS", value ?? "");
+		vi.stubEnv("OPENCUA_SUPERVISOR_DRAIN_MS", value ?? "");
 		try {
 			const f = fixture();
 			initialize(f);
@@ -549,7 +549,7 @@ describe("node supervisor adapters with injected processes and fake timers", () 
 				1,
 				process.execPath,
 				["/repo/packages/mcp/dist/server.js", "--supervised-child", "--lean"],
-				{ env: { ...process.env, APPLE_CUA_SUPERVISED: "1" }, stdio: ["pipe", "pipe", "inherit"] },
+				{ env: { ...process.env, OPENCUA_SUPERVISED: "1" }, stdio: ["pipe", "pipe", "inherit"] },
 			);
 			expect(native.watch.mock.calls.map(([path]) => path)).toEqual([
 				"/repo/packages/mcp/dist",
@@ -596,14 +596,14 @@ describe("node supervisor adapters with injected processes and fake timers", () 
 				2,
 				process.execPath,
 				["/repo/packages/mcp/dist/server.js", SELF_CHECK_FLAG],
-				{ env: { ...process.env, APPLE_CUA_SUPERVISED: "1" }, stdio: ["ignore", "pipe", "ignore"] },
+				{ env: { ...process.env, OPENCUA_SUPERVISED: "1" }, stdio: ["ignore", "pipe", "ignore"] },
 			);
 			processAt(f.processes, 1).report({ accessibility: false, screenRecording: true });
 			await vi.advanceTimersByTimeAsync(14_999);
 			expect(f.processes).toHaveLength(2);
 			await vi.advanceTimersByTimeAsync(1);
 			processAt(f.processes, 2).report({ accessibility: true, screenRecording: true });
-			expect(notifications).toHaveBeenCalledWith("apple-cua", "Permissions granted; server reloading.");
+			expect(notifications).toHaveBeenCalledWith("opencua", "Permissions granted; server reloading.");
 			expect(processAt(f.processes, 0).kill).toHaveBeenCalledTimes(1);
 			expect(processAt(f.processes, 0).kill).toHaveBeenCalledWith("SIGTERM");
 			processAt(f.processes, 0).emit("exit");

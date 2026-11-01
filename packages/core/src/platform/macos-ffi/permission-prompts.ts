@@ -4,7 +4,7 @@ import { koffi } from "./koffi.js";
 
 // The calls that put macOS's own permission dialogs on screen for this process, and the one read-only check the
 // preflight functions elsewhere do not cover (Automation). Run inside the signed helper, the dialogs and the System
-// Settings entries they create name "apple-cua-mcp" instead of the terminal that started setup.
+// Settings entries they create name "opencua-mcp" instead of the terminal that started setup.
 
 const coreFoundation = koffi.load("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation");
 const coreGraphics = koffi.load("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics");

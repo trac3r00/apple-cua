@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { DockSnapshot, DockSource, HostCapabilities, MenuExtraSnapshot, StopStatus } from "@apple-cua/core";
-import { vi } from "@apple-cua/test-support";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import type { DockSnapshot, DockSource, HostCapabilities, MenuExtraSnapshot, StopStatus } from "@opencua/core";
+import { vi } from "@opencua/test-support";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 import { createMcpServer } from "./server.js";
 
@@ -107,7 +107,7 @@ async function setup(
 		value: options.terminalDelivery ?? options.delivery ?? "attended",
 	});
 	vi.stubEnv(
-		"APPLE_CUA_ALLOWED_BUNDLE_IDS",
+		"OPENCUA_ALLOWED_BUNDLE_IDS",
 		options.terminalApproved === true
 			? "com.apple.dock,com.apple.Terminal,com.apple.controlcenter"
 			: options.approved === false
@@ -130,7 +130,7 @@ async function setup(
 			terminalHostProbe: () => host,
 			terminalDispatch: async (command) => {
 				terminalCommands.push(command);
-				return { dispatched: true, marker: `apple-cua-marker-${command.length}` };
+				return { dispatched: true, marker: `opencua-marker-${command.length}` };
 			},
 			terminalRead: () => "visible terminal output",
 			extrasSource: {
@@ -389,7 +389,7 @@ describe("run_script Dock handle", () => {
 	it("#given Terminal.app is allowlisted #when terminal.run and read execute #then dispatch marker and visible text return", async () => {
 		const h = await setup({ terminalApproved: true });
 		live.push(h.close);
-		expect(process.env["APPLE_CUA_ALLOWED_BUNDLE_IDS"]).toContain("com.apple.Terminal");
+		expect(process.env["OPENCUA_ALLOWED_BUNDLE_IDS"]).toContain("com.apple.Terminal");
 		const result = await call(
 			h,
 			`const t=apple.terminal(); const run=await t.run("echo hi"); const text=await t.read(); return {run,text};`,
@@ -398,7 +398,7 @@ describe("run_script Dock handle", () => {
 		expect(payload(result)).toMatchObject({
 			ok: true,
 			value: {
-				run: { dispatched: true, marker: "apple-cua-marker-7" },
+				run: { dispatched: true, marker: "opencua-marker-7" },
 				text: "visible terminal output",
 			},
 		});

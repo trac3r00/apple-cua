@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { Mock } from "bun:test";
 import { writeFileSync } from "node:fs";
-import type { UTM } from "@apple-cua/core";
-import { vi } from "@apple-cua/test-support";
+import type { UTM } from "@opencua/core";
+import { vi } from "@opencua/test-support";
 import { Command } from "commander";
 
 const core = vi.hoisted(() => {
@@ -32,8 +32,8 @@ const core = vi.hoisted(() => {
 	};
 });
 
-vi.mock("@apple-cua/core", () => ({ UTM: core.UTM }));
-vi.mock("node:fs", () => ({ writeFileSync: vi.fn() }));
+vi.mock("@opencua/core", () => ({ UTM: core.UTM }));
+vi.mock("node:fs", () => ({ writeFileSync: vi.fn(), existsSync: vi.fn(() => false) }));
 
 const { registerUtmCommands } = await import("./utm.js");
 

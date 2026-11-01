@@ -1,6 +1,6 @@
-# @apple-cua/mcp
+# @opencua/mcp
 
-The guarded stdio MCP server for macOS computer control, part of [apple-cua](../../README.md).
+The guarded stdio MCP server for macOS computer control, part of [OpenCUA](../../README.md).
 
 It exposes 33 tools over MCP: observation (`get_app_state`, `list_apps`, `list_windows`,
 `find_elements`, `verify_state`), mutation (`click`, `click_target`, `set_value`, `set_fields`,
@@ -20,22 +20,22 @@ where it is: `find_elements` resolves a description (role, label, text) to ranke
 shared host the last two are refused like every other action.
 
 ```bash
-pnpm --filter @apple-cua/core --filter @apple-cua/mcp build
+pnpm --filter @opencua/core --filter @opencua/mcp build
 node packages/mcp/dist/server.js
 # or, with its own TCC identity (Screen Recording + Accessibility attach to the bundle):
 scripts/build-tcc-helper.sh
 ```
 
 Explicitly name the app to observe or control; no manual whitelist or implicit frontmost target is used.
-Optionally set `APPLE_CUA_ALLOWED_BUNDLE_IDS` to exact, case-insensitive bundle IDs to restrict access.
+Optionally set `OPENCUA_ALLOWED_BUNDLE_IDS` to exact, case-insensitive bundle IDs to restrict access.
 Unset means unrestricted named apps; an explicitly empty value denies all apps. Observation tokens,
 window preflight, and the stop switch still guard input.
 
 The helper bundles a self-contained `node` built for this Mac's CPU (Homebrew's build links
-`libnode.dylib` and cannot be copied into a bundle); set `APPLE_CUA_NODE` to choose one,
-`APPLE_CUA_BUNDLE_ID` for another bundle id, and `APPLE_CUA_SIGN_IDENTITY` to keep a stable code
-identity across rebuilds. `apple-cua config --register` writes the helper into Omo, Claude Code or
+`libnode.dylib` and cannot be copied into a bundle); set `OPENCUA_NODE` to choose one,
+`OPENCUA_BUNDLE_ID` for another bundle id, and `OPENCUA_SIGN_IDENTITY` to keep a stable code
+identity across rebuilds. `opencua config --register` writes the helper into Omo, Claude Code or
 Codex.
 
-Docs: [root README](../../README.md) · [usage](../../skills/apple-cua/references/usage.md) ·
-[harness setup](../../skills/apple-cua/references/harnesses.md). MIT licensed — see [LICENSE](../../LICENSE).
+Docs: [root README](../../README.md) · [usage](../../skills/opencua/references/usage.md) ·
+[harness setup](../../skills/opencua/references/harnesses.md). MIT licensed — see [LICENSE](../../LICENSE).

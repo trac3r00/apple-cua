@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { nodeExecutable } from "@apple-cua/test-support";
+import { nodeExecutable } from "@opencua/test-support";
 import { execa } from "execa";
 
 const cli = fileURLToPath(new URL("./cli.ts", import.meta.url));
@@ -14,7 +14,7 @@ describe("#given Node type stripping #when history commands load from source #th
 		const directory = await mkdtemp(join(tmpdir(), "history-source-digest-"));
 		try {
 			const result = await execa(nodeExecutable(), ["--experimental-strip-types", cli, "history", "digest"], {
-				env: { ...process.env, APPLE_CUA_STATE_DIR: directory },
+				env: { ...process.env, OPENCUA_STATE_DIR: directory },
 				timeout: 15_000,
 			});
 			expect(JSON.parse(result.stdout)).toEqual({ state: "disabled" });
@@ -33,9 +33,18 @@ describe("#given Node type stripping #when history commands load from source #th
 		const directory = await mkdtemp(join(tmpdir(), "history-source-ui-"));
 		const child = execa(
 			nodeExecutable(),
-			["--experimental-strip-types", cli, "history", "open", "--no-open", "--skills-dir", join(directory, "skills")],
+			[
+				"--experimental-strip-types",
+				cli,
+				"history",
+				"open",
+				"--web",
+				"--no-open",
+				"--skills-dir",
+				join(directory, "skills"),
+			],
 			{
-				env: { ...process.env, APPLE_CUA_STATE_DIR: directory },
+				env: { ...process.env, OPENCUA_STATE_DIR: directory },
 				timeout: 15_000,
 				reject: false,
 			},

@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { HostCapabilities, StopStatus } from "@apple-cua/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { HostCapabilities, StopStatus } from "@opencua/core";
 import { z } from "zod/v4";
 import {
 	type CapabilitySources,
@@ -161,9 +161,9 @@ describe("#given the repository skill #when resources are listed and read #then 
 		});
 		const listed = await client.listResources();
 		const uris = listed.resources.map((resource) => resource.uri);
-		expect(uris).toContain("skill://apple-cua/SKILL.md");
-		expect(uris.some((uri) => uri.startsWith("skill://apple-cua/references/"))).toBe(true);
-		const read = await client.readResource({ uri: "skill://apple-cua/SKILL.md" });
+		expect(uris).toContain("skill://opencua/SKILL.md");
+		expect(uris.some((uri) => uri.startsWith("skill://opencua/references/"))).toBe(true);
+		const read = await client.readResource({ uri: "skill://opencua/SKILL.md" });
 		const first = read.contents[0];
 		expect(first !== undefined && "text" in first ? first.text : undefined).toBe(
 			readFileSync(join(DEFAULT_SKILL_DIR, "SKILL.md"), "utf8"),
@@ -173,7 +173,7 @@ describe("#given the repository skill #when resources are listed and read #then 
 
 describe("#given a skill directory without SKILL.md #when resources are registered #then nothing is served", () => {
 	it("registers no resource", () => {
-		const dir = mkdtempSync(join(tmpdir(), "apple-cua-skill-"));
+		const dir = mkdtempSync(join(tmpdir(), "opencua-skill-"));
 		temporaryDirs.push(dir);
 		mkdirSync(join(dir, "references"));
 		writeFileSync(join(dir, "references", "usage.md"), "# usage\n");

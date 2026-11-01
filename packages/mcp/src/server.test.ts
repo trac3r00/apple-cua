@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { AppApprovalStore } from "@apple-cua/core";
-import { vi } from "@apple-cua/test-support";
+import { AppApprovalStore } from "@opencua/core";
+import { vi } from "@opencua/test-support";
 import { allowedBundleIdsFromEnvironment } from "./native-policy.js";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import type { FakeGuardedComputer } from "./protocol-test-harness.js";
@@ -27,7 +27,7 @@ const MUTATION_NAMES = [
 let closeHarness: (() => Promise<void>) | undefined;
 
 beforeEach(() => {
-	vi.stubEnv("APPLE_CUA_BROWSER", "off");
+	vi.stubEnv("OPENCUA_BROWSER", "off");
 });
 
 afterEach(async () => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 type ExecFileCallback = (error: Error | null, stdout: string | Buffer, stderr: string) => void;
 type ExecFileMock = (
@@ -298,8 +298,8 @@ describe("#given an injected overlay #when observing in background #then nothing
 
 describe("#given background cues disabled #when observing #then nothing is drawn", () => {
 	it("#when background cues are disabled #then observing draws nothing", async () => {
-		const previous = process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"];
-		process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = "off";
+		const previous = process.env["OPENCUA_CURSOR_BACKGROUND_CUES"];
+		process.env["OPENCUA_CURSOR_BACKGROUND_CUES"] = "off";
 		try {
 			const overlay2 = {
 				set: vi.fn(),
@@ -320,15 +320,15 @@ describe("#given background cues disabled #when observing #then nothing is drawn
 			}
 		} finally {
 			if (previous === undefined) {
-				Reflect.deleteProperty(process.env, "APPLE_CUA_CURSOR_BACKGROUND_CUES");
+				Reflect.deleteProperty(process.env, "OPENCUA_CURSOR_BACKGROUND_CUES");
 			} else {
-				process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = previous;
+				process.env["OPENCUA_CURSOR_BACKGROUND_CUES"] = previous;
 			}
 		}
 	});
 });
 
-describe("#given APPLE_CUA_CURSOR #when the host decides whether to draw the agent cursor #then only an explicit off disables it", () => {
+describe("#given OPENCUA_CURSOR #when the host decides whether to draw the agent cursor #then only an explicit off disables it", () => {
 	it.each([
 		[undefined, true],
 		["on", true],
@@ -336,9 +336,9 @@ describe("#given APPLE_CUA_CURSOR #when the host decides whether to draw the age
 		["0", false],
 		["FALSE", false],
 		["no", false],
-	])("APPLE_CUA_CURSOR=%s -> %s", async (value, enabled) => {
+	])("OPENCUA_CURSOR=%s -> %s", async (value, enabled) => {
 		const { agentCursorEnabled } = await import("./macos.js");
-		expect(agentCursorEnabled(value === undefined ? {} : { APPLE_CUA_CURSOR: value })).toBe(enabled);
+		expect(agentCursorEnabled(value === undefined ? {} : { OPENCUA_CURSOR: value })).toBe(enabled);
 	});
 });
 

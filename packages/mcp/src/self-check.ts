@@ -8,8 +8,8 @@ import {
 	requestAccessibility,
 	requestInputMonitoring,
 	requestScreenRecording,
-} from "@apple-cua/core";
-import type { AutomationStatus, HostCapabilities, StopStatusSource } from "@apple-cua/core";
+} from "@opencua/core";
+import type { AutomationStatus, HostCapabilities, StopStatusSource } from "@opencua/core";
 import { capabilityReport } from "./capability-tools.js";
 import { allowedBundleIdsFromProcessEnvironment, deliveryFromProcessEnvironment } from "./native-policy.js";
 import { toolNamesFor } from "./tool-names.js";
@@ -50,8 +50,8 @@ export interface SelfCheckSources {
 /**
  * What this process may do on this Mac, read without raising a permission prompt: Accessibility and Screen
  * Recording come from AXIsProcessTrusted and CGPreflightScreenCaptureAccess, which only report. Launched through
- * the signed helper app, the answers describe the helper's identity ("apple-cua-mcp"), the one MCP clients run the
- * server under, which is why `apple-cua doctor` reads its permissions from here rather than from its own process.
+ * the signed helper app, the answers describe the helper's identity ("opencua-mcp"), the one MCP clients run the
+ * server under, which is why `opencua doctor` reads its permissions from here rather than from its own process.
  */
 export function selfCheckReport(sources: SelfCheckSources = nativeSelfCheckSources()): Record<string, unknown> {
 	const { toolset, iphone } = resolveServerOptions();

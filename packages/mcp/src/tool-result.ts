@@ -5,7 +5,7 @@ import type {
 	ElementMatch,
 	InputObservation,
 	SystemPrompt,
-} from "@apple-cua/core";
+} from "@opencua/core";
 
 export type ToolContent =
 	| { readonly type: "text"; readonly text: string }
@@ -35,10 +35,10 @@ const WINDOW_CONTENT_UNAVAILABLE_NOTE =
 	"this session does not own the Mac's physical screen (Screen Sharing or fast user switching), so the app's window content is not reachable over accessibility: ocrText is the window read from pixels, with screen frames. Keyboard input (type_text, press_keys) still reaches the app; pointer clicks and window-level menu items such as Save do not. Use keyboard routes, and call ask_user when a step needs a click or Save.";
 
 const ISOLATED_CAPTURE_NOTE =
-	"no image: apple-cua never captures the person's desktop. Elements and ids come from accessibility. For pixels, use an agent-owned isolated desktop.";
+	"no image: opencua never captures the person's desktop. Elements and ids come from accessibility. For pixels, use an agent-owned isolated desktop.";
 
 const SCREENSHOT_UNAVAILABLE_NOTE =
-	"no image: the process running apple-cua lacks macOS Screen Recording permission, so no capture was attempted (it would raise a permission prompt over the person's screen). Elements and ids are complete and actions work. If pixels are needed, ask the user to grant Screen Recording to the app that launches this server and restart it.";
+	"no image: the process running opencua lacks macOS Screen Recording permission, so no capture was attempted (it would raise a permission prompt over the person's screen). Elements and ids are complete and actions work. If pixels are needed, ask the user to grant Screen Recording to the app that launches this server and restart it.";
 
 export const SYSTEM_PROMPT_NOTE =
 	"a macOS system dialog is on screen (see systemPrompts): it belongs to no app you are driving, only the person at the Mac can answer it, and it can block input or capture until they do. Never click or type into it; call ask_user to hand it over, naming what it asks for.";

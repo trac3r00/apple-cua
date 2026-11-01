@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { StopStatus, StopStatusSource } from "@apple-cua/core";
-import { StopSwitch } from "@apple-cua/core";
+import type { StopStatus, StopStatusSource } from "@opencua/core";
+import { StopSwitch } from "@opencua/core";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 
@@ -56,7 +56,7 @@ describe("user stop #given the user stopped computer use #when an agent mutates 
 				effect: "refused",
 				reason: "user-stopped",
 				escalation: { target: "human", reason: "user_stopped" },
-				message: expect.stringContaining("apple-cua resume"),
+				message: expect.stringContaining("opencua resume"),
 			});
 		}
 		expect(harness.computer.effects.filter((effect) => effect.kind !== "close")).toEqual([]);
@@ -119,7 +119,7 @@ describe("user stop #given the user stopped computer use #when an agent mutates 
 					step: 2,
 					status: "skipped",
 					input_dispatched: false,
-					reason: expect.stringContaining("apple-cua resume"),
+					reason: expect.stringContaining("opencua resume"),
 				},
 				{ step: 3, status: "skipped", input_dispatched: false },
 			],
@@ -185,7 +185,7 @@ describe("user stop #given the user stopped computer use #when an agent mutates 
 	});
 
 	it("refuses with the file-backed switch the CLI writes", async () => {
-		const directory = mkdtempSync(join(tmpdir(), "apple-cua-stop-mcp-"));
+		const directory = mkdtempSync(join(tmpdir(), "opencua-stop-mcp-"));
 		try {
 			const fileSwitch = new StopSwitch(directory);
 			const harness = await createHarness(new FakeGuardedComputer(), undefined, undefined, {

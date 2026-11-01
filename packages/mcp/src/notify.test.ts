@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { EventEmitter } from "node:events";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 import { createNotifier, notificationsEnabled, parseNotificationsEnabled } from "./notify.js";
 import type { NotificationDependencies, NotificationProcess } from "./notify.js";
 
@@ -19,7 +19,7 @@ afterEach(() => {
 
 describe("notification configuration", () => {
 	it("#given the environment variable is absent #when notifications are queried #then they are enabled", () => {
-		vi.stubEnv("APPLE_CUA_NOTIFICATIONS", undefined);
+		vi.stubEnv("OPENCUA_NOTIFICATIONS", undefined);
 		expect(notificationsEnabled()).toBe(true);
 		expect(parseNotificationsEnabled(undefined)).toBe(true);
 	});
@@ -30,40 +30,40 @@ describe("notification configuration", () => {
 	});
 
 	it("#given notifications are disabled #when requested #then no process is spawned", () => {
-		vi.stubEnv("APPLE_CUA_NOTIFICATIONS", " off ");
+		vi.stubEnv("OPENCUA_NOTIFICATIONS", " off ");
 		const spawn: NotificationDependencies["spawn"] = vi.fn(() => new FakeProcess());
-		createNotifier(dependencies(spawn))("apple-cua", "restarted");
+		createNotifier(dependencies(spawn))("opencua", "restarted");
 		expect(spawn).not.toHaveBeenCalled();
 	});
 });
 
 describe("notification delivery", () => {
 	it("#given an identical notification was sent #when requested within 10 seconds #then it is deduplicated", () => {
-		vi.stubEnv("APPLE_CUA_NOTIFICATIONS", "on");
+		vi.stubEnv("OPENCUA_NOTIFICATIONS", "on");
 		let now = 100;
 		const spawn: NotificationDependencies["spawn"] = vi.fn(() => new FakeProcess());
 		const notify = createNotifier(dependencies(spawn, () => now));
-		notify("apple-cua", "restarted");
+		notify("opencua", "restarted");
 		now = 10_099;
-		notify("apple-cua", "restarted");
+		notify("opencua", "restarted");
 		expect(spawn).toHaveBeenCalledTimes(1);
 		now = 10_100;
-		notify("apple-cua", "restarted");
+		notify("opencua", "restarted");
 		expect(spawn).toHaveBeenCalledTimes(2);
 	});
 
 	it("#given spawning fails #when a notification is requested #then the failure is swallowed", () => {
-		vi.stubEnv("APPLE_CUA_NOTIFICATIONS", "on");
+		vi.stubEnv("OPENCUA_NOTIFICATIONS", "on");
 		const notify = createNotifier(
 			dependencies(() => {
 				throw new Error("spawn failed");
 			}),
 		);
-		expect(() => notify("apple-cua", "restarted")).not.toThrow();
+		expect(() => notify("opencua", "restarted")).not.toThrow();
 	});
 
 	it("#given title and body contain quotes and dashes #when spawned #then osascript receives one escaped argument", () => {
-		vi.stubEnv("APPLE_CUA_NOTIFICATIONS", "on");
+		vi.stubEnv("OPENCUA_NOTIFICATIONS", "on");
 		const child = new FakeProcess();
 		const spawn: NotificationDependencies["spawn"] = vi.fn((_command, _args) => child);
 		const observeSpawn = vi.mocked(spawn);
@@ -77,7 +77,7 @@ describe("notification delivery", () => {
 	});
 
 	it("#given osascript does not exit #when its deadline passes #then the child is terminated", () => {
-		vi.stubEnv("APPLE_CUA_NOTIFICATIONS", "on");
+		vi.stubEnv("OPENCUA_NOTIFICATIONS", "on");
 		vi.useFakeTimers();
 		const child = new FakeProcess();
 		createNotifier(
@@ -86,7 +86,7 @@ describe("notification delivery", () => {
 				() => 0,
 				5,
 			),
-		)("apple-cua", "restarted");
+		)("opencua", "restarted");
 		vi.advanceTimersByTime(5);
 		expect(child.kill).toHaveBeenCalledWith("SIGTERM");
 	});

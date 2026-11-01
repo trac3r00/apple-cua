@@ -5,6 +5,7 @@ describe("#given client names #when host detection runs #then each named host is
 	it.each([
 		["  CLAUDE Desktop ", "claude-code"],
 		["Codex CLI", "codex"],
+		["opencua-pi-extension", "pi"],
 		["apple-cua-pi-extension", "pi"],
 		["pi-agent", "pi"],
 		["pi", "pi"],

@@ -75,7 +75,7 @@ by a new rebuild, and old outcomes remain scored without pooling.
 
 The broad Senpi finder returned no matching sessions, but a direct read of
 the known session succeeds:
-`~/.omo/agent/sessions/--Users-bob-src-apple-cua--/2026-10-09T08-16-59-921Z_01a11fbc-a811-7c80-a87b-eeb9c72bfbb7.jsonl`.
+`~/.omo/agent/sessions/--Users-bob-src-opencua--/2026-10-09T08-16-59-921Z_01a11fbc-a811-7c80-a87b-eeb9c72bfbb7.jsonl`.
 Line290 contains a complete 7039-character apply_patch input inserting the
 initial run.mjs into the previously empty file at 2026-10-09T14:20:32.411Z;
 line291 records successful update and automatic formatting. Later recorded

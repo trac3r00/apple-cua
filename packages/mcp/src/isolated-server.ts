@@ -2,6 +2,8 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
 	type CursorOwner,
 	type ScreenshotResult,
@@ -13,9 +15,7 @@ import {
 	describeUserStop,
 	runInInputScope,
 	withCursorIdentity,
-} from "@apple-cua/core/isolated";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+} from "@opencua/core/isolated";
 import { z } from "zod/v4";
 
 type Supervisor = Pick<
@@ -113,7 +113,7 @@ function text(value: unknown) {
 class OwnedDesktopServer extends McpServer {
 	constructor(private readonly dispose: () => Promise<void>) {
 		super(
-			{ name: "apple-cua-isolated", version: "0.1.0" },
+			{ name: "opencua-isolated", version: "0.1.0" },
 			{
 				instructions:
 					"Operate only this configured agent-owned macOS guest. Start it, then observe before each action. " +
@@ -348,7 +348,7 @@ async function startDesktop(options: IsolatedServerOptions): Promise<IsolatedDes
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 	const [directory, agentName, sessionId] = process.argv.slice(2);
 	if (directory === undefined || agentName === undefined || sessionId === undefined) {
-		throw new Error("Usage: apple-cua-isolated-mcp <owned-directory> <agent-name> <session-id>");
+		throw new Error("Usage: opencua-isolated-mcp <owned-directory> <agent-name> <session-id>");
 	}
 	const server = createIsolatedMcpServer({ directory, owner: { agentName, sessionId } });
 	await server.connect(new StdioServerTransport());

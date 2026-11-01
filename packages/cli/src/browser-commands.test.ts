@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 const browser = vi.hoisted(() => ({
 	doctorBrowserService: vi.fn(),
@@ -8,7 +8,7 @@ const browser = vi.hoisted(() => ({
 	readConnection: vi.fn(),
 }));
 
-vi.mock("@apple-cua/browser", () => ({
+vi.mock("@opencua/browser", () => ({
 	doctorBrowserService: browser.doctorBrowserService,
 	installBrowserService: browser.installBrowserService,
 	uninstallBrowserService: browser.uninstallBrowserService,

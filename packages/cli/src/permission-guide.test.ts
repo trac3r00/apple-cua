@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { AutomationStatus } from "@apple-cua/core";
+import type { AutomationStatus } from "@opencua/core";
 import { PRIVACY_PANES } from "./doctor.js";
 import { type GrantDependencies, type HelperPermissions, grantPermissions } from "./permission-guide.js";
 
@@ -126,7 +126,7 @@ describe("#given a fresh helper with nothing granted #when a person runs the gui
 
 		expect(outcome.missing).toEqual(["Screen Recording"]);
 		expect(printed()).toContain(`open "${PRIVACY_PANES.screenRecording}"`);
-		expect(printed()).toContain("apple-cua permissions grant");
+		expect(printed()).toContain("opencua permissions grant");
 		expect(printed()).toContain("tccutil reset ScreenCapture dev.applecua.mcp");
 	});
 });

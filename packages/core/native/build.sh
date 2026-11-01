@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Builds the native helpers of @apple-cua/core as universal binaries (arm64 + x86_64), so one checkout
+# Builds the native helpers of @opencua/core as universal binaries (arm64 + x86_64), so one checkout
 # runs on Apple Silicon and Intel Macs alike:
 #
 #   libsckit.dylib   ScreenCaptureKit capture shim.
 #   cursor-overlay   the agent cursor overlay.
 #
-# Both target macOS 15.0, the oldest macOS apple-cua supports. Calling an API newer than that without an
+# Both target macOS 15.0, the oldest macOS opencua supports. Calling an API newer than that without an
 # @available check is a build error, which keeps the target true. The script ends by recording the hashes of
-# its inputs in build-inputs.sha256; scripts/setup.sh and `apple-cua doctor` compare them to tell whether the
+# its inputs in build-inputs.sha256; scripts/setup.sh and `opencua doctor` compare them to tell whether the
 # committed binaries still match their sources.
 #
 # Requires the Xcode Command Line Tools (clang, lipo) with a macOS SDK that ships ScreenCaptureKit.
@@ -83,9 +83,9 @@ bash "$native_dir/../../../scripts/sign-native.sh" \
 
 # The always-on history watcher runs as its own launchd process, so it would otherwise get its own
 # TCC entry and need Accessibility and Input Monitoring granted separately. Signing it with the
-# apple-cua-mcp bundle identifier makes macOS charge its grant to the same app the rest of apple-cua
-# already uses, so one approval covers it. Override the id with APPLE_CUA_BUNDLE_ID to match a custom
+# opencua-mcp bundle identifier makes macOS charge its grant to the same app the rest of opencua
+# already uses, so one approval covers it. Override the id with OPENCUA_BUNDLE_ID to match a custom
 # helper bundle id.
-APPLE_CUA_CODESIGN_IDENTIFIER="${APPLE_CUA_BUNDLE_ID:-dev.applecua.mcp}" \
+OPENCUA_CODESIGN_IDENTIFIER="${OPENCUA_BUNDLE_ID:-dev.applecua.mcp}" \
 	bash "$native_dir/../../../scripts/sign-native.sh" \
 	"$native_dir/history-recorder"

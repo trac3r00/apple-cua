@@ -173,18 +173,18 @@ static void update_status_item(void) {
                    : gMode == 3 ? @"keyboard"
                                 : @"pointer";
   NSString *label = [NSString
-      stringWithFormat:@"apple-cua running, mode %@, motion %@", mode, gStyle];
+      stringWithFormat:@"opencua running, mode %@, motion %@", mode, gStyle];
   NSStatusBarButton *button = gStatusItem.button;
   NSString *symbol = gMode == 3 ? @"keyboard" : @"cursorarrow";
   NSImage *image = [NSImage imageWithSystemSymbolName:symbol
-                             accessibilityDescription:@"apple-cua running"];
+                             accessibilityDescription:@"opencua running"];
   image.template = YES;
   button.image = image;
-  button.title = @"apple-cua";
+  button.title = @"opencua";
   button.toolTip = label;
   [button setAccessibilityLabel:label];
   NSArray<NSString *> *lines = @[
-    @"apple-cua running",
+    @"opencua running",
     [@"Mode: " stringByAppendingString:mode],
     [@"Motion: " stringByAppendingString:gStyle],
   ];
@@ -195,7 +195,7 @@ static void update_status_item(void) {
     }
     return;
   }
-  menu = [[NSMenu alloc] initWithTitle:@"apple-cua"];
+  menu = [[NSMenu alloc] initWithTitle:@"opencua"];
   menu.autoenablesItems = NO;
   for (NSString *text in lines) {
     NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:text
@@ -1559,7 +1559,7 @@ static void *stdin_reader(void *arg) {
 }
 
 // Persistent daemon mode: a unix-domain socket server so the overlay outlives
-// any single CLI command (each apple-cua verb is its own process). Singleton:
+// any single CLI command (each opencua verb is its own process). Singleton:
 // if a daemon already owns the socket, exit. Self-terminates after idle
 // timeout.
 static void *socket_reader(void *arg) {

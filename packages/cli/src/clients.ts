@@ -1,15 +1,14 @@
-// MCP client registration: writes, checks and removes the "apple-cua" entry in each client's configuration.
+// MCP client registration: writes, checks and removes the "opencua" entry in each client's configuration.
 //
-//   omo     ~/.omo/agent/mcp.json            mcpServers["apple-cua"]
+//   omo     ~/.omo/agent/mcp.json            mcpServers["opencua"]
 //   claude  `claude mcp add --scope user`    (prints the JSON block when the claude CLI is not installed)
-//   codex   ~/.codex/config.toml             [mcp_servers.apple-cua]
+//   codex   ~/.codex/config.toml             [mcp_servers.opencua]
 //   json    prints a block to paste into any other client's configuration
 //
 // Config files are merged, never replaced: other servers and settings stay as they are, and unknown keys of an
-// existing apple-cua entry are kept. A file that would change is first copied to <file>.bak-<timestamp>; a file that
+// existing opencua entry are kept. A file that would change is first copied to <file>.bak-<timestamp>; a file that
 // already says the same thing is not touched.
 
-import { spawnSync } from "node:child_process";
 import {
 	chmodSync,
 	copyFileSync,
@@ -41,6 +40,7 @@ import {
 	readOpenClawState,
 	readPiState,
 } from "./agent-clients.js";
+import { editJsonProperty } from "./json-config-edit.js";
 import { canonicalPath, isInside } from "./layout.js";
 import {
 	type CliRunner,
@@ -52,12 +52,14 @@ import {
 	planCodexRemove,
 	readClaudeState,
 	readCodexState,
+	removeRenamedMcp,
 	runCli,
 	runSteps,
 	supportsPlugins,
 } from "./plugin-clients.js";
 
-const SERVER_NAME = "apple-cua";
+const SERVER_NAME = "opencua";
+const LEGACY_SERVER_NAME = "apple-cua";
 export const CLIENT_NAMES = ["omo", "claude", "codex", "gemini", "cursor", "hermes", "openclaw", "pi", "json"] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
@@ -153,7 +155,7 @@ export interface ClientContext {
 	readonly run?: CliRunner | undefined;
 }
 
-/** An apple-cua entry as a client configuration holds it. */
+/** An opencua entry as a client configuration holds it. */
 export interface RegisteredEntry {
 	readonly command: string | undefined;
 	readonly args: readonly string[];
@@ -318,6 +320,7 @@ function mergeJsonConfig(text: string | undefined, desired: DesiredRegistration,
 		text !== undefined &&
 		before !== undefined &&
 		entryIsCurrent(before, desired) &&
+		!(LEGACY_SERVER_NAME in servers) &&
 		!needsLifecycle &&
 		!needsTimeout
 	) {
@@ -333,30 +336,32 @@ function mergeJsonConfig(text: string | undefined, desired: DesiredRegistration,
 		// Scripts can run for 120 seconds; allow time for their final observation too.
 		after["requestTimeoutMs"] = 180_000;
 	}
-	const next = { ...config, mcpServers: { ...servers, [SERVER_NAME]: after } };
-	return { text: `${JSON.stringify(next, null, detectIndent(text))}\n`, changed: true, before, after };
+	const source =
+		text === undefined || text.trim() === "" ? `${JSON.stringify(config, null, detectIndent(text))}\n` : text;
+	const withoutLegacy = editJsonProperty(source, ["mcpServers", LEGACY_SERVER_NAME], undefined);
+	const next = editJsonProperty(withoutLegacy, ["mcpServers", SERVER_NAME], after);
+	return { text: next, changed: true, before, after };
 }
 
 function removeFromJsonConfig(text: string | undefined): FileEdit {
 	if (text === undefined) {
 		return { text: "", changed: false, before: undefined };
 	}
-	const { config, servers } = parseJsonConfig(text);
-	if (!(SERVER_NAME in servers)) {
+	const { servers } = parseJsonConfig(text);
+	if (!(SERVER_NAME in servers) && !(LEGACY_SERVER_NAME in servers)) {
 		return { text, changed: false, before: undefined };
 	}
 	const before = toRegisteredEntry(servers[SERVER_NAME]);
-	const remaining = Object.fromEntries(Object.entries(servers).filter(([key]) => key !== SERVER_NAME));
-	const next = { ...config, mcpServers: remaining };
-	return { text: `${JSON.stringify(next, null, detectIndent(text))}\n`, changed: true, before };
+	const next = editJsonProperty(
+		editJsonProperty(text, ["mcpServers", LEGACY_SERVER_NAME], undefined),
+		["mcpServers", SERVER_NAME],
+		undefined,
+	);
+	return { text: next, changed: true, before };
 }
 
 // --- Codex config.toml -------------------------------------------------------------------------------------------
 
-const NAME = `(?:${SERVER_NAME}|"${SERVER_NAME}"|'${SERVER_NAME}')`;
-const OUR_TABLE = new RegExp(`^\\s*\\[\\s*mcp_servers\\s*\\.\\s*${NAME}\\s*\\]\\s*(?:#.*)?$`);
-const OUR_SUBTABLE = new RegExp(`^\\s*\\[\\s*mcp_servers\\s*\\.\\s*${NAME}\\s*\\.\\s*([^\\]]+?)\\s*\\]\\s*(?:#.*)?$`);
-const OTHER_FORM = new RegExp(`^\\s*(?:mcp_servers\\s*\\.\\s*)?${NAME}\\s*(?:\\.|=)`);
 const HEADER = /^\s*\[\[?[^[\]]+\]\]?\s*(?:#.*)?$/;
 const BLANK_OR_COMMENT = /^\s*(?:#.*)?$/;
 const BASIC_STRING = String.raw`"(?:[^"\\]|\\.)*"`;
@@ -446,7 +451,7 @@ function parseStringArray(text: string): string[] {
 
 interface CodexTable {
 	readonly lines: readonly string[];
-	/** -1 when the file has no [mcp_servers.apple-cua] table. */
+	/** -1 when the file has no [mcp_servers.opencua] table. */
 	readonly start: number;
 	/** One past the table's last line, sub-tables included, trailing blank and comment lines excluded. */
 	readonly end: number;
@@ -457,10 +462,16 @@ interface CodexTable {
 }
 
 /**
- * Finds and reads [mcp_servers.apple-cua], refusing a layout it cannot edit safely (dotted keys, an inline table, a
+ * Finds and reads [mcp_servers.opencua], refusing a layout it cannot edit safely (dotted keys, an inline table, a
  * split definition) rather than risk writing TOML Codex would reject.
  */
-function readCodexTable(source: string, path: string): CodexTable {
+function readCodexTable(source: string, path: string, name = SERVER_NAME): CodexTable {
+	const token = `(?:${name}|"${name}"|'${name}')`;
+	const OUR_TABLE = new RegExp(`^\\s*\\[\\s*mcp_servers\\s*\\.\\s*${token}\\s*\\]\\s*(?:#.*)?$`);
+	const OUR_SUBTABLE = new RegExp(
+		`^\\s*\\[\\s*mcp_servers\\s*\\.\\s*${token}\\s*\\.\\s*([^\\]]+?)\\s*\\]\\s*(?:#.*)?$`,
+	);
+	const OTHER_FORM = new RegExp(`^\\s*(?:mcp_servers\\s*\\.\\s*)?${token}\\s*(?:\\.|=)`);
 	const lines = source === "" ? [] : source.split("\n");
 	const tableLines = lines.flatMap((line, index) => (OUR_TABLE.test(line) ? [index] : []));
 	if (tableLines.length > 1) {
@@ -481,7 +492,7 @@ function readCodexTable(source: string, path: string): CodexTable {
 		const inside = index >= start && index < end;
 		if (!inside && (OUR_SUBTABLE.test(line) || OTHER_FORM.test(line))) {
 			throw new Error(
-				`${path} defines ${SERVER_NAME} in a form apple-cua does not edit (line ${index + 1}); update it by hand`,
+				`${path} defines ${SERVER_NAME} in a form opencua does not edit (line ${index + 1}); update it by hand`,
 			);
 		}
 	});
@@ -553,14 +564,15 @@ function readCodexTable(source: string, path: string): CodexTable {
 }
 
 /**
- * Rewrites only the [mcp_servers.apple-cua] table (in place, or appended) and keeps every other byte; a table that
+ * Rewrites only the [mcp_servers.opencua] table (in place, or appended) and keeps every other byte; a table that
  * already does what `desired` says is left alone.
  */
 function mergeCodexToml(text: string | undefined, desired: DesiredRegistration, path = "config.toml"): FileEdit {
-	const source = text ?? "";
+	const legacy = removeFromCodexToml(text, path, LEGACY_SERVER_NAME);
+	const source = legacy.text;
 	const table = readCodexTable(source, path);
 	if (table.before !== undefined && entryIsCurrent(table.before, desired)) {
-		return { text: source, changed: false, before: table.before };
+		return { text: source, changed: legacy.changed, before: table.before };
 	}
 	const env = applyEnvUpdate(table.env, desired.env);
 	const extras = [...table.extras];
@@ -609,10 +621,10 @@ function mergeCodexToml(text: string | undefined, desired: DesiredRegistration, 
 	return { text: nextText, changed: nextText !== source, before: table.before, after };
 }
 
-/** Removes [mcp_servers.apple-cua] and its sub-tables, and the blank line that separated them from the rest. */
-function removeFromCodexToml(text: string | undefined, path = "config.toml"): FileEdit {
+/** Removes [mcp_servers.opencua] and its sub-tables, and the blank line that separated them from the rest. */
+function removeFromCodexToml(text: string | undefined, path = "config.toml", name = SERVER_NAME): FileEdit {
 	const source = text ?? "";
-	const table = readCodexTable(source, path);
+	const table = readCodexTable(source, path, name);
 	if (table.start === -1) {
 		return { text: source, changed: false, before: undefined };
 	}
@@ -685,14 +697,24 @@ function readText(path: string): string | undefined {
 	return existsSync(path) ? readFileSync(path, "utf8") : undefined;
 }
 
-export function findExecutable(name: string, pathVariable: string | undefined): string | undefined {
-	for (const directory of (pathVariable ?? "").split(delimiter)) {
+export function findExecutable(
+	name: string,
+	pathVariable: string | undefined,
+	platform: NodeJS.Platform = process.platform,
+): string | undefined {
+	for (const directory of (pathVariable ?? "").split(platform === "win32" ? ";" : delimiter)) {
 		if (directory === "") {
 			continue;
 		}
-		const candidate = join(directory, name);
-		if (existsSync(candidate) && (statSync(candidate).mode & 0o111) !== 0) {
-			return candidate;
+		for (const suffix of platform === "win32" ? ["", ".exe", ".com", ".cmd", ".bat"] : [""]) {
+			const candidate = join(directory, name + suffix);
+			if (
+				existsSync(candidate) &&
+				statSync(candidate).isFile() &&
+				(platform === "win32" || (statSync(candidate).mode & 0o111) !== 0)
+			) {
+				return candidate;
+			}
 		}
 	}
 	return undefined;
@@ -727,7 +749,7 @@ function clientConfigPath(client: ClientName, context: ClientContext): string | 
 	}
 }
 
-/** The apple-cua entry a client's configuration holds now; `error` when the file cannot be read. */
+/** The opencua entry a client's configuration holds now; `error` when the file cannot be read. */
 export function readClientEntry(
 	client: ClientName,
 	context: ClientContext,
@@ -742,18 +764,30 @@ export function readClientEntry(
 	}
 	try {
 		if (client === "codex") {
-			return { path, entry: readCodexTable(text, path).before };
+			return {
+				path,
+				entry: readCodexTable(text, path).before ?? readCodexTable(text, path, LEGACY_SERVER_NAME).before,
+			};
 		}
 		if (client === "hermes") {
-			return { path, entry: readHermesEntry(text) };
+			return {
+				path,
+				entry: readHermesEntry(text) ?? readHermesEntry(text.replace(/^(\s+)(["']?)apple-cua\2:/gm, "$1opencua:")),
+			};
 		}
 		if (client === "openclaw") {
 			const parsed: unknown = JSON.parse(text);
 			const mcp = isPlainObject(parsed) ? parsed["mcp"] : undefined;
 			const servers = isPlainObject(mcp) ? mcp["servers"] : undefined;
-			return { path, entry: toRegisteredEntry(isPlainObject(servers) ? servers[SERVER_NAME] : undefined) };
+			return {
+				path,
+				entry: toRegisteredEntry(
+					isPlainObject(servers) ? (servers[SERVER_NAME] ?? servers[LEGACY_SERVER_NAME]) : undefined,
+				),
+			};
 		}
-		return { path, entry: toRegisteredEntry(parseJsonConfig(text).servers[SERVER_NAME]) };
+		const { servers } = parseJsonConfig(text);
+		return { path, entry: toRegisteredEntry(servers[SERVER_NAME] ?? servers[LEGACY_SERVER_NAME]) };
 	} catch (error) {
 		return { path, entry: undefined, error: error instanceof Error ? error.message : String(error) };
 	}
@@ -776,7 +810,7 @@ export function inspectClient(
 	context: ClientContext,
 ): ClientInspection {
 	if (client === "json") {
-		return { client, state: "manual", detail: "a printed block you pasted by hand; apple-cua cannot check it" };
+		return { client, state: "manual", detail: "a printed block you pasted by hand; opencua cannot check it" };
 	}
 	if ((client === "codex" || client === "claude") && desired.bundle !== undefined) {
 		const cli = pluginCli(client, context);
@@ -797,7 +831,7 @@ export function inspectClient(
 				client,
 				state: "manual",
 				path,
-				detail: "the claude CLI is not on PATH, so apple-cua printed a block to add to ~/.claude.json by hand",
+				detail: "the claude CLI is not on PATH, so opencua printed a block to add to ~/.claude.json by hand",
 			};
 		}
 		return { client, state: "missing", path, detail: `no ${SERVER_NAME} entry` };
@@ -873,7 +907,7 @@ function registerCodex(desired: DesiredRegistration, context: ClientContext): Cl
 }
 
 function runClaude(claude: string, args: readonly string[], context: ClientContext) {
-	return spawnSync(claude, args, { encoding: "utf8", env: { ...context.env } });
+	return (context.run ?? runCli)(claude, args, context.env);
 }
 
 function registerClaude(desired: DesiredRegistration, context: ClientContext): ClientChange {
@@ -945,7 +979,7 @@ function pluginCli(client: "codex" | "claude", context: ClientContext): string |
 	return supported ? cli : undefined;
 }
 
-/** Whether a client gets apple-cua as a plugin here: its CLI is installed and has the plugin commands. */
+/** Whether a client gets opencua as a plugin here: its CLI is installed and has the plugin commands. */
 export function usesPlugin(client: "codex" | "claude", context: ClientContext): boolean {
 	return pluginCli(client, context) !== undefined;
 }
@@ -1047,11 +1081,11 @@ function inspectPlugin(client: "codex" | "claude", target: PluginTarget, context
 		return {
 			client,
 			state: "disabled",
-			detail: `the apple-cua plugin is installed but switched off in ${client === "codex" ? "Codex" : "Claude Code"}`,
+			detail: `the opencua plugin is installed but switched off in ${client === "codex" ? "Codex" : "Claude Code"}`,
 		};
 	}
 	if (plan.outcome === "added") {
-		return { client, state: "missing", detail: "the apple-cua plugin is not installed" };
+		return { client, state: "missing", detail: "the opencua plugin is not installed" };
 	}
 	if (plan.outcome === "updated") {
 		return { client, state: "stale", detail: `needs: ${plan.steps.map((step) => step.describe).join("; ")}` };
@@ -1076,11 +1110,11 @@ const AGENT_RESTART: Readonly<Record<AgentClient, string>> = {
 
 const AGENT_INSTALL_HINT: Readonly<Record<AgentClient, string>> = {
 	gemini:
-		"the gemini CLI is not on PATH; install Gemini CLI (npm install -g @google/gemini-cli), then run: apple-cua config --register gemini",
+		"the gemini CLI is not on PATH; install Gemini CLI (npm install -g @google/gemini-cli), then run: opencua config --register gemini",
 	hermes:
-		"the hermes CLI is not installed (the Hermes app only sets it up); finish Hermes' setup (curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash), then run: apple-cua config --register hermes",
+		"the hermes CLI is not installed (the Hermes app only sets it up); finish Hermes' setup (curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash), then run: opencua config --register hermes",
 	openclaw:
-		"the openclaw CLI is not installed; install it from the OpenClaw app (its command-line tool installer), then run: apple-cua config --register openclaw",
+		"the openclaw CLI is not installed; install it from the OpenClaw app (its command-line tool installer), then run: opencua config --register openclaw",
 	pi: "the original pi (npm install -g @mariozechner/pi-coding-agent) is not on PATH; a `pi` that is senpi or OmO is registered as the omo client instead",
 };
 
@@ -1151,7 +1185,7 @@ function registerAgent(client: AgentClient, desired: DesiredRegistration, contex
 	const checkout = desired.bundle?.checkout;
 	const plan = checkout === undefined ? undefined : planAgent(client, desired, context, checkout);
 	if (plan === undefined) {
-		return { client, action: "manual", note: "run apple-cua config from the checkout's own apple-cua command" };
+		return { client, action: "manual", note: "run opencua config from the checkout's own opencua command" };
 	}
 	if (plan.blocked !== undefined) {
 		return { client, action: "manual", note: plan.blocked };
@@ -1161,7 +1195,7 @@ function registerAgent(client: AgentClient, desired: DesiredRegistration, contex
 			? { client, action: "unchanged", note: "linked to the bundle, so it follows settings changes by itself" }
 			: { client, action: "unchanged" };
 	}
-	const steps = runSteps(plan, { cli, env: context.env, run: context.run ?? runCli, removeLegacy: () => {} });
+	const steps = runSteps(plan, { cli, env: context.env, run: context.run ?? runCli, removeLegacy: () => undefined });
 	return {
 		client,
 		action: plan.outcome === "added" ? "added" : "updated",
@@ -1179,8 +1213,8 @@ function unregisterAgent(client: AgentClient, checkout: string | undefined, cont
 			action: "manual",
 			note:
 				cli === undefined
-					? `the ${client} CLI is not installed, so apple-cua cannot remove its ${SERVER_NAME} entry; remove it by hand if one is left`
-					: "run apple-cua uninstall from the checkout's own apple-cua command",
+					? `the ${client} CLI is not installed, so opencua cannot remove its ${SERVER_NAME} entry; remove it by hand if one is left`
+					: "run opencua uninstall from the checkout's own opencua command",
 		};
 	}
 	const plan = planAgentRemove(client, context, checkout);
@@ -1190,7 +1224,7 @@ function unregisterAgent(client: AgentClient, checkout: string | undefined, cont
 	if (plan.outcome === "absent") {
 		return { client, action: "absent" };
 	}
-	const steps = runSteps(plan, { cli, env: context.env, run: context.run ?? runCli, removeLegacy: () => {} });
+	const steps = runSteps(plan, { cli, env: context.env, run: context.run ?? runCli, removeLegacy: () => undefined });
 	return { client, action: "removed", steps, restart: AGENT_RESTART[client] };
 }
 
@@ -1207,7 +1241,7 @@ function inspectAgent(client: AgentClient, desired: DesiredRegistration, context
 		return { client, state: "conflict", detail: plan.blocked };
 	}
 	if (plan.outcome === "added") {
-		return { client, state: "missing", detail: `apple-cua is not set up in ${CLIENT_LABELS[client]}` };
+		return { client, state: "missing", detail: `opencua is not set up in ${CLIENT_LABELS[client]}` };
 	}
 	if (plan.outcome === "updated") {
 		return { client, state: "stale", detail: `needs: ${plan.steps.map((step) => step.describe).join("; ")}` };
@@ -1221,8 +1255,47 @@ function inspectAgent(client: AgentClient, desired: DesiredRegistration, context
 	return { client, state: "current", detail: `set up, up to date${caveat}` };
 }
 
+/** Drop the pre-rename entry even when the renamed registration is already current. */
+function removeRenamedEntry(client: ClientName, context: ClientContext): boolean {
+	const path = clientConfigPath(client, context);
+	if (path === undefined) return false;
+	const text = readText(path);
+	if (text === undefined || text.trim() === "") return false;
+	if (client === "codex") {
+		const edit = removeFromCodexToml(text, path, LEGACY_SERVER_NAME);
+		if (edit.changed) writeConfigFile(path, edit.text, context.now);
+		return edit.changed;
+	}
+	if (client === "hermes") {
+		if (!/^\s+["']?apple-cua["']?:\s*$/m.test(text)) return false;
+		const cli = agentCli(client, context);
+		if (cli === undefined) return false;
+		removeRenamedMcp(client, cli, context.env, context.run ?? runCli);
+		return true;
+	}
+	const parsed: unknown = JSON.parse(text);
+	if (!isPlainObject(parsed)) throw new Error(`${path} is not a JSON object`);
+	const mcp = parsed["mcp"];
+	const servers = client === "openclaw" && isPlainObject(mcp) ? mcp["servers"] : parsed["mcpServers"];
+	if (!isPlainObject(servers) || !(LEGACY_SERVER_NAME in servers)) return false;
+	if (client === "claude" || client === "gemini" || client === "openclaw") {
+		const cli = client === "claude" ? findExecutable(client, context.env["PATH"]) : agentCli(client, context);
+		if (cli !== undefined) {
+			backupFile(path, context.now);
+			removeRenamedMcp(client, cli, context.env, context.run ?? runCli);
+			return true;
+		}
+	}
+	const keys = client === "openclaw" ? ["mcp", "servers", LEGACY_SERVER_NAME] : ["mcpServers", LEGACY_SERVER_NAME];
+	writeConfigFile(path, editJsonProperty(text, keys, undefined), context.now);
+	return true;
+}
+
 /** Writes `desired` into one client's configuration (or prints it, for json). */
 export function registerClient(client: ClientName, desired: DesiredRegistration, context: ClientContext): ClientChange {
+	if (client !== "omo" && client !== "cursor" && (client !== "codex" || desired.bundle !== undefined)) {
+		removeRenamedEntry(client, context);
+	}
 	switch (client) {
 		case "omo":
 			return registerJsonFile(client, desired, context);
@@ -1295,7 +1368,12 @@ function dropCursorApprovals(home: string): number {
 		if (!Array.isArray(parsed)) {
 			continue;
 		}
-		const kept = parsed.filter((item) => !(typeof item === "string" && item.startsWith(`${SERVER_NAME}-`)));
+		const kept = parsed.filter(
+			(item) =>
+				!(
+					typeof item === "string" && [SERVER_NAME, LEGACY_SERVER_NAME].some((name) => item.startsWith(`${name}-`))
+				),
+		);
 		if (kept.length !== parsed.length) {
 			dropped += parsed.length - kept.length;
 			const temporary = `${path}.tmp-${process.pid}`;
@@ -1306,8 +1384,9 @@ function dropCursorApprovals(home: string): number {
 	return dropped;
 }
 
-/** Removes the apple-cua entry from one client's configuration; other servers and settings stay. */
+/** Removes the opencua entry from one client's configuration; other servers and settings stay. */
 export function unregisterClient(client: ClientName, context: ClientContext, checkout?: string): ClientChange {
+	const legacyRemoved = client === "omo" || client === "cursor" ? false : removeRenamedEntry(client, context);
 	if ((client === "codex" || client === "claude") && checkout !== undefined) {
 		const cli = pluginCli(client, context);
 		if (cli !== undefined) {
@@ -1322,24 +1401,20 @@ export function unregisterClient(client: ClientName, context: ClientContext, che
 		return {
 			client,
 			action: "manual",
-			note: `remove the "${SERVER_NAME}" block you pasted into other MCP clients by hand`,
+			note: `remove the "${SERVER_NAME}" and "${LEGACY_SERVER_NAME}" blocks you pasted into other MCP clients by hand`,
 		};
 	}
 	const text = readText(path);
 	if (client === "claude") {
 		const before = readClientEntry("claude", context).entry;
 		if (before === undefined) {
-			return { client, action: "absent", path };
+			return { client, action: legacyRemoved ? "removed" : "absent", path };
 		}
 		const claude = findExecutable("claude", context.env["PATH"]);
 		if (claude === undefined) {
-			return {
-				client,
-				action: "manual",
-				path,
-				before,
-				note: `the claude CLI is not on PATH; remove mcpServers["${SERVER_NAME}"] from ${path} by hand`,
-			};
+			const edit = removeFromJsonConfig(text);
+			const written = writeConfigFile(path, edit.text, context.now);
+			return { client, action: "removed", path, before, backup: written.backup };
 		}
 		const backup = backupFile(path, context.now);
 		const removed = runClaude(claude, ["mcp", "remove", SERVER_NAME, "--scope", "user"], context);
@@ -1359,7 +1434,7 @@ export function unregisterClient(client: ClientName, context: ClientContext, che
 		);
 	}
 	if (!edit.changed) {
-		return { client, action: "absent", path };
+		return { client, action: legacyRemoved ? "removed" : "absent", path };
 	}
 	const written = writeConfigFile(path, edit.text, context.now);
 	const approvals = client === "cursor" ? dropCursorApprovals(context.home) : 0;
@@ -1400,14 +1475,14 @@ export function describeChange(change: ClientChange, showPath: (path: string) =>
 			return `${label}${where}not registered, nothing to remove`;
 		case "removed":
 			if (change.steps !== undefined) {
-				return [`${label}removed apple-cua`, ...change.steps.map((step) => `           ${step}`)].join("\n");
+				return [`${label}removed opencua`, ...change.steps.map((step) => `           ${step}`)].join("\n");
 			}
 			return `${label}${where}removed ${SERVER_NAME}${backup}`;
 		case "added":
 		case "updated": {
 			if (change.steps !== undefined) {
 				return [
-					`${label}${change.action === "added" ? "installed" : "updated"} the apple-cua ${change.note ?? "plugin"}`,
+					`${label}${change.action === "added" ? "installed" : "updated"} the opencua ${change.note ?? "plugin"}`,
 					...change.steps.map((step) => `           ${step}`),
 					...(change.restart === undefined ? [] : [`           -> ${change.restart}`]),
 				].join("\n");

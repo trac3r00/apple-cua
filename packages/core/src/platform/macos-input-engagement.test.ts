@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 import type { Point } from "../types/index.js";
 
 const window = { id: 99, bounds: { x: 0, y: 0, width: 500, height: 500 } };
@@ -88,10 +88,10 @@ describe("#given focus engagement state", () => {
 			const post = vi.fn(async () => undefined);
 			const body = vi.fn(async () => undefined);
 			const wait = vi.fn(async (_milliseconds: number) => undefined);
-			vi.stubEnv("APPLE_CUA_GESTURE_FOCUS_SETTLE_MS", "31");
-			vi.stubEnv("APPLE_CUA_GESTURE_HOVER_MS", "17");
-			vi.stubEnv("APPLE_CUA_GESTURE_PRIMER_TO_CLICK_MS", "43");
-			vi.stubEnv("APPLE_CUA_GESTURE_CLICK_DRAIN_MS", "29");
+			vi.stubEnv("OPENCUA_GESTURE_FOCUS_SETTLE_MS", "31");
+			vi.stubEnv("OPENCUA_GESTURE_HOVER_MS", "17");
+			vi.stubEnv("OPENCUA_GESTURE_PRIMER_TO_CLICK_MS", "43");
+			vi.stubEnv("OPENCUA_GESTURE_CLICK_DRAIN_MS", "29");
 			await runFocusLeasedGesture(window, { x: 100, y: 100 }, post, body, {
 				sleep: wait,
 				...(targetPid === undefined ? {} : { targetPid }),
@@ -112,7 +112,7 @@ describe("#given attended click travel", () => {
 	] as const)(
 		"#when the host computer is asked for attended delivery with motion option %s and environment %s #then it is refused before any move",
 		(cursorMotion, environmentMotion) => {
-			vi.stubEnv("APPLE_CUA_CURSOR_MOTION", environmentMotion);
+			vi.stubEnv("OPENCUA_CURSOR_MOTION", environmentMotion);
 			expect(
 				() =>
 					new MacOSHostComputer({

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { copyForMatch } from "@apple-cua/test-support";
 import type { CreateMessageRequest, CreateMessageResult } from "@modelcontextprotocol/sdk/types.js";
+import { copyForMatch } from "@opencua/test-support";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 

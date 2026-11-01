@@ -16,7 +16,7 @@ import {
 let root = "";
 
 beforeEach(() => {
-	root = mkdtempSync(join(tmpdir(), "apple-cua-bundle-"));
+	root = mkdtempSync(join(tmpdir(), "opencua-bundle-"));
 });
 
 afterEach(() => {
@@ -27,10 +27,10 @@ function inputs(overrides: Partial<BundleInputs> = {}): BundleInputs {
 	return {
 		checkout: "/repo",
 		baseVersion: "0.1.0",
-		launch: { command: "/repo/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp", args: ["/repo/server.js"] },
-		env: { APPLE_CUA_DELIVERY: "background", APPLE_CUA_TOOLSET: "full" },
+		launch: { command: "/repo/opencua-mcp.app/Contents/MacOS/opencua-mcp", args: ["/repo/server.js"] },
+		env: { OPENCUA_DELIVERY: "background", OPENCUA_TOOLSET: "full" },
 		skill: [
-			{ path: "SKILL.md", content: "---\nname: apple-cua\ndescription: drive the Mac\n---\n" },
+			{ path: "SKILL.md", content: "---\nname: opencua\ndescription: drive the Mac\n---\n" },
 			{ path: "references/usage.md", content: "# Usage\n" },
 		],
 		...overrides,
@@ -56,7 +56,7 @@ describe("#given a changed setting, skill or checkout #when the bundle is planne
 	it("gives every content change a new version that clients will pick up", () => {
 		const base = planBundle(inputs()).version;
 
-		expect(planBundle(inputs({ env: { APPLE_CUA_TOOLSET: "lean" } })).version).not.toBe(base);
+		expect(planBundle(inputs({ env: { OPENCUA_TOOLSET: "lean" } })).version).not.toBe(base);
 		expect(planBundle(inputs({ skill: [{ path: "SKILL.md", content: "changed" }] })).version).not.toBe(base);
 		expect(planBundle(inputs({ checkout: "/elsewhere" })).version).not.toBe(base);
 		expect(planBundle(inputs({ baseVersion: "0.2.0" })).version).toMatch(/^0\.2\.0\+codex\./);
@@ -74,29 +74,29 @@ describe("#given a plan #when its manifests are read #then Claude Code and Codex
 			name: string;
 			plugins: { name: string; source: { path: string } }[];
 		};
-		const codexPlugin = file(plan, "plugins/apple-cua/.codex-plugin/plugin.json") as Record<string, unknown>;
-		const mcp = file(plan, "plugins/apple-cua/.mcp.json") as {
+		const codexPlugin = file(plan, "plugins/opencua/.codex-plugin/plugin.json") as Record<string, unknown>;
+		const mcp = file(plan, "plugins/opencua/.mcp.json") as {
 			mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
 		};
 
 		expect(claudeMarketplace.name).toBe(MARKETPLACE_NAME);
 		expect(codexMarketplace.name).toBe(MARKETPLACE_NAME);
-		expect(claudeMarketplace.plugins[0]).toMatchObject({ name: "apple-cua", source: "./plugins/apple-cua" });
+		expect(claudeMarketplace.plugins[0]).toMatchObject({ name: "opencua", source: "./plugins/opencua" });
 		expect(claudeMarketplace.plugins[0]?.version).toBe(plan.version);
-		expect(codexMarketplace.plugins[0]?.source.path).toBe("./plugins/apple-cua");
+		expect(codexMarketplace.plugins[0]?.source.path).toBe("./plugins/opencua");
 		expect(codexPlugin).toMatchObject({ version: plan.version, skills: "./skills/", mcpServers: "./.mcp.json" });
-		expect(mcp.mcpServers["apple-cua"]).toEqual({
-			command: "/repo/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp",
+		expect(mcp.mcpServers["opencua"]).toEqual({
+			command: "/repo/opencua-mcp.app/Contents/MacOS/opencua-mcp",
 			args: ["/repo/server.js"],
-			env: { APPLE_CUA_DELIVERY: "background", APPLE_CUA_TOOLSET: "full" },
+			env: { OPENCUA_DELIVERY: "background", OPENCUA_TOOLSET: "full" },
 		});
-		expect(file(plan, "plugins/apple-cua/gemini-extension.json")).toMatchObject({
-			name: "apple-cua",
+		expect(file(plan, "plugins/opencua/gemini-extension.json")).toMatchObject({
+			name: "opencua",
 			version: plan.version,
-			mcpServers: { "apple-cua": mcp.mcpServers["apple-cua"] },
+			mcpServers: { opencua: mcp.mcpServers["opencua"] },
 		});
-		expect(file(plan, `${SKILL_DIRECTORY}/SKILL.md`)).toContain("name: apple-cua");
-		expect(file(plan, `${SKILL_DIRECTORY}/agents/openai.yaml`)).toContain('value: "apple-cua"');
+		expect(file(plan, `${SKILL_DIRECTORY}/SKILL.md`)).toContain("name: opencua");
+		expect(file(plan, `${SKILL_DIRECTORY}/agents/openai.yaml`)).toContain('value: "opencua"');
 	});
 });
 
@@ -110,7 +110,7 @@ describe("#given a bundle directory #when the bundle is written #then it holds e
 		expect(writeBundle(dir, first).changed).toBe(false);
 		expect(readBundleStamp(dir)).toEqual({ version: first.version, hash: first.hash, checkout: "/repo" });
 
-		const second = planBundle(inputs({ skill: [{ path: "SKILL.md", content: "---\nname: apple-cua\n---\n" }] }));
+		const second = planBundle(inputs({ skill: [{ path: "SKILL.md", content: "---\nname: opencua\n---\n" }] }));
 		const rewrite = writeBundle(dir, second);
 
 		expect(rewrite.changed).toBe(true);
@@ -123,10 +123,10 @@ describe("#given a bundle directory #when the bundle is written #then it holds e
 		const dir = join(root, "bundle");
 		const plan = planBundle(inputs());
 		writeBundle(dir, plan);
-		writeFileSync(join(dir, "plugins/apple-cua/.mcp.json"), "{}\n");
+		writeFileSync(join(dir, "plugins/opencua/.mcp.json"), "{}\n");
 
 		expect(writeBundle(dir, plan).changed).toBe(true);
-		expect(readFileSync(join(dir, "plugins/apple-cua/.mcp.json"), "utf8")).toContain("apple-cua-mcp");
+		expect(readFileSync(join(dir, "plugins/opencua/.mcp.json"), "utf8")).toContain("opencua-mcp");
 	});
 });
 

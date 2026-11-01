@@ -383,7 +383,7 @@ describe("registered worker tools #given omitted screenshot options #when assign
 describe("registered worker tools #given background workers on distinct apps #when one preflight blocks #then the other dispatches independently", () => {
 	it("dispatches background runs concurrently and serializes attended runs", async () => {
 		const background = await createHarness();
-		const gate = new Deferred<import("@apple-cua/core").PreflightResult>();
+		const gate = new Deferred<import("@opencua/core").PreflightResult>();
 		const entered = new Deferred<void>();
 		let gateResolved = false;
 		try {
@@ -432,7 +432,7 @@ describe("registered worker tools #given background workers on distinct apps #wh
 		}
 
 		const attended = await createHarness();
-		const attendedGate = new Deferred<import("@apple-cua/core").PreflightResult>();
+		const attendedGate = new Deferred<import("@opencua/core").PreflightResult>();
 		const attendedEntered = new Deferred<void>();
 		let attendedGateResolved = false;
 		try {

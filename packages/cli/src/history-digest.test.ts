@@ -13,7 +13,7 @@ const roots: string[] = [];
 const segmentId = "2026-10-29T04-00-00Z";
 
 function tempRoot(): string {
-	const root = realpathSync(mkdtempSync(join(tmpdir(), "apple-cua-history-digest-")));
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "opencua-history-digest-")));
 	roots.push(root);
 	return root;
 }

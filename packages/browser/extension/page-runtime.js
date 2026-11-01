@@ -1,5 +1,5 @@
 export function pageRuntime(input) {
-	const stateKey = "__appleCuaPageRuntimeState";
+	const stateKey = "__openCuaPageRuntimeState";
 	let state = globalThis[stateKey];
 	if (!state || state.document !== document) {
 		state = {

@@ -1,5 +1,5 @@
-import { type GuardedComputerInterface, resolveAppPid } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type GuardedComputerInterface, resolveAppPid } from "@opencua/core";
 import type { GuardedSession } from "./guarded-session.js";
 import { createRunStepDriver, expectFromInput } from "./step-actions.js";
 import type { ToolContent, ToolResult } from "./tool-result.js";

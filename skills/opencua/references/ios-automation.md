@@ -1,6 +1,6 @@
 # iPhone Mirroring automation
 
-apple-cua drives a real iPhone through the macOS iPhone Mirroring app
+OpenCUA drives a real iPhone through the macOS iPhone Mirroring app
 (`com.apple.ScreenContinuity`, `/System/Applications/iPhone Mirroring.app`). The phone window is
 a second target next to macOS apps: the same server, the same discipline, a different surface.
 
@@ -36,7 +36,7 @@ The state is judged structurally: a live phone image exposes no accessibility co
 window, while every interstitial is an ordinary Mac view with labels. That holds in any language
 and for screens Apple has not shipped yet. A phrase list is only a fallback.
 
-**A blocked session is the user's to clear.** apple-cua never taps Connect, never types a
+**A blocked session is the user's to clear.** OpenCUA never taps Connect, never types a
 password, and never retries in a loop. It relays what the screen says and stops.
 
 ## What it can and cannot do
@@ -109,12 +109,12 @@ invitation to clear it for them.
   `ios_open_app`. Every mutation requires an `observation_token` from the newest `ios_observe`,
   the token is single-use, and the answer carries a fresh observation so a follow-up decision
   does not need another round trip.
-- CLI: `apple-cua ios status | observe | screenshot | tap | tap-text | long-press | swipe | scroll
+- CLI: `opencua ios status | observe | screenshot | tap | tap-text | long-press | swipe | scroll
   | type | key | home | app-switcher | open-app`, with `--json` for machine-readable output.
-- Library: `IPhoneMirroring` in `@apple-cua/core` (`observe`, `waitForSettle`, `tap`, `tapText`,
+- Library: `IPhoneMirroring` in `@opencua/core` (`observe`, `waitForSettle`, `tap`, `tapText`,
   `longPress`, `swipe`, `scroll`, `pressKeys`, `typeText`, `home`, `appSwitcher`, `openApp`).
 
-The MCP server registers these tools only with `APPLE_CUA_IPHONE=1`.
+The MCP server registers these tools only with `OPENCUA_IPHONE=1`.
 
 Delivery defaults to background: the phone is driven without taking focus or the pointer. A scroll
 would have to borrow the pointer (macOS routes wheel events by pointer position), so in background

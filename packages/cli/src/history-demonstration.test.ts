@@ -21,7 +21,7 @@ import {
 const roots: string[] = [];
 
 function tempRoot(): string {
-	const root = realpathSync(mkdtempSync(join(tmpdir(), "apple-cua-history-demonstration-")));
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "opencua-history-demonstration-")));
 	roots.push(root);
 	mkdirSync(join(root, "segments"));
 	return root;

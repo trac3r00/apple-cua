@@ -6,14 +6,14 @@ import { agentToolResult } from "./mcp-result.js";
 import { type ToolDefinition, defineTool } from "./pi/index.js";
 
 /**
- * One pi tool per apple-cua-mcp tool, with the server's own name, description and JSON Schema, so every guard stays
+ * One pi tool per opencua-mcp tool, with the server's own name, description and JSON Schema, so every guard stays
  * in the server. Calls run one at a time, as the server's harness guide asks of every client.
  */
 export function mcpToolDefinitions(tools: readonly Tool[], bridge: Pick<McpBridge, "callTool">): ToolDefinition[] {
 	return tools.map((tool) =>
 		defineTool({
 			name: tool.name,
-			label: `apple-cua: ${tool.title ?? tool.annotations?.title ?? tool.name}`,
+			label: `opencua: ${tool.title ?? tool.annotations?.title ?? tool.name}`,
 			description: tool.description ?? tool.name,
 			parameters: Type.Unsafe<Record<string, unknown>>(parameterSchema(tool.inputSchema)),
 			executionMode: "sequential",

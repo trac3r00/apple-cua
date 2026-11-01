@@ -1,12 +1,12 @@
 ---
 name: cua-browser
-description: "Drive a real Chromium browser in the background through apple-cua: parallel tabs, ranked target matching, native select controls, bounded reads, screenshots, named spaces, and one virtual cursor per worker. Use instead of an AI browser (ego lite, Aside) when work must stay off the user's screen and out of their tabs."
+description: "Drive a real Chromium browser in the background through opencua: parallel tabs, ranked target matching, native select controls, bounded reads, screenshots, named spaces, and one virtual cursor per worker. Use instead of an AI browser (ego lite, Aside) when work must stay off the user's screen and out of their tabs."
 ---
 
-# apple-cua browser
+# OpenCUA browser
 
 Use this skill when the task is a web page: reading, searching, filling a form, testing a UI,
-extracting a result, or working several pages at once. Use the native `apple-cua` skill instead
+extracting a result, or working several pages at once. Use the native `opencua` skill instead
 for desktop dialogs, canvas, native menus, or the iPhone. Never substitute another browser
 engine, a visible window, or a second browser install.
 
@@ -32,8 +32,8 @@ without a visible window, read [README.md](README.md) in this skill first.
 ## Setup is one command
 
 ```sh
-apple-cua browser setup      # build, install the daemon, open the extensions page in the background
-apple-cua browser status     # daemon + extension + action state
+opencua browser setup      # build, install the daemon, open the extensions page in the background
+opencua browser status     # daemon + extension + action state
 ```
 
 `setup` installs the local service, copies the unpacked-extension path to the clipboard, and
@@ -41,7 +41,7 @@ opens the right extensions page in the background. The one human step is: enable
 mode, choose **Load unpacked**, select that folder. The command waits for the connection when a
 terminal is present. Do not ask the user to copy ports or tokens. If the browser is not a
 Chromium-family browser, say so and stop; do not install a different one silently. After an
-apple-cua upgrade, run `setup` again and reload the unpacked extension so the new worker script
+OpenCUA upgrade, run `setup` again and reload the unpacked extension so the new worker script
 is loaded; a stale extension keeps the old behavior even when the daemon is new.
 
 ## Non-disruption contract
@@ -51,7 +51,7 @@ is loaded; a stale extension keeps the old behavior even when the daemon is new.
   window. Never switch the user's Space or select one of their tabs.
 - If the user reveals the window or moves an agent page, input pauses (that counts as taking
   over). Stop, report what happened, and wait for them to give it back. Never resume it yourself.
-- The daemon checks apple-cua's shared stop gate before input and between steps. During a batch
+- The daemon checks OpenCUA's shared stop gate before input and between steps. During a batch
   the bridge polls the gate and pushes a stop; each step checks the local flag before dispatch.
   Reads and owned-page cleanup remain available while actions are stopped.
 - A page that opens a native popup can still activate the browser. Report that limitation; do
@@ -89,7 +89,7 @@ walk plus a fresh token.
 | The person must log in, solve a CAPTCHA, or choose | `browser_handoff`, then `browser_wait_control` |
 | Fill and submit a known form | one `browser_run` with refs or target queries and `expect` |
 | Several independent pages | one named space per page or worker |
-| Native dialog, canvas, cross-origin frame, or iPhone | fresh native `apple-cua` observation |
+| Native dialog, canvas, cross-origin frame, or iPhone | fresh native `opencua` observation |
 
 ## Fast workflows
 
@@ -194,7 +194,7 @@ verification text. Do not give it another worker's token or page. Close pages wi
   guessing new tab identities; inspect those tabs instead of claiming they closed.
 - The daemon is shared by MCP and CLI calls. Start it once; do not launch a second daemon on the
   service port.
-- If another window covers a native scroll target, apple-cua refuses rather than raising it.
+- If another window covers a native scroll target, OpenCUA refuses rather than raising it.
 
 ## Take over and give back
 
@@ -233,7 +233,7 @@ is the user's to resume.
 ## Mobile parity
 
 The iPhone is a native target, not a browser page. Use `ios_observe`, `ios_tap_text`,
-`ios_swipe`, `ios_type_text`, `ios_press_keys`, and `ios_run` from the main apple-cua server.
+`ios_swipe`, `ios_type_text`, `ios_press_keys`, and `ios_run` from the main OpenCUA server.
 `ios_run` takes one token, up to 8 steps, and one final observation, and requires an `expect`
 text. Batch only a sequence already proven on the same screen. The phone window is never
 raised in background delivery; a covered phone is a refusal, not an invitation to focus it.
@@ -243,11 +243,11 @@ One phone owner at a time; parallel helpers may plan or read, but not tap concur
 
 | Signal | Action |
 |---|---|
-| `browser_status` says not connected | Run `apple-cua browser setup`; the human loads the unpacked extension once |
+| `browser_status` says not connected | Run `opencua browser setup`; the human loads the unpacked extension once |
 | `disconnected`, `no_browser_connected` | Relay; do not launch another browser or a visible window |
 | `stale` / missing ref | Observe or find again; refs are never reused across revisions |
 | `busy` | One command per tab at a time; wait for the running worker; check the 12-page space budget |
-| `stopped` | The user stopped apple-cua or revealed the agent window; report and stop |
+| `stopped` | The user stopped OpenCUA or revealed the agent window; report and stop |
 | `timeout` | Input may have occurred; re-observe and inspect, never replay |
 | A select option is missing | Use `browser_find` for the combobox, observe the options, then choose by `label`, `value`, or `index` |
-| Native dialog, canvas, or iframe | Use a fresh native apple-cua observation |
+| Native dialog, canvas, or iframe | Use a fresh native OpenCUA observation |

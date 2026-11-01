@@ -17,7 +17,7 @@ async function fixture(
 	generate: (prompt: string) => Promise<string> = async () => JSON.stringify(draft),
 	now: () => number = Date.now,
 ) {
-	const directory = await realpath(await mkdtemp(join(tmpdir(), "apple-cua-history-ui-")));
+	const directory = await realpath(await mkdtemp(join(tmpdir(), "opencua-history-ui-")));
 	const segment = join(directory, "cua-history", "segments", id);
 	await mkdir(segment, { recursive: true });
 	await writeFile(

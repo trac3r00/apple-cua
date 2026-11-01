@@ -1,4 +1,3 @@
-import type { AppOpenLauncher, StopStatusSource, SystemPrompt, TopLevelWindow } from "@apple-cua/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -11,6 +10,7 @@ import type {
 	ElicitResult,
 	JSONRPCMessage,
 } from "@modelcontextprotocol/sdk/types.js";
+import type { AppOpenLauncher, StopStatusSource, SystemPrompt, TopLevelWindow } from "@opencua/core";
 import type { PhoneToolSource } from "./phone-session.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 import { type McpServerOptions, createMcpServer } from "./server.js";

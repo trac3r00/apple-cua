@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveStateDir } from "./stop-switch.js";
 
@@ -66,10 +65,10 @@ function delay(milliseconds: number): Promise<void> {
 
 /**
  * A machine-wide input lock, to the stop switch what the queue is to one process: every
- * apple-cua process takes the same file before it posts pointer or keyboard events, so two
+ * opencua process takes the same file before it posts pointer or keyboard events, so two
  * agents cannot interleave keystrokes on one screen. A holder that died leaves a stale record
  * named by a pid that no longer exists, and the next taker steals it. Shell tools that bypass
- * apple-cua do not consult this file; the switch, the allowlist and OS permissions stay the
+ * opencua do not consult this file; the switch, the allowlist and OS permissions stay the
  * answer for those.
  */
 export class InputLock {
@@ -99,7 +98,7 @@ export class InputLock {
 			return true;
 		}
 		const started = Date.now();
-		for (;;) {
+		while (true) {
 			const record = readRecord(this.path);
 			if (record === undefined || record.pid === process.pid || !processAlive(record.pid)) {
 				claim(resolveStateDir(), this.path);
@@ -131,7 +130,7 @@ export class InputLock {
 	async run<T>(burst: () => Promise<T>, waitMilliseconds?: number): Promise<T> {
 		const taken = await this.acquire(waitMilliseconds);
 		if (!taken) {
-			throw new Error("input-lock-busy: another apple-cua process holds the machine input lock");
+			throw new Error("input-lock-busy: another opencua process holds the machine input lock");
 		}
 		try {
 			return await burst();
@@ -145,6 +144,6 @@ export function defaultInputLock(): InputLock {
 	return new InputLock();
 }
 
-export function homeStateDir(): string {
-	return join(homedir(), ".apple-cua");
+export function homeStateDir(home?: string): string {
+	return resolveStateDir({}, home);
 }

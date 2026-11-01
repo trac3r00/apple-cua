@@ -1,3 +1,4 @@
+import "./env-compat.js";
 export type * from "./accessibility/types.js";
 export { classifyContentKind, type ContentKind } from "./accessibility/content-kind.js";
 export { diffAxTreeChanges, type AxTreeChanges } from "./accessibility/diff.js";
@@ -189,6 +190,23 @@ export {
 	writeHistorySettings,
 } from "./passive-memory/history-control.js";
 export { resolveHistoryRecorderBinary } from "./passive-memory/history-recorder-binary.js";
+export {
+	type HistorySegmentEvents,
+	type HistorySkillCandidate,
+	type HistorySkillDetection,
+	type HistorySkillDetectionOptions,
+	type HistoryStep,
+	type HistoryStepAction,
+	describeHistoryStep,
+	detectHistorySkillCandidates,
+} from "./passive-memory/history-skill-candidates.js";
+export {
+	type HistorySkillDraft,
+	readRecentHistorySegments,
+	saveHistorySkillDraft,
+	suggestHistorySkills,
+	validateHistorySkillDraft,
+} from "./passive-memory/history-skill-store.js";
 export type { PermissionInterface, PermissionKind, PermissionStatus } from "./permission/interface.js";
 export { MacOSPermissions } from "./permission/macos.js";
 export { CloudComputer, type CloudComputerOptions } from "./platform/cloud.js";
@@ -350,3 +368,28 @@ export type {
 } from "./types/index.js";
 export type { WindowInfo, WindowInterface } from "./window/interface.js";
 export { MacOSWindows } from "./window/macos.js";
+export { createWindowsHostComputer, WindowsHostComputer, WindowsHostError } from "./platform/windows/index.js";
+export type {
+	WindowsHostComputerOptions,
+	WindowsProcess,
+	WindowsProcessFactory,
+	WindowsTransport,
+} from "./platform/windows/index.js";
+export {
+	createLinuxHostComputer,
+	LinuxHostComputer,
+	LinuxBackendError,
+	LINUX_INSTALL_HINTS,
+} from "./platform/linux/index.js";
+export type {
+	LinuxAppState,
+	LinuxElementRef,
+	LinuxHelperEvents,
+	LinuxHelperFactory,
+	LinuxHelperTransport,
+	LinuxHostComputerOptions,
+	LinuxScreenshotResult,
+	LinuxSemanticAction,
+} from "./platform/linux/index.js";
+export { GuardedPlatformComputer } from "./platform/guarded-platform-computer.js";
+export { denyHostInteraction, HostInteractionDenied } from "./computer/host-interaction-policy.js";

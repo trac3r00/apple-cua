@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { resolveAppPid, withCursorIdentity } from "@apple-cua/core";
-import type { CursorOwner, GuardedComputerInterface } from "@apple-cua/core";
+import { resolveAppPid, withCursorIdentity } from "@opencua/core";
+import type { CursorOwner, GuardedComputerInterface } from "@opencua/core";
 import type {
 	GuardedSession,
 	MutationOptions,
@@ -337,7 +337,7 @@ export class WorkerCoordinator {
 				errorSummary,
 			};
 			if (notificationsEnabled()) {
-				postNotification("apple-cua", `worker ${workerId} task failed: ${errorSummary.slice(0, 120)}`);
+				postNotification("opencua", `worker ${workerId} task failed: ${errorSummary.slice(0, 120)}`);
 			}
 			throw error;
 		} finally {

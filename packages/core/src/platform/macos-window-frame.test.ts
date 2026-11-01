@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { defined } from "@apple-cua/test-support";
+import { defined } from "@opencua/test-support";
 import type { AXUIElementRef } from "./macos-ffi/accessibility.js";
 import { type WindowFrameDependencies, framesApproximatelyEqual, setWindowFrame } from "./macos-window-frame.js";
 

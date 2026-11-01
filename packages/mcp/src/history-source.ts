@@ -1,17 +1,22 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
 	historyPaths,
 	readHistorySettings,
 	readHistoryState,
+	saveHistorySkillDraft,
 	segmentIdForTimestamp,
+	suggestHistorySkills,
 	writeHistorySettings,
 	writeHistoryState,
-} from "@apple-cua/core";
+} from "@opencua/core";
 import type { HistoryStatus, HistoryToolSource } from "./history-tools.js";
 
 export interface HistorySourceOptions {
 	readonly stateDir: string;
 	readonly retentionHours?: number;
 	readonly now?: () => number;
+	readonly skillsDirectory?: string;
 }
 
 export function createHistorySource(options: HistorySourceOptions): HistoryToolSource {
@@ -47,5 +52,8 @@ export function createHistorySource(options: HistorySourceOptions): HistoryToolS
 				writeHistoryState(paths, "running");
 			}
 		},
+		suggestSkills: ({ limit }) => suggestHistorySkills(paths.root, { limit }),
+		saveSkill: (draft) =>
+			saveHistorySkillDraft(options.skillsDirectory ?? join(homedir(), ".agents", "skills"), draft),
 	};
 }

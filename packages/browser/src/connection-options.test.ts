@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 describe("manual browser connection options", () => {
 	it.each(["", "a".repeat(63), "a".repeat(65), "g".repeat(64), "ab", "A".repeat(64), "0".repeat(64)])(

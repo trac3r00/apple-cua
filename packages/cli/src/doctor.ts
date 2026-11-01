@@ -2,21 +2,21 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync, readFileSync, readSync } from "node:fs";
 import { join } from "node:path";
-import { StopSwitch } from "@apple-cua/core";
-import type { AutomationStatus, StopStatus } from "@apple-cua/core";
+import { StopSwitch } from "@opencua/core";
+import type { AutomationStatus, StopStatus } from "@opencua/core";
 import { missingSkillLink } from "./client-skills.js";
 import { CLIENT_NAMES, type ClientInspection, inspectClient } from "./clients.js";
 import { historyLaunchAgentPath } from "./history-service.js";
 import { type Environment, type Layout, displayPath, homeDirectory, resolveLayout } from "./layout.js";
 import { loadSettings, plannedRegistration } from "./settings.js";
 
-/** The oldest macOS apple-cua supports: the latest major release and the one before it (Tahoe and Sequoia). */
+/** The oldest macOS opencua supports: the latest major release and the one before it (Tahoe and Sequoia). */
 const MINIMUM_MACOS = "15.0";
 const MINIMUM_MACOS_NAME = "Sequoia";
 const MINIMUM_NODE_MAJOR = 20;
 /** How the signed helper app appears in System Settings, and so the name the user grants permissions to. */
-export const HELPER_DISPLAY_NAME = "apple-cua-mcp";
-/** The System Settings panes `apple-cua doctor --fix` opens for a missing grant. */
+export const HELPER_DISPLAY_NAME = "opencua-mcp";
+/** The System Settings panes `opencua doctor --fix` opens for a missing grant. */
 export const PRIVACY_PANES = {
 	accessibility: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
 	screenRecording: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
@@ -24,7 +24,7 @@ export const PRIVACY_PANES = {
 	inputMonitoring: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
 } as const;
 /** The command that walks a person through every permission grant. */
-export const GRANT_COMMAND = "apple-cua permissions grant";
+export const GRANT_COMMAND = "opencua permissions grant";
 const AUTOMATION_STATUSES: readonly AutomationStatus[] = [
 	"granted",
 	"denied",
@@ -65,7 +65,7 @@ export interface DoctorCheck {
 }
 
 export interface DoctorReport {
-	/** No check failed: apple-cua is installed and holds its permissions. */
+	/** No check failed: opencua is installed and holds its permissions. */
 	readonly ready: boolean;
 	/** Not ready, but every failure is a manual permission grant: setup itself is done. */
 	readonly onlyManualStepsRemain: boolean;
@@ -137,7 +137,7 @@ export interface DoctorFacts {
 	readonly selfCheck: SelfCheckResult | undefined;
 	readonly stop: StopStatus;
 	readonly config: ConfigFacts;
-	/** Whether `apple-cua history start` installed the cua-history watcher, the only part that needs Input Monitoring. */
+	/** Whether `opencua history start` installed the cua-history watcher, the only part that needs Input Monitoring. */
 	readonly historyInstalled?: boolean | undefined;
 	/** Shortens paths under the home directory in summaries; identity when absent. */
 	readonly showPath?: ((path: string) => string) | undefined;
@@ -239,7 +239,7 @@ function versionAtLeast(version: string, minimum: string): boolean {
 	return true;
 }
 
-/** Whether apple-cua supports this macOS version (15 Sequoia or later). */
+/** Whether opencua supports this macOS version (15 Sequoia or later). */
 export function macosSupported(version: string): boolean {
 	return versionAtLeast(version, MINIMUM_MACOS);
 }
@@ -270,7 +270,7 @@ function macosCheck(facts: DoctorFacts): DoctorCheck {
 		: check(
 				"macos",
 				"fail",
-				`${summary}: apple-cua needs macOS ${MINIMUM_MACOS} (${MINIMUM_MACOS_NAME}) or later`,
+				`${summary}: opencua needs macOS ${MINIMUM_MACOS} (${MINIMUM_MACOS_NAME}) or later`,
 				"Update macOS in System Settings > General > Software Update.",
 			);
 }
@@ -307,7 +307,7 @@ function requiredArchitectures(facts: DoctorFacts): MachArchitecture[] {
 	return required;
 }
 
-const REBUILD_NATIVE = "Rebuild the native binaries: apple-cua doctor --fix (or ./scripts/setup.sh --rebuild-native).";
+const REBUILD_NATIVE = "Rebuild the native binaries: opencua doctor --fix (or ./scripts/setup.sh --rebuild-native).";
 
 function showOf(facts: DoctorFacts): (path: string) => string {
 	return facts.showPath ?? ((path: string) => path);
@@ -353,12 +353,12 @@ function serverCheck(facts: DoctorFacts): DoctorCheck {
 				"server",
 				"fail",
 				`MCP server not built (${server} is missing)`,
-				"Build it: ./scripts/setup.sh in the checkout (or apple-cua update).",
+				"Build it: ./scripts/setup.sh in the checkout (or opencua update).",
 			);
 }
 
 const REBUILD_HELPER =
-	"Rebuild the helper app: apple-cua doctor --fix --rebuild-helper (grants carry over when it is signed with the apple-cua dev identity; an ad-hoc build is a new app, so macOS asks for Screen Recording and Accessibility again).";
+	"Rebuild the helper app: opencua doctor --fix --rebuild-helper (grants carry over when it is signed with the opencua dev identity; an ad-hoc build is a new app, so macOS asks for Screen Recording and Accessibility again).";
 
 function helperChecks(facts: DoctorFacts): DoctorCheck[] {
 	const { helper } = facts;
@@ -428,7 +428,7 @@ function automationChecks(automation: SelfCheckReport["automation"]): DoctorChec
 				return check(
 					id,
 					"warn",
-					`Automation of ${app} refused, so apple-cua falls back to slower or less exact ways`,
+					`Automation of ${app} refused, so opencua falls back to slower or less exact ways`,
 					`Switch on ${app} under "${HELPER_DISPLAY_NAME}" in System Settings > Privacy & Security > Automation (${GRANT_COMMAND} opens it).`,
 				);
 			case "not-running":
@@ -438,7 +438,7 @@ function automationChecks(automation: SelfCheckReport["automation"]): DoctorChec
 	});
 }
 
-/** Only the cua-history watcher listens to input, so Input Monitoring is checked once `apple-cua history start` ran. */
+/** Only the cua-history watcher listens to input, so Input Monitoring is checked once `opencua history start` ran. */
 function inputMonitoringChecks(facts: DoctorFacts, report: SelfCheckReport): DoctorCheck[] {
 	if (facts.historyInstalled !== true) {
 		return [];
@@ -480,7 +480,7 @@ function selfCheckChecks(facts: DoctorFacts): DoctorCheck[] {
 				"self-check",
 				"fail",
 				`the server did not answer through the helper: ${result.error}`,
-				`Run "${join(facts.helper.app, "Contents/MacOS/apple-cua-mcp")}" "${facts.server.path}" --doctor to see the error; ${REBUILD_HELPER}`,
+				`Run "${join(facts.helper.app, "Contents/MacOS/opencua-mcp")}" "${facts.server.path}" --doctor to see the error; ${REBUILD_HELPER}`,
 			),
 		];
 	}
@@ -550,7 +550,7 @@ function selfCheckChecks(facts: DoctorFacts): DoctorCheck[] {
 	return checks;
 }
 
-const REAPPLY = "Register apple-cua again: apple-cua doctor --fix (the config file is backed up first).";
+const REAPPLY = "Register opencua again: opencua doctor --fix (the config file is backed up first).";
 
 function clientChecks(facts: DoctorFacts): DoctorCheck[] {
 	const { config } = facts;
@@ -561,7 +561,7 @@ function clientChecks(facts: DoctorFacts): DoctorCheck[] {
 				"config",
 				"fail",
 				`cannot read ${show(config.path)}: ${config.error}`,
-				`Fix or delete ${show(config.path)}, then run apple-cua config.`,
+				`Fix or delete ${show(config.path)}, then run opencua config.`,
 			),
 		];
 	}
@@ -570,8 +570,8 @@ function clientChecks(facts: DoctorFacts): DoctorCheck[] {
 			check(
 				"clients",
 				"warn",
-				"no MCP client is registered, so no agent can use apple-cua yet",
-				`Register it and allow an app: apple-cua config --register ${CLIENT_NAMES.join("|")} --allow TextEdit`,
+				"no MCP client is registered, so no agent can use opencua yet",
+				`Register it and allow an app: opencua config --register ${CLIENT_NAMES.join("|")} --allow TextEdit`,
 			),
 		];
 	}
@@ -590,7 +590,7 @@ function clientChecks(facts: DoctorFacts): DoctorCheck[] {
 					id,
 					"warn",
 					`${inspection.client}: ${inspection.detail}`,
-					`Switch it back on: apple-cua config --register ${inspection.client} (or in the client's plugin settings).`,
+					`Switch it back on: opencua config --register ${inspection.client} (or in the client's plugin settings).`,
 				);
 			case "conflict":
 				return check(id, "fail", `${inspection.client}: conflicting registration`, inspection.detail);
@@ -598,13 +598,13 @@ function clientChecks(facts: DoctorFacts): DoctorCheck[] {
 				return check(
 					id,
 					"ok",
-					`${inspection.client}: ${inspection.detail} (apple-cua config --register ${inspection.client} prints it again)`,
+					`${inspection.client}: ${inspection.detail} (opencua config --register ${inspection.client} prints it again)`,
 				);
 			case "not-installed":
 				return check(
 					id,
 					"warn",
-					`${inspection.client}: chosen but not installed, so apple-cua is not registered with it`,
+					`${inspection.client}: chosen but not installed, so opencua is not registered with it`,
 					`${inspection.detail}`,
 				);
 			case "unreadable":
@@ -612,13 +612,13 @@ function clientChecks(facts: DoctorFacts): DoctorCheck[] {
 					id,
 					"fail",
 					`${inspection.client}: cannot read ${where}: ${inspection.detail}`,
-					`Fix ${where} by hand; apple-cua never rewrites a file it cannot parse.`,
+					`Fix ${where} by hand; opencua never rewrites a file it cannot parse.`,
 				);
 			case "missing":
 				return check(
 					id,
 					"fail",
-					`${inspection.client}: ${where === "" ? inspection.detail : `${where} has no apple-cua entry`}`,
+					`${inspection.client}: ${where === "" ? inspection.detail : `${where} has no opencua entry`}`,
 					REAPPLY,
 				);
 			case "stale":
@@ -637,14 +637,14 @@ function stopCheck(facts: DoctorFacts): DoctorCheck {
 		return check(
 			"stop-switch",
 			"ok",
-			"stop switch: not stopped (Control+Option+Command or `apple-cua stop` stops every agent)",
+			"stop switch: not stopped (Control+Option+Command or `opencua stop` stops every agent)",
 		);
 	}
 	return check(
 		"stop-switch",
 		"warn",
 		`computer use is stopped (${facts.stop.source} at ${facts.stop.stoppedAt}: ${facts.stop.reason}); agents may read but not act`,
-		"Run `apple-cua resume` when agents may act again (apple-cua doctor --fix asks first).",
+		"Run `opencua resume` when agents may act again (opencua doctor --fix asks first).",
 	);
 }
 
@@ -675,7 +675,7 @@ const STATUS_LABELS: Readonly<Record<CheckStatus, string>> = { ok: "ok  ", warn:
 
 export function formatDoctorReport(report: DoctorReport): string {
 	const lines = [
-		"apple-cua doctor",
+		"opencua doctor",
 		...report.checks.map((item) => `  ${STATUS_LABELS[item.status]}  ${item.summary}`),
 		"",
 	];
@@ -690,7 +690,7 @@ export function formatDoctorReport(report: DoctorReport): string {
 		});
 	};
 	if (report.ready) {
-		lines.push("Ready: apple-cua is installed and holds its permissions.");
+		lines.push("Ready: opencua is installed and holds its permissions.");
 	} else if (report.onlyManualStepsRemain) {
 		lines.push(`Installed. One manual step remains, granting permissions to "${HELPER_DISPLAY_NAME}":`);
 		list(required);
@@ -853,7 +853,7 @@ function readConfigFacts(layout: Layout, env: Environment): ConfigFacts {
 					inspection.state === "current" ? missingSkillLink(client, layout.bundleDir, context) : undefined;
 				return folder === undefined
 					? inspection
-					: { client, state: "stale", detail: `the apple-cua skill is not linked in ${folder}` };
+					: { client, state: "stale", detail: `the opencua skill is not linked in ${folder}` };
 			}),
 		};
 	} catch (error) {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { StopSwitch } from "@apple-cua/core";
+import { StopSwitch } from "@opencua/core";
 import { Command } from "commander";
 import { commandPathOf, isInputCommand, stopRefusalFor } from "./stop-gate.js";
 
@@ -66,7 +66,7 @@ describe("#given the CLI stop gate", () => {
 	let stopSwitch: StopSwitch;
 
 	beforeEach(() => {
-		stateDir = mkdtempSync(join(tmpdir(), "apple-cua-cli-stop-"));
+		stateDir = mkdtempSync(join(tmpdir(), "opencua-cli-stop-"));
 		stopSwitch = new StopSwitch(stateDir);
 	});
 
@@ -83,7 +83,7 @@ describe("#given the CLI stop gate", () => {
 
 		// then
 		expect(refusal).toContain("stopped computer use");
-		expect(refusal).toContain("apple-cua resume");
+		expect(refusal).toContain("opencua resume");
 	});
 
 	it.each(READ_ONLY_COMMANDS)("#when stopped #then read-only %s is not refused", (path) => {
@@ -120,7 +120,7 @@ describe("#given the CLI stop gate", () => {
 
 	it("#given a nested command #when its path is read #then it is the names below the program", () => {
 		// given
-		const program = new Command("apple-cua");
+		const program = new Command("opencua");
 		const ios = program.command("ios");
 		const tap = ios.command("tap");
 		const click = program.command("click");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { currentCursorIdentity, currentInputScope } from "@apple-cua/core";
-import { copyForMatch, vi, whenSettled } from "@apple-cua/test-support";
+import { currentCursorIdentity, currentInputScope } from "@opencua/core";
+import { copyForMatch, vi, whenSettled } from "@opencua/test-support";
 import { GuardedSession } from "./guarded-session.js";
 import * as notify from "./notify.js";
 import { Deferred, FakeGuardedComputer } from "./protocol-test-harness.js";
@@ -117,7 +117,7 @@ describe("WorkerCoordinator #given a worker run #when it succeeds or rejects #th
 				errorSummary: failure.slice(0, 200),
 			});
 			expect(notification).toHaveBeenCalledTimes(1);
-			expect(notification).toHaveBeenCalledWith("apple-cua", `worker one task failed: ${failure.slice(0, 120)}`);
+			expect(notification).toHaveBeenCalledWith("opencua", `worker one task failed: ${failure.slice(0, 120)}`);
 		} finally {
 			notification.mockRestore();
 			await coordinator.close();

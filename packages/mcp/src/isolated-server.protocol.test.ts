@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { CursorOwner, StopStatusSource } from "@apple-cua/core/isolated";
-import { vi } from "@apple-cua/test-support";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { CursorOwner, StopStatusSource } from "@opencua/core/isolated";
+import { vi } from "@opencua/test-support";
 import { z } from "zod/v4";
 import type { IsolatedDesktopSource } from "./isolated-server.js";
 
@@ -19,7 +19,7 @@ vi.mock("node:net", () => ({
 	},
 }));
 
-const { currentCursorOwner } = await import("@apple-cua/core/isolated");
+const { currentCursorOwner } = await import("@opencua/core/isolated");
 const { createIsolatedMcpServer } = await import("./isolated-server.js");
 
 const owner = { agentName: "OmO", sessionId: "fixture-session" };

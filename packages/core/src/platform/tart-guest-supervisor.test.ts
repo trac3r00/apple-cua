@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { runInNewContext } from "node:vm";
-import { vi, whenSettled } from "@apple-cua/test-support";
+import { vi, whenSettled } from "@opencua/test-support";
 
 const boundary = vi.hoisted(() => ({ spawn: vi.fn(), connect: vi.fn(), ipc: vi.fn(), delay: vi.fn() }));
 vi.mock("node:child_process", () => ({ spawn: boundary.spawn }));
@@ -31,7 +31,7 @@ const registry = {
 	...owner,
 	backend: "tart",
 	store: "guest-store",
-	vmName: "apple-cua-fixture",
+	vmName: "opencua-fixture",
 	runArguments: flags,
 	sharedDirectories: [],
 	attachedHostDisks: [],
@@ -78,7 +78,7 @@ function deferred<T>() {
 }
 
 beforeEach(async () => {
-	directory = await realpath(await mkdtemp(join(tmpdir(), "apple-cua-supervisor-")));
+	directory = await realpath(await mkdtemp(join(tmpdir(), "opencua-supervisor-")));
 	await writeFile(join(directory, "ownership.json"), JSON.stringify(registry));
 	child = fakeProcess();
 	channel = fakeChannel();
@@ -146,7 +146,7 @@ describe("#given an owned VM supervisor #when it starts #then input and credenti
 		expect(boundary.spawn).not.toHaveBeenCalled();
 		expect(socket.destroy).toHaveBeenCalledOnce();
 		expect(boundary.ipc).toHaveBeenCalledWith({
-			path: join(directory, "guest-store/vms/apple-cua-fixture/control.sock"),
+			path: join(directory, "guest-store/vms/opencua-fixture/control.sock"),
 		});
 	});
 
@@ -155,7 +155,7 @@ describe("#given an owned VM supervisor #when it starts #then input and credenti
 		supervisors.push(supervisor);
 		expect(boundary.spawn).toHaveBeenCalledWith(
 			join(directory, "tart.app/Contents/MacOS/tart"),
-			["run", "apple-cua-fixture", ...flags],
+			["run", "opencua-fixture", ...flags],
 			{
 				env: {
 					HOME: expect.any(String),
@@ -451,7 +451,7 @@ describe("#given an owned VM supervisor #when it starts #then input and credenti
 	it("rejects a clipboard transport for a different VM before any input", async () => {
 		const supervisor = await TartGuestSupervisor.start(directory, owner, { connect: boundary.connect });
 		supervisors.push(supervisor);
-		await writeFile(join(directory, "ownership.json"), JSON.stringify({ ...registry, vmName: "apple-cua-other" }));
+		await writeFile(join(directory, "ownership.json"), JSON.stringify({ ...registry, vmName: "opencua-other" }));
 		const run = vi.fn(async () => Buffer.from("VirtualMac2,1\n"));
 		const transport = await TartGuestTransport.open(directory, owner, run);
 		try {

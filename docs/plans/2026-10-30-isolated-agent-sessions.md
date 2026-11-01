@@ -9,7 +9,7 @@ keyboard, Unicode-paste, save and readback verification. Logical cursor owners
 carry coordinator/child names and session ownership.
 
 The stopped VM and signed Tart runtime are retained at
-`~/.apple-cua/desktops/01a18a77`. Source launch instructions and exact limits are
+`~/.opencua/desktops/01a18a77`. Source launch instructions and exact limits are
 in `docs/isolated-desktop.md`; the retained screenshot and saved-document
 evidence are in `docs/evidence/isolated-desktop-01a18a77/`.
 
@@ -192,7 +192,7 @@ The macOS Tahoe base image is pinned to digest
 `sha256:4aaa751fa7538902d73c767f27a066fc87e83f183069da4e4b5022863abd4c77`.
 Its 26,392,647,081 compressed layer bytes are being downloaded into a dedicated
 `TART_HOME` beneath the task-owned runtime directory. The guest name is
-`apple-cua-01a18a77`; the provisioning command sets 2 CPUs and 4096 MiB RAM.
+`opencua-01a18a77`; the provisioning command sets 2 CPUs and 4096 MiB RAM.
 This command does not boot the guest.
 
 The image download and resource configuration completed with exit code 0.
@@ -204,7 +204,7 @@ under background session `bash_79` with all four isolation flags above plus
 A native path watch failed because the control endpoint is a Unix socket and
 that watcher supports regular files. Guest readiness is instead subscribed
 through a bounded command monitor that runs `/usr/bin/true` only through
-`tart exec apple-cua-01a18a77`. Readiness is not yet claimed.
+`tart exec opencua-01a18a77`. Readiness is not yet claimed.
 
 The guest-agent readiness probe subsequently passed. Guest-only commands report
 macOS 26.6.2, account `admin`, and hardware model `VirtualMac2,1`. Read-only JXA
@@ -242,7 +242,7 @@ CoreGraphics calls and checks `hw.model` before allowing an action. It supports
 owned position queries, movement, left clicks, key codes and guest-local
 clipboard paste, with owner metadata in its replies. It is being compiled
 only inside the VM under
-`/Users/admin/Library/Application Support/apple-cua/isolation-01a18a77/`.
+`/Users/admin/Library/Application Support/opencua/isolation-01a18a77/`.
 The guest source copy matched all 4040 bytes of the authored source. Its
 compile and live behavior are pending, not acceptance evidence.
 

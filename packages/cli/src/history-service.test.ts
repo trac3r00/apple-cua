@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { historyPaths, readHistoryState, writeHistoryState } from "@apple-cua/core";
+import { historyPaths, readHistoryState, writeHistoryState } from "@opencua/core";
 import {
 	HISTORY_SERVICE_LABEL,
 	type HistoryServiceOptions,
@@ -31,7 +31,7 @@ function baseOptions(calls: string[][]): HistoryServiceOptions {
 	return {
 		homeDirectory: tempDir("cua-history-home-"),
 		stateDirectory: tempDir("cua-history-state-"),
-		binary: "/opt/apple-cua/history-recorder",
+		binary: "/opt/opencua/history-recorder",
 		platform: "darwin",
 		uid: 501,
 		launchctl: async (args) => {
@@ -45,14 +45,14 @@ describe("#given the watcher paths #when rendering the LaunchAgent #then only un
 	it("configures RunAtLoad, crash recovery, the binary, and the state-dir env", () => {
 		const plist = renderHistoryLaunchAgent({
 			launchAgent: "/home/Library/LaunchAgents/x.plist",
-			stateDirectory: "/home/.apple-cua",
-			binary: "/opt/apple-cua/history-recorder",
+			stateDirectory: "/home/.opencua",
+			binary: "/opt/opencua/history-recorder",
 			logDirectory: "/home/Library/Logs/cua-history",
 			stdoutLog: "/home/Library/Logs/cua-history/stdout.log",
 			stderrLog: "/home/Library/Logs/cua-history/stderr.log",
 		});
 		expect(plist).toContain(`<string>${HISTORY_SERVICE_LABEL}</string>`);
-		expect(plist).toContain("<string>/opt/apple-cua/history-recorder</string>");
+		expect(plist).toContain("<string>/opt/opencua/history-recorder</string>");
 		expect(plist).toContain("<key>RunAtLoad</key>");
 		expect(plist).toContain("<key>KeepAlive</key>");
 		const file = join(tempDir("cua-history-plist-"), "history.plist");
@@ -61,7 +61,7 @@ describe("#given the watcher paths #when rendering the LaunchAgent #then only un
 			execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", file], { encoding: "utf8" }),
 		);
 		expect(policy).toMatchObject({ KeepAlive: { SuccessfulExit: false } });
-		expect(plist).toContain("<string>/home/.apple-cua</string>");
+		expect(plist).toContain("<string>/home/.opencua</string>");
 	});
 });
 

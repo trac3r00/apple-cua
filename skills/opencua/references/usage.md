@@ -11,7 +11,7 @@ observation, so an index can never outlive the tree it was read from.
 Build core and MCP, then let the harness own the stdio process:
 
 ```bash
-pnpm --filter @apple-cua/core --filter @apple-cua/mcp build
+pnpm --filter @opencua/core --filter @opencua/mcp build
 node packages/mcp/dist/server.js
 ```
 
@@ -122,7 +122,7 @@ mapping; window-scoped AX frames must not be scaled a second time.
   use `run_steps` when order and intermediate reads matter.
 - `get_tool_usage`: read-only session counts, errors, bytes, p50/p95/max latency, and per-tool
   stats. Every tool result also carries `timing_ms` (`total`, `handler`, `bytes`, plus the
-  existing `capture` phase when `APPLE_CUA_TIMING=1`); no token is needed for the usage report.
+  existing `capture` phase when `OPENCUA_TIMING=1`); no token is needed for the usage report.
 - `select_text`: exact text selection or caret placement in an observed text element.
 - `drag`: bounded start/end coordinates from the screenshot.
 - `scroll`: an observed scrollable element and direction.
@@ -132,7 +132,7 @@ mapping; window-scoped AX frames must not be scaled a second time.
 `run_script` also exposes `apple.terminal()`: `await terminal.run(command)` sends a command to
 Terminal.app and returns its dispatch marker, while `await terminal.read(windowId?)` reads the
 visible text tail. Terminal.app must be running and allowlisted with
-`APPLE_CUA_ALLOWED_BUNDLE_IDS=com.apple.Terminal`; command dispatch requires attended console
+`OPENCUA_ALLOWED_BUNDLE_IDS=com.apple.Terminal`; command dispatch requires attended console
 delivery and Apple Events authorization. `read_only` forbids terminal commands.
 
 `run_script` also provides `apple.spaces()`: `active()` returns the active Space id and its
@@ -259,7 +259,7 @@ touch-drag is dropped by macOS 26, so lists move with `scroll`.
 
 ## Human-directed CLI diagnostics
 
-From the checkout, use the built CLI directly (or a configured `apple-cua` alias):
+From the checkout, use the built CLI directly (or a configured `opencua` alias):
 
 ```bash
 node packages/cli/dist/cli.js --help
@@ -280,7 +280,7 @@ keeps per-app snapshots.
 For a separate screenshot artifact:
 
 ```bash
-SHOT=$(mktemp -t apple-cua-shot.XXXXXX)
+SHOT=$(mktemp -t opencua-shot.XXXXXX)
 node packages/cli/dist/cli.js screenshot -o "$SHOT"
 ```
 
@@ -292,12 +292,12 @@ CLI syntax (only use input verbs for an explicitly authorized, observed target):
 
 | Action | Syntax |
 |---|---|
-| Click | `apple-cua click <x> <y>`; `-x`/`-y` aliases also supported |
-| Drag | `apple-cua drag <fromX> <fromY> <toX> <toY>` |
-| Type | `apple-cua type "literal text"` |
-| Key chord | `apple-cua key s -m cmd` |
-| Scroll | `apple-cua scroll --direction down --amount 5` |
-| Cursor/screen metadata | `apple-cua cursor`, `apple-cua screen` |
+| Click | `opencua click <x> <y>`; `-x`/`-y` aliases also supported |
+| Drag | `opencua drag <fromX> <fromY> <toX> <toY>` |
+| Type | `opencua type "literal text"` |
+| Key chord | `opencua key s -m cmd` |
+| Scroll | `opencua scroll --direction down --amount 5` |
+| Cursor/screen metadata | `opencua cursor`, `opencua screen` |
 
 Use `--target-pid` or `--target-bundle-id` deliberately; do not guess the focused app.
 Raw CLI coordinates are global logical screen points, not necessarily screenshot pixels.
@@ -307,14 +307,14 @@ one guarded MCP connection instead.
 
 ## Pi extension and direct library
 
-The optional Pi extension and `@apple-cua/core` remain available for integrations that supply
+The optional Pi extension and `@opencua/core` remain available for integrations that supply
 their own policy. They are not prerequisites for OpenClaw or Hermes. Installing the extension
 does not turn its provider-native computer tool or raw library calls into guarded MCP calls.
 
 For direct programmatic reads, release the computer in `finally`:
 
 ```typescript
-import { MacOSHostComputer } from "@apple-cua/core";
+import { MacOSHostComputer } from "@opencua/core";
 
 const computer = new MacOSHostComputer();
 try {

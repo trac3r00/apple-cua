@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { Script } from "node:vm";
-import { whenSettled } from "@apple-cua/test-support";
+import { whenSettled } from "@opencua/test-support";
 import { z } from "zod";
 import { observationSchema } from "./protocol.js";
 

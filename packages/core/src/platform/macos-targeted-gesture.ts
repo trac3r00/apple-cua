@@ -28,19 +28,19 @@ function gestureDelayMilliseconds(name: string, defaultValue: number): number {
 }
 
 export function gestureFocusSettleMilliseconds(): number {
-	return gestureDelayMilliseconds("APPLE_CUA_GESTURE_FOCUS_SETTLE_MS", FOCUS_SETTLE_MILLISECONDS_DEFAULT);
+	return gestureDelayMilliseconds("OPENCUA_GESTURE_FOCUS_SETTLE_MS", FOCUS_SETTLE_MILLISECONDS_DEFAULT);
 }
 
 export function gestureHoverMilliseconds(): number {
-	return gestureDelayMilliseconds("APPLE_CUA_GESTURE_HOVER_MS", HOVER_MILLISECONDS_DEFAULT);
+	return gestureDelayMilliseconds("OPENCUA_GESTURE_HOVER_MS", HOVER_MILLISECONDS_DEFAULT);
 }
 
 export function gesturePrimerToClickMilliseconds(): number {
-	return gestureDelayMilliseconds("APPLE_CUA_GESTURE_PRIMER_TO_CLICK_MS", PRIMER_TO_CLICK_MILLISECONDS_DEFAULT);
+	return gestureDelayMilliseconds("OPENCUA_GESTURE_PRIMER_TO_CLICK_MS", PRIMER_TO_CLICK_MILLISECONDS_DEFAULT);
 }
 
 export function gestureClickDrainMilliseconds(): number {
-	return gestureDelayMilliseconds("APPLE_CUA_GESTURE_CLICK_DRAIN_MS", CLICK_DRAIN_MILLISECONDS_DEFAULT);
+	return gestureDelayMilliseconds("OPENCUA_GESTURE_CLICK_DRAIN_MS", CLICK_DRAIN_MILLISECONDS_DEFAULT);
 }
 
 export function needsActivationEngagement(input: {

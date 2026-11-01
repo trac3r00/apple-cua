@@ -24,7 +24,7 @@ let home = "";
 let layout: Layout;
 
 beforeEach(() => {
-	root = realpathSync(mkdtempSync(join(tmpdir(), "apple-cua-uninstall-")));
+	root = realpathSync(mkdtempSync(join(tmpdir(), "opencua-uninstall-")));
 	home = join(root, "home");
 	mkdirSync(join(root, "checkout"), { recursive: true });
 	mkdirSync(home, { recursive: true });
@@ -50,7 +50,7 @@ function facts(overrides: Partial<UninstallFacts> = {}): UninstallFacts {
 		rcFiles: [],
 		stateEntries: [],
 		stateDirectories: [],
-		stopPath: "/home/.apple-cua/stop.json",
+		stopPath: "/home/.opencua/stop.json",
 		historyService: undefined,
 		historyDirectories: [],
 		...overrides,
@@ -94,12 +94,12 @@ describe("#given registrations of several installations #when uninstall is plann
 					{ client: "omo", entry: entry(layout.helperExecutable), runsThisCheckout: true, alive: true },
 					{
 						client: "codex",
-						entry: entry("/other/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp"),
+						entry: entry("/other/opencua-mcp.app/Contents/MacOS/opencua-mcp"),
 						runsThisCheckout: false,
 						alive: true,
 						otherHelperBundleId: BUNDLE_ID,
 					},
-					{ client: "claude", entry: entry("/deleted/apple-cua-mcp"), runsThisCheckout: false, alive: false },
+					{ client: "claude", entry: entry("/deleted/opencua-mcp"), runsThisCheckout: false, alive: false },
 				],
 			}),
 			{ purge: false },
@@ -117,7 +117,7 @@ describe("#given registrations of several installations #when uninstall is plann
 				helperPresent: false,
 				helperBundleId: undefined,
 				clientEntries: [
-					{ client: "omo", entry: entry("/deleted/apple-cua-mcp"), runsThisCheckout: false, alive: false },
+					{ client: "omo", entry: entry("/deleted/opencua-mcp"), runsThisCheckout: false, alive: false },
 				],
 				stateEntries: [layout.configPath],
 			}),
@@ -144,12 +144,12 @@ describe("#given registrations of several installations #when uninstall is plann
 describe("#given the shared stop switch #when uninstall is planned #then it stays while another installation does", () => {
 	it("keeps the stop file and its folder for another installation's registration, and removes them when none is left", () => {
 		const state = {
-			stateEntries: [layout.configPath, "/home/.apple-cua/stop.json"],
-			stateDirectories: [layout.appleCuaHome, "/home/.apple-cua"],
+			stateEntries: [layout.configPath, "/home/.opencua/stop.json"],
+			stateDirectories: [layout.openCuaHome, "/home/.opencua"],
 		};
 		const other = {
 			client: "omo" as const,
-			entry: entry("/other/apple-cua-mcp"),
+			entry: entry("/other/opencua-mcp"),
 			runsThisCheckout: false,
 			alive: true,
 		};
@@ -158,7 +158,7 @@ describe("#given the shared stop switch #when uninstall is planned #then it stay
 		const alone = planUninstall(facts(state), { purge: false });
 
 		expect(shared.removeState).toEqual([layout.configPath]);
-		expect(shared.removeIfEmpty).toEqual([layout.appleCuaHome]);
+		expect(shared.removeIfEmpty).toEqual([layout.openCuaHome]);
 		expect(alone.removeState).toEqual(state.stateEntries);
 		expect(alone.removeIfEmpty).toEqual(state.stateDirectories);
 	});
@@ -168,14 +168,14 @@ describe("#given launchers and PATH lines #when uninstall is planned #then anoth
 	it("removes this checkout's launcher but keeps the PATH line while another installation's launcher uses the directory", () => {
 		const rc = { path: join(home, ".zshrc"), text: `export PATH="$HOME/.local/bin:$PATH" ${PATH_LINE_MARKER}\n` };
 		const ours = { path: layout.launcherPath, checkout: layout.checkout };
-		const theirs = { path: join(layout.binDir, "other/../apple-cua"), checkout: "/other/checkout" };
+		const theirs = { path: join(layout.binDir, "other/../opencua"), checkout: "/other/checkout" };
 
 		const alone = planUninstall(facts({ launchers: [ours], rcFiles: [rc] }), { purge: false });
 		const shared = planUninstall(
-			facts({ launchers: [ours, { ...theirs, path: join(layout.binDir, "apple-cua-other") }], rcFiles: [rc] }),
+			facts({ launchers: [ours, { ...theirs, path: join(layout.binDir, "opencua-other") }], rcFiles: [rc] }),
 			{ purge: false },
 		);
-		const foreign = planUninstall(facts({ launchers: [{ path: "/opt/bin/apple-cua", checkout: undefined }] }), {
+		const foreign = planUninstall(facts({ launchers: [{ path: "/opt/bin/opencua", checkout: undefined }] }), {
 			purge: false,
 		});
 
@@ -183,17 +183,15 @@ describe("#given launchers and PATH lines #when uninstall is planned #then anoth
 		expect(alone.removePathLines).toEqual([{ path: rc.path, lines: [rc.text.trimEnd()] }]);
 		expect(shared.removePathLines).toEqual([]);
 		expect(foreign.removeLaunchers).toEqual([]);
-		expect(foreign.leaveLaunchers).toEqual([
-			{ path: "/opt/bin/apple-cua", reason: "not written by apple-cua setup" },
-		]);
+		expect(foreign.leaveLaunchers).toEqual([{ path: "/opt/bin/opencua", reason: "not written by opencua setup" }]);
 	});
 
-	it("keeps APPLE_CUA_HOME while the installation install.sh made elsewhere still exists", () => {
+	it("keeps OPENCUA_HOME while the installation install.sh made elsewhere still exists", () => {
 		const plan = planUninstall(
 			facts({
 				otherInstallerCheckout: "/elsewhere/app",
 				stateEntries: [layout.configPath],
-				stateDirectories: [layout.appleCuaHome],
+				stateDirectories: [layout.openCuaHome],
 			}),
 			{ purge: false },
 		);
@@ -210,7 +208,7 @@ describe("#given running processes #when this checkout's are selected #then only
 		const rows = [
 			{ pid: 1, command: `${layout.helperExecutable} ${layout.server}` },
 			{ pid: 2, command: `${layout.helperApp}/Contents/Resources/node ${layout.server}` },
-			{ pid: 3, command: `${overlay} --socket /tmp/apple-cua-cursor.sock --idle 15` },
+			{ pid: 3, command: `${overlay} --socket /tmp/opencua-cursor.sock --idle 15` },
 			{ pid: 4, command: "/other/checkout/packages/mcp/dist/server.js" },
 			{ pid: 5, command: `node ${layout.server}` },
 		];
@@ -233,7 +231,7 @@ describe("#given an installation in a temporary home #when uninstall runs #then 
 		const settings = { ...DEFAULT_SETTINGS, clients: ["omo"] as const };
 		registerClient("omo", desiredRegistration(layout, settings), context);
 		saveSettings(layout.configPath, settings);
-		writeFileSync(join(layout.appleCuaHome, "stop.json"), "{}");
+		writeFileSync(join(layout.openCuaHome, "stop.json"), "{}");
 		mkdirSync(layout.binDir, { recursive: true });
 		writeFileSync(layout.launcherPath, `#!/bin/bash\n${LAUNCHER_MARKER}${layout.checkout}\nexec node cli.js "$@"\n`);
 		const zshrc = join(home, ".zshrc");
@@ -252,18 +250,18 @@ describe("#given an installation in a temporary home #when uninstall runs #then 
 			renderHistoryLaunchAgent({
 				launchAgent,
 				binary,
-				stateDirectory: layout.appleCuaHome,
+				stateDirectory: layout.openCuaHome,
 				logDirectory: root,
 				stdoutLog: join(root, "stdout.log"),
 				stderrLog: join(root, "stderr.log"),
 			}),
 		);
-		const historyDirectory = join(layout.appleCuaHome, "cua-history");
+		const historyDirectory = join(layout.openCuaHome, "cua-history");
 		mkdirSync(historyDirectory);
 		writeFileSync(join(historyDirectory, "retained.jsonl"), "recorded activity\n");
 		const plan = planUninstall(
 			facts({
-				historyService: { launchAgent, binary, stateDirectory: layout.appleCuaHome },
+				historyService: { launchAgent, binary, stateDirectory: layout.openCuaHome },
 				historyDirectories: [historyDirectory],
 				processes: [{ pid: 4242, command: binary }],
 			}),
@@ -332,8 +330,8 @@ describe("#given an installation in a temporary home #when uninstall runs #then 
 			facts({
 				historyService: {
 					launchAgent,
-					binary: join(root, "other/packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/history-recorder"),
-					stateDirectory: layout.appleCuaHome,
+					binary: join(root, "other/packages/mcp/dist/opencua-mcp.app/Contents/MacOS/history-recorder"),
+					stateDirectory: layout.openCuaHome,
 				},
 			}),
 			{ purge: false },
@@ -357,8 +355,8 @@ describe("#given an installation in a temporary home #when uninstall runs #then 
 				],
 				launchers: [{ path: layout.launcherPath, checkout: layout.checkout }],
 				rcFiles: [{ path: zshrc, text: readFileSync(zshrc, "utf8") }],
-				stateEntries: [layout.configPath, join(layout.appleCuaHome, "stop.json")],
-				stateDirectories: [layout.appleCuaHome],
+				stateEntries: [layout.configPath, join(layout.openCuaHome, "stop.json")],
+				stateDirectories: [layout.openCuaHome],
 			}),
 			{ purge: false },
 		);
@@ -399,7 +397,7 @@ describe("#given an installation in a temporary home #when uninstall runs #then 
 		expect(outcome.backups.every((backup) => existsSync(backup))).toBe(true);
 		expect(existsSync(layout.helperApp)).toBe(false);
 		expect(existsSync(layout.launcherPath)).toBe(false);
-		expect(existsSync(layout.appleCuaHome)).toBe(false);
+		expect(existsSync(layout.openCuaHome)).toBe(false);
 		expect(existsSync(layout.checkout)).toBe(true);
 	});
 

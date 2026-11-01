@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { HostCapabilities, InputDelivery, StopStatus, StopStatusSource } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { HostCapabilities, InputDelivery, StopStatus, StopStatusSource } from "@opencua/core";
 import { z } from "zod/v4";
 import { type HostInfo, detectHost, spawnGuidance } from "./host-detection.js";
 import { SERVER_INFO } from "./server-info.js";
@@ -12,7 +12,7 @@ import type { ToolUsageSnapshot } from "./tool-timing.js";
 import type { ToolsetProfile } from "./toolset.js";
 
 const STOP_CHORD = "Control+Option+Command (hold together)";
-export const DEFAULT_SKILL_DIR = fileURLToPath(new URL("../../../skills/apple-cua/", import.meta.url));
+export const DEFAULT_SKILL_DIR = fileURLToPath(new URL("../../../skills/opencua/", import.meta.url));
 
 export interface CapabilitySources {
 	readonly delivery: InputDelivery | undefined;
@@ -52,7 +52,7 @@ function adviceFor(
 	];
 	if (stop?.stopped === true) {
 		advice.push(
-			"The user stopped computer use. Do not act or retry; tell the user. Only they resume (apple-cua resume).",
+			"The user stopped computer use. Do not act or retry; tell the user. Only they resume (opencua resume).",
 		);
 	}
 	if (!host.permissions.accessibility) {
@@ -64,7 +64,7 @@ function adviceFor(
 		advice.push("Host screenshots are unavailable. This does not determine whether guest capture is available.");
 	}
 	if (allowed?.length === 0) {
-		advice.push("No host app is approved for observation. The user sets APPLE_CUA_ALLOWED_BUNDLE_IDS.");
+		advice.push("No host app is approved for observation. The user sets OPENCUA_ALLOWED_BUNDLE_IDS.");
 	}
 	if (mode === "locked") {
 		advice.push("The screen is locked: windows report no content. Use ask_user with reason screen_locked.");
@@ -119,7 +119,7 @@ export function capabilityReport(sources: CapabilitySources): Record<string, unk
 			...(stop ?? { stopped: false }),
 			armed: sources.stop !== undefined,
 			chord: STOP_CHORD,
-			resume: "apple-cua resume",
+			resume: "opencua resume",
 		},
 		advice: adviceFor(host, mode, sources.allowedBundleIds, stop),
 	};
@@ -167,22 +167,22 @@ export function registerSkillResources(server: McpServer, skillDir: string = DEF
 		return [];
 	}
 	const files: { readonly uri: string; readonly path: string; readonly name: string }[] = [
-		{ uri: "skill://apple-cua/SKILL.md", path: skillPath, name: "apple-cua-skill" },
+		{ uri: "skill://opencua/SKILL.md", path: skillPath, name: "opencua-skill" },
 	];
 	const referencesDir = join(skillDir, "references");
 	const references = existsSync(referencesDir) ? readdirSync(referencesDir).sort() : [];
 	for (const entry of references.filter((name) => name.endsWith(".md"))) {
 		files.push({
-			uri: `skill://apple-cua/references/${entry}`,
+			uri: `skill://opencua/references/${entry}`,
 			path: join(referencesDir, entry),
-			name: `apple-cua-reference-${entry.slice(0, -3)}`,
+			name: `opencua-reference-${entry.slice(0, -3)}`,
 		});
 	}
 	for (const file of files) {
 		server.registerResource(
 			file.name,
 			file.uri,
-			{ mimeType: "text/markdown", description: `apple-cua operating guide: ${file.uri.slice("skill://".length)}` },
+			{ mimeType: "text/markdown", description: `opencua operating guide: ${file.uri.slice("skill://".length)}` },
 			async (uri) => ({
 				contents: [{ uri: uri.href, mimeType: "text/markdown", text: readFileSync(file.path, "utf8") }],
 			}),

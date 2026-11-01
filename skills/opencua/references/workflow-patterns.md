@@ -1,7 +1,7 @@
 # Desktop workflow patterns
 
 Use these patterns with the guarded stdio MCP server. They describe current
-apple-cua contracts; they do not authorize a target or replace user confirmation.
+OpenCUA contracts; they do not authorize a target or replace user confirmation.
 
 ## Background and per-app input scopes
 
@@ -15,7 +15,7 @@ that app's own newest observation.
 
 ## Planners and app-owning workers
 
-The host runtime creates subagents and chooses their models. apple-cua supplies
+The host runtime creates subagents and chooses their models. OpenCUA supplies
 guarded app execution, not model spawning or a reasoning scheduler. Use one
 coordinator and one shared MCP session; if the host cannot share that session,
 keep all tool calls in the coordinator and delegate only planning and review.

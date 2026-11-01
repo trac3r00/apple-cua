@@ -1,4 +1,4 @@
-import type { AutomationStatus } from "@apple-cua/core";
+import type { AutomationStatus } from "@opencua/core";
 import { GRANT_COMMAND, HELPER_DISPLAY_NAME, PRIVACY_PANES, automationAppName } from "./doctor.js";
 
 /** What the helper holds, read without raising a prompt (server.js --doctor through the helper). */
@@ -64,7 +64,7 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 	const missing: string[] = [];
 	const notAsked: string[] = [];
 	if (state === undefined) {
-		deps.print(`Cannot read the permissions of ${NAME}: the helper app did not answer. Run apple-cua doctor.`);
+		deps.print(`Cannot read the permissions of ${NAME}: the helper app did not answer. Run opencua doctor.`);
 		return {
 			granted,
 			missing: [
@@ -138,7 +138,7 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 			continue;
 		}
 		if (current === undefined) {
-			deps.print(`Could not read the current ${grant.label} status from ${NAME}; run apple-cua doctor to check it.`);
+			deps.print(`Could not read the current ${grant.label} status from ${NAME}; run opencua doctor to check it.`);
 		}
 		if (options.mode === "report") {
 			deps.print(`missing  ${grant.label} for ${NAME}: run ${GRANT_COMMAND} while you are at this Mac.`);
@@ -160,7 +160,7 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 		} else {
 			deps.print(
 				finalState === undefined
-					? `Could not verify ${grant.label}: the helper did not return a fresh permission report. Run apple-cua doctor.`
+					? `Could not verify ${grant.label}: the helper did not return a fresh permission report. Run opencua doctor.`
 					: `${notInTime}: the latest check from ${NAME} still reports ${grant.label} off. Grant it later with ${GRANT_COMMAND}`,
 			);
 			if (finalState !== undefined && grant.kind === "accessibility") {
@@ -217,7 +217,7 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 	}
 
 	if (granted.length > 0) {
-		deps.print("\nRestart your MCP clients so running apple-cua servers pick up the new permissions.");
+		deps.print("\nRestart your MCP clients so running opencua servers pick up the new permissions.");
 	}
 	return { granted, missing, notAsked };
 }

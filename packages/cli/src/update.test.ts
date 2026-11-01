@@ -10,9 +10,9 @@ const GIT_ENV = {
 	...process.env,
 	GIT_CONFIG_GLOBAL: "/dev/null",
 	GIT_CONFIG_NOSYSTEM: "1",
-	GIT_AUTHOR_NAME: "apple-cua test",
+	GIT_AUTHOR_NAME: "opencua test",
 	GIT_AUTHOR_EMAIL: "test@example.invalid",
-	GIT_COMMITTER_NAME: "apple-cua test",
+	GIT_COMMITTER_NAME: "opencua test",
 	GIT_COMMITTER_EMAIL: "test@example.invalid",
 };
 const NATIVE_INPUTS = "packages/core/native/build-inputs.sha256";
@@ -48,7 +48,7 @@ function publish(version: string, file = "README.md"): void {
 function update(options: { readonly stamp?: string; readonly digest?: string; readonly marker?: InstallMarker } = {}) {
 	const output: string[] = [];
 	let setupRuns = 0;
-	const helperApp = join(root, "apple-cua-mcp.app");
+	const helperApp = join(root, "opencua-mcp.app");
 	if (options.stamp !== undefined) {
 		writeFile(join(helperApp, "Contents/Resources/helper-inputs.sha256"), `${options.stamp}\n`);
 	}
@@ -71,7 +71,7 @@ function update(options: { readonly stamp?: string; readonly digest?: string; re
 }
 
 beforeAll(() => {
-	template = realpathSync(mkdtempSync(join(tmpdir(), "apple-cua-update-template-")));
+	template = realpathSync(mkdtempSync(join(tmpdir(), "opencua-update-template-")));
 	const upstream = join(template, "upstream.git");
 	author = join(template, "author");
 	git(template, "init", "--quiet", "--bare", "-b", "master", upstream);
@@ -92,7 +92,7 @@ function retargetRemote(clone: string): void {
 }
 
 beforeEach(() => {
-	root = realpathSync(mkdtempSync(join(tmpdir(), "apple-cua-update-")));
+	root = realpathSync(mkdtempSync(join(tmpdir(), "opencua-update-")));
 	cpSync(template, root, { recursive: true });
 	author = join(root, "author");
 	checkout = join(root, "checkout");
@@ -164,7 +164,7 @@ describe("#given a clean checkout behind its upstream #when it is updated #then 
 		expect(result.status).toBe(0);
 		expect(result.setupRuns).toBe(1);
 		expect(newCommit).not.toBe(oldCommit);
-		expect(result.output).toContain(`Updated apple-cua 0.1.0 (${oldCommit}) -> 0.1.1 (${newCommit}).`);
+		expect(result.output).toContain(`Updated opencua 0.1.0 (${oldCommit}) -> 0.1.1 (${newCommit}).`);
 		expect(readFileSync(join(checkout, "package.json"), "utf8")).toContain("0.1.1");
 	});
 
@@ -173,7 +173,7 @@ describe("#given a clean checkout behind its upstream #when it is updated #then 
 
 		expect(result.status).toBe(0);
 		expect(result.setupRuns).toBe(0);
-		expect(result.output).toMatch(/Already up to date: apple-cua 0\.1\.0/);
+		expect(result.output).toMatch(/Already up to date: opencua 0\.1\.0/);
 	});
 
 	it("restores rebuilt native binaries first, since setup checks them again", () => {
@@ -200,7 +200,7 @@ describe("#given a clean checkout behind its upstream #when it is updated #then 
 
 describe("#given the checkout install.sh made #when its update source is read #then the installed ref wins", () => {
 	it("updates from origin and the ref install.sh cloned", () => {
-		const marker = { checkout, repo: "https://example.invalid/apple-cua.git", ref: "release" };
+		const marker = { checkout, repo: "https://example.invalid/opencua.git", ref: "release" };
 
 		expect(updateSource(gitIn(checkout, GIT_ENV), checkout, marker)).toEqual({
 			remote: "origin",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { DockSnapshot, DockSource, HostCapabilities, StopStatus, StopStatusSource } from "@apple-cua/core";
-import { vi } from "@apple-cua/test-support";
+import type { DockSnapshot, DockSource, HostCapabilities, StopStatus, StopStatusSource } from "@opencua/core";
+import { vi } from "@opencua/test-support";
 import { DockGuardSession } from "./dock-session.js";
 import type { ToolResult } from "./tool-result.js";
 

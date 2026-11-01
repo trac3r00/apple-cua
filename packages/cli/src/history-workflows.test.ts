@@ -11,13 +11,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HistorySegmentStore, nodeHistoryFs } from "@apple-cua/core";
+import { HistorySegmentStore, nodeHistoryFs } from "@opencua/core";
 import { historyDraftSchema, listHistoryTimeline, readHistoryEvidence, saveHistorySkill } from "./history-workflows.js";
 
 const roots: string[] = [];
 
 function tempRoot(): string {
-	const root = realpathSync(mkdtempSync(join(tmpdir(), "apple-cua-history-workflows-")));
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "opencua-history-workflows-")));
 	roots.push(root);
 	return root;
 }

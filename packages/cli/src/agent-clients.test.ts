@@ -27,19 +27,19 @@ let bundleDir = "";
 let desired: DesiredRegistration;
 
 beforeEach(() => {
-	home = realpathSync(mkdtempSync(join(tmpdir(), "apple-cua-agent-clients-")));
-	checkout = join(home, "apple-cua");
-	bundleDir = join(home, ".apple-cua/bundle");
+	home = realpathSync(mkdtempSync(join(tmpdir(), "opencua-agent-clients-")));
+	checkout = join(home, "opencua");
+	bundleDir = join(home, ".opencua/bundle");
 	mkdirSync(join(checkout, "packages/mcp/dist"), { recursive: true });
 	writeFileSync(join(checkout, "packages/mcp/dist/server.js"), "");
 	mkdirSync(geminiPluginDir(bundleDir), { recursive: true });
 	desired = {
 		launch: {
-			command: join(checkout, "packages/mcp/dist/apple-cua-mcp"),
+			command: join(checkout, "packages/mcp/dist/opencua-mcp"),
 			args: [join(checkout, "packages/mcp/dist/server.js")],
 		},
-		env: { APPLE_CUA_TOOLSET: "full", APPLE_CUA_DELIVERY: "background", APPLE_CUA_IPHONE: undefined },
-		envSatisfied: (env) => env["APPLE_CUA_TOOLSET"] === "full" && env["APPLE_CUA_DELIVERY"] === "background",
+		env: { OPENCUA_TOOLSET: "full", OPENCUA_DELIVERY: "background", OPENCUA_IPHONE: undefined },
+		envSatisfied: (env) => env["OPENCUA_TOOLSET"] === "full" && env["OPENCUA_DELIVERY"] === "background",
 		bundle: { bundleDir, version: "0.1.0+codex.aaaaaaaaaaaa", checkout },
 	};
 });
@@ -62,14 +62,14 @@ function foreignEntry(): { command: string; args: string[]; env: Record<string, 
 	return { command: "/usr/bin/true", args: [other], env: {} };
 }
 
-describe("#given Gemini CLI #when apple-cua is linked #then one extension carries the server and the skill, read in place", () => {
+describe("#given Gemini CLI #when opencua is linked #then one extension carries the server and the skill, read in place", () => {
 	it("links the bundle's plugin folder with consent, once", () => {
 		const fresh = planGeminiInstall(readGeminiState(home), bundleDir, checkout);
 		expect(fresh.outcome).toBe("added");
 		expect(commands(fresh)).toEqual([`extensions link ${geminiPluginDir(bundleDir)} --consent`]);
 
 		write(
-			join(home, ".gemini/extensions/apple-cua/.gemini-extension-install.json"),
+			join(home, ".gemini/extensions/opencua/.gemini-extension-install.json"),
 			JSON.stringify({ source: geminiPluginDir(bundleDir), type: "link" }),
 		);
 		expect(planGeminiInstall(readGeminiState(home), bundleDir, checkout)).toEqual({
@@ -80,44 +80,44 @@ describe("#given Gemini CLI #when apple-cua is linked #then one extension carrie
 
 	it("relinks an extension that points elsewhere and migrates an older user-scope server, but not another installation's", () => {
 		write(
-			join(home, ".gemini/extensions/apple-cua/.gemini-extension-install.json"),
+			join(home, ".gemini/extensions/opencua/.gemini-extension-install.json"),
 			JSON.stringify({ source: "/old/plugin" }),
 		);
 		write(
 			join(home, ".gemini/settings.json"),
 			JSON.stringify({
-				mcpServers: { "apple-cua": { command: desired.launch.command, args: desired.launch.args } },
+				mcpServers: { opencua: { command: desired.launch.command, args: desired.launch.args } },
 			}),
 		);
 
 		expect(commands(planGeminiInstall(readGeminiState(home), bundleDir, checkout))).toEqual([
-			"mcp remove -s user apple-cua",
-			"extensions uninstall apple-cua",
+			"mcp remove -s user opencua",
+			"extensions uninstall opencua",
 			`extensions link ${geminiPluginDir(bundleDir)} --consent`,
 		]);
 
-		write(join(home, ".gemini/settings.json"), JSON.stringify({ mcpServers: { "apple-cua": foreignEntry() } }));
+		write(join(home, ".gemini/settings.json"), JSON.stringify({ mcpServers: { opencua: foreignEntry() } }));
 		expect(planGeminiInstall(readGeminiState(home), bundleDir, checkout).blocked).toContain(
-			"gemini mcp remove -s user apple-cua",
+			"gemini mcp remove -s user opencua",
 		);
-		expect(commands(planGeminiRemove(readGeminiState(home), checkout))).toEqual(["extensions uninstall apple-cua"]);
+		expect(commands(planGeminiRemove(readGeminiState(home), checkout))).toEqual(["extensions uninstall opencua"]);
 	});
 });
 
-describe("#given Hermes' config.yaml #when the apple-cua entry is read #then the block hermes mcp add writes is understood", () => {
+describe("#given Hermes' config.yaml #when the opencua entry is read #then the block hermes mcp add writes is understood", () => {
 	it("reads command, args and env, and ignores the other servers", () => {
 		const yaml = [
 			"model: x",
 			"mcp_servers:",
 			"  other:",
 			"    command: other",
-			"  apple-cua:",
-			"    command: /a/apple-cua-mcp",
+			"  opencua:",
+			"    command: /a/opencua-mcp",
 			"    args:",
 			"      - /a/server.js",
 			"    env:",
-			"      APPLE_CUA_TOOLSET: full",
-			"      APPLE_CUA_DELIVERY: 'background'",
+			"      OPENCUA_TOOLSET: full",
+			"      OPENCUA_DELIVERY: 'background'",
 			"    enabled: true",
 			"skills:",
 			"  external_dirs: []",
@@ -125,16 +125,16 @@ describe("#given Hermes' config.yaml #when the apple-cua entry is read #then the
 		].join("\n");
 
 		expect(readHermesEntry(yaml)).toEqual({
-			command: "/a/apple-cua-mcp",
+			command: "/a/opencua-mcp",
 			args: ["/a/server.js"],
-			env: { APPLE_CUA_TOOLSET: "full", APPLE_CUA_DELIVERY: "background" },
+			env: { OPENCUA_TOOLSET: "full", OPENCUA_DELIVERY: "background" },
 		});
 		expect(readHermesEntry("mcp_servers:\n  other:\n    command: x\n")).toBeUndefined();
 		expect(readHermesEntry("model: x\n")).toBeUndefined();
 	});
 });
 
-describe("#given Hermes #when apple-cua is set up or changed #then the entry is added with Y on stdin, or replaced", () => {
+describe("#given Hermes #when opencua is set up or changed #then the entry is added with Y on stdin, or replaced", () => {
 	it("adds with --args last, replaces a changed entry, and leaves a current one alone", () => {
 		const fresh = planHermesInstall(readHermesState(home, {}), desired, checkout);
 		expect(fresh.outcome).toBe("added");
@@ -142,12 +142,12 @@ describe("#given Hermes #when apple-cua is set up or changed #then the entry is 
 			args: [
 				"mcp",
 				"add",
-				"apple-cua",
+				"opencua",
 				"--command",
 				desired.launch.command,
 				"--env",
-				"APPLE_CUA_TOOLSET=full",
-				"APPLE_CUA_DELIVERY=background",
+				"OPENCUA_TOOLSET=full",
+				"OPENCUA_DELIVERY=background",
 				"--args",
 				...desired.launch.args,
 			],
@@ -156,65 +156,65 @@ describe("#given Hermes #when apple-cua is set up or changed #then the entry is 
 
 		const hermesHome = join(home, "profiles/hermes");
 		const block = (toolset: string) =>
-			`mcp_servers:\n  apple-cua:\n    command: ${desired.launch.command}\n    args:\n      - ${desired.launch.args[0]}\n    env:\n      APPLE_CUA_TOOLSET: ${toolset}\n      APPLE_CUA_DELIVERY: background\n`;
+			`mcp_servers:\n  opencua:\n    command: ${desired.launch.command}\n    args:\n      - ${desired.launch.args[0]}\n    env:\n      OPENCUA_TOOLSET: ${toolset}\n      OPENCUA_DELIVERY: background\n`;
 		write(join(hermesHome, "config.yaml"), block("lean"));
 		expect(
 			commands(planHermesInstall(readHermesState(home, { HERMES_HOME: hermesHome }), desired, checkout))[0],
-		).toBe("mcp remove apple-cua");
+		).toBe("mcp remove opencua");
 		write(join(hermesHome, "config.yaml"), block("full"));
 		const state = readHermesState(home, { HERMES_HOME: hermesHome });
 		expect(planHermesInstall(state, desired, checkout).outcome).toBe("unchanged");
 		expect(planHermesRemove(state, checkout).steps[0]).toMatchObject({
-			args: ["mcp", "remove", "apple-cua"],
+			args: ["mcp", "remove", "opencua"],
 			input: "Y\n",
 		});
 	});
 });
 
-describe("#given OpenClaw #when apple-cua is set up #then mcp set writes the server and mcp reload hands it to agents", () => {
+describe("#given OpenClaw #when opencua is set up #then mcp set writes the server and mcp reload hands it to agents", () => {
 	it("sets and reloads, skips a current entry, and leaves another installation's alone", () => {
 		const plan = planOpenClawInstall(readOpenClawState(home, {}), desired, checkout);
-		expect(commands(plan)[0]).toMatch(/^mcp set apple-cua \{"command":/);
+		expect(commands(plan)[0]).toMatch(/^mcp set opencua \{"command":/);
 		expect(commands(plan)[1]).toBe("mcp reload");
 
 		const stateDir = join(home, "oc");
 		const server = {
 			command: desired.launch.command,
 			args: desired.launch.args,
-			env: { APPLE_CUA_TOOLSET: "full", APPLE_CUA_DELIVERY: "background" },
+			env: { OPENCUA_TOOLSET: "full", OPENCUA_DELIVERY: "background" },
 		};
-		write(join(stateDir, "openclaw.json"), JSON.stringify({ mcp: { servers: { "apple-cua": server } } }));
+		write(join(stateDir, "openclaw.json"), JSON.stringify({ mcp: { servers: { opencua: server } } }));
 		const current = readOpenClawState(home, { OPENCLAW_STATE_DIR: stateDir });
 		expect(planOpenClawInstall(current, desired, checkout).outcome).toBe("unchanged");
-		expect(commands(planOpenClawRemove(current, checkout))).toEqual(["mcp unset apple-cua", "mcp reload"]);
+		expect(commands(planOpenClawRemove(current, checkout))).toEqual(["mcp unset opencua", "mcp reload"]);
 
-		write(join(stateDir, "openclaw.json"), JSON.stringify({ mcp: { servers: { "apple-cua": foreignEntry() } } }));
+		write(join(stateDir, "openclaw.json"), JSON.stringify({ mcp: { servers: { opencua: foreignEntry() } } }));
 		expect(
 			planOpenClawInstall(readOpenClawState(home, { OPENCLAW_STATE_DIR: stateDir }), desired, checkout).blocked,
-		).toContain("openclaw mcp unset apple-cua");
+		).toContain("openclaw mcp unset opencua");
 	});
 
 	it("names the manual step instead of running mcp unset when OpenClaw's size guard would refuse the write", () => {
 		const stateDir = join(home, "oc-small");
 		const server = { command: desired.launch.command, args: desired.launch.args, env: { PAD: "x".repeat(600) } };
-		write(join(stateDir, "openclaw.json"), JSON.stringify({ mcp: { servers: { "apple-cua": server } } }, null, 2));
+		write(join(stateDir, "openclaw.json"), JSON.stringify({ mcp: { servers: { opencua: server } } }, null, 2));
 		const small = planOpenClawRemove(readOpenClawState(home, { OPENCLAW_STATE_DIR: stateDir }), checkout);
 		expect(small.steps).toEqual([]);
-		expect(small.blocked).toContain("delete mcp.servers.apple-cua");
+		expect(small.blocked).toContain("delete mcp.servers.opencua");
 
 		const others = Object.fromEntries(
 			["a", "b", "c"].map((name) => [name, { command: "npx", args: ["x".repeat(400)] }]),
 		);
 		write(
 			join(stateDir, "openclaw.json"),
-			JSON.stringify({ mcp: { servers: { "apple-cua": server, ...others } } }, null, 2),
+			JSON.stringify({ mcp: { servers: { opencua: server, ...others } } }, null, 2),
 		);
 		const roomy = planOpenClawRemove(readOpenClawState(home, { OPENCLAW_STATE_DIR: stateDir }), checkout);
-		expect(commands(roomy)).toEqual(["mcp unset apple-cua", "mcp reload"]);
+		expect(commands(roomy)).toEqual(["mcp unset opencua", "mcp reload"]);
 	});
 });
 
-describe("#given the original pi #when the apple-cua package is installed #then pi's own settings decide", () => {
+describe("#given the original pi #when the opencua package is installed #then pi's own settings decide", () => {
 	it("installs once, reads the relative paths pi stores, and removes it again", () => {
 		expect(commands(planPiInstall(readPiState(home, {}), checkout))).toEqual([
 			`install ${join(checkout, "packages/pi-extension")}`,
@@ -223,7 +223,7 @@ describe("#given the original pi #when the apple-cua package is installed #then 
 		const agentDir = join(home, "pi-agent");
 		write(
 			join(agentDir, "settings.json"),
-			JSON.stringify({ packages: ["../apple-cua/packages/pi-extension", "npm:other"] }),
+			JSON.stringify({ packages: ["../opencua/packages/pi-extension", "npm:other"] }),
 		);
 		const state = readPiState(home, { PI_CODING_AGENT_DIR: agentDir });
 		expect(planPiInstall(state, checkout).outcome).toBe("unchanged");

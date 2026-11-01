@@ -82,7 +82,7 @@ regular-activation AppKit fixture built from `scripts/fixtures/background-input.
 warm round. Evidence: `profile-dist.json`.
 
 After: source `GuardedSession` handler under Vitest/Node with source aliases
-(`@apple-cua/core` -> `packages/core/src/index.ts`), same fixture, same shape
+(`@opencua/core` -> `packages/core/src/index.ts`), same fixture, same shape
 order. Evidence: `live-final.out` and `profile-source-live.json`.
 
 | Call | Before p50 / p95 | After p50 / p95 | Contract |
@@ -111,7 +111,7 @@ The typed field value was read back after the type-only call and contained
 - Type+vision: write dispatch 16.7-28.6 ms, vision capture 99.6-127.2 ms,
   final read 101.9-125.7 ms. `overlap_ms` is 97-113 ms between the keyboard
   lane and capture; the two native reads still serialize on the event loop.
-- `APPLE_CUA_TIMING=1` labels every phase used above
+- `OPENCUA_TIMING=1` labels every phase used above
   (`windowProbe.before/after`, `preflightInput`, `hands.*.dispatch`,
   `hands.vision.capture`, `hands.coordinator`, `readOutcome.getAppState`).
 
@@ -122,7 +122,7 @@ The typed field value was read back after the type-only call and contained
 - The fast path for `click`, `type_text`, and `press_keys` when their existing
   result shape is requested.
 - Parallel starting of independent baseline, action, vision, and outcome work.
-- Per-phase timing in the result and in `APPLE_CUA_TIMING=1` logs.
+- Per-phase timing in the result and in `OPENCUA_TIMING=1` logs.
 - Safety: observation token, preflight, window guard, stop switch, no replay.
 
 ## Named long calls (not fast-path failures)

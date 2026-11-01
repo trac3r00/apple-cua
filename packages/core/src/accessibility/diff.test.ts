@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { defined } from "@apple-cua/test-support";
+import { defined } from "@opencua/test-support";
 
 import { diffAxTreeChanges, diffAxTrees, diffAxTreesByKey } from "./diff.js";
 import type { AXTreeElement } from "./types.js";

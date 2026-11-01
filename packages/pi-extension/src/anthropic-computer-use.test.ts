@@ -246,7 +246,7 @@ describe("#given screenshot and wait #when executed #then the window is observed
 	});
 });
 
-describe("#given an action apple-cua-mcp cannot perform #when executed #then it is refused by name, not faked", () => {
+describe("#given an action opencua-mcp cannot perform #when executed #then it is refused by name, not faked", () => {
 	it.each(["scroll", "mouse_move", "cursor_position", "left_mouse_down", "left_mouse_up"] as const)(
 		"refuses %s without sending anything",
 		async (action) => {

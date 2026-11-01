@@ -11,8 +11,8 @@ import {
 	isBrowserBundle,
 	parseCursorMotion,
 	probeHostCapabilities,
-} from "@apple-cua/core";
-import type { AutomationStatus, CursorMotionConfig } from "@apple-cua/core";
+} from "@opencua/core";
+import type { AutomationStatus, CursorMotionConfig } from "@opencua/core";
 import type { Command } from "commander";
 import { syncSkillLinks } from "./client-skills.js";
 import {
@@ -49,6 +49,7 @@ import {
 	type PermissionRequestAnswer,
 	grantPermissions,
 } from "./permission-guide.js";
+import { portableDoctor, runPlatformSetup } from "./platform-onboarding.js";
 import {
 	type Delivery,
 	type Settings,
@@ -79,13 +80,14 @@ type Say = (text: string) => void;
 
 export interface LifecycleCommandOptions {
 	readonly isJsonOutput: () => boolean;
+	readonly platform?: NodeJS.Platform;
 }
 
 const print: Say = (text) => {
 	process.stdout.write(`${text}\n`);
 };
 
-const quiet: Say = () => {};
+const quiet: Say = () => undefined;
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -110,7 +112,7 @@ interface Terminal {
  */
 function openTerminal(): Terminal | undefined {
 	if (process.stdin.isTTY === true && process.stdout.isTTY === true) {
-		return { input: process.stdin, output: process.stdout, close: () => {} };
+		return { input: process.stdin, output: process.stdout, close: () => undefined };
 	}
 	let inputFd: number | undefined;
 	try {
@@ -237,7 +239,7 @@ function parseCursorMotionDurationFlag(value: string): number {
 }
 
 /**
- * The motion the low-level commands use: APPLE_CUA_CURSOR_MOTION when it is set (including "off"), else the saved
+ * The motion the low-level commands use: OPENCUA_CURSOR_MOTION when it is set (including "off"), else the saved
  * setting. null means disabled.
  */
 export function resolveCursorMotion(
@@ -323,7 +325,7 @@ async function askChoice<T extends string>(
 	choices: readonly T[],
 	current: T,
 ): Promise<T> {
-	for (;;) {
+	while (true) {
 		const answer = (await ask(`${label}, ${choices.join(" or ")} [${current}]: `)).trim().toLowerCase();
 		if (answer === "") {
 			return current;
@@ -342,7 +344,7 @@ async function askClients(
 	question: string,
 	onEnter: readonly ClientName[] = [],
 ): Promise<ClientName[]> {
-	for (;;) {
+	while (true) {
 		try {
 			const answer = (await ask(question)).trim();
 			if (answer === "") {
@@ -355,7 +357,7 @@ async function askClients(
 	}
 }
 
-/** The friendly mode of `apple-cua config`: one question per setting, Enter keeps the current value. */
+/** The friendly mode of `opencua config`: one question per setting, Enter keeps the current value. */
 export async function askForChanges(
 	settings: Settings,
 	ask: Ask,
@@ -410,7 +412,7 @@ function formatSettings(
 			? " (not saved yet: read from your existing registration)"
 			: " (not saved yet: the defaults)";
 	const lines = [
-		`apple-cua settings in ${show(layout.configPath)}${origin}`,
+		`opencua settings in ${show(layout.configPath)}${origin}`,
 		`  apps       ${settings.allowedApps.join(", ") || "any explicitly named app (no restriction)"}`,
 		`  delivery   ${settings.delivery}`,
 		`  toolset    ${settings.toolset}`,
@@ -420,7 +422,7 @@ function formatSettings(
 		`Registrations of ${show(layout.checkout)}:`,
 	];
 	if (registrations.length === 0) {
-		lines.push(`  none yet: apple-cua config --register ${CLIENT_NAMES.join("|")}`);
+		lines.push(`  none yet: opencua config --register ${CLIENT_NAMES.join("|")}`);
 	}
 	for (const inspection of registrations) {
 		const where = inspection.path === undefined ? "" : `${show(inspection.path)}: `;
@@ -436,7 +438,7 @@ async function runDetect(json: boolean): Promise<number> {
 	try {
 		registered = loadSettings(layout.configPath).settings.clients;
 	} catch (error) {
-		print(`${errorMessage(error)}\nFix or delete it, then run apple-cua config again.`);
+		print(`${errorMessage(error)}\nFix or delete it, then run opencua config again.`);
 		return 1;
 	}
 	const detected = detectClients(context);
@@ -447,7 +449,7 @@ async function runDetect(json: boolean): Promise<number> {
 	}
 	if (detected.length === 0) {
 		print(
-			"No agent client found on this Mac (Codex, Claude Code, OmO, Gemini CLI, Cursor, Hermes Agent, OpenClaw, pi). Register one by hand: apple-cua config --register json",
+			"No agent client found on this Mac (Codex, Claude Code, OmO, Gemini CLI, Cursor, Hermes Agent, OpenClaw, pi). Register one by hand: opencua config --register json",
 		);
 		return 0;
 	}
@@ -456,22 +458,22 @@ async function runDetect(json: boolean): Promise<number> {
 		print(`${CLIENT_LABELS[found.client].padEnd(12)} ${state.padEnd(15)} found by ${found.how}`);
 	}
 	if (fresh.length === 0) {
-		print("Every agent client found here already has apple-cua.");
+		print("Every agent client found here already has opencua.");
 		return 0;
 	}
 	const names = fresh.map((found) => CLIENT_LABELS[found.client]).join(", ");
 	if (!isInteractive()) {
 		print(
-			`Not registered yet: ${names}. Register with: apple-cua config --register ${fresh.map((found) => found.client).join(",")}`,
+			`Not registered yet: ${names}. Register with: opencua config --register ${fresh.map((found) => found.client).join(",")}`,
 		);
 		return 0;
 	}
 	const yes = await withPrompt(
-		async (ask) => !/^n(?:o)?$/i.test((await ask(`Add apple-cua to ${names}? [Y/n] `)).trim()),
+		async (ask) => !/^n(?:o)?$/i.test((await ask(`Add opencua to ${names}? [Y/n] `)).trim()),
 	);
 	if (!yes) {
 		print(
-			`Left them out. Add them later with: apple-cua config --register ${fresh.map((found) => found.client).join(",")}`,
+			`Left them out. Add them later with: opencua config --register ${fresh.map((found) => found.client).join(",")}`,
 		);
 		return 0;
 	}
@@ -490,7 +492,7 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 	try {
 		loaded = loadSettings(layout.configPath);
 	} catch (error) {
-		print(`${errorMessage(error)}\nFix or delete it, then run apple-cua config again.`);
+		print(`${errorMessage(error)}\nFix or delete it, then run opencua config again.`);
 		return 1;
 	}
 	let current = loaded.settings;
@@ -515,15 +517,16 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 	if (options.show === true || (change === undefined && !apply && (json || !isInteractive()))) {
 		const desired = plannedRegistration(layout, current);
 		const registrations = current.clients.map((client) => inspectClient(client, desired, context));
+		const status = {
+			configPath: layout.configPath,
+			saved: loaded.saved,
+			checkout: layout.checkout,
+			settings: current,
+			registrations,
+		};
 		print(
 			json
-				? JSON.stringify({
-						configPath: layout.configPath,
-						saved: loaded.saved,
-						checkout: layout.checkout,
-						settings: current,
-						registrations,
-					})
+				? JSON.stringify(status)
 				: formatSettings(current, { saved: loaded.saved, adopted }, layout, registrations),
 		);
 		return 0;
@@ -531,7 +534,7 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 	if (change === undefined && !apply) {
 		change = await withPrompt((ask, tell) => {
 			tell(
-				`Settings live in ${show(layout.configPath)} and apply to every MCP client apple-cua is registered with. Enter keeps a value.\n`,
+				`Settings live in ${show(layout.configPath)} and apply to every MCP client opencua is registered with. Enter keeps a value.\n`,
 			);
 			return askForChanges(
 				current,
@@ -542,7 +545,7 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 		});
 	}
 	if (change === undefined && !loaded.saved && !adopted) {
-		say(`No MCP client is registered yet. Register one with: apple-cua config --register ${CLIENT_NAMES.join("|")}`);
+		say(`No MCP client is registered yet. Register one with: opencua config --register ${CLIENT_NAMES.join("|")}`);
 		if (json) {
 			print(JSON.stringify({ ok: true, settings: current, changes: [], failures: [] }));
 		}
@@ -569,7 +572,7 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 		const entry = readClientEntry(client, context).entry;
 		if (entry !== undefined && entryAlive(entry) && !entryRunsCheckout(entry, layout.checkout)) {
 			say(
-				`${client.padEnd(7)}left alone: its apple-cua entry runs ${entry.command ?? "something else"}, another installation`,
+				`${client.padEnd(7)}left alone: its opencua entry runs ${entry.command ?? "something else"}, another installation`,
 			);
 			continue;
 		}
@@ -630,9 +633,7 @@ async function runConfig(options: ConfigCommandOptions, json: boolean): Promise<
 		}
 	}
 	if (next.clients.length === 0) {
-		print(
-			`No MCP client is registered yet. Register one with: apple-cua config --register ${CLIENT_NAMES.join("|")}`,
-		);
+		print(`No MCP client is registered yet. Register one with: opencua config --register ${CLIENT_NAMES.join("|")}`);
 	}
 	if (changes.some((item) => item.action === "added" || item.action === "updated" || item.action === "removed")) {
 		print("Restart your MCP clients so they pick up the change.");
@@ -663,7 +664,8 @@ const WATCH_NOTE_MS = 30_000;
  */
 async function watchUntilGranted(granted: () => boolean, say: Say): Promise<boolean> {
 	const started = Date.now();
-	for (let note = started + WATCH_NOTE_MS; Date.now() - started < WATCH_WAIT_MS; ) {
+	let note = started + WATCH_NOTE_MS;
+	while (Date.now() - started < WATCH_WAIT_MS) {
 		if (granted()) {
 			return true;
 		}
@@ -705,7 +707,8 @@ async function waitUntilGranted(granted: () => boolean): Promise<boolean> {
 	// A stream paused by an earlier wait stays paused when a listener is added, so Enter would never arrive.
 	terminal?.input.resume();
 	try {
-		for (const deadline = Date.now() + GRANT_WAIT_MS; Date.now() < deadline && !skipped; ) {
+		const deadline = Date.now() + GRANT_WAIT_MS;
+		while (Date.now() < deadline && !skipped) {
 			if (granted()) {
 				return true;
 			}
@@ -778,7 +781,8 @@ async function openPrivacyPane(url: string): Promise<boolean> {
 	const running = () => spawnSync("/usr/bin/pgrep", ["-x", "System Settings"], { stdio: "ignore" }).status === 0;
 	if (running()) {
 		spawnSync("/usr/bin/osascript", ["-e", 'quit app "System Settings"'], { stdio: "ignore" });
-		for (const deadline = Date.now() + SETTINGS_QUIT_WAIT_MS; running() && Date.now() < deadline; ) {
+		const deadline = Date.now() + SETTINGS_QUIT_WAIT_MS;
+		while (running() && Date.now() < deadline) {
 			await sleep(200);
 		}
 	}
@@ -822,7 +826,7 @@ async function runPermissionsGrantCommand(
 	if (json) {
 		print(JSON.stringify(outcome));
 	} else if (outcome.missing.length === 0) {
-		print(`\nAll set: "apple-cua-mcp" holds every permission it needs.`);
+		print(`\nAll set: "opencua-mcp" holds every permission it needs.`);
 	}
 	return outcome.missing.length === 0 ? 0 : 1;
 }
@@ -871,8 +875,18 @@ interface DoctorCommandOptions {
 	readonly wait: boolean;
 }
 
-async function runDoctorCommand(options: DoctorCommandOptions, json: boolean): Promise<number> {
-	const layout = resolveLayout();
+async function runDoctorCommand(
+	options: DoctorCommandOptions,
+	json: boolean,
+	platform: NodeJS.Platform = process.platform,
+): Promise<number> {
+	const layout = resolveLayout(process.env, undefined, platform);
+	if (platform !== "darwin") {
+		if (options.fix === true) reapplyRegistrations(layout, json ? quiet : print);
+		const report = portableDoctor(layout, platform);
+		print(json ? JSON.stringify(report) : formatDoctorReport(report));
+		return report.ready ? 0 : 1;
+	}
 	if (options.fix !== true) {
 		const report = evaluateDoctor(gatherDoctorFacts(layout));
 		print(json ? JSON.stringify(report) : formatDoctorReport(report));
@@ -924,7 +938,7 @@ function runUpdateCommand(): number {
 	return runUpdate(layout, {
 		git: gitIn(layout.checkout, process.env),
 		marker: readInstallMarker(layout.installMarkerPath),
-		runSetup: () => spawnSync("/bin/bash", [layout.setupScript, "--yes"], { stdio: "inherit" }).status ?? 1,
+		runSetup: () => runPlatformSetup(layout),
 		helperDigest: () => {
 			const result = spawnSync("/bin/bash", [layout.helperBuildScript, "--inputs-digest"], { encoding: "utf8" });
 			return result.status === 0 ? result.stdout.trim() || undefined : undefined;
@@ -950,10 +964,10 @@ async function runUninstallCommand(options: UninstallCommandOptions): Promise<nu
 	}
 	if (options.yes !== true) {
 		if (!isInteractive()) {
-			print("\nNothing was changed. Run apple-cua uninstall --yes to uninstall without being asked.");
+			print("\nNothing was changed. Run opencua uninstall --yes to uninstall without being asked.");
 			return 1;
 		}
-		if (!(await confirm("\nUninstall apple-cua"))) {
+		if (!(await confirm("\nUninstall opencua"))) {
 			print("Nothing was changed.");
 			return 1;
 		}
@@ -984,19 +998,19 @@ async function runUninstallCommand(options: UninstallCommandOptions): Promise<nu
 	});
 	print("");
 	if (outcome.backups.length > 0) {
-		print("Backups of the files apple-cua edited (kept):");
+		print("Backups of the files opencua edited (kept):");
 		for (const backup of outcome.backups) {
 			print(`  ${show(backup)}`);
 		}
 	}
 	if (outcome.failures.length > 0) {
-		print(`apple-cua is partly uninstalled: ${outcome.failures.length} step(s) failed, listed above.`);
+		print(`opencua is partly uninstalled: ${outcome.failures.length} step(s) failed, listed above.`);
 		return 1;
 	}
 	print(
 		plan.removeCheckout
-			? "apple-cua is uninstalled."
-			: `apple-cua is uninstalled. The developer checkout ${show(layout.checkout)} stays; delete it yourself, or uninstall with --purge.`,
+			? "opencua is uninstalled."
+			: `opencua is uninstalled. The developer checkout ${show(layout.checkout)} stays; delete it yourself, or uninstall with --purge.`,
 	);
 	return 0;
 }
@@ -1005,9 +1019,16 @@ async function runUninstallCommand(options: UninstallCommandOptions): Promise<nu
 
 export function registerLifecycleCommands(program: Command, options: LifecycleCommandOptions): void {
 	program
+		.command("setup")
+		.description("Install dependencies, build TypeScript and configure this checkout for the current platform")
+		.action(() => {
+			const platform = options.platform ?? process.platform;
+			process.exitCode = runPlatformSetup(resolveLayout(process.env, undefined, platform), platform);
+		});
+	program
 		.command("config")
 		.description(
-			"Choose the apps agents may use and the MCP clients apple-cua is registered with; asks when run in a terminal without flags. Settings live in ~/.apple-cua/config.json and apply to every registered client",
+			"Choose the apps agents may use and the MCP clients opencua is registered with; asks when run in a terminal without flags. Settings live in ~/.opencua/config.json and apply to every registered client",
 		)
 		.option(
 			"--allow <apps>",
@@ -1039,7 +1060,7 @@ export function registerLifecycleCommands(program: Command, options: LifecycleCo
 			`register with ${CLIENT_NAMES.join(", ")} (comma-separated, repeatable)`,
 			collectClients,
 		)
-		.option("--unregister <clients>", "remove the apple-cua registration from these clients", collectClients)
+		.option("--unregister <clients>", "remove the opencua registration from these clients", collectClients)
 		.option("--apply", "write the saved settings into every registered client again")
 		.option("--show", "print the settings and where each client is registered")
 		.option(
@@ -1056,7 +1077,7 @@ export function registerLifecycleCommands(program: Command, options: LifecycleCo
 	permissions
 		.command("grant")
 		.description(
-			'Walk through granting "apple-cua-mcp" Accessibility, Screen Recording and Automation: shows macOS\'s dialogs, opens System Settings and moves on as soon as each is on (also without a terminal, as when an agent runs it); exits 0 when everything is granted',
+			'Walk through granting "opencua-mcp" Accessibility, Screen Recording and Automation: shows macOS\'s dialogs, opens System Settings and moves on as soon as each is on (also without a terminal, as when an agent runs it); exits 0 when everything is granted',
 		)
 		.option("--no-open", "print how to open System Settings instead of opening it")
 		.option(
@@ -1070,7 +1091,7 @@ export function registerLifecycleCommands(program: Command, options: LifecycleCo
 	program
 		.command("doctor")
 		.description(
-			'Check this Mac, the native binaries, the signed helper, the permissions of "apple-cua-mcp" and the MCP client registrations without raising a permission prompt; exits 0 when ready, 1 otherwise',
+			'Check this Mac, the native binaries, the signed helper, the permissions of "opencua-mcp" and the MCP client registrations without raising a permission prompt; exits 0 when ready, 1 otherwise',
 		)
 		.option("--fix", "repair what is safe to repair, ask before what is not, and report what is left")
 		.option(
@@ -1086,7 +1107,11 @@ export function registerLifecycleCommands(program: Command, options: LifecycleCo
 			"with --fix and no terminal: open a missing permission's pane without watching for the switch",
 		)
 		.action(async (commandOptions: DoctorCommandOptions) => {
-			process.exitCode = await runDoctorCommand(commandOptions, options.isJsonOutput());
+			process.exitCode = await runDoctorCommand(
+				commandOptions,
+				options.isJsonOutput(),
+				options.platform ?? process.platform,
+			);
 		});
 
 	program
@@ -1101,7 +1126,7 @@ export function registerLifecycleCommands(program: Command, options: LifecycleCo
 	program
 		.command("uninstall")
 		.description(
-			"Remove apple-cua: its MCP client registrations (backed up), running servers, the helper app and its permissions, the apple-cua command and its PATH line, ~/.apple-cua, and the checkout install.sh created",
+			"Remove opencua: its MCP client registrations (backed up), running servers, the helper app and its permissions, the opencua command and its PATH line, ~/.opencua, and the checkout install.sh created",
 		)
 		.option("-y, --yes", "do not ask for confirmation")
 		.option("--purge", "also delete this checkout when it is a developer checkout")

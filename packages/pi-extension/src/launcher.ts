@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
-/** How to start apple-cua-mcp: the command, its arguments and the server's environment. */
+/** How to start opencua-mcp: the command, its arguments and the server's environment. */
 export interface ServerLaunch {
 	readonly command: string;
 	readonly args: readonly string[];
@@ -16,21 +16,21 @@ export interface LaunchFiles {
 	readonly read: (file: string) => string;
 }
 
-const COMMAND_ENV = "APPLE_CUA_MCP_COMMAND";
-const ARGS_ENV = "APPLE_CUA_MCP_ARGS";
-const ENV_PREFIX = "APPLE_CUA_";
-const SERVER_NAME = "apple-cua";
+const COMMAND_ENV = "OPENCUA_MCP_COMMAND";
+const ARGS_ENV = "OPENCUA_MCP_ARGS";
+const ENV_PREFIX = "OPENCUA_";
+const SERVER_NAME = "opencua";
 const NODE_FILES: LaunchFiles = { exists: existsSync, read: (file) => readFileSync(file, "utf8") };
 
-export const DOCTOR_HINT = "Run `apple-cua doctor` to see what is missing and how to fix it.";
+export const DOCTOR_HINT = "Run `opencua doctor` to see what is missing and how to fix it.";
 
 /**
  * Where the server comes from, first match wins:
- * 1. APPLE_CUA_MCP_COMMAND (with APPLE_CUA_MCP_ARGS, a JSON array), for a server installed elsewhere;
- * 2. the per-Mac bundle `apple-cua setup` writes, $APPLE_CUA_HOME/bundle/plugins/apple-cua/.mcp.json: its command,
+ * 1. OPENCUA_MCP_COMMAND (with OPENCUA_MCP_ARGS, a JSON array), for a server installed elsewhere;
+ * 2. the per-Mac bundle `opencua setup` writes, $OPENCUA_HOME/bundle/plugins/opencua/.mcp.json: its command,
  *    args and env, the same registration every other client runs;
  * 3. the signed helper and server.js built in the checkout this extension lives in.
- * The pi process's own APPLE_CUA_* variables are passed on top in every case. The helper is the launcher because
+ * The pi process's own OPENCUA_* variables are passed on top in every case. The helper is the launcher because
  * macOS charges Accessibility and Screen Recording to it, not to the terminal running pi.
  */
 export function resolveServerLaunch(
@@ -38,7 +38,7 @@ export function resolveServerLaunch(
 	packageRoot: string,
 	files: LaunchFiles = NODE_FILES,
 ): ServerLaunch {
-	const own = appleCuaVariables(env);
+	const own = openCuaVariables(env);
 	const command = nonEmpty(env[COMMAND_ENV]);
 	const args = nonEmpty(env[ARGS_ENV]);
 	if (command !== undefined) {
@@ -46,7 +46,7 @@ export function resolveServerLaunch(
 	}
 	if (args !== undefined) {
 		throw new Error(
-			`apple-cua: ${ARGS_ENV} is set without ${COMMAND_ENV}; set both to choose the server, or neither to use the installed one.`,
+			`opencua: ${ARGS_ENV} is set without ${COMMAND_ENV}; set both to choose the server, or neither to use the installed one.`,
 		);
 	}
 	const bundle = bundleRegistrationPath(env);
@@ -55,28 +55,28 @@ export function resolveServerLaunch(
 		return { ...registration, env: { ...registration.env, ...own } };
 	}
 	const dist = path.resolve(packageRoot, "../mcp/dist");
-	const helper = path.join(dist, "apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp");
+	const helper = path.join(dist, "opencua-mcp.app/Contents/MacOS/opencua-mcp");
 	const server = path.join(dist, "server.js");
 	const missing = [helper, server].filter((file) => !files.exists(file));
 	if (missing.length > 0) {
 		throw new Error(
-			`apple-cua: cannot find apple-cua-mcp: there is no ${bundle} and ${missing.join(" and ")} not found. ${DOCTOR_HINT} To run a server installed elsewhere, set ${COMMAND_ENV} and ${ARGS_ENV}.`,
+			`opencua: cannot find opencua-mcp: there is no ${bundle} and ${missing.join(" and ")} not found. ${DOCTOR_HINT} To run a server installed elsewhere, set ${COMMAND_ENV} and ${ARGS_ENV}.`,
 		);
 	}
 	return { command: helper, args: [server], env: own };
 }
 
-/** $APPLE_CUA_HOME/bundle/plugins/apple-cua/.mcp.json, with APPLE_CUA_HOME defaulting to ~/.apple-cua as the CLI does. */
+/** $OPENCUA_HOME/bundle/plugins/opencua/.mcp.json, with OPENCUA_HOME defaulting to ~/.opencua as the CLI does. */
 export function bundleRegistrationPath(env: Environment): string {
 	const home = nonEmpty(env["HOME"]) ?? homedir();
-	const appleCuaHome = path.resolve(nonEmpty(env["APPLE_CUA_HOME"]) ?? path.join(home, ".apple-cua"));
-	return path.join(appleCuaHome, "bundle/plugins/apple-cua/.mcp.json");
+	const openCuaHome = path.resolve(nonEmpty(env["OPENCUA_HOME"]) ?? path.join(home, ".opencua"));
+	return path.join(openCuaHome, "bundle/plugins/opencua/.mcp.json");
 }
 
-/** The apple-cua entry of a bundle .mcp.json; a file that cannot be read that way is an error, never skipped. */
+/** The opencua entry of a bundle .mcp.json; a file that cannot be read that way is an error, never skipped. */
 export function parseBundleRegistration(text: string, file: string): ServerLaunch {
 	const invalid = (detail: string) =>
-		new Error(`apple-cua: ${file} ${detail}. Run \`apple-cua setup\` to regenerate it, or \`apple-cua doctor\`.`);
+		new Error(`opencua: ${file} ${detail}. Run \`opencua setup\` to regenerate it, or \`opencua doctor\`.`);
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(text);
@@ -103,7 +103,7 @@ export function parseBundleRegistration(text: string, file: string): ServerLaunc
 	return { command, args, env: Object.fromEntries(variables) };
 }
 
-function appleCuaVariables(env: Environment): Record<string, string> {
+function openCuaVariables(env: Environment): Record<string, string> {
 	return Object.fromEntries(
 		Object.entries(env).filter(
 			(pair): pair is [string, string] => pair[0].startsWith(ENV_PREFIX) && pair[1] !== undefined,
@@ -119,7 +119,7 @@ function parseArgs(value: string): string[] {
 		parsed = undefined;
 	}
 	if (!isStringList(parsed)) {
-		throw new Error(`apple-cua: ${ARGS_ENV} must be a JSON array of strings, for example ["/path/to/server.js"].`);
+		throw new Error(`opencua: ${ARGS_ENV} must be a JSON array of strings, for example ["/path/to/server.js"].`);
 	}
 	return parsed;
 }

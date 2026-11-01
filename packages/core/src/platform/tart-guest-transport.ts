@@ -41,7 +41,7 @@ export async function readTartGuestTarget(directory: string, expectedOwner: Curs
 		record.store !== "guest-store" ||
 		!("vmName" in record) ||
 		typeof record.vmName !== "string" ||
-		!/^apple-cua-[a-z0-9-]+$/.test(record.vmName) ||
+		!/^(?:opencua|apple-cua)-[a-z0-9-]+$/.test(record.vmName) ||
 		!("runArguments" in record) ||
 		!Array.isArray(record.runArguments) ||
 		record.runArguments.length !== REQUIRED_FLAGS.length ||
@@ -147,7 +147,7 @@ export class TartGuestTransport {
 
 	async screenshot(): Promise<ScreenshotResult> {
 		const script = `set -eu
-d=$(mktemp -d /tmp/apple-cua-guest-shot.XXXXXX)
+d=$(mktemp -d /tmp/opencua-guest-shot.XXXXXX)
 trap 'rm -rf "$d"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT

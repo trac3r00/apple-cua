@@ -6,7 +6,7 @@ expand your own approval policy or switch to raw input to evade a guarded MCP de
 
 ## App not approved
 
-The host explicitly set `APPLE_CUA_ALLOWED_BUNDLE_IDS` to an empty value or a list that does
+The host explicitly set `OPENCUA_ALLOWED_BUNDLE_IDS` to an empty value or a list that does
 not contain the exact bundle ID. An unset variable permits any explicitly named app.
 `list_apps` can show IDs for human setup; listing is not approval. Ask the host owner to
 configure the intended app and restart the server. An observation token cannot override
@@ -73,11 +73,11 @@ use valid AX targets or stop; an image file's existence is not visual understand
 Use the explicit built paths from the checkout rather than assuming a bin alias:
 
 ```bash
-pnpm --filter @apple-cua/core --filter @apple-cua/cli --filter @apple-cua/mcp build
+pnpm --filter @opencua/core --filter @opencua/cli --filter @opencua/mcp build
 node packages/cli/dist/cli.js --help
 ```
 
-The MCP server is `node /absolute/path/to/apple-cua/packages/mcp/dist/server.js`; it speaks
+The MCP server is `node /absolute/path/to/opencua/packages/mcp/dist/server.js`; it speaks
 stdio JSON-RPC and is not a CLI with `--version`. Let the harness launch it with the approved
 bundle-ID environment. Do not print log messages into its protocol stdout.
 

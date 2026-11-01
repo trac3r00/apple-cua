@@ -88,20 +88,20 @@ jobs:
             done
           }
           check_natives committed
-          pnpm --filter @apple-cua/core build:native
+          pnpm --filter @opencua/core build:native
           check_natives rebuilt
 
       - name: Helper app is built for this Mac
         run: |
-          app=packages/mcp/dist/apple-cua-mcp.app
+          app=packages/mcp/dist/opencua-mcp.app
           codesign --verify --deep --strict "$app"
-          echo "launcher $(lipo -archs "$app/Contents/MacOS/apple-cua-mcp"), bundled node $(lipo -archs "$app/Contents/Resources/node"), uname -m $(uname -m)"
-          test "$(lipo -archs "$app/Contents/MacOS/apple-cua-mcp")" = "$(uname -m)"
+          echo "launcher $(lipo -archs "$app/Contents/MacOS/opencua-mcp"), bundled node $(lipo -archs "$app/Contents/Resources/node"), uname -m $(uname -m)"
+          test "$(lipo -archs "$app/Contents/MacOS/opencua-mcp")" = "$(uname -m)"
           test "$(lipo -archs "$app/Contents/Resources/node")" = "$(uname -m)"
           test "$(lipo -archs "$app/Contents/MacOS/history-recorder")" = "$(uname -m)"
           test "$(plutil -extract LSMinimumSystemVersion raw -o - "$app/Contents/Info.plist")" = "15.0"
           # shellcheck disable=SC2016 # a JavaScript template literal, not a shell expansion
-          "$app/Contents/MacOS/apple-cua-mcp" -e 'console.log(`helper runs node ${process.version} on ${process.arch}`)'
+          "$app/Contents/MacOS/opencua-mcp" -e 'console.log(`helper runs node ${process.version} on ${process.arch}`)'
 
       - name: Doctor passes everything but the grants only a person can make
         run: |

@@ -56,7 +56,7 @@ afterAll(async () => {
 
 async function runNative(mode: string, root: string) {
 	const child = Bun.spawn([binary, mode, root], {
-		env: { ...process.env, APPLE_CUA_STATE_DIR: root },
+		env: { ...process.env, OPENCUA_STATE_DIR: root },
 		stdout: "pipe",
 		stderr: "pipe",
 	});

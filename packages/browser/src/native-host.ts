@@ -92,7 +92,7 @@ async function nativeHostMain(): Promise<void> {
 		} else {
 			const frame = Buffer.concat([header, readExactly(size)]);
 			response = await resolveNativeMessage(process.argv[2] ?? "", frame, {
-				extensionId: process.env["APPLE_CUA_BROWSER_EXTENSION_ID"] ?? EXTENSION_ID,
+				extensionId: process.env["OPENCUA_BROWSER_EXTENSION_ID"] ?? EXTENSION_ID,
 			});
 		}
 	} catch {

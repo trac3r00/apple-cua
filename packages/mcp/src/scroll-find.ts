@@ -1,4 +1,4 @@
-import { axScrollActionFor, describeQuery, matchElements, suggestNearMisses } from "@apple-cua/core";
+import { axScrollActionFor, describeQuery, matchElements, suggestNearMisses } from "@opencua/core";
 import type {
 	AXTreeElement,
 	ElementQuery,
@@ -8,7 +8,7 @@ import type {
 	Point,
 	Rect,
 	WindowTextRead,
-} from "@apple-cua/core";
+} from "@opencua/core";
 import type { RunStepReport } from "./tool-result.js";
 
 export type FindDirection = "up" | "down" | "left" | "right";

@@ -15,7 +15,7 @@ function reportError(error: unknown): void {
 
 async function serve(): Promise<void> {
 	const [{ StopSwitch }, { BrowserBridge }, { BrowserController }] = await Promise.all([
-		import("@apple-cua/core/stop"),
+		import("@opencua/core/stop"),
 		import("./bridge.js"),
 		import("./controller.js"),
 	]);
@@ -23,7 +23,7 @@ async function serve(): Promise<void> {
 	const bridge = new BrowserBridge(new StopSwitch(), 15000, token);
 	const controller = new BrowserController(bridge);
 	bridge.setRpcHandler((input, signal) => controller.dispatch(input, signal));
-	const configuredPort = process.env["APPLE_CUA_BROWSER_PORT"];
+	const configuredPort = process.env["OPENCUA_BROWSER_PORT"];
 	const port = z.coerce
 		.number()
 		.int()

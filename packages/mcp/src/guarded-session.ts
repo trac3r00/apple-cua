@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { DecisionAgent, type PlatformAdapter, createDecider, macosAdapter } from "@apple-cua/agent";
+import { DecisionAgent, type PlatformAdapter, createDecider, macosAdapter } from "@opencua/agent";
 import {
 	AX_PRESS_ACTION,
 	HandsCoordinator,
@@ -13,7 +13,7 @@ import {
 	resolveAppPid,
 	runInInputScope,
 	suggestNearMisses,
-} from "@apple-cua/core";
+} from "@opencua/core";
 import type {
 	AXTreeElement,
 	AppOpenLauncher,
@@ -32,7 +32,7 @@ import type {
 	SystemPrompt,
 	TopLevelWindow,
 	WindowProbe,
-} from "@apple-cua/core";
+} from "@opencua/core";
 import { latestDecisionFrame } from "./decision-frame.js";
 import { settleDeferredOutcome } from "./deferred-settle.js";
 import type { ResolvedTargetClick } from "./mutation-actions.js";
@@ -90,7 +90,7 @@ const MAX_NEAR_MISSES = 5;
 const MAX_ALTERNATIVES = 3;
 
 function timingEnabled(): boolean {
-	return process.env["APPLE_CUA_TIMING"] === "1";
+	return process.env["OPENCUA_TIMING"] === "1";
 }
 async function timed<T>(label: string, run: () => Promise<T>): Promise<T> {
 	if (!timingEnabled()) {
@@ -1652,7 +1652,7 @@ export class GuardedSession {
 	/**
 	 * The Jev decision kernel: one indexed action-space observation per step, one fan-out decision
 	 * call, execution guarded by a preflight per step. The endpoint contract and every risk gate
-	 * live in @apple-cua/agent; this method supplies the safety rails (stop switch, preflight,
+	 * live in @opencua/agent; this method supplies the safety rails (stop switch, preflight,
 	 * per-step refusal) and the honest record.
 	 */
 	runDecision(request: DecisionRunRequest): Promise<ToolResult> {
@@ -1662,14 +1662,14 @@ export class GuardedSession {
 			if (halted !== undefined) {
 				return refusalResult(halted.reason, halted.message);
 			}
-			const endpoint = process.env["APPLE_CUA_DECISION_ENDPOINT"];
+			const endpoint = process.env["OPENCUA_DECISION_ENDPOINT"];
 
-			const model = process.env["APPLE_CUA_DECISION_MODEL"] ?? "typesafe/jev-latest";
+			const model = process.env["OPENCUA_DECISION_MODEL"] ?? "typesafe/jev-latest";
 			const apiKey = process.env["LLM_POOL_PROXY_API_KEY"] ?? process.env["TYPESAFE_API_KEY"];
 			if (endpoint === undefined || endpoint === "" || apiKey === undefined || apiKey === "") {
 				return refusalResult(
 					"decision-endpoint-not-configured",
-					"set APPLE_CUA_DECISION_ENDPOINT and LLM_POOL_PROXY_API_KEY (or TYPESAFE_API_KEY); scripts/llm-pool-systemone.mjs serves the local proxy",
+					"set OPENCUA_DECISION_ENDPOINT and LLM_POOL_PROXY_API_KEY (or TYPESAFE_API_KEY); scripts/llm-pool-systemone.mjs serves the local proxy",
 				);
 			}
 			let decisionSurface: InputObservation | undefined;

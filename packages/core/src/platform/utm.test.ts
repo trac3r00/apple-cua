@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { runInNewContext } from "node:vm";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 type Callback = (error: Error | null, stdout: string, stderr: string) => void;
 const native = vi.hoisted(() => ({

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
 
-import { type FakeAppleCuaServer, guardedWindowServer, textAnswer } from "../../test/support/fake-apple-cua.js";
+import { type FakeOpenCuaServer, guardedWindowServer, textAnswer } from "../../test/support/fake-opencua.js";
 import { McpBridge } from "../mcp-bridge.js";
 import { McpComputer, ObservedTarget, UNOBSERVED_DISPLAY } from "./mcp-computer.js";
 
 interface Rig {
-	readonly fake: FakeAppleCuaServer;
+	readonly fake: FakeOpenCuaServer;
 	readonly bridge: McpBridge;
 	readonly target: ObservedTarget;
 	readonly computer: McpComputer;
@@ -14,7 +14,7 @@ interface Rig {
 
 const rigs: Rig[] = [];
 
-async function rig(fake: FakeAppleCuaServer = guardedWindowServer()): Promise<Rig> {
+async function rig(fake: FakeOpenCuaServer = guardedWindowServer()): Promise<Rig> {
 	const target = new ObservedTarget();
 	const bridge = new McpBridge(fake.connect);
 	bridge.onToolResult((_name, args, result) => target.record(args, result));

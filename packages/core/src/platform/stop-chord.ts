@@ -36,9 +36,9 @@ const SYSTEM_TIMER: StopChordTimer = (callback, milliseconds) => {
 /**
  * Detects Control+Option+Command held together (Shift not held, so common shortcuts that add
  * Shift never trigger it). The flags are read from the HID system state, which reflects the
- * physical keyboard: apple-cua's own per-pid background events do not move it. Limitation:
+ * physical keyboard: opencua's own per-pid background events do not move it. Limitation:
  * foreground (attended) delivery posts events through the HID tap, so a batch that itself
- * presses all three modifiers for >= 150 ms could trip the chord; no apple-cua action holds
+ * presses all three modifiers for >= 150 ms could trip the chord; no opencua action holds
  * that combination.
  */
 export class StopChordDetector {
@@ -101,7 +101,7 @@ export class StopChordDetector {
 
 function defaultOnError(error: unknown): void {
 	const details = error instanceof Error ? error.message : String(error);
-	process.stderr.write(`apple-cua stop chord detector could not read the keyboard state: ${details}\n`);
+	process.stderr.write(`opencua stop chord detector could not read the keyboard state: ${details}\n`);
 }
 
 /**

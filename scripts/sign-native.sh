@@ -9,22 +9,30 @@
 #   scripts/sign-native.sh <path> [more paths...]
 #
 # Env:
-#   APPLE_CUA_CODESIGN_ID          identity name (default: "apple-cua dev")
-#   APPLE_CUA_CODESIGN_KEYCHAIN    keychain path (default: <repo>/.signing/apple-cua-signing.keychain-db)
-#   APPLE_CUA_CODESIGN_IDENTIFIER  code-signing identifier to stamp with --identifier. Set this to the
-#                                  apple-cua-mcp bundle id (dev.applecua.mcp) for a standalone helper that
+#   OPENCUA_CODESIGN_ID          identity name (default: "opencua dev")
+#   OPENCUA_CODESIGN_KEYCHAIN    keychain path (default: <repo>/.signing/opencua-signing.keychain-db)
+#   OPENCUA_CODESIGN_IDENTIFIER  code-signing identifier to stamp with --identifier. Set this to the
+#                                  opencua-mcp bundle id (dev.applecua.mcp) for a standalone helper that
 #                                  must share the MCP app's TCC grant (Accessibility, Input Monitoring)
 #                                  instead of appearing as its own entry in System Settings > Privacy.
 set -euo pipefail
 
-identity="${APPLE_CUA_CODESIGN_ID:-apple-cua dev}"
-identifier="${APPLE_CUA_CODESIGN_IDENTIFIER:-}"
+identity="${OPENCUA_CODESIGN_ID:-opencua dev}"
+identifier="${OPENCUA_CODESIGN_IDENTIFIER:-}"
 identifier_args=()
 if [[ -n "$identifier" ]]; then
 	identifier_args=(--identifier "$identifier")
 fi
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-keychain="${APPLE_CUA_CODESIGN_KEYCHAIN:-$repo/.signing/apple-cua-signing.keychain-db}"
+keychain="${OPENCUA_CODESIGN_KEYCHAIN:-$repo/.signing/opencua-signing.keychain-db}"
+keychain_password="opencua-local-signing"
+# Keychains created before the OpenCUA rename keep their original file name, password and identity name.
+legacy_keychain="$repo/.signing/apple-cua-signing.keychain-db"
+if [[ -z "${OPENCUA_CODESIGN_KEYCHAIN:-}" && ! -f "$keychain" && -f "$legacy_keychain" ]]; then
+	keychain="$legacy_keychain"
+	keychain_password="apple-cua-local-signing"
+	identity="${OPENCUA_CODESIGN_ID:-apple-cua dev}"
+fi
 
 if [[ ! -f "$keychain" ]]; then
 	echo "sign-native: no signing keychain at $keychain; falling back to ad-hoc (TCC grants will reset on every rebuild)" >&2
@@ -33,7 +41,7 @@ if [[ ! -f "$keychain" ]]; then
 fi
 
 if [[ "$identity" != "-" ]]; then
-	security unlock-keychain -p apple-cua-local-signing "$keychain" 2>/dev/null || true
+	security unlock-keychain -p "$keychain_password" "$keychain" 2>/dev/null || true
 fi
 
 for path in "$@"; do

@@ -1,5 +1,5 @@
 {
-	"name": "@apple-cua/core",
+	"name": "@opencua/core",
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Platform-abstracted computer-use interfaces",

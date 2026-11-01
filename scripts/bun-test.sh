@@ -6,7 +6,7 @@
 # case only the suite runs once more and the second result stands. Any other failure is reported as is.
 set -uo pipefail
 
-log="$(mktemp -t apple-cua-bun-test)"
+log="$(mktemp -t opencua-bun-test)"
 trap 'rm -f "$log"' EXIT
 
 bun test --isolate --parallel=4 "$@" 2>&1 | tee "$log"

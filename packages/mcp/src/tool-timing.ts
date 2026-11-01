@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
+import { resolveSnapshotRefs, withSnapshotRefs } from "./snapshot-refs.js";
 import type { ToolResult } from "./tool-result.js";
 
 const MAX_SAMPLES = 512;
@@ -284,16 +285,18 @@ export function installToolTiming(server: McpServer, usage: ToolUsageRegistry): 
 			heartbeat.start();
 			const startedAt = performance.now();
 			try {
-				const callbackArgs = hasInputSchema ? [input, extra] : [extra];
+				const callbackArgs = hasInputSchema ? [resolveSnapshotRefs(input), extra] : [extra];
 				const result = (await Reflect.apply(callback, undefined, callbackArgs)) as CallToolResult;
 				const durationMs = performance.now() - startedAt;
 				const bytes = resultBytes(result);
 				usage.record(name, durationMs, result.isError === true, bytes);
-				return mergeTiming(result as ToolResult, {
-					total: Math.round(durationMs * 10) / 10,
-					handler: Math.round(durationMs * 10) / 10,
-					bytes,
-				});
+				return withSnapshotRefs(
+					mergeTiming(result as ToolResult, {
+						total: Math.round(durationMs * 10) / 10,
+						handler: Math.round(durationMs * 10) / 10,
+						bytes,
+					}),
+				);
 			} catch (error: unknown) {
 				const durationMs = performance.now() - startedAt;
 				usage.record(name, durationMs, true, 0);

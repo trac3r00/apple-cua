@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 
-const key = "APPLE_CUA_GESTURE_PRIMER_SETTLE_MS";
+const key = "OPENCUA_GESTURE_PRIMER_SETTLE_MS";
 
 afterEach(() => {
 	delete process.env[key];

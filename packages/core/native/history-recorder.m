@@ -31,23 +31,44 @@ static BOOL gInputMonitoringActive = NO;
 static NSStatusItem *gStatusItem = nil;
 static NSTask *gDigestTask = nil;
 static time_t gLastDigestWindow = -1;
+static NSMenu *gSuggestionsMenu = nil;
+static NSMenuItem *gRecordItem = nil;
+static BOOL gDemonstrating = NO;
+static NSTask *gSuggestTask = nil;
+static time_t gLastSuggestWindow = -1;
 
 static NSString *HistoryLauncherPath(void) {
   NSString *configured =
-      NSProcessInfo.processInfo.environment[@"APPLE_CUA_HISTORY_LAUNCHER"];
-  return configured.length > 0
-             ? configured
-             : [NSHomeDirectory()
-                   stringByAppendingPathComponent:@".local/bin/apple-cua"];
+      NSProcessInfo.processInfo.environment[@"OPENCUA_HISTORY_LAUNCHER"]
+          ?: NSProcessInfo.processInfo
+                 .environment[@"APPLE_CUA_HISTORY_LAUNCHER"];
+  if (configured.length > 0)
+    return configured;
+  NSString *current =
+      [NSHomeDirectory() stringByAppendingPathComponent:@".local/bin/opencua"];
+  NSString *legacy = [NSHomeDirectory()
+      stringByAppendingPathComponent:@".local/bin/apple-cua"];
+  NSFileManager *files = NSFileManager.defaultManager;
+  return ![files fileExistsAtPath:current] && [files fileExistsAtPath:legacy]
+             ? legacy
+             : current;
 }
 
 static NSString *HomeStateRoot(void) {
   NSString *configured =
-      NSProcessInfo.processInfo.environment[@"APPLE_CUA_STATE_DIR"];
-  NSString *base =
-      (configured.length > 0)
-          ? configured
-          : [NSHomeDirectory() stringByAppendingPathComponent:@".apple-cua"];
+      NSProcessInfo.processInfo.environment[@"OPENCUA_STATE_DIR"]
+          ?: NSProcessInfo.processInfo.environment[@"APPLE_CUA_STATE_DIR"];
+  NSString *current =
+      [NSHomeDirectory() stringByAppendingPathComponent:@".opencua"];
+  NSString *legacy =
+      [NSHomeDirectory() stringByAppendingPathComponent:@".apple-cua"];
+  NSFileManager *files = NSFileManager.defaultManager;
+  NSString *base = (configured.length > 0)
+                       ? configured
+                       : (![files fileExistsAtPath:current] &&
+                                  [files fileExistsAtPath:legacy]
+                              ? legacy
+                              : current);
   return [base stringByAppendingPathComponent:@"cua-history"];
 }
 
@@ -463,7 +484,7 @@ static void InstallEventTap(void) {
   gInputMonitoringActive = YES;
 }
 
-@interface HistoryRecorderDelegate : NSObject <NSApplicationDelegate>
+@interface HistoryRecorderDelegate : NSObject <NSApplicationDelegate, NSMenuDelegate>
 @end
 
 @implementation HistoryRecorderDelegate
@@ -506,14 +527,18 @@ static void InstallEventTap(void) {
   status.enabled = NO;
   [menu addItem:status];
   [menu addItem:[NSMenuItem separatorItem]];
-  [menu addItemWithTitle:@"Open history..."
-                  action:@selector(openHistory:)
-           keyEquivalent:@""]
-      .target = self;
-  [menu addItemWithTitle:@"Record a skill..."
-                  action:@selector(recordSkill:)
-           keyEquivalent:@""]
-      .target = self;
+  NSMenuItem *suggestions =
+      [[NSMenuItem alloc] initWithTitle:@"Suggested skills"
+                                 action:NULL
+                          keyEquivalent:@""];
+  gSuggestionsMenu = [[NSMenu alloc] initWithTitle:@"Suggested skills"];
+  gSuggestionsMenu.delegate = self;
+  suggestions.submenu = gSuggestionsMenu;
+  [menu addItem:suggestions];
+  gRecordItem = [menu addItemWithTitle:@"Record a skill"
+                                action:@selector(recordSkill:)
+                         keyEquivalent:@""];
+  gRecordItem.target = self;
   [menu addItem:[NSMenuItem separatorItem]];
   [menu addItemWithTitle:@"Pause recording"
                   action:@selector(pause:)
@@ -542,42 +567,123 @@ static void InstallEventTap(void) {
                               : (gPaused ? @"paused" : @"recording");
   NSString *inputStatus = gInputMonitoringActive ? @"input capture on"
                                                  : @"input capture unavailable";
-  NSString *label = [NSString stringWithFormat:@"apple-cua; cua-history %@; %@",
+  NSString *label = [NSString stringWithFormat:@"opencua; cua-history %@; %@",
                                                recordingStatus, inputStatus];
   NSStatusBarButton *button = gStatusItem.button;
   NSImage *image = [NSImage imageWithSystemSymbolName:@"cursorarrow"
-                             accessibilityDescription:@"apple-cua running"];
+                             accessibilityDescription:@"opencua running"];
   image.template = YES;
   button.image = image;
   button.imagePosition = NSImageLeft;
-  button.title = @"apple-cua";
+  button.title = @"opencua";
   button.toolTip = label;
   [button setAccessibilityLabel:label];
   gStatusItem.menu.itemArray.firstObject.title = [NSString
       stringWithFormat:@"cua-history %@; %@", recordingStatus, inputStatus];
 }
 
-- (void)openHistory:(id)sender {
-  (void)sender;
-  [self launchHistoryWithArguments:@[ @"history", @"open" ]];
+- (void)refreshSuggestionsFile {
+  if (gSuggestTask.running)
+    return;
+  gSuggestTask = [[NSTask alloc] init];
+  gSuggestTask.executableURL = [NSURL fileURLWithPath:HistoryLauncherPath()];
+  gSuggestTask.arguments = @[ @"history", @"suggest", @"--write" ];
+  gSuggestTask.standardOutput = NSFileHandle.fileHandleWithNullDevice;
+  gSuggestTask.standardError = NSFileHandle.fileHandleWithNullDevice;
+  if (![gSuggestTask launchAndReturnError:NULL])
+    gSuggestTask = nil;
+}
+
+- (void)menuNeedsUpdate:(NSMenu *)menu {
+  [menu removeAllItems];
+  NSData *data = [NSData
+      dataWithContentsOfFile:[gRoot stringByAppendingPathComponent:
+                                        @"skill-suggestions.json"]];
+  id parsed = (data != nil && data.length <= 262144)
+                  ? [NSJSONSerialization JSONObjectWithData:data
+                                                    options:0
+                                                      error:NULL]
+                  : nil;
+  NSArray *items =
+      [parsed isKindOfClass:NSDictionary.class] ? parsed[@"suggestions"] : nil;
+  NSUInteger shown = 0;
+  if ([items isKindOfClass:NSArray.class]) {
+    for (NSDictionary *item in items) {
+      if (![item isKindOfClass:NSDictionary.class] ||
+          ![item[@"title"] isKindOfClass:NSString.class] ||
+          ![item[@"prompt"] isKindOfClass:NSString.class])
+        continue;
+      NSMenuItem *entry = [menu addItemWithTitle:item[@"title"]
+                                          action:@selector(copySuggestion:)
+                                   keyEquivalent:@""];
+      entry.target = self;
+      entry.representedObject = item[@"prompt"];
+      entry.toolTip = @"Copy a prompt for your agent";
+      shown += 1;
+      if (shown >= 10)
+        break;
+    }
+  }
+  if (shown == 0) {
+    NSMenuItem *empty = [menu addItemWithTitle:@"No repeated workflow yet"
+                                        action:NULL
+                                 keyEquivalent:@""];
+    empty.enabled = NO;
+  }
+  [self refreshSuggestionsFile];
+}
+
+- (void)copyToPasteboard:(NSString *)text {
+  [NSPasteboard.generalPasteboard clearContents];
+  [NSPasteboard.generalPasteboard setString:text
+                                    forType:NSPasteboardTypeString];
+  gStatusItem.button.toolTip =
+      @"Prompt copied. Paste it into your agent to create the skill.";
+}
+
+- (void)copySuggestion:(NSMenuItem *)sender {
+  if ([sender.representedObject isKindOfClass:NSString.class])
+    [self copyToPasteboard:sender.representedObject];
 }
 
 - (void)recordSkill:(id)sender {
   (void)sender;
-  [self launchHistoryWithArguments:@[ @"history", @"open", @"--record" ]];
-}
-
-- (void)launchHistoryWithArguments:(NSArray<NSString *> *)arguments {
   NSTask *task = [[NSTask alloc] init];
   task.executableURL = [NSURL fileURLWithPath:HistoryLauncherPath()];
-  task.arguments = arguments;
-  NSError *error = nil;
-  if (![task launchAndReturnError:&error]) {
+  BOOL stopping = gDemonstrating;
+  task.arguments = stopping ? @[ @"--json", @"history", @"record", @"stop" ]
+                            : @[ @"history", @"record", @"start" ];
+  NSPipe *output = [NSPipe pipe];
+  task.standardOutput = output;
+  task.standardError = NSFileHandle.fileHandleWithNullDevice;
+  task.terminationHandler = ^(NSTask *finished) {
+    NSData *data = [output.fileHandleForReading readDataToEndOfFile];
+    int status = finished.terminationStatus;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (status != 0) {
+        gStatusItem.button.toolTip =
+            stopping ? @"Could not stop the demonstration."
+                     : @"Could not start a demonstration. Is recording on?";
+        return;
+      }
+      gDemonstrating = !stopping;
+      gRecordItem.title =
+          gDemonstrating ? @"Stop recording skill" : @"Record a skill";
+      if (stopping) {
+        id parsed = [NSJSONSerialization JSONObjectWithData:data
+                                                    options:0
+                                                      error:NULL];
+        if ([parsed isKindOfClass:NSDictionary.class] &&
+            [parsed[@"prompt"] isKindOfClass:NSString.class])
+          [self copyToPasteboard:parsed[@"prompt"]];
+      }
+    });
+  };
+  if (![task launchAndReturnError:NULL]) {
     NSAlert *alert = [[NSAlert alloc] init];
-    alert.messageText = @"Could not open computer history";
-    alert.informativeText =
-        @"The apple-cua launcher is unavailable. Run setup, then restart "
-         "history recording to refresh its launcher path.";
+    alert.messageText = @"Could not reach the opencua launcher";
+    alert.informativeText = @"Run setup, then restart history recording to "
+                             "refresh its launcher path.";
     [alert runModal];
   }
 }
@@ -630,6 +736,11 @@ static void InstallEventTap(void) {
   [self refreshStatusTitle];
   PollFocus();
   [self summarizeCompletedActivity];
+  time_t window = WindowStart(time(NULL));
+  if (!gPaused && window != gLastSuggestWindow) {
+    gLastSuggestWindow = window;
+    [self refreshSuggestionsFile];
+  }
 }
 
 - (void)pause:(id)sender {

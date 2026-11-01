@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type HistorySkillDetection, type HistorySkillDraft, detectHistorySkillCandidates } from "@opencua/core";
 import { z } from "zod/v4";
 import {
 	type HistoryObservationSettings,
@@ -46,6 +47,24 @@ class FakeHistory implements HistoryToolSource {
 
 	resume(): void {
 		this.state = "running";
+	}
+
+	saved: HistorySkillDraft[] = [];
+
+	async suggestSkills(options: { readonly limit: number }): Promise<HistorySkillDetection> {
+		const step = (app: string, title: string) => ({
+			kind: "window.changed",
+			timestamp: "2026-11-01T10:00:00Z",
+			app: { name: app },
+			window: { title },
+		});
+		const flow = [step("Safari", "Invoice"), step("Notes", "Ledger"), step("Mail", "Draft")];
+		return detectHistorySkillCandidates([{ id: "2026-11-01T10-00-00Z", events: [...flow, ...flow] }], options);
+	}
+
+	async saveSkill(draft: HistorySkillDraft): Promise<string> {
+		this.saved.push(draft);
+		return `/skills/${draft.name}/SKILL.md`;
 	}
 }
 
@@ -109,5 +128,35 @@ describe("#given new settings #when update_settings is called #then the whole do
 			},
 		});
 		expect(result.isError).toBe(true);
+	});
+});
+
+describe("#given repeated recorded workflows #when suggest_skills is called #then candidates come back inline", () => {
+	it("returns a numbered candidate with readable steps and next-step guidance", async () => {
+		const client = await connect(new FakeHistory());
+		const result = payload(await client.callTool({ name: "cua_history_suggest_skills", arguments: { limit: 3 } }));
+		expect(result["candidates"]).toEqual([
+			expect.objectContaining({
+				number: 1,
+				occurrences: 2,
+				apps: ["Mail", "Notes", "Safari"],
+				steps: ["switch to Safari (invoice)", "switch to Notes (ledger)", "switch to Mail (draft)"],
+			}),
+		]);
+		expect(String(result["next"])).toContain("cua_history_save_skill");
+	});
+});
+
+describe("#given an approved draft #when save_skill is called #then the source saves it and returns the path", () => {
+	it("saves valid drafts and rejects an invalid name", async () => {
+		const fake = new FakeHistory();
+		const client = await connect(fake);
+		const draft = { name: "invoice-ledger", description: "Copy invoice totals into the ledger", body: "# Steps" };
+		expect(payload(await client.callTool({ name: "cua_history_save_skill", arguments: draft }))["path"]).toBe(
+			"/skills/invoice-ledger/SKILL.md",
+		);
+		const bad = await client.callTool({ name: "cua_history_save_skill", arguments: { ...draft, name: "Bad Name" } });
+		expect(bad.isError).toBe(true);
+		expect(fake.saved).toEqual([draft]);
 	});
 });

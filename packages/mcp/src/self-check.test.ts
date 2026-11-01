@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { HostCapabilities } from "@apple-cua/core";
-import type { AutomationStatus } from "@apple-cua/core";
-import { vi } from "@apple-cua/test-support";
+import type { HostCapabilities } from "@opencua/core";
+import type { AutomationStatus } from "@opencua/core";
+import { vi } from "@opencua/test-support";
 import { parsePermissionRequests, requestPermissions, selfCheckReport } from "./self-check.js";
 
 const HOST_WITHOUT_ACCESSIBILITY: HostCapabilities = {
@@ -16,8 +16,8 @@ afterEach(() => {
 
 describe("#given a helper process without Accessibility #when the self-check report is built #then it carries what the doctor needs", () => {
 	it("reports the grant state, the process that answered, native capture, approval and toolset", () => {
-		vi.stubEnv("APPLE_CUA_ALLOWED_BUNDLE_IDS", "com.apple.TextEdit, com.apple.finder");
-		vi.stubEnv("APPLE_CUA_TOOLSET", "lean");
+		vi.stubEnv("OPENCUA_ALLOWED_BUNDLE_IDS", "com.apple.TextEdit, com.apple.finder");
+		vi.stubEnv("OPENCUA_TOOLSET", "lean");
 
 		const report = selfCheckReport({
 			probeHost: () => HOST_WITHOUT_ACCESSIBILITY,

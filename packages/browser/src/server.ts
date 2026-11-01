@@ -286,7 +286,7 @@ export function createBrowserMcpServer(
 	controller: BrowserController = new BrowserController(bridge),
 ): McpServer {
 	bridge.setRpcHandler((input, signal) => controller.dispatch(input, signal));
-	const server = new McpServer({ name: "apple-cua-browser", version: "0.2.0" }, { instructions: INSTRUCTIONS });
+	const server = new McpServer({ name: "cua-browser", version: "0.2.0" }, { instructions: INSTRUCTIONS });
 	registerBrowserTools(server, controller);
 	return server;
 }

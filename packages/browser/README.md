@@ -1,7 +1,7 @@
 # apple-cua browser
 
 For an AI-guided install with explicit consent checkpoints and a background smoke test, see
-[skills/apple-cua-browser/README.md](../../skills/apple-cua-browser/README.md).
+[skills/cua-browser/README.md](../../skills/cua-browser/README.md).
 
 An MV3 Chromium extension, authenticated loopback WebSocket bridge, compact
 browser session API, and MCP server. It reuses apple-cua's file-backed stop gate.
@@ -14,8 +14,8 @@ For macOS Brave, install the owner-local login service once:
 
 ```sh
 pnpm --filter @apple-cua/browser build
-node skills/apple-cua-browser/scripts/browser.mjs install
-node skills/apple-cua-browser/scripts/browser.mjs doctor
+node skills/cua-browser/scripts/browser.mjs install
+node skills/cua-browser/scripts/browser.mjs doctor
 ```
 
 Load `packages/browser/extension/` as an unpacked extension once. Unpaired extensions obtain the private local
@@ -47,9 +47,9 @@ file preserves it across daemon restarts.
 For CLI-only use:
 
 ```sh
-node skills/apple-cua-browser/scripts/browser.mjs serve
-node skills/apple-cua-browser/scripts/browser.mjs call '{"action":"open","space":"demo","url":"https://example.com"}'
-node skills/apple-cua-browser/scripts/browser.mjs call '{"action":"observe","space":"demo","page":"p1"}'
+node skills/cua-browser/scripts/browser.mjs serve
+node skills/cua-browser/scripts/browser.mjs call '{"action":"open","space":"demo","url":"https://example.com"}'
+node skills/cua-browser/scripts/browser.mjs call '{"action":"observe","space":"demo","page":"p1"}'
 ```
 
 Run the daemon through your host's background process facility. Short CLI calls
@@ -58,8 +58,8 @@ This is an independent extension; no BrowserSkills runtime or extension is used.
 Codex's public repository does not establish a public, licensed browser-extension
 implementation to fork, so this package does not claim Codex-derived code.
 
-See [installation](../../skills/apple-cua-browser/references/installation.md)
-and [the skill](../../skills/apple-cua-browser/SKILL.md).
+See [installation](../../skills/cua-browser/references/installation.md)
+and [the skill](../../skills/cua-browser/SKILL.md).
 
 ## Tests on Bun
 
@@ -118,7 +118,7 @@ disposable profile, pairs through the actual options page, checks five independe
 fill/click flows, shadow-root targeting, stale/token refusal, stop/read behavior,
 compact deltas, independent skill CLI calls, Enter/scroll input, and human
 pause/resume. It closes its tabs/browser and removes its temporary profiles.
-It writes options screenshots under `.omo/evidence/apple-cua-browser`. The verifier
+It writes options screenshots under `.omo/evidence/cua-browser`. The verifier
 predates `select`, `browser_open_many`, and ranked matching; those paths are covered
 by the protocol, controller, background-worker, and page-runtime tests above, not by
 this end-to-end script.

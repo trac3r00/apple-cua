@@ -12,8 +12,8 @@ For Brave background usage on macOS, the preferred one-time setup is:
 
 ```sh
 pnpm --filter @apple-cua/browser build
-node skills/apple-cua-browser/scripts/browser.mjs install
-node skills/apple-cua-browser/scripts/browser.mjs doctor
+node skills/cua-browser/scripts/browser.mjs install
+node skills/cua-browser/scripts/browser.mjs doctor
 ```
 
 Load the unpacked extension once. The local native host pairs an unpaired
@@ -50,7 +50,7 @@ Both expose the same authenticated local CLI endpoint.
 ```json
 {
   "mcpServers": {
-    "apple-cua-browser": {
+    "cua-browser": {
       "command": "node",
       "args": ["/absolute/apple-cua/packages/browser/dist/server.js"]
     }
@@ -68,14 +68,14 @@ The generated pairing key is retained in `~/.apple-cua/browser-connection.json`
 with owner-only permissions, so normal daemon restarts reuse it.
 Do not publish the token or include it in task reports.
 
-Install/link the `skills/apple-cua-browser` directory in your agent's skill
+Install/link the `skills/cua-browser` directory in your agent's skill
 directory using its ordinary skill installation mechanism. A directory symlink
 keeps the bundled CLI helper connected to this workspace. If copying the skill
 instead, set `APPLE_CUA_BROWSER_ROOT` to the workspace's absolute path.
 
 ```sh
-node skills/apple-cua-browser/scripts/browser.mjs status
-node skills/apple-cua-browser/scripts/browser.mjs call '{"action":"open","space":"my-task","url":"https://example.com"}'
+node skills/cua-browser/scripts/browser.mjs status
+node skills/cua-browser/scripts/browser.mjs call '{"action":"open","space":"my-task","url":"https://example.com"}'
 ```
 
 Each CLI call is a new process; named spaces, page labels, and observation

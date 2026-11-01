@@ -938,7 +938,7 @@ function runUpdateCommand(): number {
 	return runUpdate(layout, {
 		git: gitIn(layout.checkout, process.env),
 		marker: readInstallMarker(layout.installMarkerPath),
-		runSetup: () => spawnSync("/bin/bash", [layout.setupScript, "--yes"], { stdio: "inherit" }).status ?? 1,
+		runSetup: () => runPlatformSetup(layout),
 		helperDigest: () => {
 			const result = spawnSync("/bin/bash", [layout.helperBuildScript, "--inputs-digest"], { encoding: "utf8" });
 			return result.status === 0 ? result.stdout.trim() || undefined : undefined;

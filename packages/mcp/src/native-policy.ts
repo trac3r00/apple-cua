@@ -4,6 +4,7 @@ import {
 	MacOSHostComputer,
 	createLinuxHostComputer,
 	createWindowsHostComputer,
+	denyHostInteraction,
 	listTopLevelWindows,
 } from "@opencua/core";
 import type { GuardedComputerInterface, InputDelivery, WindowProbe } from "@opencua/core";
@@ -35,6 +36,11 @@ export function deliveryFromProcessEnvironment(): InputDelivery {
 
 export function createNativeComputer(platform: NodeJS.Platform = process.platform): GuardedComputerInterface {
 	const appApproval = new AppApprovalStore(allowedBundleIdsFromProcessEnvironment());
+	// Every backend is observation-only on the shared host, so an explicit attended request is a
+	// configuration error here too, not a per-action refusal later.
+	if (platform !== "darwin" && deliveryFromProcessEnvironment() === "attended") {
+		denyHostInteraction("global-input");
+	}
 	if (platform === "linux") return new GuardedPlatformComputer(createLinuxHostComputer(), { approval: appApproval });
 	if (platform === "win32") return new GuardedPlatformComputer(createWindowsHostComputer(), { approval: appApproval });
 	return new MacOSHostComputer({ appApproval, delivery: deliveryFromProcessEnvironment() });

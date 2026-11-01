@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { GuardedPlatformComputer, MacOSHostComputer } from "@opencua/core";
+import { vi } from "@opencua/test-support";
 import { createNativeComputer } from "./native-policy.js";
 
 describe("#given the host OS #when the native computer is created #then the matching backend is guarded", () => {
@@ -19,4 +20,16 @@ describe("#given the host OS #when the native computer is created #then the matc
 		expect(computer).toBeInstanceOf(MacOSHostComputer);
 		await computer.close();
 	});
+
+	it.each(["linux", "win32"] as const)(
+		"refuses an attended request on %s instead of silently observing",
+		(platform) => {
+			vi.stubEnv("OPENCUA_DELIVERY", "attended");
+			try {
+				expect(() => createNativeComputer(platform)).toThrow("agent-owned isolated session");
+			} finally {
+				vi.unstubAllEnvs();
+			}
+		},
+	);
 });

@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, rmSync, rmdirSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { StopSwitch } from "@opencua/core";
+import { z } from "zod/v4";
 import { syncSkillLinks } from "./client-skills.js";
 import {
 	type ClientContext,
@@ -14,6 +15,7 @@ import {
 	unregisterClient,
 	writeConfigFile,
 } from "./clients.js";
+import { HISTORY_SERVICE_LABEL, type HistoryServiceOptions, historyLaunchAgentPath } from "./history-service.js";
 import {
 	type Environment,
 	type InstallMarker,
@@ -50,6 +52,12 @@ export interface ClientEntryFacts {
 	readonly otherHelperBundleId?: string | undefined;
 }
 
+interface HistoryRegistration {
+	readonly launchAgent: string;
+	readonly binary: string | undefined;
+	readonly stateDirectory: string | undefined;
+}
+
 /** Everything uninstall decides from, read without changing anything. */
 export interface UninstallFacts {
 	readonly layout: Layout;
@@ -71,6 +79,8 @@ export interface UninstallFacts {
 	readonly stateDirectories: readonly string[];
 	/** The stop switch file, which every installation on this Mac shares (~/.opencua/stop.json). */
 	readonly stopPath: string;
+	readonly historyService: HistoryRegistration | undefined;
+	readonly historyDirectories: readonly string[];
 }
 
 export interface UninstallPlan {
@@ -91,6 +101,11 @@ export interface UninstallPlan {
 	readonly keepState: string | undefined;
 	readonly removeCheckout: boolean;
 	readonly checkoutReason: string;
+	readonly removeHistoryService:
+		| { readonly launchAgent: string; readonly binary: string; readonly stateDirectory: string }
+		| undefined;
+	readonly keepHistoryService: string | undefined;
+	readonly keepHistory: readonly string[];
 }
 
 /** Processes started from this checkout: its helper (launcher and bundled node), its server.js, its cursor overlay. */
@@ -119,6 +134,20 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 	const leaveRegistrations: { client: ClientName; reason: string }[] = [];
 	let sharedWith: string | undefined;
 	let anotherInstallationStays = facts.otherInstallerCheckout !== undefined;
+	const history = facts.historyService;
+	const ownsHistory =
+		history?.binary !== undefined &&
+		history.stateDirectory !== undefined &&
+		[join(layout.helperApp, "Contents/MacOS/history-recorder"), join(layout.nativeDir, "history-recorder")]
+			.map(canonicalPath)
+			.includes(canonicalPath(history.binary));
+	const removeHistoryService =
+		ownsHistory && history?.binary !== undefined && history.stateDirectory !== undefined
+			? { launchAgent: history.launchAgent, binary: history.binary, stateDirectory: history.stateDirectory }
+			: undefined;
+	if (history !== undefined && !ownsHistory) {
+		anotherInstallationStays = true;
+	}
 	for (const item of facts.clientEntries) {
 		if (item.entry === undefined) {
 			continue;
@@ -154,6 +183,8 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 		keepPermissions = installed
 			? 'no helper app is left to name, so no permission is reset; if "opencua-mcp" is still listed in System Settings > Privacy & Security, remove it there'
 			: undefined;
+	} else if (history !== undefined && !ownsHistory) {
+		keepPermissions = `the permissions of ${facts.helperBundleId}: another or unrecognized history service may still use them`;
 	} else if (sharedWith !== undefined) {
 		keepPermissions = `the permissions of ${facts.helperBundleId}: ${sharedWith} uses the same bundle id`;
 	}
@@ -212,6 +243,9 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 			: options.purge
 				? "--purge was given"
 				: "a developer checkout; --purge deletes it too",
+		removeHistoryService,
+		keepHistoryService: history !== undefined && !ownsHistory ? history.launchAgent : undefined,
+		keepHistory: facts.historyDirectories,
 	};
 }
 
@@ -221,6 +255,9 @@ export function formatPlan(plan: UninstallPlan): string {
 	const row = (verb: string, text: string) => {
 		lines.push(`  ${verb.padEnd(11)}${text}`);
 	};
+	if (plan.removeHistoryService !== undefined) {
+		row("stop/remove", `history login service ${show(plan.removeHistoryService.launchAgent)}`);
+	}
 	for (const client of plan.unregister) {
 		row(
 			"unregister",
@@ -257,6 +294,10 @@ export function formatPlan(plan: UninstallPlan): string {
 		...plan.leaveLaunchers.map((launcher) => `${show(launcher.path)}: ${launcher.reason}`),
 		...(plan.keepPermissions === undefined ? [] : [plan.keepPermissions]),
 		...(plan.keepState === undefined ? [] : [plan.keepState]),
+		...(plan.keepHistoryService === undefined
+			? []
+			: [`history login service ${show(plan.keepHistoryService)}: another or unrecognized installation`]),
+		...plan.keepHistory.map((path) => `recorded history ${show(path)}: retained, not deleted by uninstall`),
 		...(plan.pastedJson ? ['any "opencua" block you pasted into another MCP client: remove it by hand'] : []),
 	];
 	if (kept.length > 0) {
@@ -284,6 +325,7 @@ export interface UninstallDependencies {
 	/** `tccutil reset <service> <bundle id>`. */
 	readonly resetPermission: (service: string, bundleId: string) => PermissionReset;
 	readonly print: (text: string) => void;
+	readonly stopHistory: (options: HistoryServiceOptions) => Promise<void>;
 }
 
 export interface UninstallOutcome {
@@ -291,7 +333,7 @@ export interface UninstallOutcome {
 	readonly failures: readonly string[];
 }
 
-/** Carries out a plan. Every step runs even when an earlier one fails; failures are collected and reported. */
+/** History shutdown must succeed before teardown. Later independent failures are collected and reported. */
 export async function executeUninstall(plan: UninstallPlan, deps: UninstallDependencies): Promise<UninstallOutcome> {
 	const { layout } = plan;
 	const show = (path: string) => displayPath(path, layout.home);
@@ -309,6 +351,35 @@ export async function executeUninstall(plan: UninstallPlan, deps: UninstallDepen
 			done("FAILED", message);
 		}
 	};
+	const signalProcess = (pid: number, signal: "SIGTERM" | "SIGKILL") => {
+		if (!deps.isAlive(pid)) return;
+		try {
+			deps.signal(pid, signal);
+		} catch (error) {
+			if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+		}
+	};
+
+	if (plan.removeHistoryService !== undefined) {
+		const expected = plan.removeHistoryService;
+		try {
+			const current = readHistoryRegistration(layout.home);
+			if (current?.binary !== expected.binary || current.stateDirectory !== expected.stateDirectory) {
+				throw new Error("The history registration changed after planning; run uninstall again.");
+			}
+			await deps.stopHistory({
+				homeDirectory: layout.home,
+				binary: expected.binary,
+				stateDirectory: expected.stateDirectory,
+			});
+			done("removed", `history login service ${show(expected.launchAgent)}`);
+		} catch (error) {
+			const message = `stop history: ${error instanceof Error ? error.message : String(error)}`;
+			failures.push(message);
+			done("FAILED", message);
+			return { backups, failures };
+		}
+	}
 
 	for (const client of plan.unregister) {
 		attempt(`unregister ${client}`, () => {
@@ -327,14 +398,14 @@ export async function executeUninstall(plan: UninstallPlan, deps: UninstallDepen
 
 	if (plan.stopProcesses.length > 0) {
 		for (const item of plan.stopProcesses) {
-			attempt(`stop pid ${item.pid}`, () => deps.signal(item.pid, "SIGTERM"));
+			attempt(`stop pid ${item.pid}`, () => signalProcess(item.pid, "SIGTERM"));
 		}
 		for (let waited = 0; waited < 3_000 && plan.stopProcesses.some((item) => deps.isAlive(item.pid)); waited += 100) {
 			await deps.wait(100);
 		}
 		for (const item of plan.stopProcesses) {
 			if (deps.isAlive(item.pid)) {
-				attempt(`kill pid ${item.pid}`, () => deps.signal(item.pid, "SIGKILL"));
+				attempt(`kill pid ${item.pid}`, () => signalProcess(item.pid, "SIGKILL"));
 			}
 			done("stopped", `pid ${item.pid}: ${item.command}`);
 		}
@@ -419,6 +490,31 @@ export async function executeUninstall(plan: UninstallPlan, deps: UninstallDepen
 }
 
 // --- Reading the Mac -----------------------------------------------------------------------------------------------
+
+function readHistoryRegistration(home: string): HistoryRegistration | undefined {
+	const launchAgent = historyLaunchAgentPath(home);
+	if (!existsSync(launchAgent)) return undefined;
+	const result = spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", launchAgent], { encoding: "utf8" });
+	const unknown = { launchAgent, binary: undefined, stateDirectory: undefined };
+	if (result.status !== 0) return unknown;
+	try {
+		const parsed = z
+			.object({
+				Label: z.literal(HISTORY_SERVICE_LABEL),
+				ProgramArguments: z.array(z.string()).min(1),
+				EnvironmentVariables: z.record(z.string(), z.string()).optional(),
+			})
+			.safeParse(JSON.parse(result.stdout));
+		if (!parsed.success) return unknown;
+		return {
+			launchAgent,
+			binary: parsed.data.ProgramArguments[0],
+			stateDirectory: parsed.data.EnvironmentVariables?.["OPENCUA_STATE_DIR"],
+		};
+	} catch {
+		return unknown;
+	}
+}
 
 function bundleIdOf(app: string): string | undefined {
 	const result = spawnSync(
@@ -516,6 +612,7 @@ export function gatherUninstallFacts(layout: Layout, env: Environment): Uninstal
 	);
 	const stopFile = new StopSwitch().path;
 	const helperPresent = existsSync(layout.helperApp);
+	const historyService = readHistoryRegistration(layout.home);
 	return {
 		layout,
 		marker,
@@ -547,6 +644,16 @@ export function gatherUninstallFacts(layout: Layout, env: Environment): Uninstal
 		].filter((path) => existsSync(path)),
 		stateDirectories: [...new Set([layout.openCuaHome, dirname(stopFile)])],
 		stopPath: stopFile,
+		historyService,
+		historyDirectories: [
+			...new Set([
+				join(layout.openCuaHome, "cua-history"),
+				join(dirname(stopFile), "cua-history"),
+				...(historyService?.stateDirectory === undefined
+					? []
+					: [join(historyService.stateDirectory, "cua-history")]),
+			]),
+		].filter((path) => existsSync(path)),
 	};
 }
 

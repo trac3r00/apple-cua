@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { historyPaths, readHistoryState, writeHistoryState } from "@opencua/core";
 import {
 	HISTORY_SERVICE_LABEL,
 	type HistoryServiceOptions,
@@ -39,8 +41,8 @@ function baseOptions(calls: string[][]): HistoryServiceOptions {
 	};
 }
 
-describe("#given the watcher paths #when rendering the LaunchAgent #then it runs the binary at load and keeps it alive", () => {
-	it("configures RunAtLoad, KeepAlive, the binary, and the state-dir env", () => {
+describe("#given the watcher paths #when rendering the LaunchAgent #then only unexpected exits restart it", () => {
+	it("configures RunAtLoad, crash recovery, the binary, and the state-dir env", () => {
 		const plist = renderHistoryLaunchAgent({
 			launchAgent: "/home/Library/LaunchAgents/x.plist",
 			stateDirectory: "/home/.opencua",
@@ -53,6 +55,12 @@ describe("#given the watcher paths #when rendering the LaunchAgent #then it runs
 		expect(plist).toContain("<string>/opt/opencua/history-recorder</string>");
 		expect(plist).toContain("<key>RunAtLoad</key>");
 		expect(plist).toContain("<key>KeepAlive</key>");
+		const file = join(tempDir("cua-history-plist-"), "history.plist");
+		writeFileSync(file, plist);
+		const policy: unknown = JSON.parse(
+			execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", file], { encoding: "utf8" }),
+		);
+		expect(policy).toMatchObject({ KeepAlive: { SuccessfulExit: false } });
 		expect(plist).toContain("<string>/home/.opencua</string>");
 	});
 });
@@ -69,6 +77,47 @@ describe("#given a clean machine #when installing the service #then it writes th
 });
 
 describe("#given an installed service #when checking status then uninstalling #then it reports and boots out", () => {
+	it.each([true, false])("persists stopped after shutdown when loaded is %s", async (loadedInitially) => {
+		const options = baseOptions([]);
+		const paths = await installHistoryService(options);
+		writeHistoryState(historyPaths(paths.stateDirectory), "running");
+		let loaded = loadedInitially;
+		const stopOptions: HistoryServiceOptions = {
+			...options,
+			launchctl: async (args) => {
+				if (args[0] === "print") return { code: loaded ? 0 : 113, stderr: "" };
+				if (args[0] === "bootout") loaded = false;
+				return { code: 0, stderr: "" };
+			},
+		};
+
+		await uninstallHistoryService(stopOptions);
+
+		expect(readHistoryState(historyPaths(paths.stateDirectory))).toBe("stopped");
+		expect(await historyServiceStatus(stopOptions)).toMatchObject({
+			installed: false,
+			running: false,
+			state: "stopped",
+		});
+	});
+
+	it("keeps running state and the registration when shutdown fails", async () => {
+		const options = baseOptions([]);
+		const paths = await installHistoryService(options);
+		writeHistoryState(historyPaths(paths.stateDirectory), "running");
+		await expect(
+			uninstallHistoryService({
+				...options,
+				launchctl: async (args) => ({
+					code: args[0] === "print" ? 0 : 1,
+					stderr: "bootout failed",
+				}),
+			}),
+		).rejects.toThrow("bootout failed");
+		expect(readHistoryState(historyPaths(paths.stateDirectory))).toBe("running");
+		expect(readFileSync(paths.launchAgent, "utf8")).toContain(HISTORY_SERVICE_LABEL);
+	});
+
 	it("reports installed and removes the plist on uninstall", async () => {
 		const calls: string[][] = [];
 		const options = baseOptions(calls);

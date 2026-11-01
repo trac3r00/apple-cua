@@ -159,7 +159,12 @@ a 6-hour retention window; keystroke/click capture needs Input Monitoring and wi
 Accessibility, granted to the **same "opencua-mcp" entry** in System Settings (the watcher is signed
 with OpenCUA's identifier, so there is no separate recorder to approve). With
 `OPENCUA_HISTORY=1` the MCP server exposes the `cua-history` tools that read and control that
-watcher. Raw data never leaves the machine.
+watcher. Native capture cannot classify URLs or private browser windows, so the default
+privacy policy blocks it rather than ignoring exclusions. See [native recording limits and
+history-to-skill workflows](docs/history-skills.md) before enabling it. Capture is local;
+explicitly consented generation sends selected, redacted evidence to the configured model.
+Retention cleanup runs while the watcher is running, including when paused; stopped watchers
+cannot expire files.
 
 <p align="center">
   <img src="./docs/assets/doctor.svg" alt="OpenCUA doctor output: every check reports ok, ending in 'Ready: OpenCUA is installed and holds its permissions.'" width="760" />
@@ -176,7 +181,7 @@ Day-to-day lifecycle:
 | `opencua doctor [--fix]` | Check everything without triggering a permission prompt |
 | `opencua update` | Fast-forward, rebuild, re-apply registrations, run the doctor |
 | `opencua stop` / `resume` | Stop every agent on this Mac at once / lift the stop |
-| `opencua uninstall` | Remove registrations (backed up), helper, command, PATH line and `~/.opencua` |
+| `opencua uninstall` | Remove owned registrations/login services, helper, command, PATH line and installation state; retain recorded history and summaries at the reported path |
 
 ## See it work
 

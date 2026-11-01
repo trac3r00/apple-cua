@@ -40,7 +40,7 @@ import {
 	requestHelperPermissions,
 	runSelfCheck,
 } from "./doctor.js";
-import { historyLaunchAgentPath } from "./history-service.js";
+import { historyLaunchAgentPath, uninstallHistoryService } from "./history-service.js";
 import { type Layout, displayPath, readInstallMarker, resolveLayout } from "./layout.js";
 import {
 	type GrantDependencies,
@@ -975,6 +975,9 @@ async function runUninstallCommand(options: UninstallCommandOptions): Promise<nu
 	print("\nUninstalling:");
 	const outcome = await executeUninstall(plan, {
 		context: clientContext(layout),
+		stopHistory: async (historyOptions) => {
+			await uninstallHistoryService(historyOptions);
+		},
 		signal: (pid, signal) => {
 			process.kill(pid, signal);
 		},

@@ -14,8 +14,12 @@ OmO model, which may run remotely; the history interface requires explicit model
 It is opt-in and has two parts. A native always-on **watcher** (`opencua history start`) runs
 in the background as a login item with a menu-bar status item, and does the actual recording.
 The **MCP tools** (exposed when the server runs with `OPENCUA_HISTORY=1`) read and control
-that watcher: status, settings, pause, resume. Private browsing is always excluded, and apps the
-user excludes are never written. If the watcher is not installed, the tools still read any
+that watcher: status, settings, pause, resume, and local skill suggestions. The native watcher cannot classify URLs or
+private browser windows. It blocks capture when private-browsing exclusion, a default URL
+exclusion, or any URL block rule is requested, including the default privacy settings.
+Only the user's explicit choice to permit private-browsing capture with no URL exclusions
+enables native recording; never weaken those settings just to make recording work.
+Application exclusions remain enforced. If the watcher is not installed, the tools still read any
 segments on disk but nothing new is recorded.
 
 ## Before you rely on it
@@ -24,10 +28,13 @@ segments on disk but nothing new is recorded.
    - `running`: capturing activity according to the observation settings.
    - `paused`: the current segment is retained, but nothing new is recorded.
    - `stopped`: not recording; completed segments remain until retention expires.
-   If it is `stopped` or `paused` and the user expects fresh data, offer to resume it.
+   If it is `stopped` or `paused` and the user expects fresh data, first check whether
+   `state.json` reports an unsupported privacy policy. Resume only after resolving that
+   limitation with the user; do not silently change privacy preferences.
 2. Compare the current time against segment and file timestamps before treating data as fresh.
-   Raw segments are pruned after the configured retention window (6 hours by default), so old
-   activity survives only in the summaries the agent has written.
+   While the watcher is running, raw segments are pruned after the configured retention
+   window (6 hours by default), even when capture is paused. A stopped watcher cannot prune;
+   uninstall retains history and summaries and reports their paths.
 
 ## Where the data lives
 
@@ -87,10 +94,9 @@ prompt to give the agent. The menu-bar item lists the same suggestions and copie
 
 ## Legacy timeline page
 
-`opencua history open --web` still opens the older localhost timeline page.
-
-On that page, select activity, preview its redacted evidence, enable model sharing, and choose
-**Create skill draft**. That path sends selected evidence to the configured OmO model.
+`opencua history open --web` still opens the older localhost page. There, select activity,
+preview its redacted evidence, enable model sharing, and choose **Create skill draft**. That
+path sends selected evidence to the configured OmO model.
 
 The optional **Workflow suggestions** setting enables periodic model sharing and token use;
 it is off by default. Reviewed skills save under `~/.agents/skills/<name>/SKILL.md` without
@@ -131,12 +137,13 @@ separate "history-recorder" entry. Granting OpenCUA once covers the watcher. Wha
 depends on which of those permissions are on:
 
 - Foreground app and process id come from `NSWorkspace` and need no special permission
-  (`window.changed`).
+  (`window.changed`), when the configured privacy policy supports native capture.
 - The focused window title needs **Accessibility**.
 - Keystrokes and clicks (`keyboard.text_input`, `keyboard.shortcut`, `mouse.click`) come from a
   listen-only global `CGEventTap` and need **Input Monitoring**; without it the watcher still
   records window changes and its menu-bar item flags that input capture is off. Secure text
-  fields (password inputs) are never recorded, and `keyboard.shortcut` is written instead of
+  input is suppressed while macOS Secure Event Input is active; this is not a guarantee
+  that every application's password field enables that OS protection. `keyboard.shortcut` is written instead of
   `keyboard.text_input` when Command or Control is held.
 
 The event stream models `mouse.drag` as well; the current watcher does not emit it yet, so a

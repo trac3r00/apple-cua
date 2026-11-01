@@ -118,7 +118,7 @@ disposable profile, pairs through the actual options page, checks five independe
 fill/click flows, shadow-root targeting, stale/token refusal, stop/read behavior,
 compact deltas, independent skill CLI calls, Enter/scroll input, and human
 pause/resume. It closes its tabs/browser and removes its temporary profiles.
-It writes options screenshots under `.omo/evidence/opencua-browser`. The verifier
+It writes options screenshots under `.omo/evidence/cua-browser`. The verifier
 predates `select`, `browser_open_many`, and ranked matching; those paths are covered
 by the protocol, controller, background-worker, and page-runtime tests above, not by
 this end-to-end script.

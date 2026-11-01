@@ -196,10 +196,20 @@ async function readSegmentMetadata(root: string, id: string): Promise<Metadata> 
 	}
 }
 
-async function readEvents(root: string, id: string, remainingBytes: number): Promise<string> {
+async function readEvents(root: string, metadata: Metadata, remainingBytes: number): Promise<string> {
+	const { id, eventCount } = metadata;
 	const eventPath = join(root, "segments", id, "events.jsonl");
 	assertContained(root, eventPath);
-	const bytes = await readBounded(eventPath, Math.min(MAX_FILE_BYTES, remainingBytes));
+	let bytes: Buffer;
+	try {
+		bytes = await readBounded(eventPath, Math.min(MAX_FILE_BYTES, remainingBytes));
+	} catch (error) {
+		if (isNodeError(error, "ENOENT")) {
+			if (eventCount === 0) return "";
+			throw new Error(`Missing history events for segment "${id}".`);
+		}
+		throw error;
+	}
 	const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 	const records: string[] = [];
 	const lines = text.split("\n");
@@ -250,7 +260,7 @@ export async function listHistoryTimeline(root: string): Promise<readonly Histor
 			continue;
 		}
 		const metadata = await readSegmentMetadata(canonicalRoot, id);
-		const events = await readEvents(canonicalRoot, id, MAX_FILE_BYTES);
+		const events = await readEvents(canonicalRoot, metadata, MAX_FILE_BYTES);
 		const apps = new Set<string>();
 		for (const line of events.split("\n")) {
 			if (line.length === 0) {
@@ -279,17 +289,7 @@ export async function readHistoryEvidence(root: string, ids: readonly string[]):
 	let bytesUsed = 0;
 	for (const id of [...ids].sort()) {
 		const metadata = await readSegmentMetadata(canonicalRoot, id);
-		const eventPath = join(canonicalRoot, "segments", id, "events.jsonl");
-		assertContained(canonicalRoot, eventPath);
-		try {
-			await assertRegularFile(eventPath);
-		} catch (error) {
-			if (isNodeError(error, "ENOENT")) {
-				throw new Error(`Missing history events for segment "${id}".`);
-			}
-			throw error;
-		}
-		const events = await readEvents(canonicalRoot, id, MAX_FILE_BYTES);
+		const events = await readEvents(canonicalRoot, metadata, MAX_FILE_BYTES);
 		const block = `## ${metadata.id} (${metadata.startedAt} to ${metadata.endedAt})\n${events}`;
 		const size = Buffer.byteLength(block, "utf8") + (outputs.length === 0 ? 0 : 1);
 		if (bytesUsed + size > MAX_EVIDENCE_BYTES) {

@@ -4,7 +4,7 @@ import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { historyPaths, readHistoryState, resolveHistoryRecorderBinary } from "@opencua/core";
+import { historyPaths, readHistoryState, resolveHistoryRecorderBinary, writeHistoryState } from "@opencua/core";
 import { resolveStateDir } from "@opencua/core/stop";
 import { resolveLayout } from "./layout.js";
 
@@ -66,7 +66,10 @@ export function renderHistoryLaunchAgent(paths: HistoryServicePaths): string {
 		"\t<key>RunAtLoad</key>",
 		"\t<true/>",
 		"\t<key>KeepAlive</key>",
-		"\t<true/>",
+		"\t<dict>",
+		"\t\t<key>SuccessfulExit</key>",
+		"\t\t<false/>",
+		"\t</dict>",
 		"\t<key>EnvironmentVariables</key>",
 		"\t<dict>",
 		"\t\t<key>OPENCUA_STATE_DIR</key>",
@@ -189,6 +192,7 @@ export async function uninstallHistoryService(options: HistoryServiceOptions = {
 		throw new Error(`Could not inspect the cua-history LaunchAgent: ${status.stderr}`);
 	}
 	await rm(context.paths.launchAgent, { force: true });
+	writeHistoryState(historyPaths(context.paths.stateDirectory), "stopped");
 	return context.paths;
 }
 

@@ -25,7 +25,11 @@ acting when it later runs the skill.
 
 ## Legacy timeline page
 
-The older localhost page is still available with `opencua history open --web`:
+The older localhost page is still available:
+
+```sh
+opencua history open --web
+```
 
 Select recorded segments, preview the evidence, and describe the reusable
 workflow. Enable model sharing, then choose **Create skill draft**. Review and
@@ -44,6 +48,32 @@ URL as private: its random path grants access to that history session. The
 server listens only on `127.0.0.1`, closes after 15 minutes without activity,
 and can be stopped with **Close history** or Ctrl+C. Closing the page does not
 stop the independent recorder.
+
+## Native recording limits
+
+The native watcher can enforce application exclusions, but cannot identify
+browser URLs or private windows. It therefore pauses capture, without installing
+an input event tap, when the settings require private-browsing exclusion, a
+default URL exclusion, or any URL block rule. Its menu reports the unsupported
+policy and `cua-history/state.json` records the reason. The default privacy
+settings intentionally block native capture.
+
+Native recording is available only after the user explicitly chooses to allow
+private-browsing capture, uses `defaultURLBehavior: "observe"`, and has no URL
+exclusions. Do not loosen these settings merely to make recording start.
+Application exclusions still apply. After choosing a supported policy through
+the history settings tools, resume recording explicitly. Existing recordings
+can be reviewed without enabling capture.
+
+Pausing survives a recorder restart. Quitting the menu-bar recorder does not
+restart it immediately; launchd restarts it after an unexpected exit.
+While the watcher is running, its timer expires raw segments even when recording
+is paused or idle. A stopped or uninstalled process cannot expire files; retained
+history stays on disk until the watcher runs again or the user removes it.
+Full `opencua uninstall` stops and unregisters this checkout's history service
+before removing its helper. Another checkout's service is left alone. Recorded
+history and summaries are deliberately retained, and the uninstall plan lists
+their paths; uninstall does not silently erase them.
 
 ## Model requirements
 

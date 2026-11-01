@@ -1,5 +1,4 @@
-import { describe, expect, it } from "bun:test";
-import { vi } from "@opencua/test-support";
+import { describe, expect, it, mock } from "bun:test";
 
 import { HistoryCaptureLoop, type HistorySampler } from "./history-capture.js";
 import type { HistoryObservationInput } from "./history-observation.js";
@@ -91,7 +90,8 @@ describe("#given a sampler that throws #when the loop ticks on its timer #then t
 		const store = new HistorySegmentStore("/root", fs, () => BASE);
 		const recorder = new HistoryRecorder({ store, now: () => BASE });
 		await recorder.start();
-		const onError = vi.fn();
+		const reported = Promise.withResolvers<unknown>();
+		const onError = mock((error: unknown) => reported.resolve(error));
 		let fire: () => void = () => {};
 		const loop = new HistoryCaptureLoop(
 			recorder,
@@ -107,7 +107,7 @@ describe("#given a sampler that throws #when the loop ticks on its timer #then t
 
 		loop.start();
 		fire();
-		await new Promise((resolve) => setImmediate(resolve));
-		expect(onError).toHaveBeenCalledOnce();
+		await expect(reported.promise).resolves.toEqual(new Error("probe failed"));
+		expect(onError).toHaveBeenCalledTimes(1);
 	});
 });

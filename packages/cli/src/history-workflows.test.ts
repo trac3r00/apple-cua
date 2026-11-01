@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { HistorySegmentStore, nodeHistoryFs } from "@opencua/core";
 import { historyDraftSchema, listHistoryTimeline, readHistoryEvidence, saveHistorySkill } from "./history-workflows.js";
 
 const roots: string[] = [];
@@ -48,6 +49,21 @@ afterEach(() => {
 });
 
 describe("#given valid recorder segments #when listed #then newest entries include app names", () => {
+	it("reads a real suppressed-only segment beside recorded activity without hiding missing nonempty evidence", async () => {
+		const root = tempRoot();
+		const store = new HistorySegmentStore(root, nodeHistoryFs, () => Date.parse("2026-10-29T04:03:00Z"));
+		await store.recordSuppressed();
+		writeSegment(root, "2026-10-29T04-10-00Z", [event("mouse.click", { app: { name: "Finder" } })]);
+
+		expect(await listHistoryTimeline(root)).toMatchObject([
+			{ id: "2026-10-29T04-10-00Z", eventCount: 1, apps: ["Finder"] },
+			{ id: "2026-10-29T04-00-00Z", eventCount: 0, apps: [] },
+		]);
+		expect(await readHistoryEvidence(root, ["2026-10-29T04-00-00Z"])).toBe(
+			"## 2026-10-29T04-00-00Z (2026-10-29T04:00:00Z to 2026-10-29T04:10:00Z)\n",
+		);
+	});
+
 	it("lists events whose native records omit IDs", async () => {
 		const root = tempRoot();
 		mkdirSync(join(root, "segments"));

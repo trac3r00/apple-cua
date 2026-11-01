@@ -12,6 +12,9 @@ static NSString *gStatePath = nil;
 static NSString *gDefaultAppBehavior = @"observe";
 static NSMutableSet<NSString *> *gAllowBundleIds = nil;
 static NSMutableSet<NSString *> *gBlockBundleIds = nil;
+static BOOL gPrivacyPolicySupported = NO;
+static NSString *const kPrivacyPolicyError =
+    @"Native capture cannot enforce URL or private-browsing exclusions.";
 
 static BOOL gPaused = NO;
 static uint64_t gNextId = 1;
@@ -120,17 +123,22 @@ static void PruneOldSegments(time_t now) {
       [NSFileManager.defaultManager contentsOfDirectoryAtPath:gSegmentsDir
                                                         error:NULL];
   for (NSString *entry in entries) {
+    if (entry.length != 20) {
+      continue;
+    }
     struct tm parts;
     memset(&parts, 0, sizeof(parts));
-    NSString *normalized =
-        [entry stringByReplacingOccurrencesOfString:@"-"
-                                         withString:@":"
-                                            options:0
-                                              range:NSMakeRange(13, 6)];
-    if (strptime(normalized.UTF8String, "%Y-%m-%dT%H:%M:%SZ", &parts) == NULL) {
+    const char *end = strptime(entry.UTF8String, "%Y-%m-%dT%H-%M-%SZ", &parts);
+    if (end == NULL || *end != '\0') {
       continue;
     }
     time_t start = timegm(&parts);
+    if (![entry isEqualToString:IsoAt(start, YES)] ||
+        ![[NSFileManager.defaultManager attributesOfItemAtPath:SegmentDir(entry)
+                                                        error:NULL][NSFileType]
+            isEqualToString:NSFileTypeDirectory]) {
+      continue;
+    }
     if (start + (time_t)kSegmentWindowSeconds <
         now - (time_t)kRetentionSeconds) {
       [NSFileManager.defaultManager removeItemAtPath:SegmentDir(entry)
@@ -222,6 +230,9 @@ static void RecordSuppressed(void) {
 }
 
 static BOOL ShouldObserveApp(NSString *bundleId) {
+  if (!gPrivacyPolicySupported) {
+    return NO;
+  }
   NSString *key = bundleId.lowercaseString ?: @"";
   if ([gBlockBundleIds containsObject:key]) {
     return NO;
@@ -286,12 +297,19 @@ static void LoadState(void) {
 }
 
 static void WriteState(NSString *value) {
-  gPaused = [value isEqualToString:@"paused"];
-  NSDictionary *state = @{
-    @"state" : value,
+  NSString *effective =
+      !gPrivacyPolicySupported && [value isEqualToString:@"running"]
+          ? @"paused"
+          : value;
+  gPaused = [effective isEqualToString:@"paused"];
+  NSMutableDictionary *state = [@{
+    @"state" : effective,
     @"pid" : @(NSProcessInfo.processInfo.processIdentifier),
     @"updatedAt" : IsoAt(time(NULL), NO),
-  };
+  } mutableCopy];
+  if (!gPrivacyPolicySupported) {
+    state[@"error"] = kPrivacyPolicyError;
+  }
   NSData *data =
       [NSJSONSerialization dataWithJSONObject:state
                                       options:NSJSONWritingPrettyPrinted
@@ -304,6 +322,7 @@ static void LoadSettings(void) {
   [gAllowBundleIds removeAllObjects];
   [gBlockBundleIds removeAllObjects];
   gDefaultAppBehavior = @"observe";
+  gPrivacyPolicySupported = NO;
   NSData *data = [NSData dataWithContentsOfFile:gSettingsPath];
   if (data == nil) {
     return;
@@ -314,16 +333,30 @@ static void LoadSettings(void) {
   if (![settings isKindOfClass:NSDictionary.class]) {
     return;
   }
+  gPrivacyPolicySupported =
+      [settings[@"observePrivateBrowsing"] isEqual:@YES] &&
+      [settings[@"defaultURLBehavior"] isEqual:@"observe"];
   if ([settings[@"defaultApplicationBehavior"] isKindOfClass:NSString.class]) {
     gDefaultAppBehavior = settings[@"defaultApplicationBehavior"];
   }
   NSArray *rules = settings[@"rules"];
   if (![rules isKindOfClass:NSArray.class]) {
+    gPrivacyPolicySupported = NO;
     return;
   }
   for (NSDictionary *rule in rules) {
-    if (![rule isKindOfClass:NSDictionary.class] ||
-        ![rule[@"scope"] isEqualToString:@"app"]) {
+    if (![rule isKindOfClass:NSDictionary.class]) {
+      gPrivacyPolicySupported = NO;
+      continue;
+    }
+    if ([rule[@"scope"] isEqual:@"url"]) {
+      if (![rule[@"behavior"] isEqual:@"observe"]) {
+        gPrivacyPolicySupported = NO;
+      }
+      continue;
+    }
+    if (![rule[@"scope"] isEqual:@"app"]) {
+      gPrivacyPolicySupported = NO;
       continue;
     }
     NSString *bundleId = rule[@"bundleID"];
@@ -347,7 +380,7 @@ static NSMutableDictionary *EventShell(NSString *kind, NSDictionary *app) {
 }
 
 static void PollFocus(void) {
-  if (gPaused) {
+  if (gPaused || !gPrivacyPolicySupported) {
     return;
   }
   NSDictionary *app = FrontmostApp();
@@ -375,14 +408,14 @@ static CGEventRef TapCallback(CGEventTapProxy proxy, CGEventType type,
                               CGEventRef cgEvent, void *info) {
   (void)proxy;
   (void)info;
+  if (gPaused || !gPrivacyPolicySupported) {
+    return cgEvent;
+  }
   if (type == kCGEventTapDisabledByTimeout ||
       type == kCGEventTapDisabledByUserInput) {
     if (gEventTap != NULL) {
       CGEventTapEnable(gEventTap, true);
     }
-    return cgEvent;
-  }
-  if (gPaused) {
     return cgEvent;
   }
   NSDictionary *app = FrontmostApp();
@@ -429,6 +462,9 @@ static CGEventRef TapCallback(CGEventTapProxy proxy, CGEventType type,
 }
 
 static void InstallEventTap(void) {
+  if (gPaused || !gPrivacyPolicySupported || gEventTap != NULL) {
+    return;
+  }
   CGEventMask mask = CGEventMaskBit(kCGEventKeyDown) |
                      CGEventMaskBit(kCGEventLeftMouseDown) |
                      CGEventMaskBit(kCGEventRightMouseDown) |
@@ -463,7 +499,8 @@ static void InstallEventTap(void) {
   gStatePath = [gRoot stringByAppendingPathComponent:@"state.json"];
   EnsureDir(gSegmentsDir);
   LoadSettings();
-  WriteState(@"running");
+  LoadState();
+  WriteState(gPaused ? @"paused" : @"running");
   [self buildStatusItem];
   InstallEventTap();
   [self refreshStatusTitle];
@@ -525,7 +562,9 @@ static void InstallEventTap(void) {
 }
 
 - (void)refreshStatusTitle {
-  NSString *recordingStatus = gPaused ? @"paused" : @"recording";
+  NSString *recordingStatus =
+      !gPrivacyPolicySupported ? @"blocked (URL/private exclusions unavailable)"
+                              : (gPaused ? @"paused" : @"recording");
   NSString *inputStatus = gInputMonitoringActive ? @"input capture on"
                                                  : @"input capture unavailable";
   NSString *label = [NSString stringWithFormat:@"opencua; cua-history %@; %@",
@@ -685,8 +724,15 @@ static void InstallEventTap(void) {
 
 - (void)tick:(NSTimer *)timer {
   (void)timer;
+  PruneOldSegments(time(NULL));
+  BOOL wasPaused = gPaused;
   LoadState();
   LoadSettings();
+  if (!gPrivacyPolicySupported && !gPaused) {
+    WriteState(@"paused");
+  } else if (wasPaused && !gPaused) {
+    InstallEventTap();
+  }
   [self refreshStatusTitle];
   PollFocus();
   [self summarizeCompletedActivity];
@@ -706,6 +752,7 @@ static void InstallEventTap(void) {
 - (void)resume:(id)sender {
   (void)sender;
   WriteState(@"running");
+  InstallEventTap();
   gLastFocusKey = nil;
   [self refreshStatusTitle];
 }

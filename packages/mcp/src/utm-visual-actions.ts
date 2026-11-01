@@ -1,4 +1,4 @@
-import type { UTMObservation } from "@apple-cua/core";
+import type { UTMObservation } from "@opencua/core";
 import { z } from "zod/v4";
 import type { UtmToolSource } from "./utm-tools.js";
 

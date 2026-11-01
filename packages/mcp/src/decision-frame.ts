@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { HotFrameSource, InputObservation } from "@apple-cua/core";
-import { captureWindowViaSck } from "@apple-cua/core";
+import type { HotFrameSource, InputObservation } from "@opencua/core";
+import { captureWindowViaSck } from "@opencua/core";
 
 /** One canonical JPEG binds cache identity, gateway pixels, and dispatch staleness checks. */
 export function latestDecisionFrame(

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 import type { AXTreeElement, AppState } from "../accessibility/types.js";
 import type { AppStateOptions, Rect, Size } from "../types/index.js";
 import type { OcrTextObservation, RecognizeTextOptions } from "./macos-ffi/vision.js";

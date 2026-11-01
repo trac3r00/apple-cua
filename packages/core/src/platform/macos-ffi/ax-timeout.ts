@@ -12,7 +12,7 @@ export const DEFAULT_AX_MESSAGING_TIMEOUT_SECONDS = 2;
 export const AX_ERROR_CANNOT_COMPLETE = -25204;
 
 export function resolveAxMessagingTimeoutSeconds(environment: NodeJS.ProcessEnv = process.env): number {
-	const raw = environment["APPLE_CUA_AX_TIMEOUT_SECONDS"];
+	const raw = environment["OPENCUA_AX_TIMEOUT_SECONDS"];
 	if (raw === undefined || raw.trim() === "") {
 		return DEFAULT_AX_MESSAGING_TIMEOUT_SECONDS;
 	}

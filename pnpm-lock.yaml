@@ -26,7 +26,7 @@ importers:
 
   packages/agent:
     dependencies:
-      '@apple-cua/core':
+      '@opencua/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -39,7 +39,7 @@ importers:
 
   packages/browser:
     dependencies:
-      '@apple-cua/core':
+      '@opencua/core':
         specifier: workspace:*
         version: link:../core
       '@modelcontextprotocol/sdk':
@@ -58,10 +58,10 @@ importers:
 
   packages/cli:
     dependencies:
-      '@apple-cua/browser':
+      '@opencua/browser':
         specifier: workspace:*
         version: link:../browser
-      '@apple-cua/core':
+      '@opencua/core':
         specifier: workspace:*
         version: link:../core
       commander:
@@ -102,13 +102,13 @@ importers:
 
   packages/mcp:
     dependencies:
-      '@apple-cua/agent':
+      '@opencua/agent':
         specifier: workspace:*
         version: link:../agent
-      '@apple-cua/browser':
+      '@opencua/browser':
         specifier: workspace:*
         version: link:../browser
-      '@apple-cua/core':
+      '@opencua/core':
         specifier: workspace:*
         version: link:../core
       '@modelcontextprotocol/sdk':

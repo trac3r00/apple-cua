@@ -1,13 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import type { IPhoneMirroring, MirroringObservation } from "@apple-cua/core";
-import type { StopStatusSource } from "@apple-cua/core";
-import {
-	InputInterrupted,
-	describeMirroringState,
-	describeUserStop,
-	findTexts,
-	runInInputScope,
-} from "@apple-cua/core";
+import type { IPhoneMirroring, MirroringObservation } from "@opencua/core";
+import type { StopStatusSource } from "@opencua/core";
+import { InputInterrupted, describeMirroringState, describeUserStop, findTexts, runInInputScope } from "@opencua/core";
 import { type PhoneContextFailure, phoneContextFailure } from "./phone-context.js";
 import { phoneFailureResult, projectPhoneObservation, projectPhoneSearch } from "./phone-result.js";
 import { findPhoneText } from "./phone-search.js";

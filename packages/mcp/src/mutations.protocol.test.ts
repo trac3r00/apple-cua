@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { copyForMatch, defined } from "@apple-cua/test-support";
+import { copyForMatch, defined } from "@opencua/test-support";
 import { createHarness, jsonPayload, jsonText, observe } from "./protocol-client-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
 

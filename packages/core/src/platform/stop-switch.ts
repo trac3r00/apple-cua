@@ -1,8 +1,9 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import "../env-compat.js";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-/** Who flipped the switch: the keyboard chord, the `apple-cua stop` command, or code calling the API. */
+/** Who flipped the switch: the keyboard chord, the `opencua stop` command, or code calling the API. */
 export type StopSource = "chord" | "cli" | "api";
 
 export type StopStatus =
@@ -14,14 +15,19 @@ export interface StopStatusSource {
 	status(): StopStatus;
 }
 
-/** Environment variable that relocates the state directory (default `~/.apple-cua`). */
-export const STATE_DIR_ENV = "APPLE_CUA_STATE_DIR";
+/** Environment variable that relocates the state directory (default `~/.opencua`). */
+export const STATE_DIR_ENV = "OPENCUA_STATE_DIR";
 const STOP_FILE_NAME = "stop.json";
 const MALFORMED_REASON = "malformed stop file";
 
-export function resolveStateDir(env: NodeJS.ProcessEnv = process.env): string {
-	const configured = env[STATE_DIR_ENV];
-	return configured !== undefined && configured !== "" ? configured : join(homedir(), ".apple-cua");
+export function resolveStateDir(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+	const configured = env[STATE_DIR_ENV] ?? env["APPLE_CUA_STATE_DIR"];
+	if (configured !== undefined && configured !== "") {
+		return configured;
+	}
+	const current = join(home, ".opencua");
+	const legacy = join(home, ".apple-cua");
+	return !existsSync(current) && existsSync(legacy) ? legacy : current;
 }
 
 function isStopSource(value: unknown): value is StopSource {
@@ -29,7 +35,7 @@ function isStopSource(value: unknown): value is StopSource {
 }
 
 /**
- * A file-backed, machine-wide stop switch. Every apple-cua process reads the same file, so one
+ * A file-backed, machine-wide stop switch. Every opencua process reads the same file, so one
  * stop halts every agent, and only a human running `resume` (or deleting the file) lifts it.
  * A stop file that cannot be parsed counts as stopped: failing closed is the safe answer for a
  * kill switch.
@@ -89,5 +95,5 @@ function malformedStop(): StopStatus {
 
 /** The sentence an agent is shown when the stop refuses its input. */
 export function describeUserStop(status: StopStatus & { readonly stopped: true }): string {
-	return `The user stopped computer use (${status.source} at ${status.stoppedAt}). Do not retry or try to resume; tell the user. They resume with \`apple-cua resume\`.`;
+	return `The user stopped computer use (${status.source} at ${status.stoppedAt}). Do not retry or try to resume; tell the user. They resume with \`opencua resume\`.`;
 }

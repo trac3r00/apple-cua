@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { AppState, AppStateOptions, TopLevelWindow } from "@apple-cua/core";
+import type { AppState, AppStateOptions, TopLevelWindow } from "@opencua/core";
 import { createHarness, jsonPayload, jsonText, observe } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 

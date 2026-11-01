@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
-import { FAKE_TOOLS, FakeAppleCuaServer, textAnswer } from "../test/support/fake-apple-cua.js";
+import { FAKE_TOOLS, FakeOpenCuaServer, textAnswer } from "../test/support/fake-opencua.js";
 import { McpBridge } from "./mcp-bridge.js";
 
 function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
@@ -12,8 +12,8 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
 	return { promise, resolve };
 }
 
-function listAppsServer(): FakeAppleCuaServer {
-	return new FakeAppleCuaServer(FAKE_TOOLS, "Set a goal, then observe.").handle("list_apps", () =>
+function listAppsServer(): FakeOpenCuaServer {
+	return new FakeOpenCuaServer(FAKE_TOOLS, "Set a goal, then observe.").handle("list_apps", () =>
 		textAnswer([{ name: "TextEdit", bundleId: "com.apple.TextEdit" }]),
 	);
 }
@@ -64,7 +64,7 @@ describe("#given the server exits on its own #when calls continue #then it is re
 		await bridge.close();
 	});
 
-	it("fails every later call with an error naming apple-cua doctor after a second exit", async () => {
+	it("fails every later call with an error naming opencua doctor after a second exit", async () => {
 		const fake = listAppsServer();
 		fake.stderr = "Fatal error: koffi failed to load";
 		const bridge = new McpBridge(fake.connect);
@@ -75,7 +75,7 @@ describe("#given the server exits on its own #when calls continue #then it is re
 		await fake.exit();
 
 		await expect(bridge.callTool("list_apps", {})).rejects.toThrow(/exited again after its one restart/);
-		await expect(bridge.callTool("list_apps", {})).rejects.toThrow(/koffi failed to load.*apple-cua doctor/s);
+		await expect(bridge.callTool("list_apps", {})).rejects.toThrow(/koffi failed to load.*opencua doctor/s);
 		expect(fake.connections).toBe(2);
 		await bridge.close();
 	});
@@ -121,9 +121,9 @@ describe("#given the session ends #when the bridge closes #then the server stops
 describe("#given the server cannot start #when the bridge starts #then the launch error surfaces", () => {
 	it("rejects with the connector's error", async () => {
 		const bridge = new McpBridge(async () => {
-			throw new Error("apple-cua: could not start /missing/helper. Run `apple-cua doctor`");
+			throw new Error("opencua: could not start /missing/helper. Run `opencua doctor`");
 		});
 
-		await expect(bridge.start()).rejects.toThrow(/could not start \/missing\/helper.*apple-cua doctor/);
+		await expect(bridge.start()).rejects.toThrow(/could not start \/missing\/helper.*opencua doctor/);
 	});
 });

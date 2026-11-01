@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { InputInterrupted, currentInputScope } from "@apple-cua/core";
-import type { PreflightResult, StopStatus, StopStatusSource } from "@apple-cua/core";
+import { InputInterrupted, currentInputScope } from "@opencua/core";
+import type { PreflightResult, StopStatus, StopStatusSource } from "@opencua/core";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { Deferred, FakeGuardedComputer } from "./protocol-test-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
@@ -163,7 +163,7 @@ describe("stop at dispatch #given the stop switch flips after the last check #wh
 			completed: 1,
 			stoppedEarly: true,
 			refused: "user-stopped",
-			steps: [{ status: "dispatched" }, { status: "skipped", reason: expect.stringContaining("apple-cua resume") }],
+			steps: [{ status: "dispatched" }, { status: "skipped", reason: expect.stringContaining("opencua resume") }],
 		});
 	});
 
@@ -213,7 +213,7 @@ describe("stop at dispatch #given the stop switch flips after the last check #wh
 		expect(jsonPayload(single)).toMatchObject({
 			actionDispatched: true,
 			refused: "user-stopped",
-			error: expect.stringContaining("apple-cua resume"),
+			error: expect.stringContaining("opencua resume"),
 		});
 		expect(typed).toEqual(["a", "b", "c"]);
 		expect(chain["runSteps"]).toMatchObject({
@@ -222,7 +222,7 @@ describe("stop at dispatch #given the stop switch flips after the last check #wh
 			refused: "user-stopped",
 			steps: [
 				{ status: "failed", reason: expect.stringContaining("stopped while this step was sending input") },
-				{ status: "skipped", reason: expect.stringContaining("apple-cua resume") },
+				{ status: "skipped", reason: expect.stringContaining("opencua resume") },
 			],
 		});
 		expect(inputEffects(computer.effects).filter((effect) => effect.kind === "key")).toEqual([]);

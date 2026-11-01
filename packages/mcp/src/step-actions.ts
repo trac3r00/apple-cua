@@ -1,5 +1,5 @@
-import { parseElementIndex } from "@apple-cua/core";
-import type { ElementQuery, GuardedComputerInterface, InputObservation, Point } from "@apple-cua/core";
+import { parseElementIndex } from "@opencua/core";
+import type { ElementQuery, GuardedComputerInterface, InputObservation, Point } from "@opencua/core";
 import type { RunStepDriver, StepDispatchOptions, StepTarget, StepWait, VerifyRequest } from "./guarded-session.js";
 import { validateElement } from "./guarded-session.js";
 import {

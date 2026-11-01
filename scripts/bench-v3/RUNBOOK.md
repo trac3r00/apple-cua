@@ -1,6 +1,6 @@
 # Reproducing benchmark v3
 
-Run from `/Users/bob/src/apple-cua` on the permissioned macOS workstation.
+Run from `/Users/bob/src/opencua` on the permissioned macOS workstation.
 `PREREGISTRATION.md` and its amendments define the experiment; `COVERAGE.md`
 records which scopes have actually been measured. This guide describes the
 implemented entry points, not a claim that all measurements have finished.
@@ -37,7 +37,7 @@ failures did not recur. See LEDGER.md for exact checks and artifact identities.
 
 ## Preconditions and ownership
 
-Use the registered apple-cua build and Cua Driver 0.34.0 with existing
+Use the registered OpenCUA build and Cua Driver 0.34.0 with existing
 Accessibility/Screen Recording grants. Agent routes require the already
 authenticated clients and registered subscription model. Attached-browser
 trials require the existing ready BrowserSkill instance. Do not substitute a

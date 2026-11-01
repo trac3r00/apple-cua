@@ -14,7 +14,7 @@ const READ_ONLY_ANNOTATIONS = { readOnlyHint: false, destructiveHint: true } as 
 
 /**
  * The Jev decision surface: the model hands a goal, the indexed action space and a per-step
- * fan-out decision call do the stepping. Requires APPLE_CUA_DECISION_ENDPOINT plus a key;
+ * fan-out decision call do the stepping. Requires OPENCUA_DECISION_ENDPOINT plus a key;
  * scripts/llm-pool-systemone.mjs serves the local endpoint when a direct one is unavailable.
  */
 export function registerDecisionTools(server: McpServer, session: GuardedSession): void {
@@ -22,7 +22,7 @@ export function registerDecisionTools(server: McpServer, session: GuardedSession
 		"run_decision",
 		{
 			description:
-				"Drive one app toward a goal with the Jev decision kernel: per step it observes an indexed element table, makes one fan-out decision call (operation + target + risk), and executes it. Low-risk UI steps run on their own; anything at or above the risk threshold stops as needs-approval unless approve_risk is true. max_steps caps the decision records processed (default 8, max 60). Needs APPLE_CUA_DECISION_ENDPOINT and LLM_POOL_PROXY_API_KEY or TYPESAFE_API_KEY.",
+				"Drive one app toward a goal with the Jev decision kernel: per step it observes an indexed element table, makes one fan-out decision call (operation + target + risk), and executes it. Low-risk UI steps run on their own; anything at or above the risk threshold stops as needs-approval unless approve_risk is true. max_steps caps the decision records processed (default 8, max 60). Needs OPENCUA_DECISION_ENDPOINT and LLM_POOL_PROXY_API_KEY or TYPESAFE_API_KEY.",
 			inputSchema: runDecisionSchema,
 			annotations: READ_ONLY_ANNOTATIONS,
 		},

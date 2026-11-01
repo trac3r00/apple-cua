@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { DockAction, DockSnapshot, DockSource, HostCapabilities, StopStatusSource } from "@apple-cua/core";
-import { createNativeDockSource, describeUserStop } from "@apple-cua/core";
+import type { DockAction, DockSnapshot, DockSource, HostCapabilities, StopStatusSource } from "@opencua/core";
+import { createNativeDockSource, describeUserStop } from "@opencua/core";
 import type { ToolResult } from "./tool-result.js";
 import { refusalResult, textResult } from "./tool-result.js";
 

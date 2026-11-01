@@ -23,7 +23,7 @@ type KeyModifier = "command" | "option" | "control" | "shift";
 const MAX_WAIT_SECONDS = 10;
 const DEFAULT_WAIT_SECONDS = 1;
 
-/** One OpenAI computer action as apple-cua-mcp calls; actions the server cannot do are refused by name. */
+/** One OpenAI computer action as opencua-mcp calls; actions the server cannot do are refused by name. */
 export async function executeOpenAIComputerAction(
 	input: OpenAIComputerAction,
 	computer: NativeComputer,

@@ -15,9 +15,9 @@ const appleServer = {
 	command: "node",
 	args: [path.join(repo, "packages/mcp/dist/server.js")],
 	env: {
-		APPLE_CUA_ALLOWED_BUNDLE_IDS:
+		OPENCUA_ALLOWED_BUNDLE_IDS:
 			"com.apple.finder,com.apple.TextEdit,com.apple.Safari,com.apple.systempreferences,com.apple.calculator",
-		APPLE_CUA_DELIVERY: "background",
+		OPENCUA_DELIVERY: "background",
 	},
 };
 const off = { command: "true", enabled: false };
@@ -25,13 +25,13 @@ const RULES =
 	"Rules: act only on the app windows and files the task names. Do not create, edit, rename or delete files with shell commands; the change must be made through the app. Do not quit apps or close windows unless the task says so. Never ask the user anything: if you cannot finish, say so plainly. When done, reply with one short line stating the result.";
 export const PROFILES = {
 	"omo-native": {
-		servers: { "apple-cua": off, "llm-pool-systemone": off },
+		servers: { opencua: off, "llm-pool-systemone": off },
 		hand: "You have no computer-use MCP server. Drive the apps with your built-in tools (for example osascript, System Events, screencapture).",
 		mcpPrefix: null,
 	},
 	"omo-cua": {
 		servers: {
-			"apple-cua": off,
+			opencua: off,
 			"llm-pool-systemone": off,
 			"cua-driver": { command: path.join(os.homedir(), ".local/bin/cua-driver"), args: ["mcp"] },
 		},
@@ -39,14 +39,14 @@ export const PROFILES = {
 		mcpPrefix: "cua-driver",
 	},
 	"omo-apple": {
-		servers: { "apple-cua": appleServer, "llm-pool-systemone": off },
-		hand: "Use the apple-cua MCP tools (find them with tool_search) for every app interaction. Do not drive apps with osascript or other shell commands.",
-		mcpPrefix: "apple-cua",
+		servers: { opencua: appleServer, "llm-pool-systemone": off },
+		hand: "Use the opencua MCP tools (find them with tool_search) for every app interaction. Do not drive apps with osascript or other shell commands.",
+		mcpPrefix: "opencua",
 	},
 	"omo-apple-jev": {
-		servers: { "apple-cua": appleServer },
-		hand: "Use the apple-cua MCP tools (find them with tool_search) for every app interaction. Do not drive apps with osascript or other shell commands. Use Jev (the llm-pool-systemone systemone_evaluate tool) as your decision kernel: before each UI action, send it the goal plus a compact candidate list from apple-cua (find_elements, or get_app_state with element_format=table) and act on the option it chooses.",
-		mcpPrefix: "apple-cua",
+		servers: { opencua: appleServer },
+		hand: "Use the opencua MCP tools (find them with tool_search) for every app interaction. Do not drive apps with osascript or other shell commands. Use Jev (the llm-pool-systemone systemone_evaluate tool) as your decision kernel: before each UI action, send it the goal plus a compact candidate list from opencua (find_elements, or get_app_state with element_format=table) and act on the option it chooses.",
+		mcpPrefix: "opencua",
 	},
 };
 

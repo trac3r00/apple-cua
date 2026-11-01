@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 const skyLightMock = vi.hoisted(() => {
 	const previousPsn = Buffer.alloc(8, 1);

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
 

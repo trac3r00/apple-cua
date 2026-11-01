@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Socket } from "node:net";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 const spawned = { count: 0 };
 vi.mock("node:fs", () => ({ existsSync: () => true }));
@@ -17,7 +17,7 @@ function refusedConnection(): Socket {
 	queueMicrotask(() => socket.destroy(new Error("ECONNREFUSED")));
 	return socket;
 }
-const SOCKET_PATH = "apple-cua-overlay-test.sock";
+const SOCKET_PATH = "opencua-overlay-test.sock";
 
 beforeEach(() => {
 	spawned.count = 0;

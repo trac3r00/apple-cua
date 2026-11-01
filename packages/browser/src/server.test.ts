@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { createServer } from "node:net";
-import { vi } from "@apple-cua/test-support";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { vi } from "@opencua/test-support";
 import { z } from "zod";
 import { BrowserBridge } from "./bridge.js";
 import * as connection from "./connection.js";

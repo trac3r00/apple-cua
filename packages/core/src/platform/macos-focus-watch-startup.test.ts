@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 const mocks = vi.hoisted(() => {
 	const workerHandlers = new Map<string, () => void>();

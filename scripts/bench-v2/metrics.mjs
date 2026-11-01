@@ -41,7 +41,7 @@ export function accountPayload(result) {
 export function normalizeLegacy(data, source) {
 	const results = [];
 	for (const [key, driver] of [
-		["apple_cua", "apple"],
+		["opencua", "apple"],
 		["cua_driver", "cua"],
 	]) {
 		for (const [scenario, row] of Object.entries(data.tasks?.[key] ?? {})) {

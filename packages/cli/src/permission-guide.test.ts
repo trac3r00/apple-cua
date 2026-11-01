@@ -1,10 +1,15 @@
 import { describe, expect, it } from "bun:test";
-import type { AutomationStatus } from "@apple-cua/core";
+import type { AutomationStatus } from "@opencua/core";
 import { PRIVACY_PANES } from "./doctor.js";
 import { type GrantDependencies, type HelperPermissions, grantPermissions } from "./permission-guide.js";
 
 interface FakeMac {
-	state: { accessibility: boolean; screenRecording: boolean; automation: Record<string, AutomationStatus> };
+	state: {
+		accessibility: boolean;
+		screenRecording: boolean;
+		inputMonitoring?: boolean;
+		automation: Record<string, AutomationStatus>;
+	};
 	/** What the person does when a dialog or pane shows up for a kind. */
 	readonly onRequest: Record<string, () => void>;
 	/** Whether the person switches it on while the guide waits, per wait. */
@@ -121,7 +126,8 @@ describe("#given a fresh helper with nothing granted #when a person runs the gui
 
 		expect(outcome.missing).toEqual(["Screen Recording"]);
 		expect(printed()).toContain(`open "${PRIVACY_PANES.screenRecording}"`);
-		expect(printed()).toContain("apple-cua permissions grant");
+		expect(printed()).toContain("opencua permissions grant");
+		expect(printed()).toContain("tccutil reset ScreenCapture dev.applecua.mcp");
 	});
 });
 
@@ -203,5 +209,104 @@ describe("#given an agent running the guide with no terminal #when a person is a
 		expect(printed()).toContain("moves on by itself");
 		expect(printed()).toContain("not switched on in time");
 		expect(printed()).not.toContain("type s");
+	});
+});
+
+describe("#given the cua-history watcher is installed #when a person runs the guide #then Input Monitoring is walked through too", () => {
+	it("asks Input Monitoring and opens its pane only when the option is on", async () => {
+		const mac: FakeMac = {
+			state: { accessibility: true, screenRecording: true, inputMonitoring: false, automation: {} },
+			onRequest: {
+				"switch-on": () => {
+					mac.state.inputMonitoring = true;
+				},
+			},
+			switchesOn: [true],
+		};
+		const withHistory = fake(mac);
+		const outcome = await grantPermissions(
+			{ mode: "terminal", openPanes: true, extraAutomationTargets: [], inputMonitoring: true },
+			withHistory.deps,
+		);
+		expect(outcome).toEqual({ granted: ["Input Monitoring"], missing: [], notAsked: [] });
+		expect(withHistory.calls).toEqual(["request input-monitoring", `open ${PRIVACY_PANES.inputMonitoring}`, "wait"]);
+
+		const without = fake({
+			state: { accessibility: true, screenRecording: true, inputMonitoring: false, automation: {} },
+			onRequest: {},
+			switchesOn: [],
+		});
+		const skipped = await grantPermissions(
+			{ mode: "terminal", openPanes: true, extraAutomationTargets: [] },
+			without.deps,
+		);
+		expect(skipped).toEqual({ granted: [], missing: [], notAsked: [] });
+		expect(without.calls).toEqual([]);
+	});
+});
+
+describe("#given a permission changes while the guide is open #when the next pane is considered #then it uses a fresh helper report", () => {
+	it("does not prompt for Screen Recording after a fresh report says it was granted during Accessibility", async () => {
+		const mac: FakeMac = {
+			state: { accessibility: false, screenRecording: false, inputMonitoring: false, automation: {} },
+			onRequest: {
+				accessibility: () => {
+					mac.state.accessibility = true;
+					mac.state.screenRecording = true;
+				},
+			},
+			switchesOn: [true],
+		};
+		const { deps, calls } = fake(mac);
+
+		const outcome = await grantPermissions({ mode: "terminal", openPanes: true, extraAutomationTargets: [] }, deps);
+
+		expect(calls).toEqual(["request accessibility", `open ${PRIVACY_PANES.accessibility}`, "wait"]);
+		expect(outcome).toEqual({ granted: ["Accessibility"], missing: [], notAsked: [] });
+	});
+
+	it("reports an unreadable final check separately from a permission still reported off", async () => {
+		const mac = fake({
+			state: { accessibility: false, screenRecording: true, automation: {} },
+			onRequest: {},
+			switchesOn: [],
+		});
+		let reads = 0;
+		const deps: GrantDependencies = {
+			...mac.deps,
+			read: () => {
+				reads += 1;
+				return reads === 3 ? undefined : mac.deps.read();
+			},
+			waitFor: async () => false,
+		};
+
+		const outcome = await grantPermissions({ mode: "terminal", openPanes: false, extraAutomationTargets: [] }, deps);
+
+		expect(outcome.missing).toEqual(["Accessibility"]);
+		expect(mac.printed()).toContain(
+			"Could not verify Accessibility: the helper did not return a fresh permission report.",
+		);
+		expect(mac.printed()).not.toContain("latest check from");
+	});
+
+	it("uses the final fresh report when a grant lands just after the wait expires", async () => {
+		const state = { accessibility: false, screenRecording: true, automation: {} };
+		const mac = fake({
+			state,
+			onRequest: {},
+			switchesOn: [],
+		});
+		const deps: GrantDependencies = {
+			...mac.deps,
+			waitFor: async () => {
+				state.accessibility = true;
+				mac.deps.read();
+				return false;
+			},
+		};
+		const outcome = await grantPermissions({ mode: "terminal", openPanes: false, extraAutomationTargets: [] }, deps);
+
+		expect(outcome).toEqual({ granted: ["Accessibility"], missing: [], notAsked: [] });
 	});
 });

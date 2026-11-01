@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { fetchDouble } from "@apple-cua/test-support";
+import { fetchDouble } from "@opencua/test-support";
 import { createDecider, questionsFor, validate } from "./decision.js";
 import type { ActionSpace } from "./types.js";
 

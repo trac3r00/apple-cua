@@ -103,7 +103,7 @@ describe("#given cursor identities #when resolving daemon sockets #then routing 
 	});
 
 	it("keeps hide and close operations on one transport away from another socket", async () => {
-		const directory = await mkdtemp(join(tmpdir(), "apple-cua-identity-test-"));
+		const directory = await mkdtemp(join(tmpdir(), "opencua-identity-test-"));
 		const paths = [join(directory, "one.sock"), join(directory, "two.sock")];
 		const received = [[], []] as string[][];
 		const servers: Server[] = [];

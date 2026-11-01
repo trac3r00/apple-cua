@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { once } from "node:events";
-import { vi, whenSettled } from "@apple-cua/test-support";
+import { vi, whenSettled } from "@opencua/test-support";
 import { WebSocket } from "ws";
 import { z } from "zod";
 import { BrowserBridge } from "./bridge.js";

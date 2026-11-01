@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { AppState, AppStateOptions } from "@apple-cua/core";
+import type { AppState, AppStateOptions } from "@opencua/core";
 import { GuardedSession } from "./guarded-session.js";
 import { jsonPayload } from "./protocol-client-harness.js";
 import { Deferred, FakeGuardedComputer } from "./protocol-test-harness.js";

@@ -17,7 +17,7 @@ export function detectHost(
 	if (name !== undefined) {
 		if (name.includes("claude")) detected = "claude-code";
 		else if (name.startsWith("codex")) detected = "codex";
-		else if (name === "apple-cua-pi-extension" || name.startsWith("pi-") || name === "pi") detected = "pi";
+		else if (name === "opencua-pi-extension" || name.startsWith("pi-") || name === "pi") detected = "pi";
 		else if (name.includes("omo") || name.includes("senpi")) detected = "omo";
 		else if (name.includes("openclaw")) detected = "openclaw";
 		else if (name.includes("hermes")) detected = "hermes";

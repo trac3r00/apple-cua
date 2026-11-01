@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 
 let closeHarness: (() => Promise<void>) | undefined;

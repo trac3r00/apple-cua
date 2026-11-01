@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { defined, vi } from "@apple-cua/test-support";
+import { defined, vi } from "@opencua/test-support";
 
 const fixture = vi.hoisted(() => {
 	const firstWindow = { role: "AXWindow" };

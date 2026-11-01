@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 import {
 	TerminalAutomationPermissionError,
 	TerminalNotRunningError,
@@ -69,14 +69,14 @@ describe("createTerminalSession", () => {
 
 	it("#given visible text arrives after dispatch #when capture polls #then the unique marker ends polling", async () => {
 		const { session, read } = setup();
-		read.mockReturnValueOnce("running").mockReturnValueOnce("running\napple-cua-marker-fixed");
+		read.mockReturnValueOnce("running").mockReturnValueOnce("running\nopencua-marker-fixed");
 		const delay = vi.fn(async () => undefined);
 		const capture = await session.runAndCapture("echo output", {
 			attempts: 3,
-			createMarker: () => "apple-cua-marker-fixed",
+			createMarker: () => "opencua-marker-fixed",
 			delay,
 		});
-		expect(capture).toEqual({ text: "running\napple-cua-marker-fixed", markerSeen: true });
+		expect(capture).toEqual({ text: "running\nopencua-marker-fixed", markerSeen: true });
 		expect(read).toHaveBeenCalledTimes(2);
 		expect(delay).toHaveBeenCalledTimes(1);
 	});
@@ -86,7 +86,7 @@ describe("createTerminalSession", () => {
 		read.mockReturnValueOnce("first poll").mockReturnValueOnce("last poll");
 		const capture = await session.runAndCapture("echo output", {
 			attempts: 2,
-			createMarker: () => "apple-cua-marker-fixed",
+			createMarker: () => "opencua-marker-fixed",
 			delay: async () => undefined,
 		});
 		expect(capture).toEqual({ text: "last poll", markerSeen: false });

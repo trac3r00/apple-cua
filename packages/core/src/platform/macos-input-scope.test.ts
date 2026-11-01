@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { defined, vi } from "@apple-cua/test-support";
+import { defined, vi } from "@opencua/test-support";
 
 const coreGraphicsMock = vi.hoisted(() => ({
 	getCurrentCursorPosition: vi.fn(() => ({ x: 1, y: 2 })),
@@ -81,15 +81,15 @@ function backgroundController(): InstanceType<typeof MacOSInputController> {
 
 /** Background cue rendering is env-gated at construction; some tests need the legacy silent behavior. */
 function withBackgroundCuesDisabled<T>(run: () => T): T {
-	const previous = process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"];
-	process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = "off";
+	const previous = process.env["OPENCUA_CURSOR_BACKGROUND_CUES"];
+	process.env["OPENCUA_CURSOR_BACKGROUND_CUES"] = "off";
 	try {
 		return run();
 	} finally {
 		if (previous === undefined) {
-			Reflect.deleteProperty(process.env, "APPLE_CUA_CURSOR_BACKGROUND_CUES");
+			Reflect.deleteProperty(process.env, "OPENCUA_CURSOR_BACKGROUND_CUES");
 		} else {
-			process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = previous;
+			process.env["OPENCUA_CURSOR_BACKGROUND_CUES"] = previous;
 		}
 	}
 }

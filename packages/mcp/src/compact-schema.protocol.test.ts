@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 import { createHarness, observe } from "./protocol-client-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
 import { compactStepSchema, runStepSchema } from "./tool-schemas.js";
@@ -14,7 +14,7 @@ const FULL_BUDGET_BYTES = 36_500;
 let closeHarness: (() => Promise<void>) | undefined;
 
 beforeEach(() => {
-	vi.stubEnv("APPLE_CUA_BROWSER", "off");
+	vi.stubEnv("OPENCUA_BROWSER", "off");
 });
 
 afterEach(async () => {

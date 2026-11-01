@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { resolveStateDir } from "@apple-cua/core/stop";
+import { resolveStateDir } from "@opencua/core/stop";
 import { z } from "zod";
 
 export const connectionSchema = z.object({

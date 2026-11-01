@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key><string>background-input</string>
-	<key>CFBundleIdentifier</key><string>local.apple-cua.background-qa</string>
-	<key>CFBundleName</key><string>apple-cua Background QA</string>
+	<key>CFBundleIdentifier</key><string>local.opencua.background-qa</string>
+	<key>CFBundleName</key><string>opencua Background QA</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>LSUIElement</key><true/>
 	<key>NSHighResolutionCapable</key><true/>

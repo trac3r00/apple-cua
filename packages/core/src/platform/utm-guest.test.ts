@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { runInNewContext } from "node:vm";
-import { vi, whenSettled } from "@apple-cua/test-support";
+import { vi, whenSettled } from "@opencua/test-support";
 import { windowsGuestDisplay } from "./utm-guest.js";
 
 describe("#given a guest process #when its completed display query is read #then dimensions are parsed", () => {

@@ -142,7 +142,7 @@ async function main() {
 				spec = {
 					command: "node",
 					args: [`${root}/packages/mcp/dist/server.js`],
-					env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit", APPLE_CUA_DELIVERY: "background" },
+					env: { OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit", OPENCUA_DELIVERY: "background" },
 				};
 			}
 			const client = new McpClient(spec);

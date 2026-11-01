@@ -25,7 +25,7 @@ export interface CursorMotionConfig {
 	readonly turnRadius?: number;
 }
 
-export const CURSOR_MOTION_ENV = "APPLE_CUA_CURSOR_MOTION";
+export const CURSOR_MOTION_ENV = "OPENCUA_CURSOR_MOTION";
 
 type NumericKey = Exclude<keyof CursorMotionConfig, "style" | "timing">;
 

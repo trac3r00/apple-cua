@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import type { Server } from "node:http";
 import { createServer } from "node:http";
-import type { HotFrameWorker } from "@apple-cua/core";
-import { HotFrameSource } from "@apple-cua/core";
-import * as core from "@apple-cua/core";
-import { vi } from "@apple-cua/test-support";
+import type { HotFrameWorker } from "@opencua/core";
+import { HotFrameSource } from "@opencua/core";
+import * as core from "@opencua/core";
+import { vi } from "@opencua/test-support";
 import { latestDecisionFrame } from "./decision-frame.js";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
@@ -99,7 +99,7 @@ describe("hot frame decision wiring", () => {
 				}
 			},
 		);
-		vi.stubEnv("APPLE_CUA_DECISION_ENDPOINT", `http://127.0.0.1:${mock.port}/v1/chat/completions`);
+		vi.stubEnv("OPENCUA_DECISION_ENDPOINT", `http://127.0.0.1:${mock.port}/v1/chat/completions`);
 		vi.stubEnv("LLM_POOL_PROXY_API_KEY", "test-key");
 		const frames = decisionFrames();
 		const computer = new FakeGuardedComputer();
@@ -172,7 +172,7 @@ describe("hot frame decision wiring", () => {
 			press_target: { choice: "9" },
 		});
 		const mock = await startDecisionMock([press, press, press]);
-		vi.stubEnv("APPLE_CUA_DECISION_ENDPOINT", `http://127.0.0.1:${mock.port}/v1/chat/completions`);
+		vi.stubEnv("OPENCUA_DECISION_ENDPOINT", `http://127.0.0.1:${mock.port}/v1/chat/completions`);
 		vi.stubEnv("LLM_POOL_PROXY_API_KEY", "test-key");
 		const frames = decisionFrames();
 		const computer = new FakeGuardedComputer();
@@ -200,7 +200,7 @@ describe("hot frame decision wiring", () => {
 		const mock = await startDecisionMock([
 			decisionAnswer({ operation: { choice: "PRESS", confidence: 1 }, press_target: { choice: "9" } }),
 		]);
-		vi.stubEnv("APPLE_CUA_DECISION_ENDPOINT", `http://127.0.0.1:${mock.port}/v1/chat/completions`);
+		vi.stubEnv("OPENCUA_DECISION_ENDPOINT", `http://127.0.0.1:${mock.port}/v1/chat/completions`);
 		vi.stubEnv("LLM_POOL_PROXY_API_KEY", "test-key");
 		const frames = decisionFrames();
 		const computer = new FakeGuardedComputer();
@@ -249,7 +249,7 @@ describe("#given a configured decision endpoint #when run_decision steps through
 				goal_satisfied: { noul: 0.95 },
 			}),
 		]);
-		vi.stubEnv("APPLE_CUA_DECISION_ENDPOINT", `http://127.0.0.1:${mock.port}/v1/chat/completions`);
+		vi.stubEnv("OPENCUA_DECISION_ENDPOINT", `http://127.0.0.1:${mock.port}/v1/chat/completions`);
 		vi.stubEnv("LLM_POOL_PROXY_API_KEY", "test-key");
 
 		const computer = new FakeGuardedComputer();
@@ -284,7 +284,7 @@ describe("#given a configured decision endpoint #when run_decision steps through
 				goal_satisfied: { noul: 0.05 },
 			}),
 		]);
-		vi.stubEnv("APPLE_CUA_DECISION_ENDPOINT", `http://127.0.0.1:${mock.port}/v1/chat/completions`);
+		vi.stubEnv("OPENCUA_DECISION_ENDPOINT", `http://127.0.0.1:${mock.port}/v1/chat/completions`);
 		vi.stubEnv("LLM_POOL_PROXY_API_KEY", "test-key");
 
 		const computer = new FakeGuardedComputer();
@@ -317,7 +317,7 @@ describe("#given a configured decision endpoint #when run_decision steps through
 		});
 		const responses = [press, press, press];
 		const mock = await startDecisionMock(responses);
-		vi.stubEnv("APPLE_CUA_DECISION_ENDPOINT", `http://127.0.0.1:${mock.port}/v1/chat/completions`);
+		vi.stubEnv("OPENCUA_DECISION_ENDPOINT", `http://127.0.0.1:${mock.port}/v1/chat/completions`);
 		vi.stubEnv("LLM_POOL_PROXY_API_KEY", "test-key");
 
 		const computer = new FakeGuardedComputer();
@@ -346,7 +346,7 @@ describe("#given a configured decision endpoint #when run_decision steps through
 
 describe("#given no decision endpoint #when run_decision is called #then it refuses with the setup instruction", () => {
 	it("fails closed with the env names", async () => {
-		vi.stubEnv("APPLE_CUA_DECISION_ENDPOINT", "");
+		vi.stubEnv("OPENCUA_DECISION_ENDPOINT", "");
 		vi.stubEnv("LLM_POOL_PROXY_API_KEY", "");
 		vi.stubEnv("TYPESAFE_API_KEY", "");
 

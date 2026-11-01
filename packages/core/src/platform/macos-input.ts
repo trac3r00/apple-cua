@@ -213,14 +213,14 @@ export function setScreenLayoutSourceForTesting(source: () => ScreenLayout | und
 
 /** Logged when an app was told it is active but no point is provably clear for its primer click. */
 const PRIMER_SKIPPED_MESSAGE =
-	"apple-cua: activation primer skipped: the display and window layout could not be read, so no point outside all of them is known; a first-mouse app (Finder) may spend the next background click on activating its window\n";
+	"opencua: activation primer skipped: the display and window layout could not be read, so no point outside all of them is known; a first-mouse app (Finder) may spend the next background click on activating its window\n";
 
 /**
- * Background activation (see MacOSInputController.activateBehind) is on unless APPLE_CUA_BACKGROUND_ACTIVATION turns it
+ * Background activation (see MacOSInputController.activateBehind) is on unless OPENCUA_BACKGROUND_ACTIVATION turns it
  * off (off, 0, false, no).
  */
 export function backgroundActivationEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
-	const value = environment["APPLE_CUA_BACKGROUND_ACTIVATION"]?.trim().toLowerCase();
+	const value = environment["OPENCUA_BACKGROUND_ACTIVATION"]?.trim().toLowerCase();
 	return !(value === "off" || value === "0" || value === "false" || value === "no");
 }
 
@@ -230,11 +230,11 @@ export type { InputDelivery };
 /**
  * Inter-character delay for typeText. Posting keystrokes back-to-back outruns the
  * target app's event loop and drops characters; the default paces each keystroke.
- * APPLE_CUA_TYPE_CHARACTER_DELAY_MS raises or lowers it (0 posts every character
+ * OPENCUA_TYPE_CHARACTER_DELAY_MS raises or lowers it (0 posts every character
  * back-to-back, which known-fast apps tolerate but slower ones drop).
  */
 export function typeCharacterDelayMilliseconds(environment: NodeJS.ProcessEnv = process.env): number {
-	const raw = environment["APPLE_CUA_TYPE_CHARACTER_DELAY_MS"]?.trim();
+	const raw = environment["OPENCUA_TYPE_CHARACTER_DELAY_MS"]?.trim();
 	if (raw === undefined || raw.length === 0) {
 		return TYPE_CHARACTER_DELAY_MS_DEFAULT;
 	}
@@ -446,7 +446,7 @@ export class MacOSInputController {
 	 * right after each action leaves some apps (Finder) deaf to the very next activation, while a chain of
 	 * actions shares one. An app held for another of its windows is told again, naming this one. True when
 	 * this controller holds the app active afterwards; the caller then schedules the release. Never done with
-	 * background activation turned off (APPLE_CUA_BACKGROUND_ACTIVATION=off), which avoids the release's autosave (see
+	 * background activation turned off (OPENCUA_BACKGROUND_ACTIVATION=off), which avoids the release's autosave (see
 	 * releaseActivation) at the cost of the clicks and window commands above.
 	 */
 	private async activateBehind(pid: number, window: SkyLightTargetWindow): Promise<boolean> {
@@ -1074,7 +1074,7 @@ export class MacOSInputController {
 	/**
 	 * Show where the agent is acting with the drawn overlay dot, and ripple it for a press. Background
 	 * delivery updates the drawn marker only when background cues are enabled (see
-	 * APPLE_CUA_CURSOR_BACKGROUND_CUES); otherwise it updates the logical pointer model silently.
+	 * OPENCUA_CURSOR_BACKGROUND_CUES); otherwise it updates the logical pointer model silently.
 	 */
 	showPointer(position: Point, press: boolean, pid = this.currentTargetPid): void {
 		if (this.isBackground && !this.backgroundCues) {

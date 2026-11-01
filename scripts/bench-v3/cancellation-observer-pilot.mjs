@@ -24,7 +24,7 @@ if (cancelMode) report.scope = "exploratory mutation cancellation; arrival times
 let spec = {
 	command: "node",
 	args: [`${root}/packages/mcp/dist/server.js`],
-	env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit", APPLE_CUA_DELIVERY: "background" },
+	env: { OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit", OPENCUA_DELIVERY: "background" },
 };
 if (route === "cua") spec = { command: `${homedir()}/.local/bin/cua-driver`, args: ["mcp"] };
 const client = new McpClient(spec);

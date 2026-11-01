@@ -1,5 +1,5 @@
-// The user's apple-cua settings, kept in $APPLE_CUA_HOME/config.json (default ~/.apple-cua/config.json). They are
-// the source of truth for every MCP client registration: each registered client's apple-cua entry carries them as
+// The user's opencua settings, kept in $OPENCUA_HOME/config.json (default ~/.opencua/config.json). They are
+// the source of truth for every MCP client registration: each registered client's opencua entry carries them as
 // environment variables, and a settings change is applied to all of them.
 
 import { spawnSync } from "node:child_process";
@@ -10,7 +10,7 @@ import {
 	type CursorMotionConfig,
 	cursorMotionFromEnvironment,
 	parseCursorMotion,
-} from "@apple-cua/core";
+} from "@opencua/core";
 import { type BundleInputs, type BundlePlan, planBundle, readSkillFiles, writeBundle } from "./bundle.js";
 import {
 	CLIENT_NAMES,
@@ -39,7 +39,7 @@ export interface Settings {
 	readonly iphone: boolean;
 	/** Cua Cursor Motion for the pointer overlay; omitted when disabled. */
 	readonly cursorMotion?: CursorMotionConfig | undefined;
-	/** The MCP clients apple-cua is registered with; settings changes are applied to each of them. */
+	/** The MCP clients opencua is registered with; settings changes are applied to each of them. */
 	readonly clients: readonly ClientName[];
 }
 
@@ -51,10 +51,10 @@ export const DEFAULT_SETTINGS: Settings = {
 	clients: [],
 };
 
-const ALLOW_ENV = "APPLE_CUA_ALLOWED_BUNDLE_IDS";
-const DELIVERY_ENV = "APPLE_CUA_DELIVERY";
-const TOOLSET_ENV = "APPLE_CUA_TOOLSET";
-const IPHONE_ENV = "APPLE_CUA_IPHONE";
+const ALLOW_ENV = "OPENCUA_ALLOWED_BUNDLE_IDS";
+const DELIVERY_ENV = "OPENCUA_DELIVERY";
+const TOOLSET_ENV = "OPENCUA_TOOLSET";
+const IPHONE_ENV = "OPENCUA_IPHONE";
 
 const MOTION_KEYS = [
 	"style",
@@ -467,7 +467,7 @@ export function bundleInputs(layout: BundleLayout, settings: Settings): BundleIn
 		skill = readSkillFiles(layout.skillSource);
 	} catch (error) {
 		throw new Error(
-			`cannot read the apple-cua skill at ${layout.skillSource} (${error instanceof Error ? error.message : String(error)}); re-run ./scripts/setup.sh in the checkout`,
+			`cannot read the opencua skill at ${layout.skillSource} (${error instanceof Error ? error.message : String(error)}); re-run ./scripts/setup.sh in the checkout`,
 		);
 	}
 	const env = Object.fromEntries(

@@ -27,7 +27,7 @@ const PRIMER_GAP_MILLISECONDS = 1;
 const PRIMER_SETTLE_MILLISECONDS_DEFAULT = 40;
 
 export function gesturePrimerSettleMilliseconds(): number {
-	const raw = process.env["APPLE_CUA_GESTURE_PRIMER_SETTLE_MS"]?.trim();
+	const raw = process.env["OPENCUA_GESTURE_PRIMER_SETTLE_MS"]?.trim();
 	if (raw === undefined || raw.length === 0) {
 		return PRIMER_SETTLE_MILLISECONDS_DEFAULT;
 	}

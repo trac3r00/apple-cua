@@ -9,7 +9,7 @@ import { McpClient } from "../bench-v2/client.mjs";
 const root = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const codexApp = path.join(os.homedir(), ".codex/computer-use/Codex Computer Use.app");
 export const SERVERS = {
-	"apple-cua": { command: "node", args: [path.join(root, "packages/mcp/dist/server.js")] },
+	opencua: { command: "node", args: [path.join(root, "packages/mcp/dist/server.js")] },
 	"cua-driver": { command: path.join(os.homedir(), ".local/bin/cua-driver"), args: ["mcp"] },
 	"codex-computer-use": {
 		command: path.join(

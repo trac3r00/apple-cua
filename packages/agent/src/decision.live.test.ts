@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { MacOSHostComputer } from "@apple-cua/core";
+import { MacOSHostComputer } from "@opencua/core";
 import { buildMacActionSpace } from "./action-space.js";
 import { createDecider } from "./decision.js";
 
@@ -7,15 +7,15 @@ import { createDecider } from "./decision.js";
  * The decision half of the loop, live: observe a real app, build the table, and ask the real
  * decision model once. Read-only — it never sends input.
  *
- * Opt-in: APPLE_CUA_LIVE_DECISION=1. Endpoint and model come from the environment so the same test
+ * Opt-in: OPENCUA_LIVE_DECISION=1. Endpoint and model come from the environment so the same test
  * works against a direct TypeSafe endpoint or a proxy that speaks the `{state, questions}` contract.
  */
-const enabled = process.env["APPLE_CUA_LIVE_DECISION"] === "1";
-const appName = process.env["APPLE_CUA_LIVE_APP"] ?? "Finder";
-const endpoint = process.env["APPLE_CUA_DECISION_ENDPOINT"] ?? "http://127.0.0.1:18989/v1/chat/completions";
-const model = process.env["APPLE_CUA_DECISION_MODEL"] ?? "typesafe/jev-latest";
+const enabled = process.env["OPENCUA_LIVE_DECISION"] === "1";
+const appName = process.env["OPENCUA_LIVE_APP"] ?? "Finder";
+const endpoint = process.env["OPENCUA_DECISION_ENDPOINT"] ?? "http://127.0.0.1:18989/v1/chat/completions";
+const model = process.env["OPENCUA_DECISION_MODEL"] ?? "typesafe/jev-latest";
 const apiKey = process.env["LLM_POOL_PROXY_API_KEY"] ?? process.env["TYPESAFE_API_KEY"];
-const goal = process.env["APPLE_CUA_LIVE_GOAL"] ?? "Switch the front window to list view.";
+const goal = process.env["OPENCUA_LIVE_GOAL"] ?? "Switch the front window to list view.";
 
 describe.skipIf(!enabled)("#given a live app and a real decision endpoint", () => {
 	it("#when one decision is requested #then the table fits the model's budget and the answer is from the offered set", async () => {

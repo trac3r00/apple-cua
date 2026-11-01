@@ -28,9 +28,9 @@ import {
 import { type AgentToolResult, type ExtensionAPI, defineTool } from "./pi/index.js";
 
 export interface ExtensionOptions {
-	/** Opens one connection to apple-cua-mcp; defaults to the resolved launcher over stdio. */
+	/** Opens one connection to opencua-mcp; defaults to the resolved launcher over stdio. */
 	readonly connect?: ConnectServer;
-	/** Where APPLE_CUA_* settings and launcher overrides are read; defaults to process.env. */
+	/** Where OPENCUA_* settings and launcher overrides are read; defaults to process.env. */
 	readonly env?: Environment;
 }
 
@@ -50,12 +50,12 @@ interface ComputerUseModel {
 	readonly id?: string;
 }
 
-const DISABLE_COMPUTER_USE_BETA_ENV = "APPLE_CUA_DISABLE_COMPUTER_USE_BETA";
-const OPENAI_NATIVE_TRANSPORT_ENV = "APPLE_CUA_OPENAI_NATIVE_TRANSPORT";
+const DISABLE_COMPUTER_USE_BETA_ENV = "OPENCUA_DISABLE_COMPUTER_USE_BETA";
+const OPENAI_NATIVE_TRANSPORT_ENV = "OPENCUA_OPENAI_NATIVE_TRANSPORT";
 
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(sourceDirectory, "..");
-const skillPath = path.resolve(packageRoot, "../../skills/apple-cua/SKILL.md");
+const skillPath = path.resolve(packageRoot, "../../skills/opencua/SKILL.md");
 const computerFallbackToolSchema = Type.Union([
 	computerToolSchema,
 	openaiComputerToolSchema,
@@ -108,7 +108,7 @@ function installExtension(pi: ExtensionAPI, options: ExtensionOptions): void {
 				name: ANTHROPIC_NATIVE_COMPUTER_TOOL_NAME,
 				label: "Computer Use",
 				description:
-					"Native computer-use actions for Anthropic and OpenAI Responses on the app window last observed with get_app_state: screenshot, click, drag, type, key and wait, each sent to apple-cua-mcp as a guarded call.",
+					"Native computer-use actions for Anthropic and OpenAI Responses on the app window last observed with get_app_state: screenshot, click, drag, type, key and wait, each sent to opencua-mcp as a guarded call.",
 				parameters: computerFallbackToolSchema,
 				executionMode: "sequential",
 				async execute(_toolCallId, params) {
@@ -151,7 +151,7 @@ function installExtension(pi: ExtensionAPI, options: ExtensionOptions): void {
 		const sections =
 			session.instructions === undefined || session.instructions.trim() === ""
 				? []
-				: [`## apple-cua\n${session.instructions.trim()}\n`];
+				: [`## opencua\n${session.instructions.trim()}\n`];
 		if (
 			session.enabled &&
 			ctx.model?.api === "anthropic-messages" &&
@@ -230,7 +230,7 @@ function warnOpenAINativeTransportUnavailable(modelId: string | undefined): void
 	}
 	openAINativeTransportWarningEmitted = true;
 	process.stderr.write(
-		`apple-cua: keeping semantic tools for ${modelId ?? "this model"}; the installed pi-ai transport handles only function_call/function_call_output items, not computer_call/computer_call_output. ` +
+		`opencua: keeping semantic tools for ${modelId ?? "this model"}; the installed pi-ai transport handles only function_call/function_call_output items, not computer_call/computer_call_output. ` +
 			`Set ${OPENAI_NATIVE_TRANSPORT_ENV}=1 to force the native computer tool once the transport supports it.\n`,
 	);
 }

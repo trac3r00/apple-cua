@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { type Server, type Socket, connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 import { type OverlayTransportFactory, createCursorOverlay, defaultSocketTransport } from "./cursor-overlay.js";
 
@@ -48,8 +48,8 @@ describe("#given renderer motion defaults #when a cursor moves #then optional sa
 	])(
 		"uses adaptive=$adaptive for environment=$environment and motion=$motion",
 		async ({ environment, motion, adaptive }) => {
-			vi.stubEnv("APPLE_CUA_CURSOR_MOTION", environment);
-			directory = await mkdtemp(join(tmpdir(), "apple-cua-renderer-motion-"));
+			vi.stubEnv("OPENCUA_CURSOR_MOTION", environment);
+			directory = await mkdtemp(join(tmpdir(), "opencua-renderer-motion-"));
 			endpoint.path = join(directory, "overlay.sock");
 			const events = new EventEmitter();
 			const commands: string[] = [];
@@ -96,7 +96,7 @@ describe("#given renderer motion defaults #when a cursor moves #then optional sa
 
 describe("#given configured motion over a real socket #when commands arrive together #then they stay ordered", () => {
 	it("queries state before planning and finishes the trajectory before mode and hide delivery", async () => {
-		directory = await mkdtemp(join(tmpdir(), "apple-cua-motion-test-"));
+		directory = await mkdtemp(join(tmpdir(), "opencua-motion-test-"));
 		endpoint.path = join(directory, "overlay.sock");
 		const events = new EventEmitter();
 		const commands: string[] = [];
@@ -156,7 +156,7 @@ describe("#given configured motion over a real socket #when commands arrive toge
 	});
 
 	it("rejects malformed state without sending a trajectory and still delivers the next hide", async () => {
-		directory = await mkdtemp(join(tmpdir(), "apple-cua-motion-test-"));
+		directory = await mkdtemp(join(tmpdir(), "opencua-motion-test-"));
 		endpoint.path = join(directory, "overlay.sock");
 		const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 		const events = new EventEmitter();
@@ -200,7 +200,7 @@ describe("#given configured motion over a real socket #when commands arrive toge
 	});
 
 	it.each(["magnetic", "adaptive"] as const)("plans %s motion from the selected pid marker's state", async (style) => {
-		directory = await mkdtemp(join(tmpdir(), "apple-cua-motion-test-"));
+		directory = await mkdtemp(join(tmpdir(), "opencua-motion-test-"));
 		endpoint.path = join(directory, "overlay.sock");
 		const events = new EventEmitter();
 		const commands: string[] = [];
@@ -250,7 +250,7 @@ describe("#given configured motion over a real socket #when commands arrive toge
 	});
 
 	it("sends direct pid samples without querying state or planning motion", async () => {
-		directory = await mkdtemp(join(tmpdir(), "apple-cua-motion-test-"));
+		directory = await mkdtemp(join(tmpdir(), "opencua-motion-test-"));
 		endpoint.path = join(directory, "overlay.sock");
 		const events = new EventEmitter();
 		const commands: string[] = [];

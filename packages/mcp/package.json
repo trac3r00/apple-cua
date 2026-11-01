@@ -1,5 +1,5 @@
 {
-	"name": "@apple-cua/mcp",
+	"name": "@opencua/mcp",
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Model Context Protocol server for macOS computer control",
@@ -11,8 +11,9 @@
 		"directory": "packages/mcp"
 	},
 	"bin": {
+		"opencua-mcp": "./dist/server.js",
 		"apple-cua-mcp": "./dist/server.js",
-		"apple-cua-isolated-mcp": "./dist/isolated-server.js"
+		"opencua-isolated-mcp": "./dist/isolated-server.js"
 	},
 	"scripts": {
 		"build": "tsgo -p tsconfig.build.json",
@@ -20,9 +21,9 @@
 		"test": "bun test --isolate --parallel=4"
 	},
 	"dependencies": {
-		"@apple-cua/agent": "workspace:*",
-		"@apple-cua/browser": "workspace:*",
-		"@apple-cua/core": "workspace:*",
+		"@opencua/agent": "workspace:*",
+		"@opencua/browser": "workspace:*",
+		"@opencua/core": "workspace:*",
 		"@modelcontextprotocol/sdk": "^1.0.0",
 		"zod": "4.4.3"
 	},

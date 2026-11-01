@@ -1,6 +1,6 @@
-import type { MirroringText } from "@apple-cua/core";
-import { findTexts } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { MirroringText } from "@opencua/core";
+import { findTexts } from "@opencua/core";
 import { iosFindTextSchema } from "./phone-search.js";
 import type { PhoneGuardSession, PhoneToolSource } from "./phone-session.js";
 import {

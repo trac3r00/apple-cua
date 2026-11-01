@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 interface TestWindow {
 	readonly id: number;
@@ -404,8 +404,8 @@ describe("#given MacOSInputController target routing", () => {
 		windowMock.openWindows.mockResolvedValue([
 			{ id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } },
 		]);
-		const previous = process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"];
-		process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = " Off ";
+		const previous = process.env["OPENCUA_CURSOR_BACKGROUND_CUES"];
+		process.env["OPENCUA_CURSOR_BACKGROUND_CUES"] = " Off ";
 		const overlay = {
 			set: vi.fn(),
 			track: vi.fn(),
@@ -420,8 +420,8 @@ describe("#given MacOSInputController target routing", () => {
 		expect(overlay.set).not.toHaveBeenCalled();
 		expect(overlay.setMode).not.toHaveBeenCalled();
 		controller.close();
-		if (previous === undefined) process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = undefined;
-		else process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = previous;
+		if (previous === undefined) process.env["OPENCUA_CURSOR_BACKGROUND_CUES"] = undefined;
+		else process.env["OPENCUA_CURSOR_BACKGROUND_CUES"] = previous;
 	});
 
 	it("#given background cue delivery #when scrolling typing and dragging #then each action cues its drawn marker", async () => {
@@ -608,17 +608,17 @@ describe("#given the typeText pacing setting #when it is read #then an absent or
 		const { typeCharacterDelayMilliseconds } = await import("./macos-input.js");
 		const fallback = typeCharacterDelayMilliseconds({});
 		expect(typeCharacterDelayMilliseconds({})).toEqual(
-			typeCharacterDelayMilliseconds({ APPLE_CUA_TYPE_CHARACTER_DELAY_MS: "garbage" }),
+			typeCharacterDelayMilliseconds({ OPENCUA_TYPE_CHARACTER_DELAY_MS: "garbage" }),
 		);
-		expect(typeCharacterDelayMilliseconds({ APPLE_CUA_TYPE_CHARACTER_DELAY_MS: "-4" })).toEqual(fallback);
-		expect(typeCharacterDelayMilliseconds({ APPLE_CUA_TYPE_CHARACTER_DELAY_MS: "1.5" })).toEqual(fallback);
+		expect(typeCharacterDelayMilliseconds({ OPENCUA_TYPE_CHARACTER_DELAY_MS: "-4" })).toEqual(fallback);
+		expect(typeCharacterDelayMilliseconds({ OPENCUA_TYPE_CHARACTER_DELAY_MS: "1.5" })).toEqual(fallback);
 		expect(fallback).toBe(4);
 	});
 
 	it("honors a non-negative whole number, including zero", async () => {
 		const { typeCharacterDelayMilliseconds } = await import("./macos-input.js");
-		expect(typeCharacterDelayMilliseconds({ APPLE_CUA_TYPE_CHARACTER_DELAY_MS: "0" })).toBe(0);
-		expect(typeCharacterDelayMilliseconds({ APPLE_CUA_TYPE_CHARACTER_DELAY_MS: "20" })).toBe(20);
-		expect(typeCharacterDelayMilliseconds({ APPLE_CUA_TYPE_CHARACTER_DELAY_MS: " 4 " })).toBe(4);
+		expect(typeCharacterDelayMilliseconds({ OPENCUA_TYPE_CHARACTER_DELAY_MS: "0" })).toBe(0);
+		expect(typeCharacterDelayMilliseconds({ OPENCUA_TYPE_CHARACTER_DELAY_MS: "20" })).toBe(20);
+		expect(typeCharacterDelayMilliseconds({ OPENCUA_TYPE_CHARACTER_DELAY_MS: " 4 " })).toBe(4);
 	});
 });

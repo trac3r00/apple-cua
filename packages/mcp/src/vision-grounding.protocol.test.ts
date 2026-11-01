@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { Point, PointerOptions } from "@apple-cua/core";
+import type { Point, PointerOptions } from "@opencua/core";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 

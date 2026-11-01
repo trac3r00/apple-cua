@@ -1,4 +1,4 @@
-# apple-cua Agent Conventions
+# OpenCUA Agent Conventions
 
 ## TypeScript Standards
 - Ultra-strict TypeScript with all strict flags enabled

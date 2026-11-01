@@ -49,7 +49,7 @@ describe("#given named agents #when cursor transports are created #then ownershi
 			{
 				exports: {},
 				process: { env: {} },
-				CURSOR_MOTION_ENV: "APPLE_CUA_CURSOR_MOTION",
+				CURSOR_MOTION_ENV: "OPENCUA_CURSOR_MOTION",
 				denyHostInteraction,
 				currentCursorIdentity,
 				currentCursorOwner,

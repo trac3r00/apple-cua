@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 type ExecFileCallback = (error: Error | null, stdout: string | Buffer, stderr: string) => void;
 type ExecFileMock = (
@@ -87,7 +87,7 @@ describe("#given unavailable native capture #when capturing a window #then CLI f
 		expect(captureMocks.execFile).toHaveBeenCalledTimes(1);
 		expect(captureMocks.execFile).toHaveBeenCalledWith(
 			"sh",
-			expect.arrayContaining(["apple-cua-screenshot", "1920", "1080"]),
+			expect.arrayContaining(["opencua-screenshot", "1920", "1080"]),
 			expect.objectContaining({ encoding: "buffer", timeout: 10_000 }),
 			expect.any(Function),
 		);

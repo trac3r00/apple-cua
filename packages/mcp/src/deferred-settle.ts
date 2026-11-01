@@ -1,4 +1,4 @@
-import { type AxEventWaiter, createAxEventWaiter, waitForAxQuiet } from "@apple-cua/core";
+import { type AxEventWaiter, createAxEventWaiter, waitForAxQuiet } from "@opencua/core";
 
 /**
  * How long a deferred outcome waits for the app's own accessibility change events before it is

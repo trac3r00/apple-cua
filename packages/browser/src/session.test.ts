@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { whenSettled } from "@apple-cua/test-support";
+import { whenSettled } from "@opencua/test-support";
 import type { BrowserTransport } from "./bridge.js";
 import { type BrowserCommand, BrowserError, limitsSchema, stepSchema } from "./protocol.js";
 import { BrowserSession } from "./session.js";

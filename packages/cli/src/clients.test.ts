@@ -21,24 +21,120 @@ import {
 	detectClients,
 	entryAlive,
 	entryRunsCheckout,
+	findExecutable,
 	inspectClient,
 	registerClient,
 	unregisterClient,
 } from "./clients.js";
+import { editJsonProperty } from "./json-config-edit.js";
 import { DEFAULT_SETTINGS, type Settings, desiredRegistration } from "./settings.js";
 
 const LAYOUT = {
-	helperExecutable: "/checkout/packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp",
+	helperExecutable: "/checkout/packages/mcp/dist/opencua-mcp.app/Contents/MacOS/opencua-mcp",
 	server: "/checkout/packages/mcp/dist/server.js",
 };
-const DEFAULT_ENV = { APPLE_CUA_DELIVERY: "background", APPLE_CUA_TOOLSET: "full" };
+const DEFAULT_ENV = { OPENCUA_DELIVERY: "background", OPENCUA_TOOLSET: "full" };
 const NOW = new Date(2026, 9, 6, 12, 0, 0);
 const LATER = new Date(2026, 9, 6, 12, 0, 5);
+
+describe("#given a legacy product registration #when registering or removing OpenCUA #then only its names change", () => {
+	it("finds npm client cmd shims on Windows without requiring Unix execute bits", () => {
+		const bin = join(home, "bin");
+		mkdirSync(bin);
+		const shim = join(bin, "codex.cmd");
+		writeFileSync(shim, "@echo off\r\n", { mode: 0o600 });
+		expect(findExecutable("codex", bin, "win32")).toBe(shim);
+	});
+	it.each(["omo", "cursor"] as const)("migrates %s JSON without reformatting unrelated servers", (client) => {
+		const path = join(home, client === "omo" ? ".omo/agent/mcp.json" : ".cursor/mcp.json");
+		const untouched = '"other" : { "args" : ["a",  "b"], "command": "keep" }';
+		writeConfig(path, `{\n "mcpServers": {${untouched}, "apple-cua":{"command":"old"}},"keep" : [1,  2]\n}\n`);
+		registerClient(client, desired(), context());
+		const migrated = readFileSync(path, "utf8");
+		expect(migrated).toContain(untouched);
+		expect(migrated).toContain('"keep" : [1,  2]');
+		expect(JSON.parse(migrated).mcpServers["apple-cua"]).toBeUndefined();
+		expect(JSON.parse(migrated).mcpServers.opencua.command).toBe(LAYOUT.helperExecutable);
+		unregisterClient(client, context());
+		expect(JSON.parse(readFileSync(path, "utf8")).mcpServers).toEqual({
+			other: { args: ["a", "b"], command: "keep" },
+		});
+		expect(readFileSync(path, "utf8")).toContain(untouched);
+	});
+
+	it.each(["apple-cua", '"apple-cua"', "'apple-cua'"])(
+		"removes Codex table %s and its subtables while preserving other TOML bytes",
+		(name) => {
+			const path = join(home, ".codex/config.toml");
+			const untouched = '[mcp_servers.other]\ncommand  = "keep"\nargs = [ "a",  "b" ]\n';
+			writeConfig(path, `${untouched}\n[mcp_servers.${name}]\ncommand="old"\n[mcp_servers.${name}.env]\nX="y"\n`);
+			registerClient("codex", desired(), context());
+			const migrated = readFileSync(path, "utf8");
+			expect(migrated).toContain(untouched);
+			expect(migrated).not.toContain("apple-cua");
+			expect(migrated).toContain("[mcp_servers.opencua]");
+			unregisterClient("codex", context());
+			expect(readFileSync(path, "utf8")).toBe(untouched);
+		},
+	);
+
+	it.each(["omo", "cursor", "codex"] as const)("removes a legacy-only %s entry on unregister", (client) => {
+		const path = join(
+			home,
+			client === "omo" ? ".omo/agent/mcp.json" : client === "cursor" ? ".cursor/mcp.json" : ".codex/config.toml",
+		);
+		writeConfig(
+			path,
+			client === "codex"
+				? '[mcp_servers.apple-cua]\ncommand="old"\n'
+				: '{"mcpServers":{"apple-cua":{"command":"old"}}}',
+		);
+		expect(unregisterClient(client, context()).action).toBe("removed");
+		expect(readFileSync(path, "utf8")).not.toContain("apple-cua");
+	});
+
+	it("removes legacy Claude through its CLI even when the renamed entry is already current", () => {
+		const env = fakeLegacyClaude();
+		const path = join(home, ".claude.json");
+		const registration = desired();
+		writeConfig(
+			path,
+			JSON.stringify({
+				mcpServers: {
+					"apple-cua": { command: "old" },
+					opencua: { command: registration.launch.command, args: registration.launch.args, env: DEFAULT_ENV },
+					other: { command: "keep" },
+				},
+			}),
+		);
+		const ctx: ClientContext = {
+			...context(env),
+			run: (_cli, args) => {
+				if (args[0] !== "mcp" || args[1] !== "remove" || args[2] !== "apple-cua")
+					throw new Error("unexpected CLI invocation");
+				writeFileSync(path, editJsonProperty(readFileSync(path, "utf8"), ["mcpServers", args[2]], undefined));
+				return { status: 0, stdout: "", stderr: "" };
+			},
+		};
+		registerClient("claude", registration, ctx);
+		expect(JSON.parse(readFileSync(path, "utf8")).mcpServers).toEqual({
+			opencua: { command: registration.launch.command, args: registration.launch.args, env: DEFAULT_ENV },
+			other: { command: "keep" },
+		});
+	});
+
+	function fakeLegacyClaude(): { PATH: string } {
+		const bin = join(home, "bin");
+		mkdirSync(bin, { recursive: true });
+		writeFileSync(join(bin, "claude"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+		return { PATH: bin };
+	}
+});
 
 let home = "";
 
 beforeEach(() => {
-	home = mkdtempSync(join(tmpdir(), "apple-cua-clients-"));
+	home = mkdtempSync(join(tmpdir(), "opencua-clients-"));
 });
 
 afterEach(() => {
@@ -62,7 +158,7 @@ function writeConfig(path: string, text: string): void {
 	writeFileSync(path, text, { mode: 0o600 });
 }
 
-describe("#given an omo config with other servers #when apple-cua is registered #then it is merged, backed up and idempotent", () => {
+describe("#given an omo config with other servers #when opencua is registered #then it is merged, backed up and idempotent", () => {
 	it("adds the entry with the settings as env, keeps every other server and setting, and backs up the original", () => {
 		const path = join(home, ".omo/agent/mcp.json");
 		const original = {
@@ -84,10 +180,10 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 		expect(written.mcpServers.codegraph).toEqual(original.mcpServers.codegraph);
 		expect(written.mcpServers.remote).toEqual(original.mcpServers.remote);
 		expect(written.other).toEqual({ keep: true });
-		expect(written.mcpServers["apple-cua"]).toEqual({
+		expect(written.mcpServers["opencua"]).toEqual({
 			command: LAYOUT.helperExecutable,
 			args: [LAYOUT.server],
-			env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit,com.apple.finder", ...DEFAULT_ENV },
+			env: { OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit,com.apple.finder", ...DEFAULT_ENV },
 			lifecycle: "keep-alive",
 			requestTimeoutMs: 180_000,
 		});
@@ -117,10 +213,10 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 			const text = `${JSON.stringify(
 				{
 					mcpServers: {
-						"apple-cua": {
+						opencua: {
 							command: LAYOUT.helperExecutable,
 							args: [LAYOUT.server],
-							env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit" },
+							env: { OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit" },
 							...(lifecycle === undefined ? {} : { lifecycle }),
 						},
 					},
@@ -134,8 +230,8 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 			const change = registerClient("omo", desired({ allowedApps: ["com.apple.TextEdit"] }), context());
 
 			expect(change.action).toBe("updated");
-			expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["apple-cua"].lifecycle).toBe("keep-alive");
-			expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["apple-cua"].requestTimeoutMs).toBe(180_000);
+			expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["opencua"].lifecycle).toBe("keep-alive");
+			expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["opencua"].requestTimeoutMs).toBe(180_000);
 			expect(inspectClient("omo", desired({ allowedApps: ["com.apple.TextEdit"] }), context()).state).toBe(
 				"current",
 			);
@@ -149,7 +245,7 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 			path,
 			JSON.stringify({
 				mcpServers: {
-					"apple-cua": {
+					opencua: {
 						command: LAYOUT.helperExecutable,
 						args: [LAYOUT.server],
 						lifecycle: "eager",
@@ -161,8 +257,8 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 
 		registerClient("omo", desired({ allowedApps: ["com.apple.TextEdit"] }), context());
 
-		expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["apple-cua"].lifecycle).toBe("eager");
-		expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["apple-cua"].requestTimeoutMs).toBe(123_456);
+		expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["opencua"].lifecycle).toBe("eager");
+		expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["opencua"].requestTimeoutMs).toBe(123_456);
 	});
 
 	it("rewrites the managed values of an outdated entry and keeps its other keys and variables", () => {
@@ -171,10 +267,10 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 			path,
 			JSON.stringify({
 				mcpServers: {
-					"apple-cua": {
+					opencua: {
 						command: "/old/launcher",
 						args: ["/old/server.js"],
-						env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.finder", EXTRA: "1" },
+						env: { OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.finder", EXTRA: "1" },
 						enabled: true,
 					},
 				},
@@ -188,15 +284,15 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 		);
 
 		expect(change.action).toBe("updated");
-		expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["apple-cua"]).toEqual({
+		expect(JSON.parse(readFileSync(path, "utf8")).mcpServers["opencua"]).toEqual({
 			command: LAYOUT.helperExecutable,
 			args: [LAYOUT.server],
 			env: {
 				EXTRA: "1",
-				APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit",
-				APPLE_CUA_DELIVERY: "background",
-				APPLE_CUA_TOOLSET: "lean",
-				APPLE_CUA_IPHONE: "1",
+				OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit",
+				OPENCUA_DELIVERY: "background",
+				OPENCUA_TOOLSET: "lean",
+				OPENCUA_IPHONE: "1",
 			},
 			enabled: true,
 			lifecycle: "keep-alive",
@@ -223,11 +319,11 @@ describe("#given an omo config with other servers #when apple-cua is registered 
 		registerClient("omo", desired(), context());
 
 		expect(lstatSync(path).isSymbolicLink()).toBe(true);
-		expect(Object.keys(JSON.parse(readFileSync(target, "utf8")).mcpServers)).toEqual(["other", "apple-cua"]);
+		expect(Object.keys(JSON.parse(readFileSync(target, "utf8")).mcpServers)).toEqual(["other", "opencua"]);
 	});
 });
 
-describe("#given a registered omo config #when apple-cua is unregistered #then only its entry goes, after a backup", () => {
+describe("#given a registered omo config #when opencua is unregistered #then only its entry goes, after a backup", () => {
 	it("restores the other servers byte for byte and does nothing the second time", () => {
 		const path = join(home, ".omo/agent/mcp.json");
 		const original = `${JSON.stringify({ mcpServers: { codegraph: { command: "codegraph" } }, other: true }, null, 2)}\n`;
@@ -245,7 +341,7 @@ describe("#given a registered omo config #when apple-cua is unregistered #then o
 	});
 });
 
-describe("#given a Codex config.toml #when apple-cua is registered and unregistered #then only its table changes", () => {
+describe("#given a Codex config.toml #when opencua is registered and unregistered #then only its table changes", () => {
 	const original = [
 		'model = "gpt-5"',
 		"",
@@ -272,14 +368,14 @@ describe("#given a Codex config.toml #when apple-cua is registered and unregiste
 		expect(afterFirst.slice(original.length)).toBe(
 			[
 				"",
-				"[mcp_servers.apple-cua]",
+				"[mcp_servers.opencua]",
 				`command = "${LAYOUT.helperExecutable}"`,
 				`args = ["${LAYOUT.server}"]`,
 				"",
-				"[mcp_servers.apple-cua.env]",
-				'APPLE_CUA_ALLOWED_BUNDLE_IDS = "com.apple.TextEdit"',
-				'APPLE_CUA_DELIVERY = "background"',
-				'APPLE_CUA_TOOLSET = "full"',
+				"[mcp_servers.opencua.env]",
+				'OPENCUA_ALLOWED_BUNDLE_IDS = "com.apple.TextEdit"',
+				'OPENCUA_DELIVERY = "background"',
+				'OPENCUA_TOOLSET = "full"',
 				"",
 			].join("\n"),
 		);
@@ -298,15 +394,15 @@ describe("#given a Codex config.toml #when apple-cua is registered and unregiste
 				"[mcp_servers.first]",
 				'command = "first"',
 				"",
-				"[mcp_servers.apple-cua]",
+				"[mcp_servers.opencua]",
 				'command = "/old/launcher"',
 				"args = [",
 				'  "/old/server.js",',
 				"]",
-				'env = { APPLE_CUA_ALLOWED_BUNDLE_IDS = "com.apple.finder", EXTRA = "1" }',
+				'env = { OPENCUA_ALLOWED_BUNDLE_IDS = "com.apple.finder", EXTRA = "1" }',
 				"startup_timeout_sec = 20",
 				"",
-				"[mcp_servers.apple-cua.tools.ask_user]",
+				"[mcp_servers.opencua.tools.ask_user]",
 				'approval = "never"',
 				"",
 				"# the last one",
@@ -324,18 +420,18 @@ describe("#given a Codex config.toml #when apple-cua is registered and unregiste
 				"[mcp_servers.first]",
 				'command = "first"',
 				"",
-				"[mcp_servers.apple-cua]",
+				"[mcp_servers.opencua]",
 				`command = "${LAYOUT.helperExecutable}"`,
 				`args = ["${LAYOUT.server}"]`,
 				"startup_timeout_sec = 20",
 				"",
-				"[mcp_servers.apple-cua.env]",
-				'APPLE_CUA_ALLOWED_BUNDLE_IDS = "com.apple.finder"',
+				"[mcp_servers.opencua.env]",
+				'OPENCUA_ALLOWED_BUNDLE_IDS = "com.apple.finder"',
 				'EXTRA = "1"',
-				'APPLE_CUA_DELIVERY = "background"',
-				'APPLE_CUA_TOOLSET = "lean"',
+				'OPENCUA_DELIVERY = "background"',
+				'OPENCUA_TOOLSET = "lean"',
 				"",
-				"[mcp_servers.apple-cua.tools.ask_user]",
+				"[mcp_servers.opencua.tools.ask_user]",
 				'approval = "never"',
 				"",
 				"# the last one",
@@ -350,16 +446,16 @@ describe("#given a Codex config.toml #when apple-cua is registered and unregiste
 
 	it("refuses a layout it does not edit and writes nothing", () => {
 		const path = join(home, ".codex/config.toml");
-		writeConfig(path, 'mcp_servers.apple-cua.command = "x"\n');
+		writeConfig(path, 'mcp_servers.opencua.command = "x"\n');
 
 		expect(() => registerClient("codex", desired(), context())).toThrow(/does not edit/);
 		expect(() => unregisterClient("codex", context())).toThrow(/cannot be edited/);
-		expect(readFileSync(path, "utf8")).toBe('mcp_servers.apple-cua.command = "x"\n');
+		expect(readFileSync(path, "utf8")).toBe('mcp_servers.opencua.command = "x"\n');
 		expect(backupsOf(path)).toEqual([]);
 	});
 });
 
-describe("#given Claude Code #when apple-cua is registered or unregistered #then the claude CLI does the write", () => {
+describe("#given Claude Code #when opencua is registered or unregistered #then the claude CLI does the write", () => {
 	function fakeClaude(): { PATH: string; CLAUDE_LOG: string } {
 		const bin = join(home, "bin");
 		mkdirSync(bin, { recursive: true });
@@ -375,11 +471,11 @@ describe("#given Claude Code #when apple-cua is registered or unregistered #then
 		expect(change.action).toBe("printed");
 		expect(change.printed).toEqual({
 			mcpServers: {
-				"apple-cua": {
+				opencua: {
 					type: "stdio",
 					command: LAYOUT.helperExecutable,
 					args: [LAYOUT.server],
-					env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit", ...DEFAULT_ENV },
+					env: { OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit", ...DEFAULT_ENV },
 				},
 			},
 		});
@@ -392,11 +488,11 @@ describe("#given Claude Code #when apple-cua is registered or unregistered #then
 		const config = {
 			numStartups: 3,
 			mcpServers: {
-				"apple-cua": {
+				opencua: {
 					type: "stdio",
 					command: "/old/launcher",
 					args: ["/old/server.js"],
-					env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.finder" },
+					env: { OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.finder" },
 				},
 			},
 		};
@@ -405,8 +501,8 @@ describe("#given Claude Code #when apple-cua is registered or unregistered #then
 		const change = registerClient("claude", desired({ allowedApps: ["com.apple.finder"] }), context(env));
 
 		expect(readFileSync(env.CLAUDE_LOG, "utf8").trim().split("\n")).toEqual([
-			"mcp remove apple-cua --scope user",
-			`mcp add --scope user apple-cua -e APPLE_CUA_ALLOWED_BUNDLE_IDS=com.apple.finder -e APPLE_CUA_DELIVERY=background -e APPLE_CUA_TOOLSET=full -- ${LAYOUT.helperExecutable} ${LAYOUT.server}`,
+			"mcp remove opencua --scope user",
+			`mcp add --scope user opencua -e OPENCUA_ALLOWED_BUNDLE_IDS=com.apple.finder -e OPENCUA_DELIVERY=background -e OPENCUA_TOOLSET=full -- ${LAYOUT.helperExecutable} ${LAYOUT.server}`,
 		]);
 		expect(JSON.parse(readFileSync(change.backup ?? "", "utf8"))).toEqual(config);
 	});
@@ -417,11 +513,11 @@ describe("#given Claude Code #when apple-cua is registered or unregistered #then
 			join(home, ".claude.json"),
 			JSON.stringify({
 				mcpServers: {
-					"apple-cua": {
+					opencua: {
 						type: "stdio",
 						command: LAYOUT.helperExecutable,
 						args: [LAYOUT.server],
-						env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit" },
+						env: { OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit" },
 					},
 				},
 			}),
@@ -436,17 +532,17 @@ describe("#given Claude Code #when apple-cua is registered or unregistered #then
 
 	it("unregisters through the CLI after a backup", () => {
 		const env = fakeClaude();
-		writeConfig(join(home, ".claude.json"), JSON.stringify({ mcpServers: { "apple-cua": { command: "/x" } } }));
+		writeConfig(join(home, ".claude.json"), JSON.stringify({ mcpServers: { opencua: { command: "/x" } } }));
 
 		const change = unregisterClient("claude", context(env));
 
 		expect(change.action).toBe("removed");
 		expect(change.backup).toBeDefined();
-		expect(readFileSync(env.CLAUDE_LOG, "utf8").trim()).toBe("mcp remove apple-cua --scope user");
+		expect(readFileSync(env.CLAUDE_LOG, "utf8").trim()).toBe("mcp remove opencua --scope user");
 	});
 });
 
-describe("#given the json client #when apple-cua is registered #then a block is printed and nothing is written", () => {
+describe("#given the json client #when opencua is registered #then a block is printed and nothing is written", () => {
 	it("prints the launch command with the settings", () => {
 		const change = registerClient(
 			"json",
@@ -456,13 +552,13 @@ describe("#given the json client #when apple-cua is registered #then a block is 
 
 		expect(change.printed).toEqual({
 			mcpServers: {
-				"apple-cua": {
+				opencua: {
 					command: LAYOUT.helperExecutable,
 					args: [LAYOUT.server],
 					env: {
-						APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit",
-						APPLE_CUA_DELIVERY: "background",
-						APPLE_CUA_TOOLSET: "lean",
+						OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit",
+						OPENCUA_DELIVERY: "background",
+						OPENCUA_TOOLSET: "lean",
 					},
 				},
 			},
@@ -476,12 +572,12 @@ describe("#given client configs in different states #when they are inspected #th
 		const omo = join(home, ".omo/agent/mcp.json");
 		writeConfig(
 			omo,
-			JSON.stringify({ mcpServers: { "apple-cua": { command: "/gone/apple-cua-mcp", args: [LAYOUT.server] } } }),
+			JSON.stringify({ mcpServers: { opencua: { command: "/gone/opencua-mcp", args: [LAYOUT.server] } } }),
 		);
 
 		expect(inspectClient("omo", desired(), context())).toMatchObject({
 			state: "stale",
-			detail: expect.stringContaining("/gone/apple-cua-mcp"),
+			detail: expect.stringContaining("/gone/opencua-mcp"),
 		});
 		expect(inspectClient("codex", desired(), context()).state).toBe("missing");
 		registerClient("codex", desired(), context());
@@ -499,7 +595,7 @@ describe("#given client configs in different states #when they are inspected #th
 describe("#given registered entries #when their installation is asked #then the helper path or the server.js argument decides", () => {
 	it("tells this checkout's entries from another installation's and a deleted one's", () => {
 		const checkout = join(home, "checkout");
-		const helper = join(checkout, "packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp");
+		const helper = join(checkout, "packages/mcp/dist/opencua-mcp.app/Contents/MacOS/opencua-mcp");
 		const server = join(checkout, "packages/mcp/dist/server.js");
 		mkdirSync(dirname(helper), { recursive: true });
 		writeFileSync(helper, "");
@@ -508,11 +604,11 @@ describe("#given registered entries #when their installation is asked #then the 
 
 		expect(entryRunsCheckout({ command: helper, args: [server], env: {} }, canonicalCheckout)).toBe(true);
 		expect(entryRunsCheckout({ command: "node", args: [server], env: {} }, canonicalCheckout)).toBe(true);
-		expect(entryRunsCheckout({ command: "/elsewhere/apple-cua-mcp", args: [], env: {} }, canonicalCheckout)).toBe(
+		expect(entryRunsCheckout({ command: "/elsewhere/opencua-mcp", args: [], env: {} }, canonicalCheckout)).toBe(
 			false,
 		);
 		expect(entryAlive({ command: helper, args: [server], env: {} })).toBe(true);
-		expect(entryAlive({ command: "/gone/apple-cua-mcp", args: ["/gone/server.js"], env: {} })).toBe(false);
+		expect(entryAlive({ command: "/gone/opencua-mcp", args: ["/gone/server.js"], env: {} })).toBe(false);
 		expect(entryAlive({ command: "npx", args: ["some-package"], env: {} })).toBe(true);
 	});
 });

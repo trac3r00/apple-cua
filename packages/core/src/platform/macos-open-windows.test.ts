@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 import type { ListedWindow } from "./macos-ffi/window-list.js";
 import * as windowListing from "./macos-ffi/window-list.js";
@@ -29,7 +29,7 @@ function window(id: number): MacOSWindowInfo {
 describe("#given a WindowServer listing with app windows and chrome #when it is mapped for targeting #then only normal windows survive", () => {
 	it("keeps layer 0 and drops menu bar, control centre and drag-helper layers", () => {
 		const windows = targetableWindows([
-			listed({ id: 1, ownerName: "Finder", title: "apple-cua", bounds: { x: 10, y: 20, width: 30, height: 40 } }),
+			listed({ id: 1, ownerName: "Finder", title: "opencua", bounds: { x: 10, y: 20, width: 30, height: 40 } }),
 			listed({ id: 2, layer: 25, ownerName: "Control Center", title: "Item-0" }),
 			listed({ id: 3, layer: 500, ownerName: "SSDragHelper" }),
 		]);
@@ -39,7 +39,7 @@ describe("#given a WindowServer listing with app windows and chrome #when it is 
 				id: 1,
 				bounds: { x: 10, y: 20, width: 30, height: 40 },
 				owner: { processId: 100, name: "Finder" },
-				title: "apple-cua",
+				title: "opencua",
 				layer: 0,
 			},
 		]);

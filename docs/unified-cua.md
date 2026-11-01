@@ -1,4 +1,4 @@
-# Historical comparison: what apple-cua took from Codex, Cua Driver and OmO
+# Historical comparison: what OpenCUA took from Codex, Cua Driver and OmO
 
 This is a dated comparison record, not current setup guidance or a live benchmark.
 The observations below were measured on 2026-10-05/06 with the named versions,
@@ -18,12 +18,12 @@ inspected and run on this Mac:
 
 ## Recorded capability comparison (2026-10-05 snapshot)
 
-| Strength | Reference | apple-cua |
+| Strength | Reference | OpenCUA |
 |---|---|---|
 | A whole flow with loops and reads in one call | Codex `js` REPL, OmO `computer.run` | `run_script`: one JavaScript body, `apple.app(name)` handles; every action is token-guarded, allowlisted, preflighted and verified like `run_steps`; refusals throw a catchable `ScriptActionError` |
-| The person can stop every agent from the keyboard; only the person resumes | OmO stop chord, Codex "Esc to cancel" | Global stop switch: hold Control+Option+Command (read from HID state, no extra permission), or `apple-cua stop`; file-backed (`~/.apple-cua/stop.json`, `APPLE_CUA_STATE_DIR`) so every apple-cua server obeys; mutations refuse with `user-stopped`, batches stop between steps, reads keep working; `apple-cua resume` / `apple-cua stop-status` |
+| The person can stop every agent from the keyboard; only the person resumes | OmO stop chord, Codex "Esc to cancel" | Global stop switch: hold Control+Option+Command (read from HID state, no extra permission), or `opencua stop`; file-backed (`~/.opencua/stop.json`, `OPENCUA_STATE_DIR`) so every OpenCUA server obeys; mutations refuse with `user-stopped`, batches stop between steps, reads keep working; `opencua resume` / `opencua stop-status` |
 | One read-only call that says what is possible here | OmO `capabilities()`, Cua Driver health/permission report | `get_capabilities`: Accessibility and Screen Recording, locked/console/remote session, display size, delivery mode and focus guarantee, approved apps, stop state, and `advice` |
-| The guide travels with the server | Cua Driver `skill://cua-driver/SKILL.md` resources | `skill://apple-cua/SKILL.md` and `skill://apple-cua/references/*.md` served over MCP `resources/*` |
+| The guide travels with the server | Cua Driver `skill://cua-driver/SKILL.md` resources | `skill://opencua/SKILL.md` and `skill://opencua/references/*.md` served over MCP `resources/*` |
 | Token-cheap observation | Codex tree diffs | already present: `diff_only`, `element_format: "table"` |
 | Exact-window background input | Cua Driver background-input plan | already present (bench-v2 105/105 on console) |
 
@@ -38,28 +38,28 @@ it back (all three read `0`), then pressed 1 2 x 1 2 = and read `144`. Terminal 
 
 | Stack | Tool calls | Wall time | Answer size | Per-action guard and verification |
 |---|---|---|---|---|
-| apple-cua `run_script` | 1 | 2.41 s | 835 B | yes: each click re-resolved against a fresh read, token-checked, allowlisted, and answered `observed_change` |
+| OpenCUA `run_script` | 1 | 2.41 s | 835 B | yes: each click re-resolved against a fresh read, token-checked, allowlisted, and answered `observed_change` |
 | Codex `cua_repl` (`codex-cu`) | 2 (`getApp`, then clicks) | 2.70 s | 1.5 KB + 43 B (first call of a fresh session is ~20 KB with docs) | no; element numbers must come from the latest tree |
 | OmO `computer.run` | 1 | 1.90 s | 71 B | no; caller must re-find elements |
 
 What broke along the way (all fixed in the harness, not hidden):
 
 - OmO's first attempt collected the buttons once and failed on the second press with `AXError -25202`: Calculator's
-  SwiftUI keypad rebuilds its buttons after each press. apple-cua's query targets avoid this by design.
+  SwiftUI keypad rebuilds its buttons after each press. OpenCUA's query targets avoid this by design.
 - A Codex rerun that reused element numbers from an earlier session pressed the wrong keys (`0/3+53+...`) and opened
   the sidebar: Codex numbering grows across `getApp` calls in one REPL session.
 - In a standalone MCP client (outside OmO) Codex's REPL did not keep bindings between calls; inside OmO it did.
 
-Stop switch, live on the signed helper: `apple-cua stop` -> the next click answered `refused: user-stopped` with
-`actionDispatched: false`; `get_app_state` still answered; `get_capabilities` reported the stop; `apple-cua resume`
+Stop switch, live on the signed helper: `opencua stop` -> the next click answered `refused: user-stopped` with
+`actionDispatched: false`; `get_app_state` still answered; `get_capabilities` reported the stop; `opencua resume`
 -> clicks worked again; no stop file left behind.
 
-Raw evidence: `.omo/plans/qa-unified-evidence.json` (apple-cua leg) and `.omo/plans/qa-unified.mjs`.
+Raw evidence: `.omo/plans/qa-unified-evidence.json` (OpenCUA leg) and `.omo/plans/qa-unified.mjs`.
 
 ## Not taken (yet)
 
 Video recording and trajectory replay, named sessions, the OmniParser perception extension (AGPL), and paste with
-clipboard restore (apple-cua's `type_text` already passes multiline Unicode on the bench).
+clipboard restore (OpenCUA's `type_text` already passes multiline Unicode on the bench).
 
 ## Historical follow-up: lighter, faster, quieter (2026-10-05)
 
@@ -67,7 +67,7 @@ Measured on this Mac, background delivery.
 
 | Change | Before | After |
 |---|---|---|
-| Tool list an agent loads each session (`APPLE_CUA_TOOLSET=lean`, iPhone opt-in with `APPLE_CUA_IPHONE=1`) | Tool profiles vary by configured capabilities | lean registers ten tools, including `analyze_screen`; full and iPhone profiles add their respective tools |
+| Tool list an agent loads each session (`OPENCUA_TOOLSET=lean`, iPhone opt-in with `OPENCUA_IPHONE=1`) | Tool profiles vary by configured capabilities | lean registers ten tools, including `analyze_screen`; full and iPhone profiles add their respective tools |
 | `run_script` click on Calculator (144 read back each run) | 452 ms | 103-121 ms; about 33 ms in a fast chain (`app.chain`, 6 clicks in 192-207 ms, final build) |
 | Two apps in one `run_script` (`Promise.all`, Calculator chain + Finder find) | 554 ms (one queue) | 494 ms (per-app queues) |
 | Front app held by Finder Go to Folder | Historical restoration: 440-675 ms, then 0-14 ms (worker) and 7 / 15 / 11 ms (old final build) | Now refused before background dispatch; restoration alone did not prevent focus changes |
@@ -106,7 +106,7 @@ before they were fixed.
 | `diff_only` observation of a large change (152 rows added, 30 changed) | 34.8 KB full JSON, `element_format` ignored | capped at 25 per bucket with exact omission counts: 12.8 KB JSON, 5.8 KB table; `element_format: "json"` keeps the full diff |
 | Vision OCR failure | leaked the request array each time | released on success and failure |
 | Activation primer click | always at (-1,-1), which a window on an upper-left display could contain | a point proven inside no display and no window (CGGetOnlineDisplayList + window list); skipped and reported when the layout cannot be read |
-| TextEdit autosaving other unsaved documents after a background Save | unexplained side effect | root cause proven: any deactivation event makes AppKit autosave every in-place document (`_handleDeactivateEvent:` -> `_appWillBecomeInactive:`), so no narrower release can avoid it. `APPLE_CUA_BACKGROUND_ACTIVATION=off` turns background activation off; then background Save, New Folder and first-mouse clicks are refused instead |
+| TextEdit autosaving other unsaved documents after a background Save | unexplained side effect | root cause proven: any deactivation event makes AppKit autosave every in-place document (`_handleDeactivateEvent:` -> `_appWillBecomeInactive:`), so no narrower release can avoid it. `OPENCUA_BACKGROUND_ACTIVATION=off` turns background activation off; then background Save, New Folder and first-mouse clicks are refused instead |
 | Focus guard vs a deliberate switch to the target app | Command-Tab or a click into the target during the ~0.8 s watch was undone | a physical mouse press or a held Command since the watch began (read from the HID state, our per-app events never appear there) marks the switch as deliberate; the guard steps aside for good. Plain typing does not count, so typing in your own app is still protected |
 | Scroll-find page re-read (150-row Finder list) | walked the whole list every page: 700 ms, 1,544 elements | reads only the rows the list shows (`AXVisibleRows`): 19 ms, 205 elements. Vision-only search 10.3 s -> 4.5 s; accessibility search in a 500-row list 39.5 s -> 12.9 s |
 | `vision: "auto"` on a list accessibility can read | ran OCR (~220 ms) on every page anyway | reads pixels only when the list area exposes no text to accessibility; end of content is told by the accessibility signature |

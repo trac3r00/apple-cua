@@ -15,7 +15,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { isInside } from "./layout.js";
 
-export const SKILL_NAME = "apple-cua";
+export const SKILL_NAME = "opencua";
 
 export type SkillLinkAction = "linked" | "unchanged" | "relinked" | "replaced-copy" | "conflict" | "removed" | "absent";
 
@@ -29,7 +29,7 @@ export interface SkillLinkChange {
 type Existing =
 	| { readonly kind: "none" }
 	| { readonly kind: "link"; readonly target: string; readonly targetExists: boolean }
-	| { readonly kind: "folder"; readonly isAppleCuaSkill: boolean }
+	| { readonly kind: "folder"; readonly isOpenCuaSkill: boolean }
 	| { readonly kind: "other" };
 
 function inspectEntry(path: string): Existing {
@@ -44,13 +44,15 @@ function inspectEntry(path: string): Existing {
 		return { kind: "link", target, targetExists: existsSync(target) };
 	}
 	if (stat.isDirectory()) {
-		let isAppleCuaSkill = false;
+		let isOpenCuaSkill = false;
 		try {
-			isAppleCuaSkill = /^name:\s*["']?apple-cua["']?\s*$/m.test(readFileSync(join(path, "SKILL.md"), "utf8"));
+			isOpenCuaSkill = /^name:\s*["']?(?:opencua|apple-cua)["']?\s*$/m.test(
+				readFileSync(join(path, "SKILL.md"), "utf8"),
+			);
 		} catch {
-			isAppleCuaSkill = false;
+			isOpenCuaSkill = false;
 		}
-		return { kind: "folder", isAppleCuaSkill };
+		return { kind: "folder", isOpenCuaSkill };
 	}
 	return { kind: "other" };
 }
@@ -60,13 +62,30 @@ function timestamp(now: Date): string {
 }
 
 /**
- * Makes `<directory>/apple-cua` a link to `skillSource`. A link whose target is gone (a deleted checkout) is replaced;
- * an older hand-copied apple-cua skill folder is moved aside first; a live link elsewhere (another installation, the
+ * Makes `<directory>/opencua` a link to `skillSource`. A link whose target is gone (a deleted checkout) is replaced;
+ * an older hand-copied opencua skill folder is moved aside first; a live link elsewhere (another installation, the
  * person's own fork) and anything else is left alone and reported as a conflict.
  */
 export function linkSkill(directory: string, skillSource: string, now: Date): SkillLinkChange {
 	const path = join(directory, SKILL_NAME);
 	const existing = inspectEntry(path);
+	const legacyPath = join(directory, "apple-cua");
+	const legacy = inspectEntry(legacyPath);
+	const legacyTarget = legacy.kind === "link" ? inspectEntry(legacy.target) : legacy;
+	if (existing.kind === "none" && legacyTarget.kind === "folder" && legacyTarget.isOpenCuaSkill) {
+		let backup = `${legacyPath}.bak-${timestamp(now)}`;
+		for (let suffix = 2; existsSync(backup); suffix += 1) {
+			backup = `${legacyPath}.bak-${timestamp(now)}-${suffix}`;
+		}
+		renameSync(legacyPath, backup);
+		symlinkSync(skillSource, path);
+		return {
+			directory,
+			action: "replaced-copy",
+			detail: `kept the legacy apple-cua skill at ${backup} and linked ${SKILL_NAME}`,
+			backup,
+		};
+	}
 	switch (existing.kind) {
 		case "none":
 			mkdirSync(directory, { recursive: true });
@@ -79,8 +98,8 @@ export function linkSkill(directory: string, skillSource: string, now: Date): Sk
 			if (existing.targetExists) {
 				const what = inspectEntry(existing.target);
 				const kind =
-					what.kind === "folder" && what.isAppleCuaSkill
-						? "another apple-cua installation's skill"
+					what.kind === "folder" && what.isOpenCuaSkill
+						? "another opencua installation's skill"
 						: "something that is not this installation's skill";
 				return {
 					directory,
@@ -96,11 +115,11 @@ export function linkSkill(directory: string, skillSource: string, now: Date): Sk
 				detail: `relinked ${SKILL_NAME} (it pointed to ${existing.target}${existing.targetExists ? "" : ", which is gone"})`,
 			};
 		case "folder": {
-			if (!existing.isAppleCuaSkill) {
+			if (!existing.isOpenCuaSkill) {
 				return {
 					directory,
 					action: "conflict",
-					detail: `${path} is a folder that is not the apple-cua skill; left it alone`,
+					detail: `${path} is a folder that is not the opencua skill; left it alone`,
 				};
 			}
 			let backup = `${path}.bak-${timestamp(now)}`;
@@ -121,7 +140,7 @@ export function linkSkill(directory: string, skillSource: string, now: Date): Sk
 	}
 }
 
-/** Removes `<directory>/apple-cua` only when it is a link into `bundleDir`; anything else stays. */
+/** Removes `<directory>/opencua` only when it is a link into `bundleDir`; anything else stays. */
 export function unlinkSkill(directory: string, bundleDir: string): SkillLinkChange {
 	const path = join(directory, SKILL_NAME);
 	const existing = inspectEntry(path);

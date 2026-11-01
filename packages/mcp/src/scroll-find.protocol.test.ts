@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { StopStatus, StopStatusSource } from "@apple-cua/core";
-import { copyForMatch } from "@apple-cua/test-support";
+import type { StopStatus, StopStatusSource } from "@opencua/core";
+import { copyForMatch } from "@opencua/test-support";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 import type { Effect } from "./protocol-test-harness.js";

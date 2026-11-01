@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { vi, whenSettled } from "@apple-cua/test-support";
+import { vi, whenSettled } from "@opencua/test-support";
 import type { InputDelivery } from "./macos-input.js";
 
 interface TestWindow {

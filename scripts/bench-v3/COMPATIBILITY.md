@@ -92,7 +92,7 @@ L4 requires an independently verified agent task; it does not certify a
 matched model, all tasks, or 30 trials. An installed client alone does not
 establish L0 registration of a particular hand.
 
-| Client | apple-cua | Cua Driver | Native computer | Attached browser |
+| Client | OpenCUA | Cua Driver | Native computer | Attached browser |
 |---|---|---|---|---|
 | Direct scripted MCP harness | L3 text/menu tasks | L3 menu tasks; text failures retained | Codex rejects direct unauthenticated caller; OmO surface is client-only | L3 owned managed browser fixtures |
 | OmO | L4 TextEdit pilot and verified T4 A36 30/30; historical browser target provenance disputed | T4 pilot task/control and cleanup pass, focus disturbance; further input stopped | T4 pilot task/control and cleanup pass, focus disturbance; further input stopped | Historical exploratory task; current attached baseline disconnected |
@@ -110,13 +110,13 @@ observations if a later probe establishes a higher level.
 
 | Client or engine | Configuration/connectivity | Actual execution | Complete benchmark task |
 |---|---|---|---|
-| apple-cua direct MCP | 26 tools enumerated | read-only probes and 30 transport blocks pass | Scored text 90/90; menu/dialog 74/90; remaining suite pending |
+| OpenCUA direct MCP | 26 tools enumerated | read-only probes and 30 transport blocks pass | Scored text 90/90; menu/dialog 74/90; remaining suite pending |
 | Cua Driver 0.34.0 GitHub release | 58 tools enumerated | read-only probes and 30 transport blocks pass | Scored text 0/90; menu/dialog 45/90; remaining suite pending |
 | Codex Computer Use | 10 direct MCP tools, direct caller rejected as unauthenticated | authenticated Codex `cua_repl` executes read-only and native task calls | Current TextEdit pilot failed; handoff independently verified document absence; browser matrix stopped |
-| OmO + apple-cua | isolated project registration | real nested eval result returns app inventory; observed model matched | Verified T4 A36 30/30 plus TextEdit pilot; no complete paired agent cohort |
+| OmO + OpenCUA | isolated project registration | real nested eval result returns app inventory; observed model matched | Verified T4 A36 30/30 plus TextEdit pilot; no complete paired agent cohort |
 | OmO + Cua Driver | isolated project registration | real nested eval result returns Cua app inventory; observed model matched | T4 pilot task/control and cleanup pass with focus disturbance; further input stopped; historical browser rows retained |
 | OmO native computer | built-in tool discovered | Quartz capabilities returned with permissions granted | T4 pilot task/control and cleanup pass with focus disturbance; further input stopped; historical browser rows retained |
-| Codex + apple-cua | per-process MCP overrides | native TextEdit task completed | One exploratory task passes with verified cleanup but pointer disturbance; no full agent cohort |
+| Codex + OpenCUA | per-process MCP overrides | native TextEdit task completed | One exploratory task passes with verified cleanup but pointer disturbance; no full agent cohort |
 | Codex + Cua Driver | per-process MCP overrides | `list_apps` completed without tool error | Current TextEdit pilots failed with disturbance; collection stopped |
 | Claude Code | CLI installed and login reported | weekly rate limit prevented an agent turn | Unavailable while rate-limited |
 | Hermes | installer app present | no runnable CLI found | Unavailable |

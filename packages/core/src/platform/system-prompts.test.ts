@@ -19,7 +19,7 @@ afterEach(() => {
 	setSystemPromptWindowSourceForTesting(undefined);
 });
 
-describe("#given the windows on screen #when apple-cua looks for dialogs only the person can answer", () => {
+describe("#given the windows on screen #when opencua looks for dialogs only the person can answer", () => {
 	it("#then a permission request, a password sheet and a system alert are named with their kind", () => {
 		const prompts = classifySystemPrompts([
 			window("universalAccessAuthWarn", "Screen Recording", 520, 220, 1),

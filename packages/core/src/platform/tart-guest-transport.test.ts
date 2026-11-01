@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { vi, whenSettled } from "@apple-cua/test-support";
+import { vi, whenSettled } from "@opencua/test-support";
 import type { GuestCommand } from "./tart-guest-transport.js";
 
 vi.mock("node:child_process", () => ({
@@ -21,7 +21,7 @@ const registry = {
 	...owner,
 	backend: "tart",
 	store: "guest-store",
-	vmName: "apple-cua-fixture",
+	vmName: "opencua-fixture",
 	runArguments: ["--no-graphics", "--no-audio", "--no-clipboard", "--no-usb-accessories", "--net-host"],
 	sharedDirectories: [],
 	attachedHostDisks: [],
@@ -29,7 +29,7 @@ const registry = {
 let directory: string;
 
 beforeEach(async () => {
-	directory = await realpath(await mkdtemp(join(tmpdir(), "apple-cua-owned-guest-")));
+	directory = await realpath(await mkdtemp(join(tmpdir(), "opencua-owned-guest-")));
 	await writeFile(join(directory, "ownership.json"), JSON.stringify(registry));
 });
 
@@ -47,10 +47,10 @@ describe("#given an owned macOS guest #when commands run #then the host is never
 		const script = 'const text = "한글; $(not-a-shell-command)";';
 		const output = await transport.execute(["/usr/bin/osascript", "-l", "JavaScript"], script);
 		expect(output.toString()).toBe("guest-output");
-		expect(commands[0]?.args).toEqual(["exec", "apple-cua-fixture", "/usr/sbin/sysctl", "-n", "hw.model"]);
+		expect(commands[0]?.args).toEqual(["exec", "opencua-fixture", "/usr/sbin/sysctl", "-n", "hw.model"]);
 		expect(commands[1]).toEqual({
 			executable: join(directory, "tart.app/Contents/MacOS/tart"),
-			args: ["exec", "-i", "apple-cua-fixture", "/usr/bin/osascript", "-l", "JavaScript"],
+			args: ["exec", "-i", "opencua-fixture", "/usr/bin/osascript", "-l", "JavaScript"],
 			environment: {
 				HOME: expect.any(String),
 				PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
@@ -166,7 +166,7 @@ describe("#given an owned macOS guest #when commands run #then the host is never
 				width: 1,
 				height: 1,
 			});
-			expect(commands[1]?.args.slice(0, 4)).toEqual(["exec", "apple-cua-fixture", "/bin/sh", "-c"]);
+			expect(commands[1]?.args.slice(0, 4)).toEqual(["exec", "opencua-fixture", "/bin/sh", "-c"]);
 			expect(commands[1]?.args[4]).toContain("trap 'rm -rf \"$d\"' EXIT");
 		} finally {
 			transport.close();

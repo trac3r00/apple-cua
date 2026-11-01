@@ -1,4 +1,4 @@
-import type { MirroringObservation } from "@apple-cua/core";
+import type { MirroringObservation } from "@opencua/core";
 import { MAX_TARGETS_PER_OPERATION, SPARSE_TARGET_COUNT } from "./questions.js";
 import type { ActionSpace, TableElement, Target } from "./types.js";
 

@@ -38,7 +38,7 @@ export interface PointerOverlay {
 
 // A transport carries newline-terminated commands ("set x y\n", "highlight ...\n",
 // "hide\n") to the overlay. The default transport talks to a persistent unix-socket
-// daemon so the cursor survives across separate CLI commands (each apple-cua verb is
+// daemon so the cursor survives across separate CLI commands (each opencua verb is
 // its own short-lived process); tests inject a fake transport to capture commands.
 export interface OverlayTransport {
 	send(command: string, pid?: number, direct?: boolean): void;
@@ -85,14 +85,14 @@ const overlayBinaryCandidatePaths: readonly string[] = [
 const DEFAULT_CURSOR_IDENTITY = `process-${process.pid}`;
 
 export function cursorOverlaySocketPath(
-	identity = process.env["APPLE_CUA_CURSOR_ID"] ?? DEFAULT_CURSOR_IDENTITY,
+	identity = process.env["OPENCUA_CURSOR_ID"] ?? DEFAULT_CURSOR_IDENTITY,
 ): string {
 	if (
 		identity.length === 0 ||
 		identity.length > 1_024 ||
 		Array.from(identity).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
 	) {
-		throw new Error("APPLE_CUA_CURSOR_ID must be a non-empty identity without control characters");
+		throw new Error("OPENCUA_CURSOR_ID must be a non-empty identity without control characters");
 	}
 	// macOS sun_path holds 104 bytes including its terminator. Keep the filename
 	// short enough for the per-user /var/folders temporary directory.
@@ -289,7 +289,7 @@ export function defaultSocketTransport(
 			child.on("error", (error: Error) => {
 				if (!spawnFailed) {
 					spawnFailed = true;
-					process.stderr.write(`apple-cua: cursor overlay unavailable, continuing without it: ${error.message}\n`);
+					process.stderr.write(`opencua: cursor overlay unavailable, continuing without it: ${error.message}\n`);
 				}
 			});
 			child.unref();
@@ -320,7 +320,7 @@ export function defaultSocketTransport(
 					(prepared) => socket.end(prepared),
 					(error: unknown) => {
 						process.stderr.write(
-							`apple-cua: cursor motion unavailable: ${error instanceof Error ? error.message : String(error)}\n`,
+							`opencua: cursor motion unavailable: ${error instanceof Error ? error.message : String(error)}\n`,
 						);
 						socket.destroy();
 					},

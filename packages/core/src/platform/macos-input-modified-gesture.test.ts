@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 
 const WINDOW = { id: 99, bounds: { x: 10, y: 20, width: 300, height: 200 } };
 const OTHER_WINDOW = { id: 98, bounds: { x: 400, y: 20, width: 300, height: 200 } };
@@ -390,7 +390,7 @@ describe("#given an app behind the person's told it is active for a click (where
 	});
 });
 
-describe("#given background activation turned off (APPLE_CUA_BACKGROUND_ACTIVATION=off)", () => {
+describe("#given background activation turned off (OPENCUA_BACKGROUND_ACTIVATION=off)", () => {
 	beforeEach(resetDesktop);
 
 	it.each([
@@ -404,7 +404,7 @@ describe("#given background activation turned off (APPLE_CUA_BACKGROUND_ACTIVATI
 	])("#when the variable is %j #then background activation is %s", async (value, enabled) => {
 		const { backgroundActivationEnabled } = await import("./macos-input.js");
 
-		expect(backgroundActivationEnabled(value === undefined ? {} : { APPLE_CUA_BACKGROUND_ACTIVATION: value })).toBe(
+		expect(backgroundActivationEnabled(value === undefined ? {} : { OPENCUA_BACKGROUND_ACTIVATION: value })).toBe(
 			enabled,
 		);
 	});

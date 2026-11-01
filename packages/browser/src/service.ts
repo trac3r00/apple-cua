@@ -5,7 +5,7 @@ import { homedir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { resolveStateDir } from "@apple-cua/core/stop";
+import { resolveStateDir } from "@opencua/core/stop";
 import { z } from "zod";
 import type { Connection } from "./connection.js";
 import { connectionToken, readConnection, writeConnection } from "./connection.js";
@@ -113,9 +113,9 @@ export function renderLaunchAgent(paths: ServicePaths, nodePath: string, port = 
 		"\t<true/>",
 		"\t<key>EnvironmentVariables</key>",
 		"\t<dict>",
-		"\t\t<key>APPLE_CUA_STATE_DIR</key>",
+		"\t\t<key>OPENCUA_STATE_DIR</key>",
 		`\t\t<string>${escapeXml(paths.stateDirectory)}</string>`,
-		"\t\t<key>APPLE_CUA_BROWSER_PORT</key>",
+		"\t\t<key>OPENCUA_BROWSER_PORT</key>",
 		`\t\t<string>${port}</string>`,
 		"\t</dict>",
 		"\t<key>KeepAlive</key>",
@@ -148,8 +148,8 @@ export function renderNativeHostLauncher(paths: ServicePaths, nodePath: string, 
 	const quote = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`;
 	return [
 		"#!/bin/sh",
-		`export APPLE_CUA_STATE_DIR=${quote(paths.stateDirectory)}`,
-		`export APPLE_CUA_BROWSER_EXTENSION_ID=${quote(extensionId)}`,
+		`export OPENCUA_STATE_DIR=${quote(paths.stateDirectory)}`,
+		`export OPENCUA_BROWSER_EXTENSION_ID=${quote(extensionId)}`,
 		`exec ${quote(nodePath)} ${quote(paths.nativeHostProgram)} "$@"`,
 		"",
 	].join("\n");
@@ -221,7 +221,7 @@ export async function installBrowserService(options: ServiceOptions = {}): Promi
 		throw new Error("The persistent browser service is supported only on macOS.");
 	}
 	const extensionId = extensionIdSchema.parse(
-		options.extensionId ?? process.env["APPLE_CUA_BROWSER_EXTENSION_ID"] ?? EXTENSION_ID,
+		options.extensionId ?? process.env["OPENCUA_BROWSER_EXTENSION_ID"] ?? EXTENSION_ID,
 	);
 
 	await mkdir(context.paths.logDirectory, { recursive: true, mode: 0o700 });

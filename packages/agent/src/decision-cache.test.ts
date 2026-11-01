@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { type FetchHandler, fetchDouble, vi } from "@apple-cua/test-support";
+import { type FetchHandler, fetchDouble, vi } from "@opencua/test-support";
 import type { PrefetchStatus } from "./decision-cache.js";
 import { DecisionCache } from "./decision-cache.js";
 import { createDecider } from "./decision.js";

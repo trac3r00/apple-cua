@@ -1,16 +1,16 @@
-# @apple-cua/pi-extension
+# @opencua/pi-extension
 
 Computer use for the [pi coding agent](https://github.com/badlogic/pi-mono), part of
-[apple-cua](../../README.md).
+[OpenCUA](../../README.md).
 
-pi has no MCP client, so this extension is one: a thin bridge to the same guarded `apple-cua-mcp`
+pi has no MCP client, so this extension is one: a thin bridge to the same guarded `opencua-mcp`
 server every other agent client runs, inside the signed helper app. The server keeps every guard
 (observation tokens, the app allowlist, background delivery, the stop switch), and macOS
-Accessibility and Screen Recording permissions belong to **apple-cua-mcp**, not to the terminal
+Accessibility and Screen Recording permissions belong to **opencua-mcp**, not to the terminal
 that runs pi.
 
 ```bash
-pnpm --filter @apple-cua/pi-extension build
+pnpm --filter @opencua/pi-extension build
 pi install <checkout>/packages/pi-extension
 ```
 
@@ -19,18 +19,18 @@ pi install <checkout>/packages/pi-extension
 At each session start (so a settings change applies to the next session) the extension starts
 one server, first match wins:
 
-1. `APPLE_CUA_MCP_COMMAND`, with `APPLE_CUA_MCP_ARGS` as a JSON array of arguments, for a server
+1. `OPENCUA_MCP_COMMAND`, with `OPENCUA_MCP_ARGS` as a JSON array of arguments, for a server
    installed elsewhere.
-2. The per-Mac bundle `apple-cua setup` writes, `$APPLE_CUA_HOME/bundle/plugins/apple-cua/.mcp.json`
-   (`APPLE_CUA_HOME` defaults to `~/.apple-cua`): its `command`, `args` and `env`, the same
+2. The per-Mac bundle `opencua setup` writes, `$OPENCUA_HOME/bundle/plugins/opencua/.mcp.json`
+   (`OPENCUA_HOME` defaults to `~/.opencua`): its `command`, `args` and `env`, the same
    registration and saved settings every other client runs.
 3. The helper and server built in this checkout:
-   `packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp packages/mcp/dist/server.js`.
+   `packages/mcp/dist/opencua-mcp.app/Contents/MacOS/opencua-mcp packages/mcp/dist/server.js`.
 
 If none applies, or the bundle cannot be read, session start fails with an error naming
-`apple-cua doctor`. The pi process's own `APPLE_CUA_*` variables are passed to the server on top
-of the bundle's env and win over it, for example `APPLE_CUA_ALLOWED_BUNDLE_IDS`,
-`APPLE_CUA_DELIVERY`, `APPLE_CUA_TOOLSET` and `APPLE_CUA_IPHONE`. The server's stderr is kept out
+`opencua doctor`. The pi process's own `OPENCUA_*` variables are passed to the server on top
+of the bundle's env and win over it, for example `OPENCUA_ALLOWED_BUNDLE_IDS`,
+`OPENCUA_DELIVERY`, `OPENCUA_TOOLSET` and `OPENCUA_IPHONE`. The server's stderr is kept out
 of pi's terminal UI and quoted in error messages instead.
 
 One server runs per pi session and stops at session end. If it exits on its own it is restarted
@@ -41,7 +41,7 @@ been dispatched. After a second exit every call fails until a new session starts
 
 Tools are registered from the server's `tools/list` at session start, with the server's own names,
 descriptions and JSON Schemas: `list_apps`, `get_app_state`, `click`, `run_script` and the rest of
-the profile `APPLE_CUA_TOOLSET` selects, plus the iPhone Mirroring tools when `APPLE_CUA_IPHONE=1`.
+the profile `OPENCUA_TOOLSET` selects, plus the iPhone Mirroring tools when `OPENCUA_IPHONE=1`.
 Calls run one at a time and return the server's text and images unchanged; a refusal is reported
 as a failed tool call carrying the server's reason. The server's instructions are added to the
 system prompt, as an MCP client would show them.
@@ -49,8 +49,8 @@ system prompt, as an MCP client would show them.
 ## Native computer-use shapes
 
 Anthropic models get the native `computer-use-2025-01-24` tool with its beta header, and OpenAI
-Responses models can get `{ "type": "computer" }` (off until `APPLE_CUA_OPENAI_NATIVE_TRANSPORT=1`,
-because the pi-ai transport cannot carry computer calls yet). `APPLE_CUA_DISABLE_COMPUTER_USE_BETA=1`
+Responses models can get `{ "type": "computer" }` (off until `OPENCUA_OPENAI_NATIVE_TRANSPORT=1`,
+because the pi-ai transport cannot carry computer calls yet). `OPENCUA_DISABLE_COMPUTER_USE_BETA=1`
 turns both off.
 
 The native tool acts on the app window last observed through the bridge, so the model calls
@@ -59,7 +59,7 @@ screenshot's size, and coordinates are its pixels (the server caps window images
 edge, so they map 1:1). Every action is one guarded call with the newest observation token; an
 answer without a token means the next action needs a new screenshot.
 
-| Native action | apple-cua-mcp call |
+| Native action | opencua-mcp call |
 |---|---|
 | `screenshot` | `get_app_state` of the targeted window (the window, not the whole screen) |
 | `left_click`, `right_click`, `middle_click`, OpenAI `click` | `click` with `x`, `y`, `mouse_button`; OpenAI `keys` are held as `modifiers` |
@@ -76,5 +76,5 @@ a point), `mouse_move` and OpenAI `move` (the pointer is never moved), `cursor_p
 `left_mouse_down` and `left_mouse_up`, the OpenAI `back` and `forward` buttons, and OpenAI drag
 paths through more than two points.
 
-Docs: [root README](../../README.md) · [harness setup](../../skills/apple-cua/references/harnesses.md).
+Docs: [root README](../../README.md) · [harness setup](../../skills/opencua/references/harnesses.md).
 MIT licensed — see [LICENSE](../../LICENSE).

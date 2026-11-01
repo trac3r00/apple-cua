@@ -1,4 +1,4 @@
-import { vi } from "@apple-cua/test-support";
+import { vi } from "@opencua/test-support";
 import { Value } from "typebox/value";
 
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "../../src/pi/index.js";

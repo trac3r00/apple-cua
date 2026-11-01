@@ -29,7 +29,7 @@ The directory's registry must name the actual coordinating agent and session:
   "agentName": "OmO",
   "sessionId": "your-session-id",
   "store": "guest-store",
-  "vmName": "apple-cua-your-session-id",
+  "vmName": "opencua-your-session-id",
   "runArguments": [
     "--no-graphics",
     "--no-audio",
@@ -56,7 +56,7 @@ bun --tsconfig-override=tsconfig.isolated.json \
 ```
 
 This is an MCP stdio server, not an interactive shell. After normal packaging,
-the corresponding executable is `apple-cua-isolated-mcp`.
+the corresponding executable is `opencua-isolated-mcp`.
 Allow at least 210 seconds for a client's initial `start` request. Startup has
 a bounded 180-second guest-agent readiness window. Normal guest commands have
 a 30-second deadline.

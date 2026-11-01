@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { Rect } from "@apple-cua/core";
+import type { Rect } from "@opencua/core";
 import { createHarness, jsonPayload, jsonText, observe } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 

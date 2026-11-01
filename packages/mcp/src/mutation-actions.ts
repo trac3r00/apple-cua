@@ -7,7 +7,7 @@ import {
 	pressKeySequence,
 	scrollElement,
 	withTargetedApp,
-} from "@apple-cua/core";
+} from "@opencua/core";
 import type {
 	ComputerInterface,
 	ComputerUseMouseButton,
@@ -17,7 +17,7 @@ import type {
 	KeySequenceOptions,
 	Point,
 	ScrollOptions,
-} from "@apple-cua/core";
+} from "@opencua/core";
 import { observedPointToScreen, validateElement, validatePoint } from "./guarded-session.js";
 import type { ActionDelivery, ActionDispatch } from "./tool-result.js";
 import type { ClickActionInput, DragActionInput, PressKeysActionInput, SelectTextActionInput } from "./tool-schemas.js";

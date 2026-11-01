@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { PreflightResult } from "@apple-cua/core";
+import type { PreflightResult } from "@opencua/core";
 import { GuardedSession } from "./guarded-session.js";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { Deferred, type Effect, FakeGuardedComputer } from "./protocol-test-harness.js";

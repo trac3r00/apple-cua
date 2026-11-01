@@ -1,5 +1,12 @@
-import { AppApprovalStore, MacOSHostComputer, listTopLevelWindows } from "@apple-cua/core";
-import type { GuardedComputerInterface, InputDelivery, WindowProbe } from "@apple-cua/core";
+import {
+	AppApprovalStore,
+	GuardedPlatformComputer,
+	MacOSHostComputer,
+	createLinuxHostComputer,
+	createWindowsHostComputer,
+	listTopLevelWindows,
+} from "@opencua/core";
+import type { GuardedComputerInterface, InputDelivery, WindowProbe } from "@opencua/core";
 
 export function allowedBundleIdsFromEnvironment(value: string | undefined): readonly string[] | undefined {
 	return value
@@ -18,19 +25,19 @@ function deliveryFromEnvironment(value: string | undefined): InputDelivery {
 
 /** Optional exact restriction: unset permits named apps; explicitly empty permits none. */
 export function allowedBundleIdsFromProcessEnvironment(): readonly string[] | undefined {
-	return allowedBundleIdsFromEnvironment(process.env["APPLE_CUA_ALLOWED_BUNDLE_IDS"]);
+	return allowedBundleIdsFromEnvironment(process.env["OPENCUA_ALLOWED_BUNDLE_IDS"]);
 }
 
 /** Delivery mode from the host environment. */
 export function deliveryFromProcessEnvironment(): InputDelivery {
-	return deliveryFromEnvironment(process.env["APPLE_CUA_DELIVERY"]);
+	return deliveryFromEnvironment(process.env["OPENCUA_DELIVERY"]);
 }
 
-export function createNativeComputer(): GuardedComputerInterface {
-	return new MacOSHostComputer({
-		appApproval: new AppApprovalStore(allowedBundleIdsFromProcessEnvironment()),
-		delivery: deliveryFromProcessEnvironment(),
-	});
+export function createNativeComputer(platform: NodeJS.Platform = process.platform): GuardedComputerInterface {
+	const appApproval = new AppApprovalStore(allowedBundleIdsFromProcessEnvironment());
+	if (platform === "linux") return new GuardedPlatformComputer(createLinuxHostComputer(), { approval: appApproval });
+	if (platform === "win32") return new GuardedPlatformComputer(createWindowsHostComputer(), { approval: appApproval });
+	return new MacOSHostComputer({ appApproval, delivery: deliveryFromProcessEnvironment() });
 }
 
 export function createNativeWindowProbe(): WindowProbe | undefined {

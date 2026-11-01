@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { once } from "node:events";
-import type { StopStatusSource } from "@apple-cua/core";
-import { vi, whenSettled } from "@apple-cua/test-support";
+import type { StopStatusSource } from "@opencua/core";
+import { vi, whenSettled } from "@opencua/test-support";
 import { WebSocket } from "ws";
 import { z } from "zod";
 import { BrowserBridge } from "./bridge.js";

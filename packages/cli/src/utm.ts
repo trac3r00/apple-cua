@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { UTM } from "@apple-cua/core";
+import { UTM } from "@opencua/core";
 import { type Command, InvalidArgumentError } from "commander";
 
 type RegisterUtmOptions = {

@@ -1,5 +1,5 @@
 {
-	"name": "@apple-cua/cli",
+	"name": "@opencua/cli",
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Command-line interface for macOS computer control",
@@ -11,6 +11,7 @@
 	},
 	"keywords": ["macos", "automation", "cli", "computer-use"],
 	"bin": {
+		"opencua": "./dist/cli.js",
 		"apple-cua": "./dist/cli.js"
 	},
 	"scripts": {
@@ -19,8 +20,8 @@
 		"test": "bun test --isolate --parallel=4"
 	},
 	"dependencies": {
-		"@apple-cua/browser": "workspace:*",
-		"@apple-cua/core": "workspace:*",
+		"@opencua/browser": "workspace:*",
+		"@opencua/core": "workspace:*",
 		"commander": "^12.0.0",
 		"zod": "4.4.3"
 	},

@@ -138,7 +138,7 @@ export function createTerminalSession(access: TerminalAccess = nativeAccess) {
 
 		async runAndCapture(command: string, options: TerminalCaptureOptions = {}): Promise<TerminalCapture> {
 			this.findTerminal();
-			const marker = options.createMarker?.() ?? `apple-cua-marker-${crypto.randomUUID().replaceAll("-", "")}`;
+			const marker = options.createMarker?.() ?? `opencua-marker-${crypto.randomUUID().replaceAll("-", "")}`;
 			const windowId = await this.runCommand({
 				command: markerForCommand(command, marker),
 				...(options.windowId === undefined ? {} : { windowId: options.windowId }),
@@ -172,7 +172,7 @@ export function runCommand(options: TerminalRunOptions): Promise<number | undefi
 }
 
 export async function dispatchTerminalCommand(options: TerminalRunOptions): Promise<TerminalRunResult> {
-	const marker = `apple-cua-marker-${crypto.randomUUID().replaceAll("-", "")}`;
+	const marker = `opencua-marker-${crypto.randomUUID().replaceAll("-", "")}`;
 	const windowId = await nativeTerminalSession.runCommand({
 		...options,
 		command: markerForCommand(options.command, marker),

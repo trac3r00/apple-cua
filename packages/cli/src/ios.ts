@@ -1,13 +1,8 @@
 import { writeFileSync } from "node:fs";
-import {
-	IPhoneMirroring,
-	type MirroringSessionState,
-	describeMirroringState,
-	readImagePixelSize,
-} from "@apple-cua/core";
+import { IPhoneMirroring, type MirroringSessionState, describeMirroringState, readImagePixelSize } from "@opencua/core";
 import type { Command } from "commander";
 
-export type { MirroringSessionState } from "@apple-cua/core";
+export type { MirroringSessionState } from "@opencua/core";
 type Direction = "up" | "down" | "left" | "right";
 type SwipeKind = "flick" | "drag";
 

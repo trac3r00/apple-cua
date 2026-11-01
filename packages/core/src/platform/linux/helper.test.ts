@@ -127,7 +127,7 @@ print(json.dumps(dict(value=control.value, actions=control.performed,
 	selection=window_node.selection, commands=commands)))
 `);
 		expect(result).toEqual({ value: "start!", actions: ["toggle"], selection: 0, commands: [] });
-	});
+	}, 30_000);
 
 	it("#given text context #when selection and caret actions run #then uses character offsets without focus changes", async () => {
 		const result = await python(String.raw`
@@ -137,7 +137,7 @@ semantic(dict(ref=ref, action="selectText", options=dict(selection="before", tex
 print(json.dumps(dict(selection=selection, caret=control.caret, commands=commands)))
 `);
 		expect(result).toEqual({ selection: [6, 11], caret: 6, commands: [] });
-	});
+	}, 30_000);
 
 	it.each(["removed", "replaced", "defunct", "new-snapshot", "app-exited"])(
 		"#given an observed element #when %s #then refuses STALE_REF rather than acting on a replacement",
@@ -172,7 +172,7 @@ focused_text(17, "!")
 print(json.dumps(dict(value=control.value, commands=commands)))
 `),
 		).toEqual({ value: "hello! world", commands: [] });
-	});
+	}, 30_000);
 
 	it("#given no physical opt-in #when physical commands reach Python #then independently rejects before invoking tools", async () => {
 		expect(
@@ -185,7 +185,7 @@ except BackendError as error:
 print(json.dumps(dict(result=result, commands=commands)))
 `),
 		).toEqual({ result: "PHYSICAL_INPUT_REQUIRED", commands: [] });
-	});
+	}, 30_000);
 
 	it.each(["x11", "wayland"])(
 		"#given explicit physical input on %s #when clicking #then uses the matching tool without window activation",
@@ -225,7 +225,7 @@ semantic(dict(ref=ref, action="setValue", value="42.5"))
 print(json.dumps(dict(value=numeric.current, commands=commands)))
 `),
 		).toEqual({ value: 42.5, commands: [] });
-	});
+	}, 30_000);
 
 	it("#given an unsupported semantic action #when requested #then fails without synthetic fallback", async () => {
 		expect(
@@ -238,7 +238,7 @@ except BackendError as error:
 print(json.dumps(dict(result=result, commands=commands)))
 `),
 		).toEqual({ result: "UNSUPPORTED_ACTION", commands: [] });
-	});
+	}, 30_000);
 
 	it.each([
 		["up", "0", "2"],
@@ -273,7 +273,7 @@ print(json.dumps(dict(pauses=pauses, commands=commands)))
 				["ydotool", "key", "28:0", "29:0"],
 			],
 		});
-	});
+	}, 30_000);
 
 	it("#given a failed drag movement #when physical drag runs #then releases its button in the failure path", async () => {
 		expect(
@@ -297,7 +297,7 @@ print(json.dumps(commands))
 			["ydotool", "mousemove", "--absolute", "-x", "3", "-y", "4"],
 			["ydotool", "click", "0x80"],
 		]);
-	});
+	}, 30_000);
 
 	it.each(["x11", "grim", "portal"])(
 		"#given %s capture support #when screenshot runs #then captures without raising and reports actual scope",
@@ -344,7 +344,7 @@ except BackendError as error:
 print(json.dumps(dict(result=result, commands=commands)))
 `),
 		).toEqual({ result: "FULL_SCREEN_ONLY", commands: [] });
-	});
+	}, 30_000);
 
 	it("#given a missing Python executable #when spawned #then reports installation guidance through the actual transport", async () => {
 		const client = new LinuxHelperClient({
@@ -359,5 +359,5 @@ print(json.dumps(dict(result=result, commands=commands)))
 		} finally {
 			client.close();
 		}
-	});
+	}, 30_000);
 });

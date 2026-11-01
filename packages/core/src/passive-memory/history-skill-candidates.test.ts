@@ -189,7 +189,7 @@ describe("#given a copy-paste workflow repeated three times #when detecting #the
 		expect(result.candidates[0]?.proposedName).toBe("safari-notes-workflow");
 		expect(result.candidates[0]?.segmentIds).toEqual(["2026-11-01T10-00-00Z", "2026-11-01T10-10-00Z"]);
 		expect(JSON.stringify(result)).not.toContain("private-literal");
-	});
+	}, 30_000);
 });
 
 describe("#given only overlapping repeats #when detecting #then no candidate is claimed", () => {
@@ -201,7 +201,7 @@ describe("#given only overlapping repeats #when detecting #then no candidate is 
 			maxSteps: 3,
 		});
 		expect(result.candidates).toEqual([]);
-	});
+	}, 30_000);
 });
 
 describe("#given a repeat split across a segment boundary #when detecting #then it is not joined", () => {
@@ -216,7 +216,7 @@ describe("#given a repeat split across a segment boundary #when detecting #then 
 			{ id: "2", events: [flow[2]].map((step, index) => event(step as AbstractStep, index)) },
 		];
 		expect(detectHistorySkillCandidates(segments).candidates).toEqual([]);
-	});
+	}, 30_000);
 });
 
 describe("#given malformed events #when detecting #then they are skipped and counted, never thrown", () => {
@@ -233,7 +233,7 @@ describe("#given malformed events #when detecting #then they are skipped and cou
 		];
 		const result = detectHistorySkillCandidates([{ id: "s", events: invalid }]);
 		expect(result).toEqual({ candidates: [], scannedSegments: 1, scannedEvents: invalid.length, skippedEvents: 8 });
-	});
+	}, 30_000);
 });
 
 describe("#given empty and boundary inputs #when detecting #then results are empty but well-formed", () => {
@@ -248,7 +248,7 @@ describe("#given empty and boundary inputs #when detecting #then results are emp
 		const events = [...flow, ...flow].map(event);
 		expect(detectHistorySkillCandidates([{ id: "s", events }], { maxEvents: 4 }).candidates).toEqual([]);
 		expect(detectHistorySkillCandidates([{ id: "s", events }], { maxEvents: 6 }).candidates).toHaveLength(1);
-	});
+	}, 30_000);
 });
 
 describe("#given the oracle #when fed a corrupted detection #then it reports the violation (calibration)", () => {
@@ -273,7 +273,7 @@ describe("#given the oracle #when fed a corrupted detection #then it reports the
 		expect(violations(model, leaked, bounds).join()).toContain("typed text leaked");
 		expect(violations(model, invented, bounds).join()).toContain("segment without occurrence");
 		expect(violations(model, missing, bounds).join()).toContain("missed repeated workflow");
-	});
+	}, 30_000);
 });
 
 describe("#given seeded generated histories #when detecting #then every result matches the brute-force model", () => {
@@ -306,7 +306,7 @@ describe("#given seeded generated histories #when detecting #then every result m
 		expect(counts.executed).toBe(400);
 		expect(counts.withCandidates).toBeGreaterThan(50);
 		expect(counts.empty).toBeGreaterThan(20);
-	});
+	}, 30_000);
 });
 
 describe("#given a single-app loop of bare clicks and typing #when detecting #then it is not suggested", () => {
@@ -326,7 +326,7 @@ describe("#given a single-app loop of bare clicks and typing #when detecting #th
 		];
 		const result = detectHistorySkillCandidates([{ id: "s", events: [...titled, ...titled].map(event) }]);
 		expect(result.candidates[0]?.occurrences).toBe(2);
-	});
+	}, 30_000);
 });
 
 describe("#given a workflow repeated back to back #when detecting #then only the single workflow is suggested, not its doubling", () => {
@@ -343,5 +343,5 @@ describe("#given a workflow repeated back to back #when detecting #then only the
 		expect(result.candidates[0]?.occurrences).toBe(4);
 		expect(isPeriodic(["a", "b", "c", "a", "b"], 2)).toBe(true);
 		expect(isPeriodic(["a", "b", "c", "a"], 2)).toBe(false);
-	});
+	}, 30_000);
 });

@@ -53,6 +53,11 @@ interface ComputerUseModel {
 const DISABLE_COMPUTER_USE_BETA_ENV = "OPENCUA_DISABLE_COMPUTER_USE_BETA";
 const OPENAI_NATIVE_TRANSPORT_ENV = "OPENCUA_OPENAI_NATIVE_TRANSPORT";
 
+/** Reads a renamed flag, honoring the APPLE_CUA_* name an older installation still sets. */
+function flagValue(env: Environment, name: string): string | undefined {
+	return env[name] ?? env[name.replace(/^OPENCUA_/, "APPLE_CUA_")];
+}
+
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(sourceDirectory, "..");
 const skillPath = path.resolve(packageRoot, "../../skills/opencua/SKILL.md");
@@ -97,7 +102,7 @@ function installExtension(pi: ExtensionAPI, options: ExtensionOptions): void {
 			pi.registerTool(tool);
 		}
 		const computer = new McpComputer((name, args) => bridge.callTool(name, args), target);
-		const enabled = !isTruthyFlag(env[DISABLE_COMPUTER_USE_BETA_ENV]);
+		const enabled = !isTruthyFlag(flagValue(env, DISABLE_COMPUTER_USE_BETA_ENV));
 		session = { bridge, computer, instructions, enabled };
 		if (!enabled) {
 			return;
@@ -208,7 +213,7 @@ function shouldInjectOpenAINativeComputerUse(model: ComputerUseModel | undefined
 	if (!isDirectOpenAIEndpoint(model.baseUrl)) {
 		return false;
 	}
-	if (isTruthyFlag(env[OPENAI_NATIVE_TRANSPORT_ENV])) {
+	if (isTruthyFlag(flagValue(env, OPENAI_NATIVE_TRANSPORT_ENV))) {
 		return true;
 	}
 	warnOpenAINativeTransportUnavailable(model.id);

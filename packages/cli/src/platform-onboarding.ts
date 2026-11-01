@@ -5,10 +5,11 @@ import type { Layout } from "./layout.js";
 import { type CliRunner, runCli } from "./plugin-clients.js";
 
 export const LINUX_INSTALL_HINTS = [
-	"apt: sudo apt-get install at-spi2-core libatspi2.0-0 xdotool gnome-screenshot",
-	"dnf: sudo dnf install at-spi2-core xdotool gnome-screenshot",
-	"pacman: sudo pacman -S at-spi2-core xdotool gnome-screenshot",
-	"Wayland: replace xdotool with ydotool and gnome-screenshot with grim; configure the ydotool daemon.",
+	"apt: sudo apt-get install at-spi2-core python3-gi gir1.2-atspi-2.0 gir1.2-gdkpixbuf-2.0 imagemagick",
+	"dnf: sudo dnf install at-spi2-core python3-gobject gdk-pixbuf2 ImageMagick",
+	"pacman: sudo pacman -S at-spi2-core python-gobject gdk-pixbuf2 imagemagick",
+	"Wayland: install grim instead of imagemagick; the xdg-desktop-portal screenshot is the fallback.",
+	"Physical input (opt-in only): xdotool on X11, or ydotool with its daemon on Wayland.",
 ].join("\n");
 
 /** Non-macOS checks never probe a TCC helper, Mach-O binary or Apple service. */
@@ -34,22 +35,38 @@ export function portableDoctor(
 	];
 	if (platform === "linux") {
 		const probe = (script: string) => run("sh", ["-c", script], env).status === 0;
-		for (const [id, summary, script] of [
-			[
-				"at-spi",
-				"AT-SPI accessibility runtime",
-				"pkg-config --exists atspi-2 2>/dev/null || ldconfig -p 2>/dev/null | grep libatspi >/dev/null || command -v at-spi-bus-launcher >/dev/null || test -x /usr/libexec/at-spi-bus-launcher || test -x /usr/lib/at-spi2-core/at-spi-bus-launcher",
-			],
-			["input", "xdotool or ydotool", "command -v xdotool >/dev/null || command -v ydotool >/dev/null"],
-			[
-				"screenshot",
-				"screenshot tool",
-				"command -v grim >/dev/null || command -v scrot >/dev/null || command -v gnome-screenshot >/dev/null || command -v import >/dev/null",
-			],
-		]) {
-			if (id === undefined || summary === undefined || script === undefined) continue;
-			checks.push({ id, summary, status: probe(script) ? "ok" : "fail", fix: LINUX_INSTALL_HINTS });
-		}
+		const wayland = (env["WAYLAND_DISPLAY"] ?? "") !== "";
+		// The helper reaches AT-SPI through Python GI, so probe that import rather than the C library.
+		checks.push({
+			id: "at-spi",
+			summary: "Python GI with the AT-SPI and GdkPixbuf typelibs",
+			status: probe(
+				"python3 -c \"import gi; gi.require_version('Atspi', '2.0'); gi.require_version('GdkPixbuf', '2.0'); from gi.repository import Atspi, GdkPixbuf\" >/dev/null 2>&1",
+			)
+				? "ok"
+				: "fail",
+			fix: LINUX_INSTALL_HINTS,
+		});
+		// Capture uses grim (or the portal) on Wayland and ImageMagick `import` on X11; nothing else.
+		checks.push({
+			id: "screenshot",
+			summary: wayland ? "grim or the desktop portal (Wayland)" : "ImageMagick import (X11)",
+			status: wayland
+				? probe("command -v grim >/dev/null")
+					? "ok"
+					: "warn"
+				: probe("command -v import >/dev/null")
+					? "ok"
+					: "fail",
+			fix: LINUX_INSTALL_HINTS,
+		});
+		// Physical input is opt-in, so its tool is a warning rather than a failed installation.
+		checks.push({
+			id: "input",
+			summary: wayland ? "ydotool, for opt-in physical input (Wayland)" : "xdotool, for opt-in physical input (X11)",
+			status: probe(`command -v ${wayland ? "ydotool" : "xdotool"} >/dev/null`) ? "ok" : "warn",
+			fix: LINUX_INSTALL_HINTS,
+		});
 		checks.push({
 			id: "desktop-session",
 			status: env["DISPLAY"] || env["WAYLAND_DISPLAY"] ? "ok" : "fail",
@@ -96,7 +113,16 @@ export function runPlatformSetup(
 		case "linux":
 			return run("bash", [layout.setupScript, "--yes"]);
 		case "win32":
-			return run("powershell.exe", ["-NoProfile", "-File", layout.setupScript, "-Checkout", layout.checkout]);
+			// The installer is a local .ps1, which the default Restricted policy would refuse to run.
+			return run("powershell.exe", [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				layout.setupScript,
+				"-Checkout",
+				layout.checkout,
+			]);
 		default:
 			throw new Error(`Setup is not supported on ${platform}`);
 	}

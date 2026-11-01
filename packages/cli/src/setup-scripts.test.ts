@@ -72,6 +72,9 @@ describe("#given a Linux checkout and legacy state #when setup runs #then it ski
 			pnpm: `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${version}'; fi\nexit 0\n`,
 			node: `#!/bin/sh\nif [ "$1" = '${join(repo, "packages/cli/dist/cli.js")}' ]; then exit 0; fi\nexec '${process.execPath}' "$@"\n`,
 			"pkg-config": "#!/bin/sh\nexit 0\n",
+			// The dependency check imports AT-SPI and GdkPixbuf through Python GI, and captures with import.
+			python3: "#!/bin/sh\nexit 0\n",
+			import: "#!/bin/sh\nexit 0\n",
 			xdotool: "#!/bin/sh\nexit 0\n",
 			grim: "#!/bin/sh\nexit 0\n",
 		};

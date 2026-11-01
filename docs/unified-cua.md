@@ -1,6 +1,10 @@
 # Historical comparison: what OpenCUA took from Codex, Cua Driver and OmO
 
 This is a dated comparison record, not current setup guidance or a live benchmark.
+
+> These runs predate the rename to OpenCUA. Commands and paths recorded as executed keep their
+> original `apple-cua` names; product references use the current name.
+
 The observations below were measured on 2026-10-05/06 with the named versions,
 machine, harness and scenarios. Keep those results as historical evidence; consult
 the current skill and `docs/bundle-capability-audit.md` for actionable workflows
@@ -50,11 +54,11 @@ What broke along the way (all fixed in the harness, not hidden):
   the sidebar: Codex numbering grows across `getApp` calls in one REPL session.
 - In a standalone MCP client (outside OmO) Codex's REPL did not keep bindings between calls; inside OmO it did.
 
-Stop switch, live on the signed helper: `opencua stop` -> the next click answered `refused: user-stopped` with
-`actionDispatched: false`; `get_app_state` still answered; `get_capabilities` reported the stop; `opencua resume`
+Stop switch, live on the signed helper: `apple-cua stop` -> the next click answered `refused: user-stopped` with
+`actionDispatched: false`; `get_app_state` still answered; `get_capabilities` reported the stop; `apple-cua resume`
 -> clicks worked again; no stop file left behind.
 
-Raw evidence: `.omo/plans/qa-unified-evidence.json` (OpenCUA leg) and `.omo/plans/qa-unified.mjs`.
+Raw evidence: `.omo/plans/qa-unified-evidence.json` (`apple-cua` leg) and `.omo/plans/qa-unified.mjs`.
 
 ## Not taken (yet)
 

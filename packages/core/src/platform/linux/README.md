@@ -85,9 +85,9 @@ the embedded Python with in-memory GI objects and requires Python 3, but no Linu
 host or real AT-SPI. Live AT-SPI, X11, Wayland compositor, portal, and uinput behavior
 still require verification on Linux.
 
-Shared root exports to add separately:
+`packages/core/src/index.ts` already re-exports `createLinuxHostComputer`, `LinuxHostComputer`,
+`LinuxBackendError`, `LINUX_INSTALL_HINTS` and the Linux types, so consumers import them from
+`@opencua/core`.
 
-```ts
-export { createLinuxHostComputer, LinuxHostComputer, LinuxBackendError, LINUX_INSTALL_HINTS } from "./platform/linux/index.js";
-export type { LinuxAppState, LinuxElementRef, LinuxHelperEvents, LinuxHelperFactory, LinuxHelperTransport, LinuxHostComputerOptions, LinuxScreenshotResult, LinuxSemanticAction } from "./platform/linux/index.js";
-```
+The live-check attempt and its exact commands are recorded in
+[docs/plans/2026-11-01-linux-live-check.md](../../../../../docs/plans/2026-11-01-linux-live-check.md).

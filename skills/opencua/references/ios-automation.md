@@ -109,7 +109,7 @@ invitation to clear it for them.
   `ios_open_app`. Every mutation requires an `observation_token` from the newest `ios_observe`,
   the token is single-use, and the answer carries a fresh observation so a follow-up decision
   does not need another round trip.
-- CLI: `OpenCUA ios status | observe | screenshot | tap | tap-text | long-press | swipe | scroll
+- CLI: `opencua ios status | observe | screenshot | tap | tap-text | long-press | swipe | scroll
   | type | key | home | app-switcher | open-app`, with `--json` for machine-readable output.
 - Library: `IPhoneMirroring` in `@opencua/core` (`observe`, `waitForSettle`, `tap`, `tapText`,
   `longPress`, `swipe`, `scroll`, `pressKeys`, `typeText`, `home`, `appSwitcher`, `openApp`).

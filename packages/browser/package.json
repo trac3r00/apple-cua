@@ -6,7 +6,9 @@
 	"description": "Compact Chromium browser automation with the opencua stop gate",
 	"bin": {
 		"cua-browser": "./dist/cli.js",
-		"cua-browser-mcp": "./dist/server.js"
+		"cua-browser-mcp": "./dist/server.js",
+		"apple-cua-browser": "./dist/cli.js",
+		"apple-cua-browser-mcp": "./dist/server.js"
 	},
 	"exports": {
 		".": "./dist/index.js"

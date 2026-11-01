@@ -87,10 +87,10 @@ export function resolveLayout(
 	const current = join(home, ".opencua");
 	const legacy = join(home, ".apple-cua");
 	const defaultHome = !existsSync(current) && existsSync(legacy) ? legacy : current;
-	const openCuaHome = resolve(nonEmpty(env["OPENCUA_HOME"] ?? env["APPLE_CUA_HOME"]) ?? defaultHome);
+	const openCuaHome = resolve(nonEmpty(env["OPENCUA_HOME"]) ?? nonEmpty(env["APPLE_CUA_HOME"]) ?? defaultHome);
 	const defaultBin =
 		platform === "win32" ? join(env["LOCALAPPDATA"] ?? home, "opencua", "bin") : join(home, ".local/bin");
-	const binDir = resolve(nonEmpty(env["OPENCUA_BIN_DIR"] ?? env["APPLE_CUA_BIN_DIR"]) ?? defaultBin);
+	const binDir = resolve(nonEmpty(env["OPENCUA_BIN_DIR"]) ?? nonEmpty(env["APPLE_CUA_BIN_DIR"]) ?? defaultBin);
 	const helperApp = join(checkout, "packages/mcp/dist/opencua-mcp.app");
 	return {
 		checkout,

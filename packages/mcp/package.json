@@ -13,7 +13,8 @@
 	"bin": {
 		"opencua-mcp": "./dist/server.js",
 		"apple-cua-mcp": "./dist/server.js",
-		"opencua-isolated-mcp": "./dist/isolated-server.js"
+		"opencua-isolated-mcp": "./dist/isolated-server.js",
+		"apple-cua-isolated-mcp": "./dist/isolated-server.js"
 	},
 	"scripts": {
 		"build": "tsgo -p tsconfig.build.json",

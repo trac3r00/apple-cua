@@ -1,6 +1,10 @@
 # Agent scenario hardening
 
-The results below describe the hardening run before publication. The user
+The results below describe the hardening run before publication.
+
+> These runs predate the rename to OpenCUA. Commands and paths recorded as executed keep their
+> original `apple-cua` names; product references use the current name.
+ The user
 subsequently authorized committing and pushing the reviewed changes on
 `wip/ios-mirroring-cursor-motion-20261007`. References to no commits describe
 the original test run, not that later publication.
@@ -26,7 +30,7 @@ skipped. The repository-wide formatting blockers noted below remain pre-existing
 | --- | --- | --- |
 | OmO | Live MCP capabilities, guarded desktop/browser actions, and verification | Not a general agent success-rate benchmark |
 | Codex | Real `exec` session called `get_capabilities` successfully using transient stdio configuration | Read-only tool call, not all agent task types; default `gpt-6.1-sol` failed, advertised `gpt-6-astra` succeeded |
-| Hermes | Real `mcp test opencua` connected in 1,295 ms and discovered the lean tool profile | Discovery, not a model-driven desktop task; this historical run predates `analyze_screen` |
+| Hermes | Real `mcp test apple-cua` connected in 1,295 ms and discovered the lean tool profile | Discovery, not a model-driven desktop task; this historical run predates `analyze_screen` |
 | Claude | Transient MCP model-driven smoke attempted | Provider returned HTTP 429 weekly quota; no tool call occurred |
 | OpenClaw | Documented registration path; no local installation established | No live client run |
 | Doldori | User clarified the product name; primary contract not identified | No configuration or compatibility certification |

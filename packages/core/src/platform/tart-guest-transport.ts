@@ -41,7 +41,7 @@ export async function readTartGuestTarget(directory: string, expectedOwner: Curs
 		record.store !== "guest-store" ||
 		!("vmName" in record) ||
 		typeof record.vmName !== "string" ||
-		!/^opencua-[a-z0-9-]+$/.test(record.vmName) ||
+		!/^(?:opencua|apple-cua)-[a-z0-9-]+$/.test(record.vmName) ||
 		!("runArguments" in record) ||
 		!Array.isArray(record.runArguments) ||
 		record.runArguments.length !== REQUIRED_FLAGS.length ||

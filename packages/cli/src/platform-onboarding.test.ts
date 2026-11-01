@@ -28,10 +28,28 @@ describe("#given a non-macOS installation #when doctor runs #then only platform-
 		expect(report.ready).toBe(true);
 		expect(report.checks.map((check) => check.id)).toEqual(
 			platform === "linux"
-				? ["node", "server", "at-spi", "input", "screenshot", "desktop-session"]
+				? ["node", "server", "at-spi", "screenshot", "input", "desktop-session"]
 				: ["node", "server", "uia"],
 		);
 		expect(commands).toEqual(platform === "linux" ? ["sh", "sh", "sh"] : ["powershell.exe"]);
+	});
+
+	it("probes the tools the Wayland backend actually uses", () => {
+		const scripts: string[] = [];
+		const report = portableDoctor(
+			resolveLayout({ HOME: home }, home, "linux"),
+			"linux",
+			{ WAYLAND_DISPLAY: "wayland-0" },
+			(_command, args) => {
+				scripts.push(args[1] ?? "");
+				return { status: 0, stdout: "", stderr: "" };
+			},
+		);
+		expect(scripts.join("\n")).toContain("gi.require_version('Atspi', '2.0')");
+		expect(scripts.join("\n")).toContain("command -v grim");
+		expect(scripts.join("\n")).toContain("command -v ydotool");
+		expect(scripts.join("\n")).not.toContain("xdotool");
+		expect(report.checks.find((check) => check.id === "screenshot")?.summary).toContain("Wayland");
 	});
 
 	it("fails missing Linux dependencies and supplies package-manager install instructions", () => {
@@ -44,11 +62,13 @@ describe("#given a non-macOS installation #when doctor runs #then only platform-
 		expect(report.checks.filter((check) => check.status === "fail").map((check) => check.id)).toEqual([
 			"server",
 			"at-spi",
-			"input",
 			"screenshot",
 			"desktop-session",
 		]);
+		// Physical input is opt-in, so its missing tool warns instead of failing the installation.
+		expect(report.checks.find((check) => check.id === "input")?.status).toBe("warn");
 		expect(report.nextSteps.join("\n")).toMatch(/apt-get install.*at-spi2-core/);
+		expect(report.nextSteps.join("\n")).toContain("gir1.2-atspi-2.0");
 		expect(report.nextSteps.join("\n")).toContain("sudo dnf install");
 		expect(report.nextSteps.join("\n")).toContain("sudo pacman -S");
 	});
@@ -65,7 +85,15 @@ describe("#given setup on a supported platform #when dispatched #then the correc
 		expect(status).toBe(7);
 		const windows = {
 			command: "powershell.exe",
-			args: ["-NoProfile", "-File", join(home, "scripts/install.ps1"), "-Checkout", home],
+			args: [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				join(home, "scripts/install.ps1"),
+				"-Checkout",
+				home,
+			],
 		};
 		const unix = { command: "bash", args: [join(home, "scripts/setup.sh"), "--yes"] };
 		expect(calls).toEqual([platform === "win32" ? windows : unix]);

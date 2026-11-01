@@ -169,7 +169,7 @@ cannot expire files.
 <p align="center">
   <img src="./docs/assets/doctor.svg" alt="OpenCUA doctor output: every check reports ok, ending in 'Ready: OpenCUA is installed and holds its permissions.'" width="760" />
   <br />
-  <sub>Real <code>OpenCUA doctor</code> output from a configured Mac (two path-only lines omitted for width).</sub>
+  <sub>Real <code>opencua doctor</code> output from a configured Mac (two path-only lines omitted for width).</sub>
 </p>
 
 Day-to-day lifecycle:
@@ -343,7 +343,7 @@ before irreversible actions.
 ## Development
 
 ```bash
-git clone https://github.com/trac3r00/apple-cua.git && cd opencua
+git clone https://github.com/trac3r00/apple-cua.git opencua && cd opencua
 ./scripts/setup.sh     # install, build and check everything (safe to re-run)
 pnpm check             # lint, typecheck, tests
 pnpm doctor            # is this Mac ready?

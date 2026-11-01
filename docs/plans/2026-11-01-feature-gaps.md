@@ -97,7 +97,8 @@ not claimed by this tool.
 - New focused tests: **38 passed**, consisting of 17 agent-feature protocol tests,
   10 snapshot-ref unit tests, 2 error-envelope unit tests, and 9 skills-command
   tests. All names use `#given #when #then`; no fixed sleeps were added.
-- Required unmodified command `pnpm vitest --run packages/mcp`: **205 passed,
+- Run before this branch merged origin/main's Bun test runner, when the repository still used Vitest;
+  the current command is `pnpm test`. `pnpm vitest --run packages/mcp` then reported: **205 passed,
   3 failed**, with **55 additional suites failing to load**. The load failure is
   the existing `@apple-cua/core/stop` import in
   `packages/browser/dist/server.js`; this track does not rebuild generated files.

@@ -100,12 +100,14 @@ function parseAllowList(value: string | undefined): string[] {
 /** What a server started with `env` would do, read with the server's own rules. */
 function settingsFromEnv(env: EnvMap): Omit<Settings, "clients"> {
 	const cursorMotion = normalizeMotion(cursorMotionFromEnvironment(env));
+	// A registration written before the rename still carries APPLE_CUA_* names.
+	const read = (name: string): string | undefined => env[name] ?? env[name.replace(/^OPENCUA_/, "APPLE_CUA_")];
 	return withMotion(
 		{
-			allowedApps: parseAllowList(env[ALLOW_ENV]),
-			delivery: env[DELIVERY_ENV]?.trim().toLowerCase() === "attended" ? "attended" : "background",
-			toolset: env[TOOLSET_ENV]?.trim().toLowerCase() === "lean" ? "lean" : "full",
-			iphone: env[IPHONE_ENV]?.trim() === "1",
+			allowedApps: parseAllowList(read(ALLOW_ENV)),
+			delivery: read(DELIVERY_ENV)?.trim().toLowerCase() === "attended" ? "attended" : "background",
+			toolset: read(TOOLSET_ENV)?.trim().toLowerCase() === "lean" ? "lean" : "full",
+			iphone: read(IPHONE_ENV)?.trim() === "1",
 		},
 		cursorMotion,
 	);

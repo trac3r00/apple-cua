@@ -42,6 +42,7 @@ export function normalizeLegacy(data, source) {
 	const results = [];
 	for (const [key, driver] of [
 		["opencua", "apple"],
+		["apple_cua", "apple"],
 		["cua_driver", "cua"],
 	]) {
 		for (const [scenario, row] of Object.entries(data.tasks?.[key] ?? {})) {

@@ -4,6 +4,8 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 type Retry = "safe" | "unsafe" | "never";
 
+const NEVER_RETRY_REASONS = new Set(["user-stopped", "screen-locked", "app-not-approved", "url-blocked"]);
+
 function errorMetadata(
 	payload: Record<string, unknown>,
 	message: string,
@@ -13,7 +15,20 @@ function errorMetadata(
 	readonly suggestion: string;
 } {
 	const reason = payload["reason"];
+	// Only an explicit false proves nothing was delivered; a missing or "unknown" value does not.
+	const notDispatched = payload["actionDispatched"] === false;
 	const dispatched = payload["actionDispatched"] === true;
+	// A refusal keeps its own code even when input went out first, so its "never" and its
+	// ask-the-user guidance are not replaced by the generic post-dispatch envelope.
+	if (typeof reason === "string" && NEVER_RETRY_REASONS.has(reason)) {
+		return {
+			code: reason.toUpperCase().replaceAll("-", "_"),
+			retry: "never",
+			suggestion: dispatched
+				? "Input may already have been delivered. Ask the user to resolve the refusal and verify the outcome; do not retry."
+				: "Ask the user to resolve the refusal. Do not retry input automatically.",
+		};
+	}
 	if (dispatched) {
 		return {
 			code: "POST_ACTION_ERROR",
@@ -37,18 +52,6 @@ function errorMetadata(
 		};
 	}
 	if (
-		reason === "user-stopped" ||
-		reason === "screen-locked" ||
-		reason === "app-not-approved" ||
-		reason === "url-blocked"
-	) {
-		return {
-			code: reason.toUpperCase().replaceAll("-", "_"),
-			retry: "never",
-			suggestion: "Ask the user to resolve the refusal. Do not retry input automatically.",
-		};
-	}
-	if (
 		message.includes("Invalid arguments") ||
 		message.includes("Invalid params") ||
 		message.includes("MCP error -32602")
@@ -59,11 +62,13 @@ function errorMetadata(
 			suggestion: "Read the tool schema and correct the arguments before calling again.",
 		};
 	}
-	if (reason !== undefined && typeof reason === "string") {
+	if (typeof reason === "string") {
 		return {
 			code: reason.toUpperCase().replaceAll("-", "_"),
-			retry: dispatched ? "unsafe" : "safe",
-			suggestion: "Observe the target app again and resolve the refusal before retrying.",
+			retry: notDispatched ? "safe" : "unsafe",
+			suggestion: notDispatched
+				? "Observe the target app again and resolve the refusal before retrying."
+				: "Delivery is unconfirmed. Observe and verify the target before retrying.",
 		};
 	}
 	return {
@@ -78,22 +83,36 @@ export function normalizeToolError(result: CallToolResult): CallToolResult {
 	let payload: Record<string, unknown> = {};
 	let payloadIndex = -1;
 	let message = "Tool failed without error details.";
-	for (let index = result.content.length - 1; index >= 0; index--) {
+	let found = false;
+	// A tool can append a report after its error payload, so scan back until the error-bearing one.
+	for (let index = result.content.length - 1; index >= 0 && !found; index--) {
 		const item = result.content[index];
 		if (item?.type !== "text") continue;
-		message = item.text.trim() || message;
+		const text = item.text.trim();
+		let parsed: unknown;
 		try {
-			const parsed: unknown = JSON.parse(item.text);
-			if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-				payload = Object.fromEntries(Object.entries(parsed));
-				payloadIndex = index;
-				const detail = payload["error"] ?? payload["message"];
-				if (typeof detail === "string") message = detail;
-			}
+			parsed = JSON.parse(item.text);
 		} catch {
 			// SDK validation errors are plain text rather than JSON.
+			if (payloadIndex === -1) message = text || message;
+			break;
 		}
-		break;
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+			if (payloadIndex === -1) message = text || message;
+			continue;
+		}
+		const candidate = Object.fromEntries(Object.entries(parsed));
+		const detail = candidate["error"] ?? candidate["message"];
+		found =
+			typeof detail === "string" ||
+			typeof candidate["reason"] === "string" ||
+			candidate["observationStatus"] === "error" ||
+			"actionDispatched" in candidate;
+		if (found || payloadIndex === -1) {
+			payload = candidate;
+			payloadIndex = index;
+			message = typeof detail === "string" ? detail : text || message;
+		}
 	}
 	if (result.isError !== true && payload["observationStatus"] !== "error") return result;
 	const metadata = errorMetadata(payload, message);

@@ -26,6 +26,8 @@ export interface CursorMotionConfig {
 }
 
 export const CURSOR_MOTION_ENV = "OPENCUA_CURSOR_MOTION";
+/** Registrations written before the OpenCUA rename still carry the motion under this name. */
+export const LEGACY_CURSOR_MOTION_ENV = "APPLE_CUA_CURSOR_MOTION";
 
 type NumericKey = Exclude<keyof CursorMotionConfig, "style" | "timing">;
 
@@ -116,7 +118,8 @@ export function parseCursorMotion(value: unknown, source = "cursor motion"): Cur
 export function cursorMotionFromEnvironment(
 	environment: Readonly<Record<string, string | undefined>> = process.env,
 ): CursorMotionConfig | undefined {
-	const raw = environment[CURSOR_MOTION_ENV]?.trim();
+	const name = environment[CURSOR_MOTION_ENV] === undefined ? LEGACY_CURSOR_MOTION_ENV : CURSOR_MOTION_ENV;
+	const raw = environment[name]?.trim();
 	if (raw === undefined || raw === "") return undefined;
 	if (raw.startsWith("{")) {
 		let parsed: unknown;
@@ -124,9 +127,9 @@ export function cursorMotionFromEnvironment(
 			parsed = JSON.parse(raw);
 		} catch (error) {
 			const reason = error instanceof Error ? error.message : String(error);
-			throw new Error(`${CURSOR_MOTION_ENV}: invalid JSON (${reason}); use a style name, "off" or a JSON object`);
+			throw new Error(`${name}: invalid JSON (${reason}); use a style name, "off" or a JSON object`);
 		}
-		return parseCursorMotion(parsed, CURSOR_MOTION_ENV);
+		return parseCursorMotion(parsed, name);
 	}
-	return parseCursorMotion(raw, CURSOR_MOTION_ENV);
+	return parseCursorMotion(raw, name);
 }

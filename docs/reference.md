@@ -525,12 +525,12 @@ Xcode, nothing installed on the phone.
   interstitial, and nothing types a password for you.
 
 \u0060\u0060\u0060bash
-OpenCUA ios status          # ready | blocked | no-window | not-running
-OpenCUA ios observe         # every visible string with a tap-ready centre
-OpenCUA ios tap-text "Settings"
-OpenCUA ios type "hello"    # exact: the paste path, past iOS autocorrect
-OpenCUA ios scroll down --amount 0.4
-OpenCUA ios home
+opencua ios status          # ready | blocked | no-window | not-running
+opencua ios observe         # every visible string with a tap-ready centre
+opencua ios tap-text "Settings"
+opencua ios type "hello"    # exact: the paste path, past iOS autocorrect
+opencua ios scroll down --amount 0.4
+opencua ios home
 \u0060\u0060\u0060
 
 Two rules worth knowing before writing a loop:

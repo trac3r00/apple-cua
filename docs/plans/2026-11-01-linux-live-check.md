@@ -2,7 +2,7 @@
 
 Requested target: `omarchy`, QEMU UUID
 `D52B6480-49B5-4EC2-8EE7-EC6BBCEE002D`, through
-`/Users/cminseo/Applications/UTM.app`.
+`$HOME/Applications/UTM.app`.
 
 Result: blocked before guest execution. The running UTM application did not expose
 the requested VM. No other VM was substituted, and no VM was started, stopped,
@@ -15,7 +15,7 @@ Host executable: `/usr/bin/osascript`.
 Arguments: `-l`, `JavaScript`, `-e`, followed by this exact source argument:
 
 ```js
-function run(){ const u=Application("/Users/cminseo/Applications/UTM.app"); const matches=u.virtualMachines().filter(v=>v.id()==="D52B6480-49B5-4EC2-8EE7-EC6BBCEE002D"); if(matches.length!==1) throw Error("Exact VM not found"); const v=matches[0]; if(v.status()!=="started" || v.backend()!=="qemu") throw Error("Expected running QEMU VM"); const p=u.execute(v,{at:"/bin/sh",withArguments:["-lc","id; command -v python3; python3 -c 'import gi; gi.require_version(\"Atspi\", \"2.0\"); from gi.repository import Atspi; print(\"AT_SPI_IMPORT_OK\")'"],outputCapturing:true}); return JSON.stringify({guestProcessId:p.id()}); }
+function run(){ const u=Application("$HOME/Applications/UTM.app"); const matches=u.virtualMachines().filter(v=>v.id()==="D52B6480-49B5-4EC2-8EE7-EC6BBCEE002D"); if(matches.length!==1) throw Error("Exact VM not found"); const v=matches[0]; if(v.status()!=="started" || v.backend()!=="qemu") throw Error("Expected running QEMU VM"); const p=u.execute(v,{at:"/bin/sh",withArguments:["-lc","id; command -v python3; python3 -c 'import gi; gi.require_version(\"Atspi\", \"2.0\"); from gi.repository import Atspi; print(\"AT_SPI_IMPORT_OK\")'"],outputCapturing:true}); return JSON.stringify({guestProcessId:p.id()}); }
 ```
 
 Exit code: `1`. Output:
@@ -35,7 +35,7 @@ The intended guest command, which was **not executed**, was:
 Same host executable and arguments, with this source argument:
 
 ```js
-function run(){const u=Application("/Users/cminseo/Applications/UTM.app"); return JSON.stringify(u.virtualMachines().map(v=>({id:v.id(),name:v.name(),status:v.status(),backend:v.backend()})));}
+function run(){const u=Application("$HOME/Applications/UTM.app"); return JSON.stringify(u.virtualMachines().map(v=>({id:v.id(),name:v.name(),status:v.status(),backend:v.backend()})));}
 ```
 
 Exit code: `0`. Output:

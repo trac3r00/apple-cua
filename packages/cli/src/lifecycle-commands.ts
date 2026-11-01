@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
+import { closeSync, existsSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -40,6 +40,7 @@ import {
 	requestHelperPermissions,
 	runSelfCheck,
 } from "./doctor.js";
+import { historyLaunchAgentPath, uninstallHistoryService } from "./history-service.js";
 import { type Layout, displayPath, readInstallMarker, resolveLayout } from "./layout.js";
 import {
 	type GrantDependencies,
@@ -751,10 +752,12 @@ function grantDependencies(layout: Layout, say: Say, open: boolean, mode: GrantM
 			}
 			const accessibility = answer["accessibility"];
 			const screenRecording = answer["screenRecording"];
+			const inputMonitoring = answer["inputMonitoring"];
 			const automation = automationAnswer(answer["automation"]);
 			return {
 				...(typeof accessibility === "boolean" ? { accessibility } : {}),
 				...(typeof screenRecording === "boolean" ? { screenRecording } : {}),
+				...(typeof inputMonitoring === "boolean" ? { inputMonitoring } : {}),
 				...(automation === undefined ? {} : { automation }),
 			};
 		},
@@ -800,7 +803,12 @@ function approvedBrowsers(layout: Layout): string[] {
 
 function runGrant(layout: Layout, say: Say, open: boolean, mode: GrantMode): Promise<GrantOutcome> {
 	return grantPermissions(
-		{ mode, openPanes: open, extraAutomationTargets: approvedBrowsers(layout) },
+		{
+			mode,
+			openPanes: open,
+			extraAutomationTargets: approvedBrowsers(layout),
+			inputMonitoring: existsSync(historyLaunchAgentPath(layout.home)),
+		},
 		grantDependencies(layout, say, open, mode),
 	);
 }
@@ -953,6 +961,9 @@ async function runUninstallCommand(options: UninstallCommandOptions): Promise<nu
 	print("\nUninstalling:");
 	const outcome = await executeUninstall(plan, {
 		context: clientContext(layout),
+		stopHistory: async (historyOptions) => {
+			await uninstallHistoryService(historyOptions);
+		},
 		signal: (pid, signal) => {
 			process.kill(pid, signal);
 		},

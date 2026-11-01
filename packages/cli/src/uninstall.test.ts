@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { type ClientContext, registerClient } from "./clients.js";
+import { historyLaunchAgentPath, renderHistoryLaunchAgent, uninstallHistoryService } from "./history-service.js";
 import { type Layout, resolveLayout } from "./layout.js";
 import { DEFAULT_SETTINGS, desiredRegistration, saveSettings } from "./settings.js";
 import {
@@ -50,6 +51,8 @@ function facts(overrides: Partial<UninstallFacts> = {}): UninstallFacts {
 		stateEntries: [],
 		stateDirectories: [],
 		stopPath: "/home/.apple-cua/stop.json",
+		historyService: undefined,
+		historyDirectories: [],
 		...overrides,
 	};
 }
@@ -239,6 +242,107 @@ describe("#given an installation in a temporary home #when uninstall runs #then 
 		return { context, omo, omoBefore, zshrc, zshrcBefore };
 	}
 
+	it.each([true, false])("shuts down owned history before teardown (success=%s)", async (succeeds) => {
+		const { context } = install();
+		const launchAgent = historyLaunchAgentPath(home);
+		const binary = join(layout.helperApp, "Contents/MacOS/history-recorder");
+		mkdirSync(dirname(launchAgent), { recursive: true });
+		writeFileSync(
+			launchAgent,
+			renderHistoryLaunchAgent({
+				launchAgent,
+				binary,
+				stateDirectory: layout.appleCuaHome,
+				logDirectory: root,
+				stdoutLog: join(root, "stdout.log"),
+				stderrLog: join(root, "stderr.log"),
+			}),
+		);
+		const historyDirectory = join(layout.appleCuaHome, "cua-history");
+		mkdirSync(historyDirectory);
+		writeFileSync(join(historyDirectory, "retained.jsonl"), "recorded activity\n");
+		const plan = planUninstall(
+			facts({
+				historyService: { launchAgent, binary, stateDirectory: layout.appleCuaHome },
+				historyDirectories: [historyDirectory],
+				processes: [{ pid: 4242, command: binary }],
+			}),
+			{ purge: false },
+		);
+		let loaded = true;
+		const outcome = await executeUninstall(plan, {
+			context,
+			stopHistory: async (options) => {
+				await uninstallHistoryService({
+					...options,
+					uid: 501,
+					launchctl: async (args) => {
+						if (args[0] === "print") return { code: loaded ? 0 : 113, stderr: "" };
+						if (!succeeds) return { code: 1, stderr: "shutdown refused" };
+						loaded = false;
+						return { code: 0, stderr: "" };
+					},
+				});
+			},
+			signal: () => {
+				if (!loaded) throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" });
+				throw new Error("History must be unloaded before process teardown.");
+			},
+			isAlive: () => loaded,
+			wait: async () => {},
+			launchServices: () => {},
+			resetPermission: () => ({ status: "reset", output: "" }),
+			print: () => {},
+		});
+
+		expect(loaded).toBe(!succeeds);
+		expect(existsSync(launchAgent)).toBe(!succeeds);
+		expect(existsSync(layout.helperApp)).toBe(!succeeds);
+		expect(outcome.failures).toHaveLength(succeeds ? 0 : 1);
+		expect(readFileSync(join(historyDirectory, "retained.jsonl"), "utf8")).toBe("recorded activity\n");
+		expect(plan.keepHistory).toEqual([historyDirectory]);
+	});
+
+	it.each(["ESRCH", "EPERM"])("handles a process-exit race without hiding %s", async (code) => {
+		const { context } = install();
+		const plan = planUninstall(
+			facts({ processes: [{ pid: 4242, command: `${layout.helperExecutable} ${layout.server}` }] }),
+			{ purge: false },
+		);
+		let alive = true;
+		const outcome = await executeUninstall(plan, {
+			context,
+			stopHistory: async () => {},
+			signal: () => {
+				alive = false;
+				throw Object.assign(new Error(`kill ${code}`), { code });
+			},
+			isAlive: () => alive,
+			wait: async () => {},
+			launchServices: () => {},
+			resetPermission: () => ({ status: "reset", output: "" }),
+			print: () => {},
+		});
+		expect(outcome.failures).toEqual(code === "ESRCH" ? [] : ["stop pid 4242: kill EPERM"]);
+	});
+
+	it("preserves another checkout's history registration and shared grants", () => {
+		const launchAgent = historyLaunchAgentPath(home);
+		const plan = planUninstall(
+			facts({
+				historyService: {
+					launchAgent,
+					binary: join(root, "other/packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/history-recorder"),
+					stateDirectory: layout.appleCuaHome,
+				},
+			}),
+			{ purge: false },
+		);
+		expect(plan.removeHistoryService).toBeUndefined();
+		expect(plan.keepHistoryService).toBe(launchAgent);
+		expect(plan.resetPermissions).toBeUndefined();
+	});
+
 	it("unregisters, stops, resets the permissions around a LaunchServices registration, and removes the rest", async () => {
 		const { context, omo, omoBefore, zshrc, zshrcBefore } = install();
 		const plan = planUninstall(
@@ -263,6 +367,7 @@ describe("#given an installation in a temporary home #when uninstall runs #then 
 
 		const outcome = await executeUninstall(plan, {
 			context,
+			stopHistory: async () => {},
 			signal: (pid, signal) => {
 				calls.push(`${signal} ${pid}`);
 				alive.delete(pid);
@@ -305,6 +410,7 @@ describe("#given an installation in a temporary home #when uninstall runs #then 
 
 		const outcome = await executeUninstall(plan, {
 			context: { home, env: { PATH: "" }, now: new Date() },
+			stopHistory: async () => {},
 			signal: () => {},
 			isAlive: () => false,
 			wait: async () => {},

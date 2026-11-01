@@ -181,7 +181,16 @@ export interface ClientChange {
 	readonly restart?: string | undefined;
 }
 
-export type RegistrationState = "current" | "stale" | "missing" | "unreadable" | "manual" | "disabled" | "conflict";
+/** `not-installed`: the client was chosen but its CLI is not on PATH, so nothing could be registered yet. */
+export type RegistrationState =
+	| "current"
+	| "stale"
+	| "missing"
+	| "unreadable"
+	| "manual"
+	| "not-installed"
+	| "disabled"
+	| "conflict";
 
 export interface ClientInspection {
 	readonly client: ClientName;
@@ -1187,7 +1196,7 @@ function unregisterAgent(client: AgentClient, checkout: string | undefined, cont
 
 function inspectAgent(client: AgentClient, desired: DesiredRegistration, context: ClientContext): ClientInspection {
 	if (agentCli(client, context) === undefined) {
-		return { client, state: "manual", detail: AGENT_INSTALL_HINT[client] };
+		return { client, state: "not-installed", detail: AGENT_INSTALL_HINT[client] };
 	}
 	const checkout = desired.bundle?.checkout;
 	const plan = checkout === undefined ? undefined : planAgent(client, desired, context, checkout);

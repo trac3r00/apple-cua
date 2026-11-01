@@ -557,7 +557,7 @@ native_reason=""
 if ((rebuild_native)); then
 	native_reason="--rebuild-native was given"
 else
-	for binary in libsckit.dylib cursor-overlay; do
+	for binary in libsckit.dylib cursor-overlay history-recorder; do
 		if [[ ! -f "$native_dir/$binary" ]]; then
 			native_reason="$binary is missing"
 			break
@@ -575,7 +575,7 @@ if [[ -n "$native_reason" ]]; then
 	info "building because $native_reason"
 	"$native_dir/build.sh"
 fi
-ok "libsckit.dylib ($(lipo -archs "$native_dir/libsckit.dylib")), cursor-overlay ($(lipo -archs "$native_dir/cursor-overlay"))${native_reason:+, rebuilt}"
+ok "libsckit.dylib ($(lipo -archs "$native_dir/libsckit.dylib")), cursor-overlay ($(lipo -archs "$native_dir/cursor-overlay")), history-recorder ($(lipo -archs "$native_dir/history-recorder"))${native_reason:+, rebuilt}"
 
 # --- 7. TypeScript -----------------------------------------------------------------------------------------------
 
@@ -592,6 +592,8 @@ if ((rebuild_helper)); then
 	helper_reason="--rebuild-helper was given"
 elif [[ ! -d "$helper_app" ]]; then
 	helper_reason="it does not exist yet"
+elif [[ ! -x "$helper_app/Contents/MacOS/history-recorder" ]]; then
+	helper_reason="it does not contain the cua-history watcher yet"
 elif ! helper_problem="$(helper_smoke)"; then
 	helper_reason="its smoke run failed: $helper_problem"
 elif [[ -f "$helper_stamp" && "$(<"$helper_stamp")" != "$(bash "$repo/scripts/build-tcc-helper.sh" --inputs-digest)" ]]; then
@@ -604,7 +606,9 @@ if [[ -z "$helper_reason" ]]; then
 else
 	if [[ -d "$helper_app" ]]; then
 		warn "rebuilding the helper because $helper_reason"
-		warn "the rebuild is a new code identity: macOS will ask again for Screen Recording and Accessibility"
+		if [[ ! -f "$repo/.signing/apple-cua-signing.keychain-db" ]]; then
+		warn "the rebuild is ad-hoc signed, a new code identity: macOS will ask again for Screen Recording and Accessibility"
+	fi
 		info "helpers built before the apple-cua-mcp name was used are listed as \"node\" in Privacy & Security;"
 		info "that entry is no longer used and can be removed there with the minus button"
 	else
@@ -687,17 +691,22 @@ if ((${#config_arguments[@]} == 0)) && [[ ! -e "$apple_cua_home/config.json" ]] 
 		fail "apple-cua config did not complete" "read the messages above, then run: $cua config"
 	ok "apple-cua config (answered above)"
 else
-	if ((${#config_arguments[@]} == 0)) && can_ask; then
-		# A client installed since the last setup is offered here; the question reaches the terminal, so no sed pipe.
-		node "$cli_js" config --detect ||
-			warn "could not check for newly installed agent clients; run: $cua config --detect"
+	offer_new_clients=0
+	if ((${#config_arguments[@]} == 0)); then
+		config_arguments=(--apply)
+		can_ask && offer_new_clients=1
 	fi
-	if ((${#config_arguments[@]} == 0)); then config_arguments=(--apply); fi
 	if ! node "$cli_js" config "${config_arguments[@]}" 2>&1 | sed 's/^/          /'; then
 		fail "the MCP client registration did not complete" \
 			"read the messages above, then run: $cua config; a config file that could not be read was left untouched"
 	fi
 	ok "apple-cua config ${config_arguments[*]}"
+	# After --apply, so a client registered here is reported once rather than again as "already registered".
+	# The question reaches the terminal, so no sed pipe.
+	if ((offer_new_clients)); then
+		node "$cli_js" config --detect ||
+			warn "could not check for newly installed agent clients; run: $cua config --detect"
+	fi
 fi
 
 # --- 12. Permissions -----------------------------------------------------------------------------------------------
@@ -743,6 +752,7 @@ printf '\nNext:\n'
 printf '  %-28s %s\n' "$cua config" "optionally restrict apps and choose the MCP clients to register with" \
 	"$cua browser setup" "load the unpacked browser extension once and verify the connection" \
 	"$cua permissions grant" "walk through the macOS permissions of \"apple-cua-mcp\"" \
+	"$cua history start" "optional: record recent activity, then run permissions grant for Input Monitoring" \
 	"$cua doctor --fix" "check the installation and repair what is safe to repair" \
 	"$cua update" "update this checkout and everything setup built" \
 	"$cua uninstall" "remove apple-cua again"

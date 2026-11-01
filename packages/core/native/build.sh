@@ -19,7 +19,7 @@ architectures=(-arch arm64 -arch x86_64)
 deployment_target=(-mmacosx-version-min=15.0)
 availability_errors=(-Werror=unguarded-availability -Werror=unguarded-availability-new)
 
-for source in sckit.m cursor-overlay.m; do
+for source in sckit.m cursor-overlay.m history-recorder.m; do
 	if [[ ! -f "${native_dir}/${source}" ]]; then
 		echo "error: missing ${native_dir}/${source}" >&2
 		exit 1
@@ -57,7 +57,22 @@ clang \
 	-o "${native_dir}/cursor-overlay"
 echo "built ${native_dir}/cursor-overlay ($(lipo -archs "${native_dir}/cursor-overlay"))"
 
-(cd "${native_dir}" && shasum -a 256 build.sh sckit.m cursor-overlay.m >build-inputs.sha256)
+clang \
+	"${architectures[@]}" \
+	-O2 \
+	-fobjc-arc \
+	"${deployment_target[@]}" \
+	"${availability_errors[@]}" \
+	-framework AppKit \
+	-framework Foundation \
+	-framework ApplicationServices \
+	-framework CoreGraphics \
+	-framework Carbon \
+	"${native_dir}/history-recorder.m" \
+	-o "${native_dir}/history-recorder"
+echo "built ${native_dir}/history-recorder ($(lipo -archs "${native_dir}/history-recorder"))"
+
+(cd "${native_dir}" && shasum -a 256 build.sh sckit.m cursor-overlay.m history-recorder.m >build-inputs.sha256)
 echo "recorded input hashes in ${native_dir}/build-inputs.sha256"
 
 # Sign the helpers with the stable identity (see scripts/sign-native.sh): ad-hoc builds change
@@ -65,3 +80,12 @@ echo "recorded input hashes in ${native_dir}/build-inputs.sha256"
 bash "$native_dir/../../../scripts/sign-native.sh" \
 	"$native_dir/libsckit.dylib" \
 	"$native_dir/cursor-overlay"
+
+# The always-on history watcher runs as its own launchd process, so it would otherwise get its own
+# TCC entry and need Accessibility and Input Monitoring granted separately. Signing it with the
+# apple-cua-mcp bundle identifier makes macOS charge its grant to the same app the rest of apple-cua
+# already uses, so one approval covers it. Override the id with APPLE_CUA_BUNDLE_ID to match a custom
+# helper bundle id.
+APPLE_CUA_CODESIGN_IDENTIFIER="${APPLE_CUA_BUNDLE_ID:-dev.applecua.mcp}" \
+	bash "$native_dir/../../../scripts/sign-native.sh" \
+	"$native_dir/history-recorder"

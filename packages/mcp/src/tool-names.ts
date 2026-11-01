@@ -60,6 +60,15 @@ export const IPHONE_TOOL_NAMES = [
 
 export const UTM_TOOL_NAMES = ["utm_list", "utm_observe", "utm_run"] as const;
 
+/** Opt-in cua-history tools, registered only with `APPLE_CUA_HISTORY=1`. */
+export const HISTORY_TOOL_NAMES = [
+	"cua_history_status",
+	"cua_history_get_settings",
+	"cua_history_update_settings",
+	"cua_history_pause",
+	"cua_history_resume",
+] as const;
+
 /** Every tool this server can ever register, including opt-in tools. */
 export const TOOL_NAMES = [
 	...LEAN_TOOL_NAMES,
@@ -67,6 +76,7 @@ export const TOOL_NAMES = [
 	...IPHONE_TOOL_NAMES,
 	...BROWSER_TOOL_NAMES,
 	...UTM_TOOL_NAMES,
+	...HISTORY_TOOL_NAMES,
 ] as const;
 
 /** Tools registered for one configuration: lean or full desktop, plus iPhone and browser when enabled. */
@@ -75,6 +85,7 @@ export function toolNamesFor(
 	iphone: boolean,
 	browser = false,
 	utm = false,
+	history = false,
 ): readonly string[] {
 	return [
 		...LEAN_TOOL_NAMES,
@@ -82,5 +93,6 @@ export function toolNamesFor(
 		...(iphone ? IPHONE_TOOL_NAMES : []),
 		...(browser ? BROWSER_TOOL_NAMES : []),
 		...(utm ? UTM_TOOL_NAMES : []),
+		...(history ? HISTORY_TOOL_NAMES : []),
 	];
 }

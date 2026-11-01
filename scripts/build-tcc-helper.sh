@@ -43,6 +43,12 @@ if [[ -z "${APPLE_CUA_SIGN_IDENTITY:-}" && -f "$repo/.signing/apple-cua-signing.
 	fi
 fi
 sign_identity="${APPLE_CUA_SIGN_IDENTITY:--}"
+signing_keychain="$repo/.signing/apple-cua-signing.keychain-db"
+keychain_args=()
+if [[ "$sign_identity" == "apple-cua dev" && -f "$signing_keychain" ]]; then
+	security unlock-keychain -p apple-cua-local-signing "$signing_keychain" 2>/dev/null || true
+	keychain_args=(--keychain "$signing_keychain")
+fi
 minimum_macos="15.0"
 stamp="Contents/Resources/helper-inputs.sha256"
 lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
@@ -86,6 +92,8 @@ info_plist() {
 	<string>apple-cua-mcp</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>LSUIElement</key>
+	<true/>
 	<key>CFBundleShortVersionString</key>
 	<string>$1</string>
 	<key>CFBundleVersion</key>
@@ -105,6 +113,7 @@ inputs_digest() {
 	{
 		printf 'launcher %s\n' "$(shasum -a 256 <"$launcher_source" | awk '{ print $1 }')"
 		printf 'launcher-flags %s\n' "${launcher_flags[*]}"
+		printf 'history-recorder %s\n' "$(shasum -a 256 <"$repo/packages/core/native/history-recorder.m" 2>/dev/null | awk '{ print $1 }')"
 		info_plist "(any version)"
 	} | shasum -a 256 | awk '{ print $1 }'
 }
@@ -203,9 +212,20 @@ inputs_digest >"$app/$stamp"
 
 # The bundled Node carries the bundle's identifier and is signed before the bundle, so a grant
 # recorded for the bundle id covers the process that asks and the bundle seal covers it (and the stamp).
-codesign --force --sign "$sign_identity" --identifier "$bundle_id" "$app/Contents/Resources/node"
+codesign --force --sign "$sign_identity" ${keychain_args[@]+"${keychain_args[@]}"} --identifier "$bundle_id" "$app/Contents/Resources/node"
+# The always-on cua-history watcher lives inside the bundle so it is the same app as the MCP
+# helper: one code identity, one entry in System Settings, so a single grant of Input Monitoring
+# and Accessibility covers it. Signed with the bundle id like node, before the bundle is sealed.
+history_source="$repo/packages/core/native/history-recorder.m"
+if [[ -f "$history_source" ]]; then
+	cc "${launcher_flags[@]}" -fobjc-arc \
+		-framework AppKit -framework Foundation -framework ApplicationServices \
+		-framework CoreGraphics -framework Carbon \
+		-o "$app/Contents/MacOS/history-recorder" "$history_source"
+	codesign --force --sign "$sign_identity" ${keychain_args[@]+"${keychain_args[@]}"} --identifier "$bundle_id" "$app/Contents/MacOS/history-recorder"
+fi
 # Hardened runtime stays off: the executable is Node and needs its JIT pages.
-codesign --force --sign "$sign_identity" "$app"
+codesign --force --sign "$sign_identity" ${keychain_args[@]+"${keychain_args[@]}"} "$app"
 codesign --verify --deep --strict "$app"
 "$lsregister" -f "$app" ||
 	echo "warning: LaunchServices did not register $app, so System Settings may not list it" >&2

@@ -92,7 +92,7 @@ export const REVIEWED = {
 	"packages/mcp/src/worker-coordinator.ts": "1f54bb061c39ed40c66ad476ef18f61f7c99d3c655be1f507a3e4d371d00fd59",
 	"packages/mcp/src/worker-tools.protocol.test.ts": "b8b85cacbacf0a47279c34781a8745073cd491976292d006de46692b343ddafc",
 	"packages/mcp/src/worker-tools.ts": "11f9f785365c619da91d6691dab3e3d3e2489af0f6193410b38083a51179759c",
-	"skills/apple-cua-browser/SKILL.md": "1b765ed1a51d01202fc2d9a733d5b4553586b940f44d05254bdcf4c4c873445c",
+	"skills/cua-browser/SKILL.md": "01fd5324291d06ea7b1071cbc9bd0aa9802378f477b037c80424527b363fe7be",
 	"skills/apple-cua/SKILL.md": "64b05c6c68d0eff7eb30c8ecb2e6c3472685c84eaa6f7db81e9e7f2edaccfefa",
 	"skills/apple-cua/references/subagents.md": "818b945ebf5e739f32da81d34a396f8828dd2b4d7fefead887d5de1a114fbfd8",
 };

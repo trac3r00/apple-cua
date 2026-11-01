@@ -47,7 +47,8 @@ describe("#given setup under curl | bash, where stdin is the download #when it m
 
 		expect(transcript).toContain("a Node.js download was declined");
 		expect(transcript).toContain("EXIT 1");
-	});
+		// setup probes the SDK before asking; loaded Intel runners can exceed the 5-second default.
+	}, 30_000);
 });
 
 describe("#given no terminal at all, as on CI #when setup must ask #then it takes the default without asking", () => {

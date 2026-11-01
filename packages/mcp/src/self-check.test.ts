@@ -60,6 +60,7 @@ describe("#given permission requests #when the helper asks for them #then it rep
 		const asked: string[] = [];
 		const report = requestPermissions(parsePermissionRequests("automation-status:com.apple.finder"), {
 			requestAccessibility: () => false,
+			requestInputMonitoring: () => false,
 			requestScreenRecording: () => false,
 			automation: (bundleId, ask) => {
 				asked.push(`${ask ? "ask" : "read"} ${bundleId}`);
@@ -89,6 +90,7 @@ describe("#given permission requests #when the helper asks for them #then it rep
 					calls.push("ask accessibility");
 					return false;
 				},
+				requestInputMonitoring: () => false,
 				requestScreenRecording: () => {
 					calls.push("ask screen recording");
 					return true;
@@ -127,5 +129,20 @@ describe("#given permission requests #when the helper asks for them #then it rep
 			"read com.apple.finder",
 			"read com.apple.Safari",
 		]);
+	});
+});
+
+describe("#given an input-monitoring request #when the helper handles it #then it asks Input Monitoring and reports the answer", () => {
+	it("parses the kind and returns only the Input Monitoring answer", () => {
+		expect(parsePermissionRequests("input-monitoring")).toEqual([{ kind: "input-monitoring" }]);
+		const report = requestPermissions(parsePermissionRequests("input-monitoring"), {
+			requestAccessibility: () => false,
+			requestScreenRecording: () => false,
+			requestInputMonitoring: () => true,
+			automation: () => "unknown",
+			launchSystemEvents: () => {},
+			pause: () => {},
+		});
+		expect(report).toEqual({ inputMonitoring: true });
 	});
 });

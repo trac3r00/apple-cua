@@ -1,4 +1,4 @@
-# Set up apple-cua-browser with an AI
+# Set up cua-browser with an AI
 
 Hand this file to an agent that can run shell commands. The agent installs the background
 browser bridge, asks only the questions below with `AskUserQuestion`, and verifies the result
@@ -212,7 +212,7 @@ Use the bundled CLI, which talks to the same daemon as the MCP server. This open
 one call; both must load concurrently in the minimized window.
 
 ```sh
-node skills/apple-cua-browser/scripts/browser.mjs call \
+node skills/cua-browser/scripts/browser.mjs call \
   '{"action":"open_many","space":"setup-check","urls":["https://example.com","https://example.org"]}'
 ```
 
@@ -220,14 +220,14 @@ Require `pages` with two entries (`p1`, `p2`) and `failed: []`. Then wait for th
 the first page:
 
 ```sh
-node skills/apple-cua-browser/scripts/browser.mjs call \
+node skills/cua-browser/scripts/browser.mjs call \
   '{"action":"wait","space":"setup-check","page":"p1","text":"Example Domain","timeoutMs":5000}'
 ```
 
 Require `matched: true`. Close the whole space:
 
 ```sh
-node skills/apple-cua-browser/scripts/browser.mjs call \
+node skills/cua-browser/scripts/browser.mjs call \
   '{"action":"finish","space":"setup-check"}'
 ```
 
@@ -296,7 +296,7 @@ is retained by design.
 ## Copy-paste prompt
 
 ```text
-Read skills/apple-cua-browser/README.md and set up apple-cua-browser for me.
+Read skills/cua-browser/README.md and set up cua-browser for me.
 Use AskUserQuestion only at the checkpoints in that file, and do not ask me for a port or token.
 Run the background smoke test, report what you observed, and stop if any verification fails.
 ```

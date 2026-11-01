@@ -129,11 +129,11 @@ export async function runDoctorFix(options: FixOptions, deps: FixDependencies): 
 					options.rebuildHelper ||
 					(options.interactive &&
 						(await deps.ask(
-							"Rebuild the helper app now (a new code identity, so macOS asks for Screen Recording and Accessibility again)",
+							"Rebuild the helper app now (grants carry over with the apple-cua dev signing identity; with an ad-hoc build macOS asks for Screen Recording and Accessibility again)",
 						)));
 				if (!consent) {
 					deps.print(
-						"  skipped: rebuilding the helper needs your consent, because macOS then asks for Screen Recording and Accessibility again. Run: apple-cua doctor --fix --rebuild-helper",
+						"  skipped: rebuilding the helper needs your consent, because an ad-hoc build makes macOS ask for Screen Recording and Accessibility again. Run: apple-cua doctor --fix --rebuild-helper",
 					);
 					skipped.push(`${repair.title} (needs your consent: apple-cua doctor --fix --rebuild-helper)`);
 					break;

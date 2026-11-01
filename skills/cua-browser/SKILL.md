@@ -1,5 +1,5 @@
 ---
-name: apple-cua-browser
+name: cua-browser
 description: "Drive a real Chromium browser in the background through apple-cua: parallel tabs, ranked target matching, native select controls, bounded reads, screenshots, named spaces, and one virtual cursor per worker. Use instead of an AI browser (ego lite, Aside) when work must stay off the user's screen and out of their tabs."
 ---
 
@@ -140,8 +140,8 @@ The same JSON actions work through the bundled CLI. Each call is a new process; 
 page labels, and tokens stay in the daemon:
 
 ```sh
-node skills/apple-cua-browser/scripts/browser.mjs call '{"action":"open_many","space":"research","urls":["https://a.test","https://b.test"]}'
-node skills/apple-cua-browser/scripts/browser.mjs call '{"action":"read","space":"research","page":"p1","maxChars":4000}'
+node skills/cua-browser/scripts/browser.mjs call '{"action":"open_many","space":"research","urls":["https://a.test","https://b.test"]}'
+node skills/cua-browser/scripts/browser.mjs call '{"action":"read","space":"research","page":"p1","maxChars":4000}'
 ```
 
 Do not start a second daemon on the service port, and do not keep a CLI call alive as a watcher.

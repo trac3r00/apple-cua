@@ -6,6 +6,7 @@ import { StopSwitch } from "@apple-cua/core";
 import type { AutomationStatus, StopStatus } from "@apple-cua/core";
 import { missingSkillLink } from "./client-skills.js";
 import { CLIENT_NAMES, type ClientInspection, inspectClient } from "./clients.js";
+import { historyLaunchAgentPath } from "./history-service.js";
 import { type Environment, type Layout, displayPath, homeDirectory, resolveLayout } from "./layout.js";
 import { loadSettings, plannedRegistration } from "./settings.js";
 
@@ -20,6 +21,7 @@ export const PRIVACY_PANES = {
 	accessibility: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
 	screenRecording: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
 	automation: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+	inputMonitoring: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
 } as const;
 /** The command that walks a person through every permission grant. */
 export const GRANT_COMMAND = "apple-cua permissions grant";
@@ -89,7 +91,12 @@ export interface HelperFacts {
 
 /** The part of `server.js --doctor` output the doctor reads. */
 export interface SelfCheckReport {
-	readonly permissions: { readonly accessibility: boolean; readonly screenRecording: boolean };
+	readonly permissions: {
+		readonly accessibility: boolean;
+		readonly screenRecording: boolean;
+		/** Undefined from a helper that predates the Input Monitoring check. */
+		readonly inputMonitoring?: boolean | undefined;
+	};
 	readonly sessionMode: string | undefined;
 	readonly processArch: MachArchitecture | undefined;
 	readonly processNode: string | undefined;
@@ -130,6 +137,8 @@ export interface DoctorFacts {
 	readonly selfCheck: SelfCheckResult | undefined;
 	readonly stop: StopStatus;
 	readonly config: ConfigFacts;
+	/** Whether `apple-cua history start` installed the cua-history watcher, the only part that needs Input Monitoring. */
+	readonly historyInstalled?: boolean | undefined;
 	/** Shortens paths under the home directory in summaries; identity when absent. */
 	readonly showPath?: ((path: string) => string) | undefined;
 }
@@ -349,7 +358,7 @@ function serverCheck(facts: DoctorFacts): DoctorCheck {
 }
 
 const REBUILD_HELPER =
-	"Rebuild the helper app: apple-cua doctor --fix --rebuild-helper (macOS then asks for Screen Recording and Accessibility again).";
+	"Rebuild the helper app: apple-cua doctor --fix --rebuild-helper (grants carry over when it is signed with the apple-cua dev identity; an ad-hoc build is a new app, so macOS asks for Screen Recording and Accessibility again).";
 
 function helperChecks(facts: DoctorFacts): DoctorCheck[] {
 	const { helper } = facts;
@@ -389,7 +398,7 @@ function helperChecks(facts: DoctorFacts): DoctorCheck[] {
 			check(
 				"helper-inputs",
 				"warn",
-				"the helper was built from an older launcher or Info.plist than this checkout has",
+				"the helper was built from an older launcher, Info.plist or cua-history watcher than this checkout has",
 				REBUILD_HELPER,
 			),
 		);
@@ -427,6 +436,36 @@ function automationChecks(automation: SelfCheckReport["automation"]): DoctorChec
 				return check(id, "ok", `Automation of ${app}: not checked (${app} is not running)`);
 		}
 	});
+}
+
+/** Only the cua-history watcher listens to input, so Input Monitoring is checked once `apple-cua history start` ran. */
+function inputMonitoringChecks(facts: DoctorFacts, report: SelfCheckReport): DoctorCheck[] {
+	if (facts.historyInstalled !== true) {
+		return [];
+	}
+	const granted = report.permissions.inputMonitoring;
+	if (granted === true) {
+		return [check("permission:input-monitoring", "ok", `Input Monitoring granted to "${HELPER_DISPLAY_NAME}"`)];
+	}
+	if (granted === undefined) {
+		return [
+			check(
+				"permission:input-monitoring",
+				"warn",
+				"the helper app predates cua-history and cannot report Input Monitoring",
+				REBUILD_HELPER,
+			),
+		];
+	}
+	return [
+		check(
+			"permission:input-monitoring",
+			"fail",
+			`Input Monitoring not granted to "${HELPER_DISPLAY_NAME}" (cua-history needs it to record keystrokes and clicks)`,
+			permissionFix("Input Monitoring", "Input Monitoring"),
+			true,
+		),
+	];
 }
 
 function selfCheckChecks(facts: DoctorFacts): DoctorCheck[] {
@@ -482,6 +521,7 @@ function selfCheckChecks(facts: DoctorFacts): DoctorCheck[] {
 					permissionFix("Screen Recording", "Screen & System Audio Recording"),
 					true,
 				),
+		...inputMonitoringChecks(facts, report),
 		...automationChecks(report.automation),
 	);
 	if (report.nativeCapture !== undefined) {
@@ -559,6 +599,13 @@ function clientChecks(facts: DoctorFacts): DoctorCheck[] {
 					id,
 					"ok",
 					`${inspection.client}: ${inspection.detail} (apple-cua config --register ${inspection.client} prints it again)`,
+				);
+			case "not-installed":
+				return check(
+					id,
+					"warn",
+					`${inspection.client}: chosen but not installed, so apple-cua is not registered with it`,
+					`${inspection.detail}`,
 				);
 			case "unreadable":
 				return check(
@@ -724,7 +771,12 @@ export function parseSelfCheckOutput(stdout: string): SelfCheckReport | undefine
 	const nativeCapture = record["nativeCapture"] as Record<string, unknown> | undefined;
 	const automation = record["automation"];
 	return {
-		permissions: { accessibility: permissions["accessibility"], screenRecording: permissions["screenRecording"] },
+		permissions: {
+			accessibility: permissions["accessibility"],
+			screenRecording: permissions["screenRecording"],
+			inputMonitoring:
+				typeof permissions["inputMonitoring"] === "boolean" ? permissions["inputMonitoring"] : undefined,
+		},
 		sessionMode: typeof session?.["mode"] === "string" ? session["mode"] : undefined,
 		processArch: typeof processInfo?.["arch"] === "string" ? nodeArchitecture(processInfo["arch"]) : undefined,
 		processNode: typeof processInfo?.["node"] === "string" ? processInfo["node"] : undefined,
@@ -905,6 +957,7 @@ export function gatherDoctorFacts(layout: Layout = resolveLayout(), env: Environ
 		},
 		selfCheck,
 		stop: new StopSwitch().status(),
+		historyInstalled: existsSync(historyLaunchAgentPath(home)),
 		config: readConfigFacts(layout, env),
 		showPath: (path) => displayPath(path, home),
 	};

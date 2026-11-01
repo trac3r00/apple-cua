@@ -1,0 +1,674 @@
+#import <AppKit/AppKit.h>
+#import <ApplicationServices/ApplicationServices.h>
+#import <Foundation/Foundation.h>
+
+extern Boolean IsSecureEventInputEnabled(void);
+
+static NSString *gRoot = nil;
+static NSString *gSegmentsDir = nil;
+static NSString *gSettingsPath = nil;
+static NSString *gStatePath = nil;
+
+static NSString *gDefaultAppBehavior = @"observe";
+static NSMutableSet<NSString *> *gAllowBundleIds = nil;
+static NSMutableSet<NSString *> *gBlockBundleIds = nil;
+static BOOL gPrivacyPolicySupported = NO;
+static NSString *const kPrivacyPolicyError =
+    @"Native capture cannot enforce URL or private-browsing exclusions.";
+
+static BOOL gPaused = NO;
+static uint64_t gNextId = 1;
+static const double kSegmentWindowSeconds = 600.0;
+static const double kRetentionSeconds = 6 * 60 * 60;
+
+static NSString *gCurrentSegmentId = nil;
+static long gCurrentEventCount = 0;
+static long gCurrentSuppressedCount = 0;
+
+static NSString *gLastFocusKey = nil;
+static CFMachPortRef gEventTap = NULL;
+static BOOL gInputMonitoringActive = NO;
+static NSStatusItem *gStatusItem = nil;
+static NSTask *gDigestTask = nil;
+static time_t gLastDigestWindow = -1;
+
+static NSString *HistoryLauncherPath(void) {
+  NSString *configured =
+      NSProcessInfo.processInfo.environment[@"APPLE_CUA_HISTORY_LAUNCHER"];
+  return configured.length > 0
+             ? configured
+             : [NSHomeDirectory()
+                   stringByAppendingPathComponent:@".local/bin/apple-cua"];
+}
+
+static NSString *HomeStateRoot(void) {
+  NSString *configured =
+      NSProcessInfo.processInfo.environment[@"APPLE_CUA_STATE_DIR"];
+  NSString *base =
+      (configured.length > 0)
+          ? configured
+          : [NSHomeDirectory() stringByAppendingPathComponent:@".apple-cua"];
+  return [base stringByAppendingPathComponent:@"cua-history"];
+}
+
+static NSString *IsoAt(time_t seconds, BOOL dashes) {
+  struct tm parts;
+  gmtime_r(&seconds, &parts);
+  char buffer[32];
+  strftime(buffer, sizeof(buffer),
+           dashes ? "%Y-%m-%dT%H-%M-%SZ" : "%Y-%m-%dT%H:%M:%SZ", &parts);
+  return [NSString stringWithUTF8String:buffer];
+}
+
+static time_t WindowStart(time_t now) {
+  return (time_t)(floor((double)now / kSegmentWindowSeconds) *
+                  kSegmentWindowSeconds);
+}
+
+static void EnsureDir(NSString *path) {
+  [NSFileManager.defaultManager createDirectoryAtPath:path
+                          withIntermediateDirectories:YES
+                                           attributes:@{
+                                             NSFilePosixPermissions : @0700
+                                           }
+                                                error:NULL];
+}
+
+static NSString *SegmentDir(NSString *segmentId) {
+  return [gSegmentsDir stringByAppendingPathComponent:segmentId];
+}
+
+static void WriteMetadata(NSString *segmentId, time_t start) {
+  NSDictionary *metadata = @{
+    @"id" : segmentId,
+    @"startedAt" : IsoAt(start, NO),
+    @"endedAt" : IsoAt(start + (time_t)kSegmentWindowSeconds, NO),
+    @"eventCount" : @(gCurrentEventCount),
+    @"suppressedEventCount" : @(gCurrentSuppressedCount),
+    @"eventsPath" :
+        [SegmentDir(segmentId) stringByAppendingPathComponent:@"events.jsonl"],
+  };
+  NSData *data =
+      [NSJSONSerialization dataWithJSONObject:metadata
+                                      options:NSJSONWritingPrettyPrinted
+                                        error:NULL];
+  [data writeToFile:[SegmentDir(segmentId)
+                        stringByAppendingPathComponent:@"metadata.json"]
+         atomically:YES];
+}
+
+static void PruneOldSegments(time_t now) {
+  NSArray<NSString *> *entries =
+      [NSFileManager.defaultManager contentsOfDirectoryAtPath:gSegmentsDir
+                                                        error:NULL];
+  for (NSString *entry in entries) {
+    if (entry.length != 20) {
+      continue;
+    }
+    struct tm parts;
+    memset(&parts, 0, sizeof(parts));
+    const char *end = strptime(entry.UTF8String, "%Y-%m-%dT%H-%M-%SZ", &parts);
+    if (end == NULL || *end != '\0') {
+      continue;
+    }
+    time_t start = timegm(&parts);
+    if (![entry isEqualToString:IsoAt(start, YES)] ||
+        ![[NSFileManager.defaultManager attributesOfItemAtPath:SegmentDir(entry)
+                                                        error:NULL][NSFileType]
+            isEqualToString:NSFileTypeDirectory]) {
+      continue;
+    }
+    if (start + (time_t)kSegmentWindowSeconds <
+        now - (time_t)kRetentionSeconds) {
+      [NSFileManager.defaultManager removeItemAtPath:SegmentDir(entry)
+                                               error:NULL];
+    }
+  }
+}
+
+static void SeedSegmentCounts(NSString *segmentId) {
+  gCurrentEventCount = 0;
+  gCurrentSuppressedCount = 0;
+  NSString *events = [NSString
+      stringWithContentsOfFile:
+          [SegmentDir(segmentId) stringByAppendingPathComponent:@"events.jsonl"]
+                      encoding:NSUTF8StringEncoding
+                         error:NULL];
+  if (events.length > 0) {
+    for (NSString *line in [events componentsSeparatedByString:@"\n"]) {
+      if (line.length > 0) {
+        gCurrentEventCount += 1;
+      }
+    }
+  }
+  NSData *metaData =
+      [NSData dataWithContentsOfFile:
+                  [SegmentDir(segmentId)
+                      stringByAppendingPathComponent:@"metadata.json"]];
+  if (metaData != nil) {
+    NSDictionary *meta = [NSJSONSerialization JSONObjectWithData:metaData
+                                                         options:0
+                                                           error:NULL];
+    if ([meta isKindOfClass:NSDictionary.class] &&
+        [meta[@"suppressedEventCount"] isKindOfClass:NSNumber.class]) {
+      gCurrentSuppressedCount = [meta[@"suppressedEventCount"] longValue];
+    }
+  }
+  if (gNextId <= (uint64_t)gCurrentEventCount) {
+    gNextId = (uint64_t)gCurrentEventCount + 1;
+  }
+}
+
+static NSString *RollSegment(time_t now) {
+  time_t start = WindowStart(now);
+  NSString *segmentId = IsoAt(start, YES);
+  if (![segmentId isEqualToString:gCurrentSegmentId]) {
+    gCurrentSegmentId = segmentId;
+    EnsureDir(SegmentDir(segmentId));
+    SeedSegmentCounts(segmentId);
+    WriteMetadata(segmentId, start);
+  }
+  return segmentId;
+}
+
+static void AppendEvent(NSMutableDictionary *event) {
+  time_t now = time(NULL);
+  NSString *segmentId = RollSegment(now);
+  event[@"id"] = @(gNextId++);
+  NSData *line = [NSJSONSerialization dataWithJSONObject:event
+                                                 options:0
+                                                   error:NULL];
+  if (line == nil) {
+    return;
+  }
+  NSString *path =
+      [SegmentDir(segmentId) stringByAppendingPathComponent:@"events.jsonl"];
+  NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+  if (handle == nil) {
+    [NSFileManager.defaultManager createFileAtPath:path
+                                          contents:nil
+                                        attributes:@{
+                                          NSFilePosixPermissions : @0600
+                                        }];
+    handle = [NSFileHandle fileHandleForWritingAtPath:path];
+  }
+  [handle seekToEndOfFile];
+  [handle writeData:line];
+  [handle writeData:[@"\n" dataUsingEncoding:NSUTF8StringEncoding]];
+  [handle closeFile];
+  gCurrentEventCount += 1;
+  WriteMetadata(segmentId, WindowStart(now));
+  PruneOldSegments(now);
+}
+
+static void RecordSuppressed(void) {
+  time_t now = time(NULL);
+  NSString *segmentId = RollSegment(now);
+  gCurrentSuppressedCount += 1;
+  WriteMetadata(segmentId, WindowStart(now));
+}
+
+static BOOL ShouldObserveApp(NSString *bundleId) {
+  if (!gPrivacyPolicySupported) {
+    return NO;
+  }
+  NSString *key = bundleId.lowercaseString ?: @"";
+  if ([gBlockBundleIds containsObject:key]) {
+    return NO;
+  }
+  if ([gAllowBundleIds containsObject:key]) {
+    return YES;
+  }
+  return [gDefaultAppBehavior isEqualToString:@"observe"];
+}
+
+static NSDictionary *FrontmostApp(void) {
+  NSRunningApplication *app = NSWorkspace.sharedWorkspace.frontmostApplication;
+  if (app == nil || app.bundleIdentifier == nil) {
+    return nil;
+  }
+  return @{
+    @"bundleIdentifier" : app.bundleIdentifier,
+    @"name" : app.localizedName ?: app.bundleIdentifier,
+    @"processIdentifier" : @(app.processIdentifier),
+  };
+}
+
+static NSString *FocusedWindowTitle(pid_t pid) {
+  if (!AXIsProcessTrusted()) {
+    return nil;
+  }
+  AXUIElementRef appElement = AXUIElementCreateApplication(pid);
+  if (appElement == NULL) {
+    return nil;
+  }
+  CFTypeRef window = NULL;
+  NSString *title = nil;
+  if (AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute,
+                                    &window) == kAXErrorSuccess &&
+      window != NULL) {
+    CFTypeRef titleValue = NULL;
+    if (AXUIElementCopyAttributeValue((AXUIElementRef)window, kAXTitleAttribute,
+                                      &titleValue) == kAXErrorSuccess &&
+        titleValue != NULL) {
+      if (CFGetTypeID(titleValue) == CFStringGetTypeID()) {
+        title = [(__bridge NSString *)titleValue copy];
+      }
+      CFRelease(titleValue);
+    }
+    CFRelease(window);
+  }
+  CFRelease(appElement);
+  return title;
+}
+
+static void LoadState(void) {
+  NSData *data = [NSData dataWithContentsOfFile:gStatePath];
+  if (data == nil) {
+    return;
+  }
+  NSDictionary *state = [NSJSONSerialization JSONObjectWithData:data
+                                                        options:0
+                                                          error:NULL];
+  if ([state isKindOfClass:NSDictionary.class]) {
+    gPaused = [state[@"state"] isEqualToString:@"paused"];
+  }
+}
+
+static void WriteState(NSString *value) {
+  NSString *effective =
+      !gPrivacyPolicySupported && [value isEqualToString:@"running"]
+          ? @"paused"
+          : value;
+  gPaused = [effective isEqualToString:@"paused"];
+  NSMutableDictionary *state = [@{
+    @"state" : effective,
+    @"pid" : @(NSProcessInfo.processInfo.processIdentifier),
+    @"updatedAt" : IsoAt(time(NULL), NO),
+  } mutableCopy];
+  if (!gPrivacyPolicySupported) {
+    state[@"error"] = kPrivacyPolicyError;
+  }
+  NSData *data =
+      [NSJSONSerialization dataWithJSONObject:state
+                                      options:NSJSONWritingPrettyPrinted
+                                        error:NULL];
+  EnsureDir(gRoot);
+  [data writeToFile:gStatePath atomically:YES];
+}
+
+static void LoadSettings(void) {
+  [gAllowBundleIds removeAllObjects];
+  [gBlockBundleIds removeAllObjects];
+  gDefaultAppBehavior = @"observe";
+  gPrivacyPolicySupported = NO;
+  NSData *data = [NSData dataWithContentsOfFile:gSettingsPath];
+  if (data == nil) {
+    return;
+  }
+  NSDictionary *settings = [NSJSONSerialization JSONObjectWithData:data
+                                                           options:0
+                                                             error:NULL];
+  if (![settings isKindOfClass:NSDictionary.class]) {
+    return;
+  }
+  gPrivacyPolicySupported =
+      [settings[@"observePrivateBrowsing"] isEqual:@YES] &&
+      [settings[@"defaultURLBehavior"] isEqual:@"observe"];
+  if ([settings[@"defaultApplicationBehavior"] isKindOfClass:NSString.class]) {
+    gDefaultAppBehavior = settings[@"defaultApplicationBehavior"];
+  }
+  NSArray *rules = settings[@"rules"];
+  if (![rules isKindOfClass:NSArray.class]) {
+    gPrivacyPolicySupported = NO;
+    return;
+  }
+  for (NSDictionary *rule in rules) {
+    if (![rule isKindOfClass:NSDictionary.class]) {
+      gPrivacyPolicySupported = NO;
+      continue;
+    }
+    if ([rule[@"scope"] isEqual:@"url"]) {
+      if (![rule[@"behavior"] isEqual:@"observe"]) {
+        gPrivacyPolicySupported = NO;
+      }
+      continue;
+    }
+    if (![rule[@"scope"] isEqual:@"app"]) {
+      gPrivacyPolicySupported = NO;
+      continue;
+    }
+    NSString *bundleId = rule[@"bundleID"];
+    if (![bundleId isKindOfClass:NSString.class]) {
+      continue;
+    }
+    if ([rule[@"behavior"] isEqualToString:@"do_not_observe"]) {
+      [gBlockBundleIds addObject:bundleId.lowercaseString];
+    } else {
+      [gAllowBundleIds addObject:bundleId.lowercaseString];
+    }
+  }
+}
+
+static NSMutableDictionary *EventShell(NSString *kind, NSDictionary *app) {
+  NSMutableDictionary *event = [NSMutableDictionary dictionary];
+  event[@"kind"] = kind;
+  event[@"timestamp"] = IsoAt(time(NULL), NO);
+  event[@"app"] = app;
+  return event;
+}
+
+static void PollFocus(void) {
+  if (gPaused || !gPrivacyPolicySupported) {
+    return;
+  }
+  NSDictionary *app = FrontmostApp();
+  if (app == nil) {
+    return;
+  }
+  NSString *bundleId = app[@"bundleIdentifier"];
+  NSString *title =
+      FocusedWindowTitle([app[@"processIdentifier"] intValue]) ?: @"";
+  NSString *focusKey = [NSString stringWithFormat:@"%@\t%@", bundleId, title];
+  if ([focusKey isEqualToString:gLastFocusKey]) {
+    return;
+  }
+  gLastFocusKey = focusKey;
+  if (!ShouldObserveApp(bundleId)) {
+    RecordSuppressed();
+    return;
+  }
+  NSMutableDictionary *event = EventShell(@"window.changed", app);
+  event[@"window"] = @{@"windowID" : @0, @"title" : title};
+  AppendEvent(event);
+}
+
+static CGEventRef TapCallback(CGEventTapProxy proxy, CGEventType type,
+                              CGEventRef cgEvent, void *info) {
+  (void)proxy;
+  (void)info;
+  if (gPaused || !gPrivacyPolicySupported) {
+    return cgEvent;
+  }
+  if (type == kCGEventTapDisabledByTimeout ||
+      type == kCGEventTapDisabledByUserInput) {
+    if (gEventTap != NULL) {
+      CGEventTapEnable(gEventTap, true);
+    }
+    return cgEvent;
+  }
+  NSDictionary *app = FrontmostApp();
+  if (app == nil || !ShouldObserveApp(app[@"bundleIdentifier"])) {
+    if (app != nil) {
+      RecordSuppressed();
+    }
+    return cgEvent;
+  }
+  if (type == kCGEventKeyDown) {
+    CGEventFlags flags = CGEventGetFlags(cgEvent);
+    BOOL hasCommandOrControl =
+        (flags & (kCGEventFlagMaskCommand | kCGEventFlagMaskControl)) != 0;
+    if (hasCommandOrControl) {
+      UniChar chars[8];
+      UniCharCount length = 0;
+      CGEventKeyboardGetUnicodeString(cgEvent, 8, &length, chars);
+      NSString *text = (length > 0)
+                           ? [NSString stringWithCharacters:chars length:length]
+                           : @"";
+      NSMutableDictionary *event = EventShell(@"keyboard.shortcut", app);
+      event[@"keyboard"] = @{@"keyEquivalent" : text};
+      AppendEvent(event);
+    } else if (!IsSecureEventInputEnabled()) {
+      UniChar chars[16];
+      UniCharCount length = 0;
+      CGEventKeyboardGetUnicodeString(cgEvent, 16, &length, chars);
+      if (length > 0) {
+        NSMutableDictionary *event = EventShell(@"keyboard.text_input", app);
+        event[@"keyboard"] =
+            @{@"text" : [NSString stringWithCharacters:chars length:length]};
+        AppendEvent(event);
+      }
+    }
+  } else {
+    NSString *button = (type == kCGEventRightMouseDown)   ? @"right"
+                       : (type == kCGEventOtherMouseDown) ? @"other"
+                                                          : @"left";
+    NSMutableDictionary *event = EventShell(@"mouse.click", app);
+    event[@"mouse"] = @{@"button" : button};
+    AppendEvent(event);
+  }
+  return cgEvent;
+}
+
+static void InstallEventTap(void) {
+  if (gPaused || !gPrivacyPolicySupported || gEventTap != NULL) {
+    return;
+  }
+  CGEventMask mask = CGEventMaskBit(kCGEventKeyDown) |
+                     CGEventMaskBit(kCGEventLeftMouseDown) |
+                     CGEventMaskBit(kCGEventRightMouseDown) |
+                     CGEventMaskBit(kCGEventOtherMouseDown);
+  gEventTap =
+      CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
+                       kCGEventTapOptionListenOnly, mask, TapCallback, NULL);
+  if (gEventTap == NULL) {
+    gInputMonitoringActive = NO;
+    return;
+  }
+  CFRunLoopSourceRef source =
+      CFMachPortCreateRunLoopSource(kCFAllocatorDefault, gEventTap, 0);
+  CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
+  CFRelease(source);
+  CGEventTapEnable(gEventTap, true);
+  gInputMonitoringActive = YES;
+}
+
+@interface HistoryRecorderDelegate : NSObject <NSApplicationDelegate>
+@end
+
+@implementation HistoryRecorderDelegate
+
+- (void)applicationDidFinishLaunching:(NSNotification *)notification {
+  (void)notification;
+  gAllowBundleIds = [NSMutableSet set];
+  gBlockBundleIds = [NSMutableSet set];
+  gRoot = HomeStateRoot();
+  gSegmentsDir = [gRoot stringByAppendingPathComponent:@"segments"];
+  gSettingsPath = [gRoot stringByAppendingPathComponent:@"settings.json"];
+  gStatePath = [gRoot stringByAppendingPathComponent:@"state.json"];
+  EnsureDir(gSegmentsDir);
+  LoadSettings();
+  LoadState();
+  WriteState(gPaused ? @"paused" : @"running");
+  [self buildStatusItem];
+  InstallEventTap();
+  [self refreshStatusTitle];
+
+  NSMutableDictionary *session = EventShell(@"session.started", @{});
+  [session removeObjectForKey:@"app"];
+  AppendEvent(session);
+
+  [NSTimer scheduledTimerWithTimeInterval:2.0
+                                   target:self
+                                 selector:@selector(tick:)
+                                 userInfo:nil
+                                  repeats:YES];
+}
+
+- (void)buildStatusItem {
+  gStatusItem = [NSStatusBar.systemStatusBar
+      statusItemWithLength:NSVariableStatusItemLength];
+  NSMenu *menu = [[NSMenu alloc] init];
+  NSMenuItem *status =
+      [[NSMenuItem alloc] initWithTitle:@"cua-history recording"
+                                 action:NULL
+                          keyEquivalent:@""];
+  status.enabled = NO;
+  [menu addItem:status];
+  [menu addItem:[NSMenuItem separatorItem]];
+  [menu addItemWithTitle:@"Open history..."
+                  action:@selector(openHistory:)
+           keyEquivalent:@""]
+      .target = self;
+  [menu addItemWithTitle:@"Record a skill..."
+                  action:@selector(recordSkill:)
+           keyEquivalent:@""]
+      .target = self;
+  [menu addItem:[NSMenuItem separatorItem]];
+  [menu addItemWithTitle:@"Pause recording"
+                  action:@selector(pause:)
+           keyEquivalent:@""]
+      .target = self;
+  [menu addItemWithTitle:@"Resume recording"
+                  action:@selector(resume:)
+           keyEquivalent:@""]
+      .target = self;
+  [menu addItem:[NSMenuItem separatorItem]];
+  [menu addItemWithTitle:@"Reveal data folder"
+                  action:@selector(reveal:)
+           keyEquivalent:@""]
+      .target = self;
+  [menu addItem:[NSMenuItem separatorItem]];
+  [menu addItemWithTitle:@"Quit cua-history"
+                  action:@selector(quit:)
+           keyEquivalent:@""]
+      .target = self;
+  gStatusItem.menu = menu;
+}
+
+- (void)refreshStatusTitle {
+  NSString *recordingStatus =
+      !gPrivacyPolicySupported ? @"blocked (URL/private exclusions unavailable)"
+                              : (gPaused ? @"paused" : @"recording");
+  NSString *inputStatus = gInputMonitoringActive ? @"input capture on"
+                                                 : @"input capture unavailable";
+  NSString *label = [NSString stringWithFormat:@"apple-cua; cua-history %@; %@",
+                                               recordingStatus, inputStatus];
+  NSStatusBarButton *button = gStatusItem.button;
+  NSImage *image = [NSImage imageWithSystemSymbolName:@"cursorarrow"
+                             accessibilityDescription:@"apple-cua running"];
+  image.template = YES;
+  button.image = image;
+  button.imagePosition = NSImageLeft;
+  button.title = @"apple-cua";
+  button.toolTip = label;
+  [button setAccessibilityLabel:label];
+  gStatusItem.menu.itemArray.firstObject.title = [NSString
+      stringWithFormat:@"cua-history %@; %@", recordingStatus, inputStatus];
+}
+
+- (void)openHistory:(id)sender {
+  (void)sender;
+  [self launchHistoryWithArguments:@[ @"history", @"open" ]];
+}
+
+- (void)recordSkill:(id)sender {
+  (void)sender;
+  [self launchHistoryWithArguments:@[ @"history", @"open", @"--record" ]];
+}
+
+- (void)launchHistoryWithArguments:(NSArray<NSString *> *)arguments {
+  NSTask *task = [[NSTask alloc] init];
+  task.executableURL = [NSURL fileURLWithPath:HistoryLauncherPath()];
+  task.arguments = arguments;
+  NSError *error = nil;
+  if (![task launchAndReturnError:&error]) {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"Could not open computer history";
+    alert.informativeText =
+        @"The apple-cua launcher is unavailable. Run setup, then restart "
+         "history recording to refresh its launcher path.";
+    [alert runModal];
+  }
+}
+
+- (void)summarizeCompletedActivity {
+  if (gPaused || gDigestTask.running)
+    return;
+  time_t window = WindowStart(time(NULL));
+  if (window == gLastDigestWindow)
+    return;
+  NSData *data =
+      [NSData dataWithContentsOfFile:
+                  [gRoot stringByAppendingPathComponent:@"automation.json"]];
+  if (data == nil || data.length > 4096)
+    return;
+  id settings = [NSJSONSerialization JSONObjectWithData:data
+                                                options:0
+                                                  error:NULL];
+  if (![settings isKindOfClass:NSDictionary.class] ||
+      ![settings[@"enabled"] isEqual:@YES])
+    return;
+  gLastDigestWindow = window;
+  gDigestTask = [[NSTask alloc] init];
+  gDigestTask.executableURL = [NSURL fileURLWithPath:HistoryLauncherPath()];
+  gDigestTask.arguments = @[ @"history", @"digest" ];
+  NSError *error = nil;
+  if (![gDigestTask launchAndReturnError:&error]) {
+    NSDictionary *status = @{@"state" : @"launcher-unavailable"};
+    NSData *statusData = [NSJSONSerialization dataWithJSONObject:status
+                                                         options:0
+                                                           error:NULL];
+    [statusData writeToFile:[gRoot stringByAppendingPathComponent:
+                                       @"automation-status.json"]
+                 atomically:YES];
+    gDigestTask = nil;
+  }
+}
+
+- (void)tick:(NSTimer *)timer {
+  (void)timer;
+  PruneOldSegments(time(NULL));
+  BOOL wasPaused = gPaused;
+  LoadState();
+  LoadSettings();
+  if (!gPrivacyPolicySupported && !gPaused) {
+    WriteState(@"paused");
+  } else if (wasPaused && !gPaused) {
+    InstallEventTap();
+  }
+  [self refreshStatusTitle];
+  PollFocus();
+  [self summarizeCompletedActivity];
+}
+
+- (void)pause:(id)sender {
+  (void)sender;
+  WriteState(@"paused");
+  [self refreshStatusTitle];
+}
+
+- (void)resume:(id)sender {
+  (void)sender;
+  WriteState(@"running");
+  InstallEventTap();
+  gLastFocusKey = nil;
+  [self refreshStatusTitle];
+}
+
+- (void)reveal:(id)sender {
+  (void)sender;
+  [NSWorkspace.sharedWorkspace
+      activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:gRoot] ]];
+}
+
+- (void)quit:(id)sender {
+  (void)sender;
+  WriteState(@"stopped");
+  [NSApp terminate:nil];
+}
+
+@end
+
+int main(int argc, const char *argv[]) {
+  (void)argc;
+  (void)argv;
+  @autoreleasepool {
+    NSApplication *app = NSApplication.sharedApplication;
+    [app setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    HistoryRecorderDelegate *delegate = [[HistoryRecorderDelegate alloc] init];
+    app.delegate = delegate;
+    [app run];
+  }
+  return 0;
+}

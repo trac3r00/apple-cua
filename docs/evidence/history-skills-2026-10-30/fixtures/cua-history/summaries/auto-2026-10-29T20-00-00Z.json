@@ -1,0 +1,11 @@
+{
+	"id": "2026-10-29T20-00-00Z",
+	"sourceIds": ["2026-10-29T20-00-00Z"],
+	"title": "TextEdit: Command+B pressed on a selection in a disposable heading-formatting document",
+	"summary": "Between 2026-10-29T20:01:00Z and 20:04:00Z, four events were recorded in TextEdit (com.apple.TextEdit, PID 123), all in window 1 titled \"Disposable heading-formatting example\".\n\n1. 20:01:00Z: window.changed. TextEdit window 1 became the active context.\n2. 20:02:00Z: selection.changed in the document text area (AXTextArea, \"Document text\").\n3. 20:03:00Z: keyboard shortcut Command+B sent to the same document text area.\n4. 20:04:00Z: window.changed again, still window 1 with the same title.\n\nThe sequence suggests an attempt to bold a heading in the document. The evidence is incomplete in several ways:\n- The selected text, its range, and whether it was a heading are not recorded.\n- There is no recorded outcome showing bold formatting was applied, such as a font attribute change or a post-action verification.\n- The 20:04 window event has no recorded cause, and the record does not show whether the document was saved, closed, or left as is.\n\nNo success can be claimed from this history.",
+	"suggestion": {
+		"name": "textedit-bold-heading",
+		"description": "Bold a specific heading line in an open TextEdit document by selecting it in the document text area and applying Command+B, then verify the formatting change. Based on one recorded, unverified occurrence in a disposable document.",
+		"goal": "In TextEdit, target the named document window by exact window ID or title. Select the exact heading text in the document text area (AXTextArea, \"Document text\") and confirm the selection matches the intended heading before acting. Send Command+B to that text area. Then re-observe the document and verify that the selected heading now has bold formatting. Report done only if that verification succeeds, and report the actual state otherwise. Do not save, close, or modify other text unless explicitly asked."
+	}
+}

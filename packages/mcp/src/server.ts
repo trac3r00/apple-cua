@@ -31,6 +31,8 @@ import { DockGuardSession } from "./dock-session.js";
 import { ExtrasGuardSession } from "./extras-session.js";
 import { GuardedSession } from "./guarded-session.js";
 import { registerHandsTools } from "./hands-tools.js";
+import { createHistorySource } from "./history-source.js";
+import { registerHistoryTools } from "./history-tools.js";
 import { detectHost, spawnGuidance } from "./host-detection.js";
 import { registerHumanTools } from "./human-tools.js";
 import {
@@ -121,6 +123,7 @@ export function createMcpServer(
 	const { toolset, iphone } = resolveServerOptions(options);
 	const browser = browserToolsEnabled();
 	const utm = process.env["APPLE_CUA_UTM"] === "1";
+	const history = process.env["APPLE_CUA_HISTORY"] === "1";
 	const resolvedComputer = computer ?? createNativeComputer();
 	// Natively, the machine-wide file-backed stop switch plus the keyboard chord that flips it; tests inject their own.
 	const nativeStopSwitch = computer === undefined && stopSwitch === undefined ? new StopSwitch() : undefined;
@@ -305,7 +308,7 @@ export function createMcpServer(
 		allowedBundleIds: allowedBundleIdsFromProcessEnvironment(),
 		stop: stopGate,
 		toolset,
-		toolNames: toolNamesFor(toolset, iphone, browser, utm),
+		toolNames: toolNamesFor(toolset, iphone, browser, utm, history),
 		host,
 		toolUsage: () => toolUsage.snapshot(),
 	});
@@ -340,6 +343,9 @@ export function createMcpServer(
 		registerUtmTools(server, new UTM(appPath === undefined ? {} : { appPath }), {
 			...(stopGate === undefined ? {} : { stopSwitch: stopGate }),
 		});
+	}
+	if (history) {
+		registerHistoryTools(server, createHistorySource({ stateDir: resolveStateDir() }));
 	}
 	return server;
 }

@@ -142,10 +142,25 @@ apple-cua config --iphone
 apple-cua ios status
 ```
 
-Use the `apple-cua-browser` skill for web pages and the `apple-cua` skill for native apps and the
+Use the `cua-browser` skill for web pages and the `apple-cua` skill for native apps and the
 phone. Both skills explain the one-cursor-per-subagent workflow and the non-disruption rules.
 For a question-driven install an AI can run end to end, see the
-[AI setup guide](skills/apple-cua-browser/README.md).
+[AI setup guide](skills/cua-browser/README.md).
+
+`cua-history` is an opt-in, private, local record of recent desktop activity for answering "what
+was I just doing?". `apple-cua history start` installs an always-on native menu-bar watcher (a
+launchd login item) that records foreground app, window title, keystrokes, and clicks into
+10-minute segments under the state directory, with per-app observation rules, pause/resume, and
+a 6-hour retention window; keystroke/click capture needs Input Monitoring and window titles need
+Accessibility, granted to the **same "apple-cua-mcp" entry** in System Settings (the watcher is signed
+with apple-cua's identifier, so there is no separate recorder to approve). With
+`APPLE_CUA_HISTORY=1` the MCP server exposes the `cua-history` tools that read and control that
+watcher. Native capture cannot classify URLs or private browser windows, so the default
+privacy policy blocks it rather than ignoring exclusions. See [native recording limits and
+history-to-skill workflows](docs/history-skills.md) before enabling it. Capture is local;
+explicitly consented generation sends selected, redacted evidence to the configured model.
+Retention cleanup runs while the watcher is running, including when paused; stopped watchers
+cannot expire files.
 
 <p align="center">
   <img src="./docs/assets/doctor.svg" alt="apple-cua doctor output: every check reports ok, ending in 'Ready: apple-cua is installed and holds its permissions.'" width="760" />
@@ -162,7 +177,7 @@ Day-to-day lifecycle:
 | `apple-cua doctor [--fix]` | Check everything without triggering a permission prompt |
 | `apple-cua update` | Fast-forward, rebuild, re-apply registrations, run the doctor |
 | `apple-cua stop` / `resume` | Stop every agent on this Mac at once / lift the stop |
-| `apple-cua uninstall` | Remove registrations (backed up), helper, command, PATH line and `~/.apple-cua` |
+| `apple-cua uninstall` | Remove owned registrations/login services, helper, command, PATH line and installation state; retain recorded history and summaries at the reported path |
 
 ## See it work
 

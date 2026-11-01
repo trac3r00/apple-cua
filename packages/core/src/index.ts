@@ -117,6 +117,7 @@ export {
 	automationPermission,
 	automationStatusFromCode,
 	requestAccessibility,
+	requestInputMonitoring,
 	requestScreenRecording,
 } from "./platform/macos-ffi/permission-prompts.js";
 export { isBrowserBundle } from "./permission/url-blocklist.js";
@@ -130,6 +131,64 @@ export {
 	PassiveMemorySegmentWriter,
 	fileSegmentSink,
 } from "./passive-memory/segment-writer.js";
+export type {
+	HistoryApp,
+	HistoryWindow,
+	HistoryElement,
+	HistoryAx,
+	HistoryEvent,
+	HistoryEventKind,
+} from "./passive-memory/history-events.js";
+export { encodeHistoryEvent } from "./passive-memory/history-events.js";
+export {
+	type ObservationDefaultBehavior,
+	type ObservationRule,
+	type AppObservationRule,
+	type UrlObservationRule,
+	type HistoryObservationSettings,
+	type HistoryObservationContext,
+	DEFAULT_HISTORY_OBSERVATION_SETTINGS,
+	shouldObserve,
+} from "./passive-memory/history-settings.js";
+export {
+	type HistoryFs,
+	type SegmentMetadata,
+	HistorySegmentStore,
+	nodeHistoryFs,
+	segmentIdForTimestamp,
+	segmentStartMs,
+	SEGMENT_WINDOW_MS,
+	DEFAULT_RETENTION_MS,
+} from "./passive-memory/history-store.js";
+export {
+	type HistoryRecorderState,
+	type HistoryRecorderOptions,
+	type RecordOutcome,
+	type UnstampedHistoryEvent,
+	HistoryRecorder,
+} from "./passive-memory/history-recorder.js";
+export {
+	type HistoryObservationInput,
+	appStateToHistory,
+} from "./passive-memory/history-observation.js";
+export {
+	type HistorySampler,
+	type CaptureTimer,
+	type HistoryCaptureLoopOptions,
+	HistoryCaptureLoop,
+} from "./passive-memory/history-capture.js";
+export {
+	type HistoryState,
+	type HistoryPaths,
+	type HistoryControlFs,
+	historyPaths,
+	nodeHistoryControlFs,
+	readHistoryState,
+	writeHistoryState,
+	readHistorySettings,
+	writeHistorySettings,
+} from "./passive-memory/history-control.js";
+export { resolveHistoryRecorderBinary } from "./passive-memory/history-recorder-binary.js";
 export type { PermissionInterface, PermissionKind, PermissionStatus } from "./permission/interface.js";
 export { MacOSPermissions } from "./permission/macos.js";
 export { CloudComputer, type CloudComputerOptions } from "./platform/cloud.js";

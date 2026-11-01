@@ -172,7 +172,7 @@ let cliStateDir;
 async function cliCall(input) {
 	const child = spawn(
 		process.execPath,
-		[resolve(root, "../../skills/apple-cua-browser/scripts/browser.mjs"), "call", JSON.stringify(input)],
+		[resolve(root, "../../skills/cua-browser/scripts/browser.mjs"), "call", JSON.stringify(input)],
 		{
 			env: { ...process.env, APPLE_CUA_STATE_DIR: cliStateDir },
 			stdio: ["ignore", "pipe", "pipe"],
@@ -204,9 +204,9 @@ const assert = (condition, message) => {
 };
 
 try {
-	const userDataDir = await mkdtemp(join(tmpdir(), "apple-cua-browser-qa-profile-"));
+	const userDataDir = await mkdtemp(join(tmpdir(), "cua-browser-qa-profile-"));
 	ownedDirs.push(userDataDir);
-	const stopDir = await mkdtemp(join(tmpdir(), "apple-cua-browser-qa-stop-"));
+	const stopDir = await mkdtemp(join(tmpdir(), "cua-browser-qa-stop-"));
 	ownedDirs.push(stopDir);
 	const stopSwitch = new StopSwitch(stopDir);
 	cliStateDir = stopDir;
@@ -740,7 +740,7 @@ try {
 		);
 		assert(focus.result.value.focused === false, "QA options rendering activated the background browser");
 	}
-	const evidenceRoot = resolve(root, "../../.omo/evidence/apple-cua-browser");
+	const evidenceRoot = resolve(root, "../../.omo/evidence/cua-browser");
 	await mkdir(evidenceRoot, { recursive: true });
 	const evidenceDir = await mkdtemp(join(evidenceRoot, "run-"));
 	const screenshots = [];

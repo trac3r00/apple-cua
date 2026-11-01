@@ -5,11 +5,11 @@ import { z } from "zod";
 import { connectionToken, readConnection, writeConnection } from "./connection.js";
 import { doctorBrowserService, installBrowserService, uninstallBrowserService } from "./service.js";
 
-const usage = "Usage: apple-cua-browser <install|doctor|uninstall|serve|call <json>|status>";
+const usage = "Usage: cua-browser <install|doctor|uninstall|serve|call <json>|status>";
 
 function reportError(error: unknown): void {
 	const message = error instanceof Error ? error.message : String(error);
-	process.stderr.write(`apple-cua-browser: ${message}\n`);
+	process.stderr.write(`cua-browser: ${message}\n`);
 	process.exitCode = 1;
 }
 

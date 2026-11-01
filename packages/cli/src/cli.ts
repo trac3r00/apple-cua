@@ -24,6 +24,7 @@ import type {
 } from "@apple-cua/core";
 import { Command } from "commander";
 import { registerBrowserCommands } from "./browser-commands.js";
+import { registerHistoryCommands } from "./history-commands.js";
 import { registerIosCommands } from "./ios.js";
 import { resolveLayout } from "./layout.js";
 import { registerLifecycleCommands, resolveCursorMotion } from "./lifecycle-commands.js";
@@ -580,6 +581,7 @@ program
 
 registerIosCommands(program, { isJsonOutput });
 registerBrowserCommands(program, { isJsonOutput });
+registerHistoryCommands(program, { isJsonOutput });
 registerLifecycleCommands(program, { isJsonOutput });
 registerUtmCommands(program, { isJsonOutput });
 

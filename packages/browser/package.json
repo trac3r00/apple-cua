@@ -5,8 +5,8 @@
 	"type": "module",
 	"description": "Compact Chromium browser automation with the apple-cua stop gate",
 	"bin": {
-		"apple-cua-browser": "./dist/cli.js",
-		"apple-cua-browser-mcp": "./dist/server.js"
+		"cua-browser": "./dist/cli.js",
+		"cua-browser-mcp": "./dist/server.js"
 	},
 	"exports": {
 		".": "./dist/index.js"

@@ -137,6 +137,12 @@ fi
 # also be built for this Mac's CPU, or the helper runs under Rosetta (or, without Rosetta, not at
 # all). Prefer OPENCUA_NODE, then the first such node on PATH and in the usual local installs,
 # and refuse loudly instead of shipping a broken bundle.
+# Bun reports Node's process.versions and process.arch, so it passes the checks below and then cannot
+# run the helper; only a real Node has neither the Bun nor the Deno global.
+node_is_real_node() {
+	[[ "$("$1" -p 'typeof Bun === "undefined" && typeof Deno === "undefined"' 2>/dev/null)" == "true" ]]
+}
+
 bundled_node_is_self_contained() {
 	local dependencies
 	dependencies="$(otool -L "$1" 2>/dev/null || true)"
@@ -150,13 +156,16 @@ arch_of_node() {
 
 resolve_node_bin() {
 	if [[ -n "$node_bin" ]]; then
+		node_is_real_node "$node_bin" ||
+			{ echo "OPENCUA_NODE=$node_bin is Bun or Deno pretending to be node; the bundled helper needs a real node from https://nodejs.org" >&2; return 1; }
 		printf '%s\n' "$node_bin"
 		return 0
 	fi
 	local candidate
 	while IFS= read -r candidate; do
 		[[ -n "$candidate" && -x "$candidate" ]] || continue
-		if bundled_node_is_self_contained "$candidate" && [[ "$(arch_of_node "$candidate")" == "$node_arch" ]]; then
+		if node_is_real_node "$candidate" && bundled_node_is_self_contained "$candidate" &&
+			[[ "$(arch_of_node "$candidate")" == "$node_arch" ]]; then
 			printf '%s\n' "$candidate"
 			return 0
 		fi

@@ -257,6 +257,12 @@ version_at_least() {
 
 # --- Node.js helpers ---------------------------------------------------------------------------------------------
 
+# Bun answers process.versions.node and process.arch like Node, so a `node` on PATH that is really Bun
+# passes every other check and lands in the bundle, where `node --version` then fails. Reject it by name.
+node_is_node() {
+	[[ "$("$1" -p 'typeof Bun === "undefined" && typeof Deno === "undefined"' 2>/dev/null)" == "true" ]]
+}
+
 node_is_usable() {
 	local major
 	major="$("$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null)" || return 1
@@ -273,11 +279,13 @@ node_is_self_contained() {
 }
 
 node_is_bundleable() {
-	node_is_usable "$1" && node_is_self_contained "$1" && [[ "$("$1" -p process.arch 2>/dev/null)" == "$node_platform_arch" ]]
+	node_is_node "$1" && node_is_usable "$1" && node_is_self_contained "$1" && [[ "$("$1" -p process.arch 2>/dev/null)" == "$node_platform_arch" ]]
 }
 
 bundle_refusal() {
-	if ! node_is_usable "$1"; then
+	if ! node_is_node "$1"; then
+		echo "it is Bun or Deno pretending to be node, which cannot run the helper"
+	elif ! node_is_usable "$1"; then
 		echo "it does not run or is older than Node $MIN_NODE_MAJOR"
 	elif ! node_is_self_contained "$1"; then
 		echo "it links shared libraries (libnode.dylib or Homebrew paths), so it cannot live inside the app bundle"

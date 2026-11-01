@@ -291,3 +291,32 @@ describe("#given app names #when they are resolved #then bundle ids pass through
 		expect(findAppBundleId("TextEdit", home)).toBe("com.apple.TextEdit");
 	});
 });
+
+describe("#given a registration written before the rename #when settings are read or rewritten #then legacy names follow", () => {
+	it("reads the legacy names and clears them when the setting changes", () => {
+		const legacy = {
+			APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit",
+			APPLE_CUA_TOOLSET: "lean",
+			APPLE_CUA_IPHONE: "1",
+			APPLE_CUA_DELIVERY: "background",
+		};
+		expect(
+			envMatchesSettings(legacy, {
+				...DEFAULT_SETTINGS,
+				allowedApps: ["com.apple.TextEdit"],
+				toolset: "lean",
+				iphone: true,
+			}),
+		).toBe(true);
+		const update = envForSettings({ ...DEFAULT_SETTINGS, allowedApps: [], toolset: "full", iphone: false });
+		expect(update["APPLE_CUA_IPHONE"]).toBeUndefined();
+		expect(update["APPLE_CUA_ALLOWED_BUNDLE_IDS"]).toBeUndefined();
+		expect("APPLE_CUA_TOOLSET" in update).toBe(true);
+		expect(
+			envMatchesSettings(
+				{ ...legacy, ...Object.fromEntries(Object.entries(update).filter(([, value]) => value !== undefined)) },
+				DEFAULT_SETTINGS,
+			),
+		).toBe(false);
+	});
+});

@@ -3,9 +3,10 @@ import { createInterface } from "node:readline";
 import { LINUX_HELPER } from "./helper.js";
 
 export const LINUX_INSTALL_HINTS =
-	"apt: sudo apt install python3 python3-gi gir1.2-atspi-2.0 gir1.2-gdkpixbuf-2.0; " +
-	"dnf: sudo dnf install python3 python3-gobject at-spi2-core gdk-pixbuf2; " +
-	"pacman: sudo pacman -S python python-gobject at-spi2-core gdk-pixbuf2";
+	"apt: sudo apt install python3 python3-gi gir1.2-atspi-2.0 gir1.2-gdkpixbuf-2.0 imagemagick; " +
+	"dnf: sudo dnf install python3 python3-gobject at-spi2-core gdk-pixbuf2 ImageMagick; " +
+	"pacman: sudo pacman -S python python-gobject at-spi2-core gdk-pixbuf2 imagemagick; " +
+	"Wayland captures with grim instead of ImageMagick";
 
 export class LinuxBackendError extends Error {
 	constructor(

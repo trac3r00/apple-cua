@@ -1,5 +1,8 @@
 # Windows host backend
 
+> The operator's home directory and checkout path are redacted as `<home>` and `<repo>`; every
+> other byte of these commands and outputs is as recorded. Substitute real paths before running them.
+
 `createWindowsHostComputer(options)` implements `ComputerInterface` through one persistent PowerShell JSONL
 process. It prefers `pwsh`, falling back to `powershell.exe` only when the executable is missing. The helper
 is embedded in `helper.ts` and compressed into the startup command, so compilation needs no copied assets.
@@ -93,7 +96,7 @@ existing display helper launches a hidden child in the active console session. B
 guest execution, this exact read-only inventory command was run:
 
 ```sh
-/usr/bin/osascript -l JavaScript -e 'function run(){const u=Application("$HOME/Applications/UTM.app"); return JSON.stringify(u.virtualMachines().map(v=>({id:v.id(),name:v.name(),status:v.status(),backend:v.backend()})));}'
+/usr/bin/osascript -l JavaScript -e 'function run(){const u=Application("<home>/Applications/UTM.app"); return JSON.stringify(u.virtualMachines().map(v=>({id:v.id(),name:v.name(),status:v.status(),backend:v.backend()})));}'
 ```
 
 Exit code: `0`. Exact stdout:
@@ -192,7 +195,7 @@ The cleanup exception masked the original live-run exception, so no snapshot/act
 from that attempt is claimed. A subsequent exact query:
 
 ```sh
-/usr/bin/osascript -l JavaScript -e 'function run(){const u=Application("$HOME/Applications/UTM.app"); const v=u.virtualMachines.byId("E7610018-F723-475D-9B98-DAF94E769CDB"); return JSON.stringify({status:v.status(),result:u.getResult(v.guestProcesses.byId(11980))});}'
+/usr/bin/osascript -l JavaScript -e 'function run(){const u=Application("<home>/Applications/UTM.app"); const v=u.virtualMachines.byId("E7610018-F723-475D-9B98-DAF94E769CDB"); return JSON.stringify({status:v.status(),result:u.getResult(v.guestProcesses.byId(11980))});}'
 ```
 
 returned:
@@ -365,7 +368,7 @@ Exact final scoped summary:
 0 fail
 112 expect() calls
 Ran 53 tests across 2 files. [237.00ms]
-> @opencua/core@0.1.0 typecheck $REPO/packages/core
+> @opencua/core@0.1.0 typecheck <repo>/packages/core
 > tsgo --noEmit
 Checked 7 files in 24ms. No fixes applied.
 ```

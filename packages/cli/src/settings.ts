@@ -137,10 +137,23 @@ export function envMatchesSettings(env: EnvMap, settings: Settings): boolean {
 	);
 }
 
+/** The pre-rename name of a renamed variable, which an adopted registration may still carry. */
+function legacyName(name: string): string {
+	return name.replace(/^OPENCUA_/, "APPLE_CUA_");
+}
+
 /** The env a registration carries for `settings`; undefined removes a key. */
 export function envForSettings(settings: Settings): EnvUpdate {
 	const motion = normalizeMotion(settings.cursorMotion);
+	// Clear the legacy names too: a value left behind there would still be read as the setting.
+	const cleared = Object.fromEntries(
+		[ALLOW_ENV, DELIVERY_ENV, TOOLSET_ENV, IPHONE_ENV, CURSOR_MOTION_ENV].map((name) => [
+			legacyName(name),
+			undefined,
+		]),
+	);
 	return {
+		...cleared,
 		[ALLOW_ENV]: settings.allowedApps.length === 0 ? undefined : settings.allowedApps.join(","),
 		[DELIVERY_ENV]: settings.delivery,
 		[TOOLSET_ENV]: settings.toolset,

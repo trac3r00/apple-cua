@@ -38,6 +38,17 @@ afterEach(async () => {
 });
 
 describe("#given an owned macOS guest #when commands run #then the host is never the command target", () => {
+	it("opens a registry whose VM still carries the pre-rename apple-cua name", async () => {
+		await writeFile(join(directory, "ownership.json"), JSON.stringify({ ...registry, vmName: "apple-cua-fixture" }));
+		const commands: GuestCommand[] = [];
+		const transport = await TartGuestTransport.open(directory, owner, async (command) => {
+			commands.push(command);
+			return Buffer.from("VirtualMac2,1\n");
+		});
+		expect(commands[0]?.args).toEqual(["exec", "apple-cua-fixture", "/usr/sbin/sysctl", "-n", "hw.model"]);
+		transport.close();
+	});
+
 	it("pins executable, store and VM and sends script content through guest stdin", async () => {
 		const commands: GuestCommand[] = [];
 		const transport = await TartGuestTransport.open(directory, owner, async (command) => {

@@ -4,8 +4,8 @@ The results below describe the hardening run before publication.
 
 > These runs predate the rename to OpenCUA. Commands and paths recorded as executed keep their
 > original `apple-cua` names; product references use the current name.
- The user
-subsequently authorized committing and pushing the reviewed changes on
+
+The user subsequently authorized committing and pushing the reviewed changes on
 `wip/ios-mirroring-cursor-motion-20261007`. References to no commits describe
 the original test run, not that later publication.
 

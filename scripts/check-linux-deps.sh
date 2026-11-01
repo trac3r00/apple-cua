@@ -12,7 +12,7 @@ if ! python3 -c "import gi; gi.require_version('Atspi', '2.0'); gi.require_versi
 fi
 if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
 	command -v grim >/dev/null 2>&1 ||
-		printf 'Optional: grim is not installed; captures fall back to the xdg-desktop-portal screenshot.\n'
+		printf 'grim is not installed. Capture then needs an xdg-desktop-portal Screenshot backend, which this check does not verify.\n'
 	command -v ydotool >/dev/null 2>&1 ||
 		printf 'Optional: ydotool (and its daemon) is needed only for opt-in physical input on Wayland.\n'
 else

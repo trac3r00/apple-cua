@@ -676,7 +676,7 @@ const workerAssignmentsSchema = z
 	.max(6);
 
 export const manageWorkersSchema = z.object({
-	op: z.enum(["assign", "status", "observe", "release"]),
+	op: z.enum(["assign", "status", "observe", "release", "pause", "stop", "resume"]),
 	assignments: workerAssignmentsSchema.optional(),
 	worker_id: z.string().min(1).optional(),
 	include_screenshot: includeScreenshotSchema,
@@ -697,6 +697,9 @@ export const workerManagementRequestSchema = z.discriminatedUnion("op", [
 		max_elements: z.number().int().positive().optional(),
 	}),
 	z.object({ op: z.literal("release"), worker_id: z.string().min(1) }),
+	z.object({ op: z.literal("pause"), worker_id: z.string().min(1) }),
+	z.object({ op: z.literal("stop"), worker_id: z.string().min(1) }),
+	z.object({ op: z.literal("resume"), worker_id: z.string().min(1) }),
 ]);
 
 export const runWorkerSchema = z.object({

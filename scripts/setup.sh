@@ -548,12 +548,26 @@ fi
 # --- 3. Node.js --------------------------------------------------------------------------------------------------
 
 step "Node.js $MIN_NODE_MAJOR or later"
-build_node="$(command -v node 2>/dev/null || true)"
-if [[ -n "$build_node" ]] && node_is_usable "$build_node"; then
+first_node="$(command -v node 2>/dev/null || true)"
+# Agent harnesses put a `node` that is really Bun first on PATH; pnpm and the build need Node itself, so take the
+# first real Node on PATH and put it in front.
+build_node=""
+while IFS= read -r candidate; do
+	if node_is_node "$candidate" && node_is_usable "$candidate"; then
+		build_node="$candidate"
+		break
+	fi
+done < <(type -ap node 2>/dev/null || true)
+if [[ -n "$build_node" ]]; then
+	if [[ "$build_node" != "$first_node" ]]; then
+		info "skipping $first_node: $(bundle_refusal "$first_node")"
+		PATH="$(dirname "$build_node"):$PATH"
+		export PATH
+	fi
 	ok "$build_node ($("$build_node" --version))"
 else
-	if [[ -n "$build_node" ]]; then
-		warn "$build_node is $("$build_node" --version 2>/dev/null || echo 'not runnable'), older than Node $MIN_NODE_MAJOR"
+	if [[ -n "$first_node" ]]; then
+		warn "$first_node cannot build opencua: $(bundle_refusal "$first_node")"
 	else
 		info "no node on PATH"
 	fi
@@ -663,6 +677,16 @@ else
 		info "building it because $helper_reason"
 	fi
 	select_helper_node
+	# A helper from before the OpenCUA rename is rebuilt as dev.opencua.mcp. Clear the old id's grants while
+	# LaunchServices still knows that app, so Privacy & Security does not list "opencua-mcp" twice.
+	previous_bundle_id="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$helper_app/Contents/Info.plist" 2>/dev/null || true)"
+	if [[ "$previous_bundle_id" == "dev.applecua.mcp" && "${OPENCUA_BUNDLE_ID:-dev.opencua.mcp}" != "dev.applecua.mcp" ]]; then
+		if /usr/bin/tccutil reset All dev.applecua.mcp >/dev/null 2>&1; then
+			info "removed the permission entries of the old dev.applecua.mcp helper; grant \"opencua-mcp\" once in step 12"
+		else
+			warn "could not remove the old dev.applecua.mcp permission entries; remove the stale \"opencua-mcp\" in Privacy & Security"
+		fi
+	fi
 	OPENCUA_NODE="$helper_node_source" "$repo/scripts/build-tcc-helper.sh" 2>&1 | sed 's/^/          /'
 	if ! helper_problem="$(helper_smoke)"; then
 		fail "the freshly built helper failed its smoke run: $helper_problem" \

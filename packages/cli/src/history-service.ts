@@ -37,12 +37,40 @@ export type HistoryServiceOptions = {
 	readonly platform?: NodeJS.Platform;
 	readonly uid?: number;
 	readonly launchctl?: (arguments_: readonly string[]) => Promise<LaunchctlResult>;
+	/** Waits between unload checks; injectable so tests do not depend on wall-clock time. */
+	readonly pause?: (milliseconds: number) => Promise<void>;
 };
+
+const UNLOAD_CHECK_MILLISECONDS = 100;
+const UNLOAD_CHECKS = 50;
+
+/**
+ * `launchctl bootout` returns before launchd has finished removing the job, and a bootstrap in that window fails
+ * with "Input/output error". Wait until `print` no longer finds the service (exit 113) before going on.
+ */
+async function waitUntilUnloaded(
+	context: ReturnType<typeof serviceContext>,
+	pause: (milliseconds: number) => Promise<void>,
+): Promise<void> {
+	for (let check = 0; check < UNLOAD_CHECKS; check++) {
+		const status = await context.launchctl(["print", context.serviceTarget]);
+		if (status.code === 113) return;
+		if (status.code !== 0) throw new Error(`Could not inspect the cua-history LaunchAgent: ${status.stderr}`);
+		await pause(UNLOAD_CHECK_MILLISECONDS);
+	}
+	throw new Error("The previous cua-history watcher did not unload within 5 seconds.");
+}
+
+function defaultPause(milliseconds: number): Promise<void> {
+	return new Promise((done) => setTimeout(done, milliseconds));
+}
 
 export type HistoryServiceStatus = {
 	readonly installed: boolean;
 	readonly running: boolean;
 	readonly state: "running" | "paused" | "stopped";
+	/** Why the recorder holds capture, when it reported one (for example a settings policy it cannot enforce). */
+	readonly reason?: string;
 	readonly launchAgent: string;
 	readonly eventStreamRootPath: string;
 };
@@ -165,6 +193,7 @@ export async function installHistoryService(options: HistoryServiceOptions = {})
 		if (unloaded.code !== 0) {
 			throw new Error(`Could not restart the cua-history LaunchAgent: ${unloaded.stderr}`);
 		}
+		await waitUntilUnloaded(context, options.pause ?? defaultPause);
 	} else if (previous.code !== 113) {
 		throw new Error(`Could not inspect the cua-history LaunchAgent: ${previous.stderr}`);
 	}
@@ -188,6 +217,7 @@ export async function uninstallHistoryService(options: HistoryServiceOptions = {
 		if (unloaded.code !== 0) {
 			throw new Error(`Could not stop the cua-history LaunchAgent: ${unloaded.stderr}`);
 		}
+		await waitUntilUnloaded(context, options.pause ?? defaultPause);
 	} else if (status.code !== 113) {
 		throw new Error(`Could not inspect the cua-history LaunchAgent: ${status.stderr}`);
 	}
@@ -209,10 +239,31 @@ export async function historyServiceStatus(options: HistoryServiceOptions = {}):
 		},
 	);
 	const printed = await context.launchctl(["print", context.serviceTarget]);
+	const paths = historyPaths(context.paths.stateDirectory);
+	const reason = await readFile(paths.statePath, "utf8").then(
+		(text) => {
+			try {
+				const parsed: unknown = JSON.parse(text);
+				const value =
+					typeof parsed === "object" && parsed !== null
+						? Object.getOwnPropertyDescriptor(parsed, "error")?.value
+						: undefined;
+				return typeof value === "string" ? value : undefined;
+			} catch (error) {
+				if (error instanceof SyntaxError) return undefined;
+				throw error;
+			}
+		},
+		(error: unknown) => {
+			if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+			throw error;
+		},
+	);
 	return {
 		installed,
 		running: printed.code === 0,
-		state: readHistoryState(historyPaths(context.paths.stateDirectory)),
+		state: readHistoryState(paths),
+		...(reason === undefined ? {} : { reason }),
 		launchAgent: context.paths.launchAgent,
 		eventStreamRootPath: historyPaths(context.paths.stateDirectory).root,
 	};

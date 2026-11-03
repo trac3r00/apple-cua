@@ -8,6 +8,7 @@ import { type Environment, type InstallMarker, type Layout, canonicalPath } from
 const DERIVED_PATHS: readonly string[] = [
 	"packages/core/native/libsckit.dylib",
 	"packages/core/native/cursor-overlay",
+	"packages/core/native/history-recorder",
 	"packages/core/native/build-inputs.sha256",
 ];
 

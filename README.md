@@ -30,13 +30,14 @@ By default it works **in the background**: input goes to the target app's own wi
 real cursor stay where you left them while the agent works.
 
 Upgrading from apple-cua: the old `apple-cua` command, `APPLE_CUA_*` variables and `~/.apple-cua` state keep
-working, setup replaces the old `apple-cua` MCP entry in each client, and the macOS bundle ID is unchanged, so granted
-permissions stay granted.
+working, and setup replaces the old `apple-cua` MCP entry in each client. The helper's macOS bundle ID moved from
+`dev.applecua.mcp` to `dev.opencua.mcp`, so after updating, grant "opencua-mcp" its permissions once more; setup
+removes the old entries so Privacy & Security lists it only once.
 
 ## Quickstart
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | bash
 ```
 
 That one line clones OpenCUA into `~/.opencua/app`, builds it, installs the `opencua` command into
@@ -48,28 +49,28 @@ permission dialogs, and finishes with a health check.
 
 ```bash
 # Also put ~/.local/bin on your PATH (your shell startup file is backed up first)
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash -s -- --add-to-path
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | bash -s -- --add-to-path
 
 # Connect specific agent clients during install
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash -s -- --register claude,codex
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | bash -s -- --register claude,codex
 
 # Unattended (CI, provisioning): ask nothing; the closing doctor run lists what is left
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | bash -s -- --yes
 
 # Pin a branch, tag or commit, or install somewhere else
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | OPENCUA_REF=main OPENCUA_HOME=~/tools/opencua bash
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | OPENCUA_REF=main OPENCUA_HOME=~/tools/opencua bash
 
 # Read the script first, then run it
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh -o install.sh && less install.sh && bash install.sh
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh -o install.sh && less install.sh && bash install.sh
 
 # From a clone of your own
-git clone https://github.com/trac3r00/apple-cua.git opencua && cd opencua && ./scripts/setup.sh
+git clone https://github.com/trac3r00/opencua.git opencua && cd opencua && ./scripts/setup.sh
 ```
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `OPENCUA_HOME` | `~/.opencua` | State directory; the checkout lives in `app/` |
-| `OPENCUA_REPO` | `https://github.com/trac3r00/apple-cua.git` | Repository to clone |
+| `OPENCUA_REPO` | `https://github.com/trac3r00/opencua.git` | Repository to clone |
 | `OPENCUA_REF` | `main` | Branch, tag or commit to install |
 | `OPENCUA_BIN_DIR` | `~/.local/bin` | Where the `opencua` command goes |
 
@@ -343,7 +344,7 @@ before irreversible actions.
 ## Development
 
 ```bash
-git clone https://github.com/trac3r00/apple-cua.git opencua && cd opencua
+git clone https://github.com/trac3r00/opencua.git opencua && cd opencua
 ./scripts/setup.sh     # install, build and check everything (safe to re-run)
 pnpm check             # lint, typecheck, tests
 pnpm doctor            # is this Mac ready?

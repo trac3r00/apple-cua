@@ -165,11 +165,11 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 			);
 			if (finalState !== undefined && grant.kind === "accessibility") {
 				deps.print(
-					"If its switch is already on, reset the stale TCC decision, then grant it again: tccutil reset Accessibility dev.applecua.mcp",
+					"If its switch is already on, reset the stale TCC decision, then grant it again: tccutil reset Accessibility dev.opencua.mcp",
 				);
 			} else if (finalState !== undefined && grant.kind === "screen-recording") {
 				deps.print(
-					"If its switch is already on, reset the stale TCC decision, then grant it again: tccutil reset ScreenCapture dev.applecua.mcp",
+					"If its switch is already on, reset the stale TCC decision, then grant it again: tccutil reset ScreenCapture dev.opencua.mcp",
 				);
 			}
 			missing.push(grant.label);

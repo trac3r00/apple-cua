@@ -127,7 +127,7 @@ describe("#given a fresh helper with nothing granted #when a person runs the gui
 		expect(outcome.missing).toEqual(["Screen Recording"]);
 		expect(printed()).toContain(`open "${PRIVACY_PANES.screenRecording}"`);
 		expect(printed()).toContain("opencua permissions grant");
-		expect(printed()).toContain("tccutil reset ScreenCapture dev.applecua.mcp");
+		expect(printed()).toContain("tccutil reset ScreenCapture dev.opencua.mcp");
 	});
 });
 

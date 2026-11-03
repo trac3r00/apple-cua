@@ -9,7 +9,7 @@ allowlist.
 ## Install with one command
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | bash
 ```
 
 The installer clones OpenCUA into `~/.opencua/app`, runs `scripts/setup.sh` there, and puts the

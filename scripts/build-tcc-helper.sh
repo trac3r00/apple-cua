@@ -8,7 +8,7 @@
 # which for a server started by an MCP client is the client. This bundle gives the server its own
 # identity: a small launcher is the bundle's executable, it re-spawns itself with responsibility
 # disclaimed and that copy runs the bundled Node, so the server's asks name this app
-# ("opencua-mcp", dev.applecua.mcp by default) instead of the host or a bare "node". The build
+# ("opencua-mcp", dev.opencua.mcp by default) instead of the host or a bare "node". The build
 # registers the app with LaunchServices, without which System Settings does not list it and
 # tccutil cannot find it. OPENCUA_BUNDLE_ID sets another bundle id; without it a rebuild keeps
 # the id of the helper it replaces.
@@ -65,7 +65,10 @@ if [[ -n "${OPENCUA_BUNDLE_ID:-}" ]]; then
 	bundle_id="$OPENCUA_BUNDLE_ID"
 else
 	bundle_id="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist" 2>/dev/null || true)"
-	bundle_id="${bundle_id:-dev.applecua.mcp}"
+	# Helpers built before the OpenCUA rename carry dev.applecua.mcp; move them to the OpenCUA id.
+	if [[ -z "$bundle_id" || "$bundle_id" == "dev.applecua.mcp" ]]; then
+		bundle_id="dev.opencua.mcp"
+	fi
 fi
 # This Mac's CPU, also from a shell that runs under Rosetta, where uname -m says x86_64.
 if [[ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" == 1 ]]; then

@@ -68,7 +68,7 @@ on devices here. Mirroring does not expose the iPhone microphone for phone calls
 [Mac call relay](https://support.apple.com/en-ie/102405) is a separate service.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | bash
 ```
 
 One command on a Mac with **macOS 15 (Sequoia) or macOS 26 (Tahoe)**, **Apple Silicon or Intel**. It clones OpenCUA
@@ -350,7 +350,7 @@ Merge configuration rather than replacing unrelated settings.
 ```
 
 For a grant that survives updates, run the server through the signed helper app instead of
-`node` directly: the bundle carries its own TCC identity (`dev.applecua.mcp`, or `OPENCUA_BUNDLE_ID`), so Screen
+`node` directly: the bundle carries its own TCC identity (`dev.opencua.mcp`, or `OPENCUA_BUNDLE_ID`), so Screen
 Recording and Accessibility attach to it rather than to whatever launched the server. Setup builds it, and
 `opencua config --register` sets it up in every [agent client](#agent-clients) (`--register json` prints the block
 for any other client). By hand:

@@ -26,7 +26,7 @@ export const MCP_SERVER_NAME = "opencua";
 export const PLUGIN_DIRECTORY = `plugins/${PLUGIN_NAME}`;
 export const SKILL_DIRECTORY = `${PLUGIN_DIRECTORY}/skills/opencua`;
 const STAMP_FILE = "bundle.json";
-const HOMEPAGE = "https://github.com/trac3r00/apple-cua";
+const HOMEPAGE = "https://github.com/trac3r00/opencua";
 const DESCRIPTION =
 	"Operate macOS apps you approve, and an iPhone through iPhone Mirroring, through the signed opencua-mcp helper: observe, act, verify, and stop when unsure.";
 

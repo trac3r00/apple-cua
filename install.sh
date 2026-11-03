@@ -2,15 +2,15 @@
 # Installs opencua for this user: clones it into ~/.opencua/app, runs its setup, and puts the `opencua`
 # command into ~/.local/bin.
 #
-#   curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash -s -- --add-to-path
+#   curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | bash -s -- --add-to-path
 #
 # Options go to scripts/setup.sh: --add-to-path (append the line that puts ~/.local/bin on PATH to your shell
 # startup file, backed up first), --register omo|claude|codex|gemini|cursor|hermes|openclaw|pi|json, --allow <apps>,
 # --yes, ...
 #
 #   OPENCUA_HOME     where opencua keeps its state, and the checkout in app/ (default ~/.opencua)
-#   OPENCUA_REPO     the git repository to clone (default https://github.com/trac3r00/apple-cua.git)
+#   OPENCUA_REPO     the git repository to clone (default https://github.com/trac3r00/opencua.git)
 #   OPENCUA_REF      the branch, tag or commit to install (default main)
 #   OPENCUA_BIN_DIR  where the opencua command goes (default ~/.local/bin)
 #
@@ -47,7 +47,7 @@ json_string() {
 
 usage() {
 	cat <<'EOF'
-usage: curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash [-s -- options]
+usage: curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | bash [-s -- options]
 
 Clones opencua into ~/.opencua/app (OPENCUA_HOME), runs its scripts/setup.sh, and installs the opencua
 command into ~/.local/bin (OPENCUA_BIN_DIR). OPENCUA_REPO and OPENCUA_REF choose what to clone.
@@ -75,7 +75,7 @@ main() {
 	if [[ ! -e "$default_home" && -d "$HOME/.apple-cua" ]]; then default_home="$HOME/.apple-cua"; fi
 	local home="${OPENCUA_HOME:-$default_home}"
 	export OPENCUA_HOME="$home"
-	local repo="${OPENCUA_REPO:-https://github.com/trac3r00/apple-cua.git}"
+	local repo="${OPENCUA_REPO:-https://github.com/trac3r00/opencua.git}"
 	local ref="${OPENCUA_REF:-main}"
 	if [[ "$home" != /* ]]; then
 		home="$PWD/$home"

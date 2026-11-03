@@ -36,7 +36,7 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 
 $root = Join-Path $env:LOCALAPPDATA 'opencua'
-$repo = if ($env:OPENCUA_REPO) { $env:OPENCUA_REPO } else { 'https://github.com/trac3r00/apple-cua.git' }
+$repo = if ($env:OPENCUA_REPO) { $env:OPENCUA_REPO } else { 'https://github.com/trac3r00/opencua.git' }
 $ref = if ($env:OPENCUA_REF) { $env:OPENCUA_REF } else { 'main' }
 $useExistingCheckout = -not [string]::IsNullOrEmpty($Checkout)
 if (-not $useExistingCheckout) { $Checkout = Join-Path $root 'app' }

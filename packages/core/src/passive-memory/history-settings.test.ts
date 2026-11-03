@@ -54,10 +54,12 @@ describe("#given a browser record with a URL #when app and URL policies disagree
 	});
 });
 
-describe("#given private browsing #when deciding to observe #then it is excluded unless opted in", () => {
-	it("excludes private browsing by default", () => {
-		expect(
-			shouldObserve({ bundleId: "com.brave.Browser", privateBrowsing: true }, DEFAULT_HISTORY_OBSERVATION_SETTINGS),
-		).toBe(false);
+describe("#given private browsing #when deciding to observe #then it follows the opt-out setting", () => {
+	it("records private windows by default and skips them once excluded", () => {
+		const context = { bundleId: "com.brave.Browser", privateBrowsing: true };
+		expect(shouldObserve(context, DEFAULT_HISTORY_OBSERVATION_SETTINGS)).toBe(true);
+		expect(shouldObserve(context, { ...DEFAULT_HISTORY_OBSERVATION_SETTINGS, observePrivateBrowsing: false })).toBe(
+			false,
+		);
 	});
 });

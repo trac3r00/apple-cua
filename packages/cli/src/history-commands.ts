@@ -167,7 +167,7 @@ export function registerHistoryCommands(program: Command, options: HistoryComman
 				return;
 			}
 			process.stdout.write(
-				`cua-history watcher started and set to launch at login.\nData: ${paths.stateDirectory}/cua-history\nNext: run opencua permissions grant. It walks you through Input Monitoring (keystrokes and clicks) and Accessibility (window titles) for "opencua-mcp", the same entry the rest of opencua uses.\n`,
+				`cua-history watcher started and set to launch at login.\nData: ${paths.stateDirectory}/cua-history\nIt records which apps and windows you use, clicks and shortcuts in every app, private browser windows included. Typed text is off by default and password fields are never recorded. To skip an app, open the opencua menu bar item and choose Don't record.\nNext: run opencua permissions grant. It walks you through Input Monitoring (keystrokes and clicks) and Accessibility (window titles) for "opencua-mcp", the same entry the rest of opencua uses.\n`,
 			);
 		});
 
@@ -223,7 +223,7 @@ export function registerHistoryCommands(program: Command, options: HistoryComman
 				return;
 			}
 			process.stdout.write(
-				`installed: ${status.installed}\nrunning: ${status.running}\nstate: ${status.state}\ndata: ${status.eventStreamRootPath}\n`,
+				`installed: ${status.installed}\nrunning: ${status.running}\nstate: ${status.state}${status.reason === undefined ? "" : ` (${status.reason})`}\ndata: ${status.eventStreamRootPath}\n`,
 			);
 		});
 }

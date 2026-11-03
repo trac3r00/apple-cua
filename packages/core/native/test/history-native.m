@@ -62,6 +62,19 @@ int main(int argc, const char *argv[]) {
         while (fread(buffer, 1, sizeof(buffer), stdin) > 0) {
         }
         return 0;
+      } else if ([mode isEqualToString:@"exclude"]) {
+        gRoot = [root stringByAppendingPathComponent:@"cua-history"];
+        gSettingsPath = [gRoot stringByAppendingPathComponent:@"settings.json"];
+        gAllowBundleIds = [NSMutableSet set];
+        gBlockBundleIds = [NSMutableSet set];
+        LoadSettings();
+        OfflineHistoryDelegate *delegate = [[OfflineHistoryDelegate alloc] init];
+        NSMenuItem *item = [[NSMenuItem alloc] init];
+        item.representedObject = @"com.example.Notes";
+        [delegate excludeFrontApp:item];
+        printf("%s %s\n", ShouldObserveApp(@"com.example.Notes") ? "observe" : "skip",
+               ShouldObserveApp(@"com.example.Other") ? "observe" : "skip");
+        return 0;
       } else if ([mode isEqualToString:@"tick"]) {
         gRoot = [root stringByAppendingPathComponent:@"cua-history"];
         gSegmentsDir = [gRoot stringByAppendingPathComponent:@"segments"];

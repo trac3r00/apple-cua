@@ -35,6 +35,7 @@ static NSTask *gDigestTask = nil;
 static time_t gLastDigestWindow = -1;
 static NSMenu *gSuggestionsMenu = nil;
 static NSMenuItem *gRecordItem = nil;
+static NSMenuItem *gExcludeItem = nil;
 static BOOL gDemonstrating = NO;
 static NSTask *gSuggestTask = nil;
 static time_t gLastSuggestWindow = -1;
@@ -318,7 +319,11 @@ static void LoadState(void) {
                                                         options:0
                                                           error:NULL];
   if ([state isKindOfClass:NSDictionary.class]) {
-    gPaused = [state[@"state"] isEqualToString:@"paused"];
+    // A pause this recorder imposed for an unenforceable policy is not the
+    // person's choice: once the policy is supported again, recording resumes.
+    BOOL policyHold = [state[@"error"] isEqual:kPrivacyPolicyError];
+    gPaused = [state[@"state"] isEqualToString:@"paused"] &&
+              !(policyHold && gPrivacyPolicySupported);
   }
 }
 
@@ -350,6 +355,9 @@ static void LoadSettings(void) {
   gPrivacyPolicySupported = NO;
   NSData *data = [NSData dataWithContentsOfFile:gSettingsPath];
   if (data == nil) {
+    // No settings yet means the default policy: observe every app, private
+    // windows included, until the user excludes an app. Typed text stays off.
+    gPrivacyPolicySupported = YES;
     return;
   }
   NSDictionary *settings = [NSJSONSerialization JSONObjectWithData:data
@@ -553,6 +561,11 @@ static void InstallEventTap(void) {
                           keyEquivalent:@""];
   status.enabled = NO;
   [menu addItem:status];
+  gExcludeItem = [menu addItemWithTitle:@"Don't record this app"
+                                 action:@selector(excludeFrontApp:)
+                          keyEquivalent:@""];
+  gExcludeItem.target = self;
+  menu.delegate = self;
   [menu addItem:[NSMenuItem separatorItem]];
   NSMenuItem *suggestions =
       [[NSMenuItem alloc] initWithTitle:@"Suggested skills"
@@ -630,7 +643,69 @@ static void InstallEventTap(void) {
     gSuggestTask = nil;
 }
 
+// The status menu opens without activating this accessory app, so the
+// frontmost application is the one the person was just using.
+- (void)refreshExcludeItem {
+  NSRunningApplication *app = NSWorkspace.sharedWorkspace.frontmostApplication;
+  NSString *bundleId = app.bundleIdentifier;
+  BOOL usable =
+      bundleId.length > 0 &&
+      ![bundleId isEqualToString:NSBundle.mainBundle.bundleIdentifier] &&
+      ShouldObserveApp(bundleId);
+  gExcludeItem.title =
+      usable ? [NSString stringWithFormat:@"Don't record \u201C%@\u201D",
+                                          app.localizedName ?: bundleId]
+             : @"Don't record this app";
+  gExcludeItem.representedObject = usable ? bundleId : nil;
+}
+
+- (void)excludeFrontApp:(NSMenuItem *)sender {
+  NSString *bundleId = sender.representedObject;
+  if (![bundleId isKindOfClass:NSString.class]) {
+    return;
+  }
+  NSMutableDictionary *settings = nil;
+  NSData *data = [NSData dataWithContentsOfFile:gSettingsPath];
+  if (data != nil) {
+    id parsed = [NSJSONSerialization JSONObjectWithData:data
+                                                options:0
+                                                  error:NULL];
+    if (![parsed isKindOfClass:NSDictionary.class]) {
+      return; // never overwrite settings this recorder cannot read
+    }
+    settings = [parsed mutableCopy];
+  } else {
+    settings = [@{
+      @"defaultApplicationBehavior" : @"observe",
+      @"defaultURLBehavior" : @"observe",
+      @"observePrivateBrowsing" : @YES,
+      @"rules" : @[],
+    } mutableCopy];
+  }
+  NSMutableArray *rules = [settings[@"rules"] isKindOfClass:NSArray.class]
+                              ? [settings[@"rules"] mutableCopy]
+                              : [NSMutableArray array];
+  [rules addObject:@{
+    @"scope" : @"app",
+    @"bundleID" : bundleId,
+    @"behavior" : @"do_not_observe",
+  }];
+  settings[@"rules"] = rules;
+  NSData *written =
+      [NSJSONSerialization dataWithJSONObject:settings
+                                      options:NSJSONWritingPrettyPrinted
+                                        error:NULL];
+  EnsureDir(gRoot);
+  [written writeToFile:gSettingsPath atomically:YES];
+  LoadSettings();
+  [self refreshStatusTitle];
+}
+
 - (void)menuNeedsUpdate:(NSMenu *)menu {
+  if (menu != gSuggestionsMenu) {
+    [self refreshExcludeItem];
+    return;
+  }
   [menu removeAllItems];
   NSData *data = [NSData
       dataWithContentsOfFile:
@@ -819,6 +894,8 @@ static void InstallEventTap(void) {
     return !stopped;
   if (item.action == @selector(resumeAgents:))
     return stopped;
+  if (item.action == @selector(excludeFrontApp:))
+    return item.representedObject != nil;
   return YES;
 }
 

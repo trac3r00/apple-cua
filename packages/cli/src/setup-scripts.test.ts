@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { nodeExecutable } from "@opencua/test-support";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -82,7 +83,7 @@ describe("#given a Linux checkout and legacy state #when setup runs #then it ski
 			const scripts: Record<string, string> = {
 				uname: '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Linux; else echo aarch64; fi\n',
 				pnpm: `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${version}'; fi\nexit 0\n`,
-				node: `#!/bin/sh\nif [ "$1" = '${join(repo, "packages/cli/dist/cli.js")}' ]; then exit 0; fi\nexec '${process.execPath}' "$@"\n`,
+				node: `#!/bin/sh\nif [ "$1" = '${join(repo, "packages/cli/dist/cli.js")}' ]; then exit 0; fi\nexec '${nodeExecutable()}' "$@"\n`,
 				"pkg-config": "#!/bin/sh\nexit 0\n",
 				// The dependency check imports AT-SPI and GdkPixbuf through Python GI, and captures with import.
 				python3: "#!/bin/sh\nexit 0\n",

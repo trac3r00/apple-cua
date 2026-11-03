@@ -131,7 +131,7 @@ opencua. It is started and kept alive by a launchd LaunchAgent via `opencua hist
 `opencua history stop` manage it. Its menu-bar item shows the state and offers Open history,
 Record a skill, Pause, Resume, Reveal data folder, and Quit.
 
-The watcher is code-signed with OpenCUA's own bundle identifier (`dev.applecua.mcp`), so macOS
+The watcher is code-signed with OpenCUA's own bundle identifier (`dev.opencua.mcp`), so macOS
 charges its permissions to the **same "opencua-mcp" entry** the rest of OpenCUA already uses, not a
 separate "history-recorder" entry. Granting OpenCUA once covers the watcher. What it records
 depends on which of those permissions are on:

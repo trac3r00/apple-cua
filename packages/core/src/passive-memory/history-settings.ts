@@ -30,7 +30,8 @@ export interface HistoryObservationContext {
 export const DEFAULT_HISTORY_OBSERVATION_SETTINGS: HistoryObservationSettings = {
 	defaultApplicationBehavior: "observe",
 	defaultURLBehavior: "observe",
-	observePrivateBrowsing: false,
+	// The user chose to record every app by default, private windows included, and exclude apps one by one.
+	observePrivateBrowsing: true,
 	rules: [],
 };
 

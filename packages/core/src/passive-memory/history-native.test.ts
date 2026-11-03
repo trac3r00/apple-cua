@@ -167,7 +167,6 @@ describe("#given unsupported native privacy rules #when starting or resuming #th
 	});
 
 	it.each([
-		undefined,
 		{},
 		{ defaultURLBehavior: "observe", observePrivateBrowsing: false, rules: [] },
 		{ defaultURLBehavior: "do_not_observe", observePrivateBrowsing: true, rules: [] },
@@ -193,6 +192,65 @@ describe("#given unsupported native privacy rules #when starting or resuming #th
 			});
 		} finally {
 			await rm(root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("#given a fresh install without settings #when the recorder starts #then it records right away", () => {
+	it("starts capture instead of blocking on a missing policy", async () => {
+		const root = await mkdtemp(join(scratch, "fresh-"));
+		try {
+			await mkdir(join(root, "cua-history"));
+
+			expect(await runNative("startup", root)).toBe(1);
+			const state: unknown = JSON.parse(await readFile(join(root, "cua-history", "state.json"), "utf8"));
+			expect(state).toMatchObject({ state: "running" });
+			expect(state).not.toHaveProperty("error");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("#given the menu's Don't record item #when an app is excluded #then only that app stops being recorded", () => {
+	it("writes an app rule into fresh settings and keeps recording other apps", async () => {
+		const root = await mkdtemp(join(scratch, "exclude-"));
+		try {
+			const child = Bun.spawn([binary, "exclude", root], { stdout: "pipe", stderr: "pipe" });
+			const [exitCode, stdout, stderr] = await Promise.all([
+				child.exited,
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+			]);
+			expect({ exitCode, stdout, stderr }).toEqual({ exitCode: 0, stdout: "skip observe\n", stderr: "" });
+			expect(JSON.parse(await readFile(join(root, "cua-history", "settings.json"), "utf8"))).toMatchObject({
+				observePrivateBrowsing: true,
+				rules: [{ scope: "app", bundleID: "com.example.Notes", behavior: "do_not_observe" }],
+			});
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("#given a recorder paused only by the old missing-settings block #when it starts again #then it resumes", () => {
+	it("clears the policy hold but keeps a pause the person chose", async () => {
+		for (const [stored, expected] of [
+			[{ state: "paused", error: "Native capture cannot enforce URL or private-browsing exclusions." }, "running"],
+			[{ state: "paused" }, "paused"],
+		] as const) {
+			const root = await mkdtemp(join(scratch, "hold-"));
+			try {
+				await mkdir(join(root, "cua-history"));
+				await writeFile(join(root, "cua-history", "state.json"), JSON.stringify(stored));
+
+				await runNative("startup", root);
+
+				const state: unknown = JSON.parse(await readFile(join(root, "cua-history", "state.json"), "utf8"));
+				expect(state).toMatchObject({ state: expected });
+			} finally {
+				await rm(root, { recursive: true, force: true });
+			}
 		}
 	});
 });

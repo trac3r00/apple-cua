@@ -1,6 +1,6 @@
 // Runs the bundled Node so that macOS attributes the server's Accessibility,
 // Screen Recording and Automation asks to this bundle ("opencua-mcp",
-// dev.applecua.mcp) instead of whatever launched it.
+// dev.opencua.mcp) instead of whatever launched it.
 //
 // macOS charges a permission to a process's responsible process. A process
 // spawned with responsibility disclaimed is responsible for itself, and its

@@ -86,6 +86,6 @@ bash "$native_dir/../../../scripts/sign-native.sh" \
 # opencua-mcp bundle identifier makes macOS charge its grant to the same app the rest of opencua
 # already uses, so one approval covers it. Override the id with OPENCUA_BUNDLE_ID to match a custom
 # helper bundle id.
-OPENCUA_CODESIGN_IDENTIFIER="${OPENCUA_BUNDLE_ID:-dev.applecua.mcp}" \
+OPENCUA_CODESIGN_IDENTIFIER="${OPENCUA_BUNDLE_ID:-dev.opencua.mcp}" \
 	bash "$native_dir/../../../scripts/sign-native.sh" \
 	"$native_dir/history-recorder"

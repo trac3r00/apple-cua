@@ -12,7 +12,7 @@
 #   OPENCUA_CODESIGN_ID          identity name (default: "opencua dev")
 #   OPENCUA_CODESIGN_KEYCHAIN    keychain path (default: <repo>/.signing/opencua-signing.keychain-db)
 #   OPENCUA_CODESIGN_IDENTIFIER  code-signing identifier to stamp with --identifier. Set this to the
-#                                  opencua-mcp bundle id (dev.applecua.mcp) for a standalone helper that
+#                                  opencua-mcp bundle id (dev.opencua.mcp) for a standalone helper that
 #                                  must share the MCP app's TCC grant (Accessibility, Input Monitoring)
 #                                  instead of appearing as its own entry in System Settings > Privacy.
 set -euo pipefail

@@ -4,7 +4,13 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 type Retry = "safe" | "unsafe" | "never";
 
-const NEVER_RETRY_REASONS = new Set(["user-stopped", "screen-locked", "app-not-approved", "url-blocked"]);
+const NEVER_RETRY_REASONS = new Set([
+	"user-stopped",
+	"worker-stopped",
+	"screen-locked",
+	"app-not-approved",
+	"url-blocked",
+]);
 
 function errorMetadata(
 	payload: Record<string, unknown>,

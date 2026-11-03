@@ -3,7 +3,7 @@ import type { SpawnGuidance } from "./host-detection.js";
 import { expectFromInput } from "./step-actions.js";
 import type { ToolContent, ToolResult } from "./tool-result.js";
 import { manageWorkersSchema, parseRunSteps, runWorkerSchema, workerManagementRequestSchema } from "./tool-schemas.js";
-import type { WorkerCoordinator } from "./worker-coordinator.js";
+import { WorkerControlRefusal, type WorkerCoordinator } from "./worker-coordinator.js";
 import type { WorkerAssignment, WorkerObservation, WorkerRunResult } from "./worker-coordinator.js";
 
 function attributedEntry(
@@ -73,6 +73,24 @@ function objectResult(value: unknown): ToolResult {
 	return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
 }
 
+/** A user Take Over or Stop answers as a refusal that provably sent nothing. */
+async function refusingControl(run: () => Promise<ToolResult>): Promise<ToolResult> {
+	try {
+		return await run();
+	} catch (error: unknown) {
+		if (!(error instanceof WorkerControlRefusal)) throw error;
+		return {
+			content: [
+				{
+					type: "text",
+					text: JSON.stringify({ error: error.message, reason: error.reason, actionDispatched: false }),
+				},
+			],
+			isError: true,
+		};
+	}
+}
+
 /** `spawn` names how the connected harness starts one subagent per assigned worker; it rides on every assign answer. */
 export function registerWorkerTools(
 	server: McpServer,
@@ -83,32 +101,39 @@ export function registerWorkerTools(
 		"manage_workers",
 		{
 			description:
-				"Assign disjoint app tasks, observe a worker for a fresh token, inspect assignments, or release an idle worker. agent_name and parent_agent_name name the cursor owner (default worker_id); cursor ids are opaque server keys.",
+				"Assign disjoint app tasks, observe a worker for a fresh token, inspect assignments, release an idle worker, or control one worker: pause (user Take Over; cancels its run, refuses runs until resume), stop (cancels and refuses until release), resume. agent_name and parent_agent_name name the cursor owner (default worker_id); cursor ids are opaque server keys.",
 			inputSchema: manageWorkersSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true },
 		},
-		async (input) => {
-			const request = workerManagementRequestSchema.parse(input);
-			switch (request.op) {
-				case "assign":
-					return assignedResult(await coordinator.assign(request.assignments), spawn?.());
-				case "status":
-					return objectResult(coordinator.status());
-				case "observe": {
-					const observation = await coordinator.observe(request.worker_id, {
-						...(request.include_screenshot === undefined
-							? {}
-							: { includeScreenshot: request.include_screenshot }),
-						...(request.max_elements === undefined ? {} : { maxElements: request.max_elements }),
-					});
-					const { result, ...attribution } = observation;
-					return attributedResult(attribution, result);
+		async (input) =>
+			refusingControl(async () => {
+				const request = workerManagementRequestSchema.parse(input);
+				switch (request.op) {
+					case "assign":
+						return assignedResult(await coordinator.assign(request.assignments), spawn?.());
+					case "status":
+						return objectResult(coordinator.status());
+					case "observe": {
+						const observation = await coordinator.observe(request.worker_id, {
+							...(request.include_screenshot === undefined
+								? {}
+								: { includeScreenshot: request.include_screenshot }),
+							...(request.max_elements === undefined ? {} : { maxElements: request.max_elements }),
+						});
+						const { result, ...attribution } = observation;
+						return attributedResult(attribution, result);
+					}
+					case "release":
+						coordinator.release(request.worker_id);
+						return objectResult({ released: request.worker_id });
+					case "pause":
+						return objectResult({ worker_id: request.worker_id, control: coordinator.pause(request.worker_id) });
+					case "stop":
+						return objectResult({ worker_id: request.worker_id, control: coordinator.stop(request.worker_id) });
+					case "resume":
+						return objectResult({ worker_id: request.worker_id, control: coordinator.resume(request.worker_id) });
 				}
-				case "release":
-					coordinator.release(request.worker_id);
-					return objectResult({ released: request.worker_id });
-			}
-		},
+			}),
 	);
 	server.registerTool(
 		"run_worker",
@@ -118,17 +143,18 @@ export function registerWorkerTools(
 			inputSchema: runWorkerSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true },
 		},
-		async (input, extra) => {
-			const result: WorkerRunResult = await coordinator.run(
-				input.worker_id,
-				input.observation_token,
-				parseRunSteps(input.steps, "run_worker"),
-				expectFromInput(input.expect),
-				{ fullState: input.full_state === true, includeScreenshot: input.include_screenshot === true },
-				{ signal: extra.signal, ...(input.pace === undefined ? {} : { pace: input.pace }) },
-			);
-			const { result: innerResult, ...attribution } = result;
-			return attributedResult(attribution, innerResult);
-		},
+		async (input, extra) =>
+			refusingControl(async () => {
+				const result: WorkerRunResult = await coordinator.run(
+					input.worker_id,
+					input.observation_token,
+					parseRunSteps(input.steps, "run_worker"),
+					expectFromInput(input.expect),
+					{ fullState: input.full_state === true, includeScreenshot: input.include_screenshot === true },
+					{ signal: extra.signal, ...(input.pace === undefined ? {} : { pace: input.pace }) },
+				);
+				const { result: innerResult, ...attribution } = result;
+				return attributedResult(attribution, innerResult);
+			}),
 	);
 }

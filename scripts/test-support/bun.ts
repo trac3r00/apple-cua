@@ -1,6 +1,6 @@
 import { type Mock, vi as bunVi, jest, mock } from "bun:test";
-import { readFileSync, realpathSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { basename, delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const shimPath = realpathSync(fileURLToPath(import.meta.url));
@@ -147,9 +147,14 @@ async function runAllTimersAsync(): Promise<void> {
 
 /** The Node binary. Under Vitest, which ran on Node, tests started the shipped Node CLI with process.execPath. */
 export function nodeExecutable(): string {
-	const found = Bun.which("node");
-	if (found === null) throw new Error("node is not on PATH; the shipped CLI runs on Node");
-	return found;
+	// Agent harnesses put a `node` shim that is really Bun first on PATH; the shipped CLI must be tested on Node.
+	for (const directory of (process.env["PATH"] ?? "").split(delimiter)) {
+		const candidate = join(directory, "node");
+		if (directory !== "" && existsSync(candidate) && !basename(realpathSync(candidate)).startsWith("bun")) {
+			return candidate;
+		}
+	}
+	throw new Error("no Node binary is on PATH (only Bun shims); the shipped CLI runs on Node");
 }
 
 /** The function shape Bun's Mock accepts, read from mock() itself. */

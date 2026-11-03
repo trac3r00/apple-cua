@@ -53,6 +53,15 @@ int main(int argc, const char *argv[]) {
         gSegmentsDir = [root stringByAppendingPathComponent:@"segments"];
         // 2026-11-01T12:00:00Z. Do not depend on the machine clock.
         PruneOldSegments(1793534400);
+      } else if ([mode isEqualToString:@"menubar"]) {
+        // Hold the menu bar lock as the running recorder does, until stdin closes.
+        AcquireMenubarLock(root);
+        printf("%s\n", gMenubarLock >= 0 ? "held" : "busy");
+        fflush(stdout);
+        char buffer[16];
+        while (fread(buffer, 1, sizeof(buffer), stdin) > 0) {
+        }
+        return 0;
       } else if ([mode isEqualToString:@"tick"]) {
         gRoot = [root stringByAppendingPathComponent:@"cua-history"];
         gSegmentsDir = [gRoot stringByAppendingPathComponent:@"segments"];

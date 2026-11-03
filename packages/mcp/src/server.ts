@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
@@ -15,6 +16,7 @@ import {
 	readHidModifierFlags,
 	spawnOpenLauncher,
 	startStopChordDetector,
+	startStopMenu,
 } from "@opencua/core";
 import type {
 	AppOpenLauncher,
@@ -130,8 +132,19 @@ export function createMcpServer(
 	// Natively, the machine-wide file-backed stop switch plus the keyboard chord that flips it; tests inject their own.
 	const nativeStopSwitch = computer === undefined && stopSwitch === undefined ? new StopSwitch() : undefined;
 	const stopGate = stopSwitch ?? nativeStopSwitch;
-	const stopChord =
+	const chord =
 		nativeStopSwitch === undefined ? undefined : startStopChordDetector(nativeStopSwitch, readHidModifierFlags);
+	// The user's menu bar Stop/Resume for the same file-backed switch, shown while this server runs.
+	const menu = nativeStopSwitch === undefined || process.platform !== "darwin" ? undefined : startStopMenu(spawn);
+	const stopChord =
+		chord === undefined && menu === undefined
+			? undefined
+			: {
+					stop(): void {
+						chord?.stop();
+						menu?.stop();
+					},
+				};
 	let launcher = appLauncher;
 	if (launcher === undefined && computer === undefined) {
 		launcher = spawnOpenLauncher({ background: resolvedComputer.delivery === "background" });

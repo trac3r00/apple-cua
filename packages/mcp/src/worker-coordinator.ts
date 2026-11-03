@@ -28,8 +28,12 @@ export type WorkerAssignment = WorkerAssignmentInput & {
 	readonly observation?: ToolResult;
 };
 
+/** `paused` is a human Take Over: runs are refused until resume. `stopped` is terminal until release. */
+export type WorkerControl = "running" | "paused" | "stopped";
+
 export type WorkerStatus = Omit<WorkerAssignment, "observation"> & {
 	readonly busy: boolean;
+	readonly control: WorkerControl;
 	readonly lastRun?: WorkerRunSummary;
 };
 
@@ -75,6 +79,8 @@ type WorkerState = {
 	};
 	readonly pid: number;
 	busy: boolean;
+	control: WorkerControl;
+	activeRun: AbortController | undefined;
 	lastRun: WorkerRunSummary | undefined;
 };
 
@@ -88,6 +94,21 @@ function payload(result: ToolResult): Record<string, unknown> {
 		throw new Error("guarded observation payload must be an object");
 	}
 	return Object.fromEntries(Object.entries(value));
+}
+
+/** A user Take Over or Stop refused the call before any input was sent. */
+export class WorkerControlRefusal extends Error {
+	readonly reason: "worker-paused" | "worker-stopped";
+
+	constructor(workerId: string, control: Exclude<WorkerControl, "running">) {
+		super(
+			control === "paused"
+				? `the user took over worker "${workerId}"; wait for resume, then observe again before acting`
+				: `the user stopped worker "${workerId}"; do not retry, report back`,
+		);
+		this.name = "WorkerControlRefusal";
+		this.reason = control === "paused" ? "worker-paused" : "worker-stopped";
+	}
 }
 
 export class WorkerCoordinator {
@@ -142,6 +163,8 @@ export class WorkerCoordinator {
 				},
 				pid,
 				busy: true,
+				control: "running",
+				activeRun: undefined,
 				lastRun: undefined,
 			};
 			this.workers.set(assignment.worker_id, worker);
@@ -200,6 +223,9 @@ export class WorkerCoordinator {
 		if (worker.busy) {
 			throw new Error(`worker "${workerId}" is busy`);
 		}
+		if (worker.control === "stopped") {
+			throw new WorkerControlRefusal(workerId, worker.control);
+		}
 		worker.busy = true;
 		worker.assignment = { ...worker.assignment, observation_token: undefined };
 		try {
@@ -216,7 +242,7 @@ export class WorkerCoordinator {
 	}
 
 	status(): readonly WorkerStatus[] {
-		return [...this.workers.values()].flatMap(({ assignment, busy, lastRun }) => {
+		return [...this.workers.values()].flatMap(({ assignment, busy, control, lastRun }) => {
 			if (assignment.observation === undefined) {
 				return [];
 			}
@@ -231,6 +257,7 @@ export class WorkerCoordinator {
 						? {}
 						: { observation_token: assignment.observation_token }),
 					busy,
+					control,
 					...(lastRun === undefined ? {} : { lastRun }),
 				},
 			];
@@ -247,6 +274,34 @@ export class WorkerCoordinator {
 			throw new Error(`worker "${workerId}" is busy`);
 		}
 		this.workers.delete(workerId);
+	}
+
+	/** Take Over: cancel the worker's in-flight run between guarded steps and refuse new runs until resume. */
+	pause(workerId: string): WorkerControl {
+		const worker = this.controlled(workerId);
+		if (worker.control === "stopped") {
+			throw new WorkerControlRefusal(workerId, worker.control);
+		}
+		worker.control = "paused";
+		worker.activeRun?.abort();
+		return worker.control;
+	}
+
+	/** Stop: cancel the in-flight run and refuse every further run or observation until release. */
+	stop(workerId: string): WorkerControl {
+		const worker = this.controlled(workerId);
+		worker.control = "stopped";
+		worker.activeRun?.abort();
+		return worker.control;
+	}
+
+	resume(workerId: string): WorkerControl {
+		const worker = this.controlled(workerId);
+		if (worker.control === "stopped") {
+			throw new WorkerControlRefusal(workerId, "stopped");
+		}
+		worker.control = "running";
+		return worker.control;
 	}
 
 	async run(
@@ -268,9 +323,18 @@ export class WorkerCoordinator {
 		if (token !== worker.assignment.observation_token) {
 			throw new Error(`observation token does not belong to worker "${workerId}"`);
 		}
+		if (worker.control !== "running") {
+			throw new WorkerControlRefusal(workerId, worker.control);
+		}
 		worker.busy = true;
 		worker.assignment = { ...worker.assignment, observation_token: undefined };
 		const startedAt = new Date().toISOString();
+		const activeRun = new AbortController();
+		worker.activeRun = activeRun;
+		const signal =
+			executionOptions.signal === undefined
+				? activeRun.signal
+				: AbortSignal.any([executionOptions.signal, activeRun.signal]);
 		try {
 			const dispatch = () =>
 				withCursorIdentity(
@@ -283,7 +347,7 @@ export class WorkerCoordinator {
 							expect,
 							createRunStepDriver(this.computer),
 							resultOptions,
-							executionOptions,
+							{ ...executionOptions, signal },
 						),
 					worker.assignment.cursor_owner,
 				);
@@ -342,6 +406,7 @@ export class WorkerCoordinator {
 			throw error;
 		} finally {
 			worker.busy = false;
+			worker.activeRun = undefined;
 		}
 	}
 
@@ -349,6 +414,15 @@ export class WorkerCoordinator {
 		this.closed = true;
 		this.workers.clear();
 		await this.session.close();
+	}
+
+	private controlled(workerId: string): WorkerState {
+		this.assertOpen();
+		const worker = this.workers.get(workerId);
+		if (worker === undefined) {
+			throw new Error(`worker "${workerId}" is not assigned`);
+		}
+		return worker;
 	}
 
 	private assertOpen(): void {

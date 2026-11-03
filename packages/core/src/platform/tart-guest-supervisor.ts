@@ -195,10 +195,25 @@ export class TartGuestSupervisor {
 		const last = points.at(-1);
 		if (buttons === undefined || points.length < 2 || points.length > 256 || last === undefined)
 			return Promise.reject(new Error("Invalid guest drag."));
-		return this.pointerSequence([
-			...points.map(({ x, y }) => ({ x, y, buttons })),
-			{ x: last.x, y: last.y, buttons: 0 },
-		]);
+		// One guest script per drag, with samples at most DRAG_SAMPLE_PIXELS apart: AppKit selection tracking ignores a
+		// press and a few far jumps that arrive as separate processes hundreds of milliseconds apart.
+		const path: PointerStep[] = [];
+		for (const [index, point] of points.entries()) {
+			const previous = points[index - 1];
+			if (previous !== undefined) {
+				const segments = Math.ceil(Math.hypot(point.x - previous.x, point.y - previous.y) / DRAG_SAMPLE_PIXELS);
+				for (let step = 1; step < segments; step++) {
+					path.push({
+						x: Math.round(previous.x + ((point.x - previous.x) * step) / segments),
+						y: Math.round(previous.y + ((point.y - previous.y) * step) / segments),
+						buttons,
+					});
+				}
+			}
+			path.push({ x: point.x, y: point.y, buttons });
+		}
+		if (path.length > MAX_DRAG_STEPS) return Promise.reject(new Error("Guest drag path is too long."));
+		return this.pointerSequence([...path, { x: last.x, y: last.y, buttons: 0 }], true);
 	}
 
 	key(keysym: number): Promise<void> {
@@ -319,6 +334,9 @@ if (!board.setStringForType($(${JSON.stringify(text)}), $.NSPasteboardTypeString
 		});
 	}
 }
+
+const DRAG_SAMPLE_PIXELS = 24;
+const MAX_DRAG_STEPS = 511;
 
 function buttonMask(button: MouseButton): number | undefined {
 	if (button === "left") return 1;

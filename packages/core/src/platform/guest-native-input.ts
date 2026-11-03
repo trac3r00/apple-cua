@@ -145,6 +145,8 @@ const steps = ${JSON.stringify(steps)};
 const screen = $.NSScreen.mainScreen.frame.size;
 ${seed}
 let clickCount = 0;
+// JXA's standard delay; absent only in non-guest script evaluation.
+const pace = typeof delay === "function" ? () => delay(0.012) : () => undefined;
 function mouse(kind, point, button, count) {
 	const event = $.CGEventCreateMouseEvent(source, kind, point, button);
 	$.CGEventSetIntegerValueField(event, 1, count);
@@ -152,6 +154,7 @@ function mouse(kind, point, button, count) {
 }
 function release() {
 	if (held !== 0 && last !== null) {
+		pace();
 		const button = held === 1 ? 0 : held === 4 ? 1 : 2;
 		mouse(button === 0 ? 2 : button === 1 ? 4 : 26, last, button, clickCount);
 		held = 0;
@@ -177,6 +180,8 @@ try {
 			const button = step.buttons === 1 ? 0 : step.buttons === 4 ? 1 : 2;
 			const dragging = held === step.buttons;
 			if (!dragging) clickCount++;
+			// Paced like a hand so AppKit tracking loops see a real drag.
+			else pace();
 			held = step.buttons;
 			last = point;
 			mouse(dragging ? (button === 0 ? 6 : button === 1 ? 7 : 27) :

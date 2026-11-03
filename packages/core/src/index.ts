@@ -104,6 +104,12 @@ export {
 export { type AppApprovalDecision, AppApprovalStore } from "./permission/app-approval.js";
 export { type InputLockRecord, InputLock } from "./platform/input-lock.js";
 export {
+	type SpawnStopMenu,
+	type StopMenu,
+	type StopMenuProcess,
+	startStopMenu,
+} from "./platform/stop-menu.js";
+export {
 	type HotFrame,
 	type HotFrameSourceOptions,
 	type HotFrameWorker,

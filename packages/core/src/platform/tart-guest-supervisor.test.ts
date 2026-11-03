@@ -214,9 +214,9 @@ describe("#given an owned VM supervisor #when it starts #then input and credenti
 			{ x: 10, y: 20 },
 			{ x: 100, y: 200 },
 		]);
+		// A 201-pixel drag is sampled every 20 pixels so guest tracking loops see a continuous path.
 		expect(channel.pointer.mock.calls).toEqual([
-			[10, 20, 1],
-			[100, 200, 1],
+			...Array.from({ length: 10 }, (_, index): [number, number, number] => [10 + 10 * index, 20 + 20 * index, 1]),
 			[100, 200, 0],
 		]);
 	});
@@ -286,6 +286,7 @@ describe("#given an owned VM supervisor #when it starts #then input and credenti
 			expect(channel.pointer.mock.calls).toEqual([
 				[1, 2, 0],
 				[10, 20, 1],
+				[20, 30, 1],
 				[30, 40, 1],
 				[30, 40, 0],
 			]);

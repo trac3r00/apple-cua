@@ -1,6 +1,8 @@
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import <Foundation/Foundation.h>
+#import <fcntl.h>
+#import <sys/file.h>
 
 extern Boolean IsSecureEventInputEnabled(void);
 
@@ -72,6 +74,30 @@ static NSString *HomeStateRoot(void) {
   return [base stringByAppendingPathComponent:@"cua-history"];
 }
 
+// cua-history owns opencua's single menu bar item while it runs: holding this
+// lock tells the agent Stop helper to hide, and this menu carries Stop/Resume.
+static int gMenubarLock = -1;
+static void EnsureDir(NSString *path);
+
+static void AcquireMenubarLock(NSString *stateBase) {
+  EnsureDir(stateBase);
+  int fd =
+      open([stateBase stringByAppendingPathComponent:@"menubar-history.lock"]
+               .fileSystemRepresentation,
+           O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+  if (fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) == 0) {
+    gMenubarLock = fd;
+  } else if (fd >= 0) {
+    close(fd);
+  }
+}
+
+// The machine-wide StopSwitch file every opencua agent reads before input.
+static NSString *AgentStopPath(void) {
+  return [gRoot.stringByDeletingLastPathComponent
+      stringByAppendingPathComponent:@"stop.json"];
+}
+
 static NSString *IsoAt(time_t seconds, BOOL dashes) {
   struct tm parts;
   gmtime_r(&seconds, &parts);
@@ -135,7 +161,7 @@ static void PruneOldSegments(time_t now) {
     time_t start = timegm(&parts);
     if (![entry isEqualToString:IsoAt(start, YES)] ||
         ![[NSFileManager.defaultManager attributesOfItemAtPath:SegmentDir(entry)
-                                                        error:NULL][NSFileType]
+                                                         error:NULL][NSFileType]
             isEqualToString:NSFileTypeDirectory]) {
       continue;
     }
@@ -298,9 +324,8 @@ static void LoadState(void) {
 
 static void WriteState(NSString *value) {
   NSString *effective =
-      !gPrivacyPolicySupported && [value isEqualToString:@"running"]
-          ? @"paused"
-          : value;
+      !gPrivacyPolicySupported && [value isEqualToString:@"running"] ? @"paused"
+                                                                     : value;
   gPaused = [effective isEqualToString:@"paused"];
   NSMutableDictionary *state = [@{
     @"state" : effective,
@@ -484,7 +509,8 @@ static void InstallEventTap(void) {
   gInputMonitoringActive = YES;
 }
 
-@interface HistoryRecorderDelegate : NSObject <NSApplicationDelegate, NSMenuDelegate>
+@interface HistoryRecorderDelegate
+    : NSObject <NSApplicationDelegate, NSMenuDelegate>
 @end
 
 @implementation HistoryRecorderDelegate
@@ -494,6 +520,7 @@ static void InstallEventTap(void) {
   gAllowBundleIds = [NSMutableSet set];
   gBlockBundleIds = [NSMutableSet set];
   gRoot = HomeStateRoot();
+  AcquireMenubarLock(gRoot.stringByDeletingLastPathComponent);
   gSegmentsDir = [gRoot stringByAppendingPathComponent:@"segments"];
   gSettingsPath = [gRoot stringByAppendingPathComponent:@"settings.json"];
   gStatePath = [gRoot stringByAppendingPathComponent:@"state.json"];
@@ -540,6 +567,15 @@ static void InstallEventTap(void) {
                          keyEquivalent:@""];
   gRecordItem.target = self;
   [menu addItem:[NSMenuItem separatorItem]];
+  [menu addItemWithTitle:@"Stop all agents"
+                  action:@selector(stopAgents:)
+           keyEquivalent:@""]
+      .target = self;
+  [menu addItemWithTitle:@"Resume agents"
+                  action:@selector(resumeAgents:)
+           keyEquivalent:@""]
+      .target = self;
+  [menu addItem:[NSMenuItem separatorItem]];
   [menu addItemWithTitle:@"Pause recording"
                   action:@selector(pause:)
            keyEquivalent:@""]
@@ -564,7 +600,7 @@ static void InstallEventTap(void) {
 - (void)refreshStatusTitle {
   NSString *recordingStatus =
       !gPrivacyPolicySupported ? @"blocked (URL/private exclusions unavailable)"
-                              : (gPaused ? @"paused" : @"recording");
+                               : (gPaused ? @"paused" : @"recording");
   NSString *inputStatus = gInputMonitoringActive ? @"input capture on"
                                                  : @"input capture unavailable";
   NSString *label = [NSString stringWithFormat:@"opencua; cua-history %@; %@",
@@ -597,8 +633,8 @@ static void InstallEventTap(void) {
 - (void)menuNeedsUpdate:(NSMenu *)menu {
   [menu removeAllItems];
   NSData *data = [NSData
-      dataWithContentsOfFile:[gRoot stringByAppendingPathComponent:
-                                        @"skill-suggestions.json"]];
+      dataWithContentsOfFile:
+          [gRoot stringByAppendingPathComponent:@"skill-suggestions.json"]];
   id parsed = (data != nil && data.length <= 262144)
                   ? [NSJSONSerialization JSONObjectWithData:data
                                                     options:0
@@ -755,6 +791,35 @@ static void InstallEventTap(void) {
   InstallEventTap();
   gLastFocusKey = nil;
   [self refreshStatusTitle];
+}
+
+- (void)stopAgents:(id)sender {
+  (void)sender;
+  NSISO8601DateFormatter *formatter = [[NSISO8601DateFormatter alloc] init];
+  formatter.formatOptions |= NSISO8601DateFormatWithFractionalSeconds;
+  NSData *data = [NSJSONSerialization dataWithJSONObject:@{
+    @"stoppedAt" : [formatter stringFromDate:[NSDate date]],
+    @"reason" : @"stopped from the menu bar",
+    @"source" : @"menu",
+  }
+                                                 options:0
+                                                   error:nil];
+  [data writeToFile:AgentStopPath() atomically:YES];
+}
+
+- (void)resumeAgents:(id)sender {
+  (void)sender;
+  [NSFileManager.defaultManager removeItemAtPath:AgentStopPath() error:nil];
+}
+
+- (BOOL)validateMenuItem:(NSMenuItem *)item {
+  BOOL stopped =
+      [NSFileManager.defaultManager fileExistsAtPath:AgentStopPath()];
+  if (item.action == @selector(stopAgents:))
+    return !stopped;
+  if (item.action == @selector(resumeAgents:))
+    return stopped;
+  return YES;
 }
 
 - (void)reveal:(id)sender {

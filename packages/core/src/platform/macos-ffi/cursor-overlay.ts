@@ -216,7 +216,7 @@ function safeTransport(
 	}
 }
 
-function overlayBinaryPath(): string | undefined {
+export function overlayBinaryPath(): string | undefined {
 	return overlayBinaryCandidatePaths.find((candidate) => existsSync(candidate));
 }
 

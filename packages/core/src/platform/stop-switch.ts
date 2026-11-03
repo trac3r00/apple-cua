@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-/** Who flipped the switch: the keyboard chord, the `opencua stop` command, or code calling the API. */
-export type StopSource = "chord" | "cli" | "api";
+/** Who flipped the switch: the keyboard chord, the `opencua stop` command, the overlay menu bar item, or the API. */
+export type StopSource = "chord" | "cli" | "menu" | "api";
 
 export type StopStatus =
 	| { readonly stopped: false }
@@ -31,7 +31,7 @@ export function resolveStateDir(env: NodeJS.ProcessEnv = process.env, home: stri
 }
 
 function isStopSource(value: unknown): value is StopSource {
-	return value === "chord" || value === "cli" || value === "api";
+	return value === "chord" || value === "cli" || value === "menu" || value === "api";
 }
 
 /**

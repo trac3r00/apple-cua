@@ -6,10 +6,12 @@
 #import <Cocoa/Cocoa.h>
 #import <ctype.h>
 #import <errno.h>
+#import <fcntl.h>
 #import <pthread.h>
 #import <signal.h>
 #import <stdlib.h>
 #import <string.h>
+#import <sys/file.h>
 #import <sys/socket.h>
 #import <sys/un.h>
 #import <unistd.h>
@@ -164,6 +166,178 @@ static void cancel_trajectory(void) {
   gTrajCount = 0;
 }
 
+// The machine-wide stop switch lives in <state dir>/stop.json, the same file
+// StopSwitch in stop-switch.ts reads before every input. The overlay inherits
+// OPENCUA_STATE_DIR from the process that spawned it.
+static NSString *stop_file_path(void) {
+  NSDictionary<NSString *, NSString *> *env =
+      NSProcessInfo.processInfo.environment;
+  NSString *dir = env[@"OPENCUA_STATE_DIR"];
+  if (dir.length == 0) {
+    dir = env[@"APPLE_CUA_STATE_DIR"];
+  }
+  if (dir.length == 0) {
+    NSString *current =
+        [NSHomeDirectory() stringByAppendingPathComponent:@".opencua"];
+    NSString *legacy =
+        [NSHomeDirectory() stringByAppendingPathComponent:@".apple-cua"];
+    NSFileManager *files = NSFileManager.defaultManager;
+    dir = (![files fileExistsAtPath:current] && [files fileExistsAtPath:legacy])
+              ? legacy
+              : current;
+  }
+  return [dir stringByAppendingPathComponent:@"stop.json"];
+}
+
+static BOOL stop_engaged(void) {
+  return [NSFileManager.defaultManager fileExistsAtPath:stop_file_path()];
+}
+
+@interface StopMenuTarget : NSObject
+- (void)stopAll:(id)sender;
+- (void)resumeAll:(id)sender;
+@end
+
+static void update_status_item(void);
+
+@implementation StopMenuTarget
+- (void)stopAll:(id)sender {
+  (void)sender;
+  NSString *path = stop_file_path();
+  [NSFileManager.defaultManager
+            createDirectoryAtPath:path.stringByDeletingLastPathComponent
+      withIntermediateDirectories:YES
+                       attributes:nil
+                            error:nil];
+  NSISO8601DateFormatter *formatter = [[NSISO8601DateFormatter alloc] init];
+  formatter.formatOptions |= NSISO8601DateFormatWithFractionalSeconds;
+  NSDictionary *record = @{
+    @"stoppedAt" : [formatter stringFromDate:[NSDate date]],
+    @"reason" : @"stopped from the menu bar",
+    @"source" : @"menu",
+  };
+  NSData *data = [NSJSONSerialization dataWithJSONObject:record
+                                                 options:0
+                                                   error:nil];
+  [data writeToFile:path atomically:YES];
+  update_status_item();
+}
+- (void)resumeAll:(id)sender {
+  (void)sender;
+  [NSFileManager.defaultManager removeItemAtPath:stop_file_path() error:nil];
+  update_status_item();
+}
+@end
+
+static StopMenuTarget *gStopTarget = nil;
+
+// Builds the status menu on first use and refreshes it after: the read-only
+// state lines, then Stop all agents (enabled while agents may act) and Resume
+// agents (enabled while stopped).
+static NSMenu *control_menu(NSMenu *menu, NSArray<NSString *> *lines,
+                            BOOL stopped) {
+  if (menu == nil) {
+    menu = [[NSMenu alloc] initWithTitle:@"opencua"];
+    menu.autoenablesItems = NO;
+    for (NSString *text in lines) {
+      NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:text
+                                                    action:NULL
+                                             keyEquivalent:@""];
+      item.enabled = NO;
+      [menu addItem:item];
+    }
+    [menu addItem:[NSMenuItem separatorItem]];
+    if (gStopTarget == nil) {
+      gStopTarget = [[StopMenuTarget alloc] init];
+    }
+    NSMenuItem *stop = [[NSMenuItem alloc] initWithTitle:@"Stop all agents"
+                                                  action:@selector(stopAll:)
+                                           keyEquivalent:@""];
+    stop.target = gStopTarget;
+    [menu addItem:stop];
+    NSMenuItem *resume = [[NSMenuItem alloc] initWithTitle:@"Resume agents"
+                                                    action:@selector(resumeAll:)
+                                             keyEquivalent:@""];
+    resume.target = gStopTarget;
+    [menu addItem:resume];
+  }
+  for (NSUInteger index = 0; index < lines.count; index++) {
+    [menu itemAtIndex:index].title = lines[index];
+  }
+  [menu itemAtIndex:lines.count + 1].enabled = !stopped;
+  [menu itemAtIndex:lines.count + 2].enabled = stopped;
+  return menu;
+}
+
+static NSArray<NSString *> *status_only_lines(BOOL stopped) {
+  return @[
+    @"opencua agent controls",
+    stopped ? @"State: all agents stopped" : @"State: agents may act",
+    @"Keyboard stop: Control+Option+Command",
+  ];
+}
+// --status-only: a persistent menu bar control for the user, with no cursor.
+static BOOL gStatusOnly = NO;
+
+// opencua shows one menu bar item, however many servers run. Every server
+// starts a status-only helper; only the helper holding stop-menu.lock shows
+// its item, and a waiting helper takes over when the holder exits. While
+// cua-history holds menubar-history.lock, its own menu carries Stop and
+// Resume, so no helper shows an item at all.
+static int gStopMenuLock = -1;
+
+static int open_state_lock(NSString *name) {
+  NSString *dir = stop_file_path().stringByDeletingLastPathComponent;
+  [NSFileManager.defaultManager createDirectoryAtPath:dir
+                          withIntermediateDirectories:YES
+                                           attributes:nil
+                                                error:nil];
+  return open(
+      [dir stringByAppendingPathComponent:name].fileSystemRepresentation,
+      O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+}
+
+static BOOL hold_stop_menu_lock(void) {
+  if (gStopMenuLock >= 0) {
+    return YES;
+  }
+  int fd = open_state_lock(@"stop-menu.lock");
+  if (fd < 0) {
+    return NO;
+  }
+  if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+    close(fd);
+    return NO;
+  }
+  gStopMenuLock = fd;
+  return YES;
+}
+
+static BOOL history_menu_running(void) {
+  int fd = open_state_lock(@"menubar-history.lock");
+  if (fd < 0) {
+    return NO;
+  }
+  BOOL held = flock(fd, LOCK_EX | LOCK_NB) != 0;
+  close(fd);
+  return held;
+}
+
+static BOOL stop_menu_visible(void) {
+  return hold_stop_menu_lock() && !history_menu_running();
+}
+
+static void ensure_status_item(void);
+static void remove_status_item(void);
+
+static void refresh_stop_menu(void) {
+  if (stop_menu_visible()) {
+    ensure_status_item();
+  } else {
+    remove_status_item();
+  }
+}
+
 static void update_status_item(void) {
   if (gStatusItem == nil) {
     return;
@@ -183,28 +357,28 @@ static void update_status_item(void) {
   button.title = @"opencua";
   button.toolTip = label;
   [button setAccessibilityLabel:label];
-  NSArray<NSString *> *lines = @[
+  BOOL stopped = stop_engaged();
+  NSArray<NSString *> *lines = gStatusOnly ? status_only_lines(stopped) : @[
     @"opencua running",
     [@"Mode: " stringByAppendingString:mode],
     [@"Motion: " stringByAppendingString:gStyle],
   ];
-  NSMenu *menu = gStatusItem.menu;
-  if (menu != nil) {
-    for (NSUInteger index = 0; index < lines.count; index++) {
-      [menu itemAtIndex:index].title = lines[index];
-    }
-    return;
+  if (gStatusOnly) {
+    NSString *state =
+        stopped ? @"opencua: all agents stopped" : @"opencua: agents may act";
+    NSImage *control = [NSImage
+        imageWithSystemSymbolName:stopped ? @"stop.circle.fill" : @"stop.circle"
+         accessibilityDescription:state];
+    control.template = YES;
+    button.image = control;
+    button.title = stopped ? @"stopped" : @"";
+    button.toolTip = state;
+    [button setAccessibilityLabel:state];
   }
-  menu = [[NSMenu alloc] initWithTitle:@"opencua"];
-  menu.autoenablesItems = NO;
-  for (NSString *text in lines) {
-    NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:text
-                                                  action:NULL
-                                           keyEquivalent:@""];
-    item.enabled = NO;
-    [menu addItem:item];
+  NSMenu *menu = control_menu(gStatusItem.menu, lines, stopped);
+  if (gStatusItem.menu != menu) {
+    gStatusItem.menu = menu;
   }
-  gStatusItem.menu = menu;
 }
 
 static void ensure_status_item(void) {
@@ -720,6 +894,72 @@ static NSBezierPath *drag_anchor_path(void) {
 }
 @end
 
+// Background markers never float above the user's work. Each one is stacked
+// directly above the frontmost on-screen normal window of the app it drives, so
+// any window the user brings in front of that app also covers its cursor, and a
+// target with no on-screen window (hidden, minimized, another Space) hides it.
+// `windows` is a front-to-back CGWindowListCopyWindowInfo result.
+static CGWindowID marker_target_window(NSArray<NSDictionary *> *windows,
+                                       pid_t pid) {
+  if (pid <= 0) {
+    return kCGNullWindowID;
+  }
+  for (NSDictionary *info in windows) {
+    NSNumber *owner = info[(__bridge NSString *)kCGWindowOwnerPID];
+    NSNumber *layer = info[(__bridge NSString *)kCGWindowLayer];
+    NSNumber *number = info[(__bridge NSString *)kCGWindowNumber];
+    if (![owner isKindOfClass:[NSNumber class]] ||
+        ![layer isKindOfClass:[NSNumber class]] ||
+        ![number isKindOfClass:[NSNumber class]]) {
+      continue;
+    }
+    if (owner.intValue == pid && layer.intValue == 0 &&
+        number.unsignedIntValue != kCGNullWindowID) {
+      return (CGWindowID)number.unsignedIntValue;
+    }
+  }
+  return kCGNullWindowID;
+}
+
+static void stack_marker_window(NSWindow *window, NSNumber *key,
+                                NSArray<NSDictionary *> *windows) {
+  if (window == nil || key == nil) {
+    return;
+  }
+  CGWindowID target = marker_target_window(windows, (pid_t)key.intValue);
+  if (target == kCGNullWindowID) {
+    [window orderOut:nil];
+    return;
+  }
+  [window setLevel:NSNormalWindowLevel];
+  [window orderWindow:NSWindowAbove relativeTo:(NSInteger)target];
+}
+
+static NSArray<NSDictionary *> *onscreen_windows(void) {
+  return CFBridgingRelease(CGWindowListCopyWindowInfo(
+      kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+      kCGNullWindowID));
+}
+
+static void stack_marker(NSWindow *window, NSNumber *key) {
+  stack_marker_window(window, key, onscreen_windows());
+}
+
+// The user can raise, hide or move the target app at any time; re-stack every
+// marker and per-app highlight so each stays just above its own app.
+static void restack_markers(void) {
+  if (gMarkerWindows.count == 0 && gMarkerHighlights.count == 0) {
+    return;
+  }
+  NSArray<NSDictionary *> *windows = onscreen_windows();
+  for (NSNumber *key in gMarkerHighlights.allKeys) {
+    stack_marker_window(gMarkerHighlights[key], key, windows);
+  }
+  for (NSNumber *key in gMarkerWindows.allKeys) {
+    stack_marker_window(gMarkerWindows[key], key, windows);
+  }
+}
+
 // AppKit marker objects are created and accessed only from the main queue.
 static NSWindow *marker_window(NSNumber *key, BOOL create) {
   if (key == nil) {
@@ -738,7 +978,7 @@ static NSWindow *marker_window(NSNumber *key, BOOL create) {
   [window setBackgroundColor:[NSColor clearColor]];
   [window setHasShadow:NO];
   [window setIgnoresMouseEvents:YES];
-  [window setLevel:NSFloatingWindowLevel];
+  [window setLevel:NSNormalWindowLevel];
   [window setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
                                 NSWindowCollectionBehaviorStationary |
                                 NSWindowCollectionBehaviorIgnoresCycle |
@@ -933,7 +1173,7 @@ static void apply_marker_set(double x, double y, NSNumber *markerKey) {
       NSMakePoint(x - kHotspotX, screenHeight - y + kHotspotY - kOverlaySize);
   [window setAlphaValue:1.0];
   [window setFrameOrigin:target];
-  [window orderFrontRegardless];
+  stack_marker(window, markerKey);
 }
 
 static void apply_direct_set(double x, double y) {
@@ -973,7 +1213,7 @@ static void apply_highlight(double x, double y, double w, double h,
     [window setBackgroundColor:[NSColor clearColor]];
     [window setHasShadow:NO];
     [window setIgnoresMouseEvents:YES];
-    [window setLevel:NSFloatingWindowLevel];
+    [window setLevel:NSNormalWindowLevel];
     [window setCollectionBehavior:gHighlightWindow.collectionBehavior];
     [window setContentView:[[HighlightView alloc] initWithFrame:frame]];
     gMarkerHighlights[key] = window;
@@ -986,7 +1226,11 @@ static void apply_highlight(double x, double y, double w, double h,
   [window setFrame:NSMakeRect(x, screenHeight - y - h, w, h) display:YES];
   [window.contentView setNeedsDisplay:YES];
   [window setAlphaValue:1.0];
-  [window orderFrontRegardless];
+  if (key == nil) {
+    [window orderFrontRegardless];
+  } else {
+    stack_marker(window, key);
+  }
   [(key == nil ? gHighlightTimer : gMarkerHighlightTimers[key]) invalidate];
   NSTimeInterval start = [NSDate timeIntervalSinceReferenceDate];
   NSTimer *fade = [NSTimer
@@ -1634,17 +1878,40 @@ static void *socket_reader(void *arg) {
 
 int main(int argc, const char *argv[]) {
   const char *socketPath = NULL;
+  pid_t parent = 0;
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc) {
       socketPath = argv[++i];
     } else if (strcmp(argv[i], "--idle") == 0 && i + 1 < argc) {
       gIdleTimeout = atof(argv[++i]);
+    } else if (strcmp(argv[i], "--status-only") == 0) {
+      gStatusOnly = YES;
+    } else if (strcmp(argv[i], "--parent") == 0 && i + 1 < argc) {
+      parent = (pid_t)strtol(argv[++i], NULL, 10);
     }
   }
   signal(SIGPIPE, SIG_IGN);
   @autoreleasepool {
     [NSApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    if (gStatusOnly) {
+      // Lives exactly as long as the opencua server that started it, and
+      // mirrors stops made by the chord or `opencua stop` within a second.
+      refresh_stop_menu();
+      [NSTimer
+          scheduledTimerWithTimeInterval:1.0
+                                 repeats:YES
+                                   block:^(NSTimer *timer) {
+                                     (void)timer;
+                                     if (parent <= 0 || (kill(parent, 0) != 0 &&
+                                                         errno == ESRCH)) {
+                                       [NSApp terminate:nil];
+                                     }
+                                     refresh_stop_menu();
+                                   }];
+      [NSApp run];
+      return 0;
+    }
     gMarkerWindows = [NSMutableDictionary dictionary];
     gMarkerViews = [NSMutableDictionary dictionary];
     gMarkerModes = [NSMutableDictionary dictionary];
@@ -1709,6 +1976,23 @@ int main(int argc, const char *argv[]) {
                               NSWindowCollectionBehaviorFullScreenAuxiliary];
     [gRippleWindow
         setContentView:[[RippleView alloc] initWithFrame:rippleFrame]];
+
+    // Re-stack background markers when the user switches apps, and on a
+    // light cadence for raises, minimizes and Space changes within an app.
+    [[[NSWorkspace sharedWorkspace] notificationCenter]
+        addObserverForName:NSWorkspaceDidActivateApplicationNotification
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification *note) {
+                  (void)note;
+                  restack_markers();
+                }];
+    [NSTimer scheduledTimerWithTimeInterval:0.25
+                                    repeats:YES
+                                      block:^(NSTimer *timer) {
+                                        (void)timer;
+                                        restack_markers();
+                                      }];
 
     pthread_t thread;
     if (socketPath != NULL) {

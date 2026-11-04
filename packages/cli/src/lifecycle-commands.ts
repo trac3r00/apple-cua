@@ -4,15 +4,14 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { ReadStream, WriteStream } from "node:tty";
+import type { AutomationStatus, CursorMotionConfig } from "@opencua/core";
 import {
 	CURSOR_MOTION_ENV,
 	StopSwitch,
 	cursorMotionFromEnvironment,
 	isBrowserBundle,
 	parseCursorMotion,
-	probeHostCapabilities,
-} from "@opencua/core";
-import type { AutomationStatus, CursorMotionConfig } from "@opencua/core";
+} from "@opencua/core/light";
 import type { Command } from "commander";
 import { syncSkillLinks } from "./client-skills.js";
 import {
@@ -683,7 +682,7 @@ async function watchUntilGranted(granted: () => boolean, say: Say): Promise<bool
  * Who the permission guide can reach: a person at the terminal, a person at the Mac with no terminal (an agent ran the
  * command), or nobody (CI, a locked screen, or --no-wait).
  */
-function grantMode(wait: boolean, terminalAllowed: boolean): GrantMode {
+async function grantMode(wait: boolean, terminalAllowed: boolean): Promise<GrantMode> {
 	if (terminalAllowed && isInteractive()) {
 		return "terminal";
 	}
@@ -691,6 +690,7 @@ function grantMode(wait: boolean, terminalAllowed: boolean): GrantMode {
 	if (!wait || (ci !== undefined && ci !== "" && ci !== "false")) {
 		return "report";
 	}
+	const { probeHostCapabilities } = await import("@opencua/core");
 	return probeHostCapabilities().session.screenLocked ? "report" : "watch";
 }
 
@@ -822,7 +822,7 @@ async function runPermissionsGrantCommand(
 	json: boolean,
 ): Promise<number> {
 	const layout = resolveLayout();
-	const outcome = await runGrant(layout, json ? quiet : print, options.open, grantMode(options.wait, !json));
+	const outcome = await runGrant(layout, json ? quiet : print, options.open, await grantMode(options.wait, !json));
 	if (json) {
 		print(JSON.stringify(outcome));
 	} else if (outcome.missing.length === 0) {
@@ -894,7 +894,7 @@ async function runDoctorCommand(
 	}
 	const say = json ? quiet : print;
 	const stdio = json ? "ignore" : "inherit";
-	const mode = grantMode(options.wait, !json);
+	const mode = await grantMode(options.wait, !json);
 	const outcome = await runDoctorFix(
 		{
 			rebuildHelper: options.rebuildHelper === true,

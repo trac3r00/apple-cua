@@ -5,23 +5,16 @@ import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import {
-	AppApprovalStore,
-	MacOSHostComputer,
-	NOOP_POINTER_OVERLAY,
-	StopSwitch,
-	agentCursorEnabled,
-	createCursorOverlay,
-	getAppStateForApp,
-} from "@opencua/core";
 import type {
 	ComputerInterface,
 	KeyOptions,
+	MacOSHostComputer,
 	MacOSHostComputerOptions,
 	PointerMode,
 	ScreenshotOptions,
 	ScrollOptions,
 } from "@opencua/core";
+import { AppApprovalStore, StopSwitch } from "@opencua/core/light";
 import { Command } from "commander";
 import { registerBrowserCommands } from "./browser-commands.js";
 import { registerHistoryCommands } from "./history-commands.js";
@@ -312,6 +305,7 @@ program
 	.argument("<mode>", "pointer | scroll | thinking")
 	.action(async (mode: string) => {
 		const normalized: PointerMode = mode === "scroll" || mode === "thinking" ? mode : "pointer";
+		const { NOOP_POINTER_OVERLAY, agentCursorEnabled, createCursorOverlay } = await import("@opencua/core");
 		// Drive the shared overlay daemon directly (it persists across commands).
 		// setMode writes to the daemon socket asynchronously; await briefly so the
 		// command actually lands before this short-lived process exits (otherwise
@@ -472,6 +466,7 @@ appsCommand
 			},
 		) => {
 			await withComputer(async (computer) => {
+				const { getAppStateForApp } = await import("@opencua/core");
 				const state = await getAppStateForApp(computer, app, {
 					...(options.maxElements === undefined ? {} : { maxElements: options.maxElements }),
 					...(options.windowId === undefined ? {} : { windowId: options.windowId }),
@@ -609,6 +604,7 @@ await program.parseAsync().catch(handleError);
 
 /** Resolve an app name/bundleId to a pid, reusing the same matching as `apps state`. */
 async function resolveAppPidForCli(computer: MacOSHostComputer, app: string): Promise<number> {
+	const { getAppStateForApp } = await import("@opencua/core");
 	const state = await getAppStateForApp(computer, app);
 	return state.pid;
 }
@@ -647,6 +643,7 @@ async function withComputer(
 ): Promise<void> {
 	// Commander sets `cursor` to false only when `--no-cursor` is passed; the overlay
 	// is shown by default. When hidden, inject the no-op overlay so no helper spawns.
+	const { MacOSHostComputer, NOOP_POINTER_OVERLAY, agentCursorEnabled } = await import("@opencua/core");
 	const showCursor = program.opts<GlobalOptions>().cursor !== false && agentCursorEnabled();
 	const background = program.opts<GlobalOptions>().background === true;
 	const computer = new MacOSHostComputer({

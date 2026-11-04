@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
-import { historyPaths, readHistoryState } from "@opencua/core";
+import { historyPaths, readHistoryState } from "@opencua/core/light";
 import { z } from "zod/v4";
 import { generateHistoryText } from "./history-agent.js";
 import {

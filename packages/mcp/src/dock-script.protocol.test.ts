@@ -4,8 +4,8 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { DockSnapshot, DockSource, HostCapabilities, MenuExtraSnapshot, StopStatus } from "@opencua/core";
 import { vi } from "@opencua/test-support";
+import { createMcpServer } from "./mcp-server.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
-import { createMcpServer } from "./server.js";
 
 class MemoryTransport implements Transport {
 	peer: MemoryTransport | undefined;

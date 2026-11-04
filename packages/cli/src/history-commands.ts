@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { historyPaths, readHistoryState, writeHistoryState } from "@opencua/core";
+import { historyPaths, readHistoryState, writeHistoryState } from "@opencua/core/light";
 import { resolveStateDir } from "@opencua/core/stop";
 import type { Command } from "commander";
 import { z } from "zod/v4";

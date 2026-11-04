@@ -4,12 +4,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
-import { doctorBrowserService, installBrowserService, readConnection, uninstallBrowserService } from "@opencua/browser";
 import type { Command } from "commander";
 import { z } from "zod";
 import { resolveLayout } from "./layout.js";
 
 const execFileAsync = promisify(execFile);
+
+/** The browser service pulls in its own dependency tree, so it loads only when a browser command runs. */
+const browserService = (): Promise<typeof import("@opencua/browser")> => import("@opencua/browser");
 
 export type BrowserInstall = {
 	readonly name: string;
@@ -109,12 +111,12 @@ async function openInBackground(browser: BrowserInstall): Promise<boolean> {
 }
 
 async function readStatus(): Promise<BrowserStatus> {
-	const doctor = await doctorBrowserService();
+	const doctor = await (await browserService()).doctorBrowserService();
 	let connected = false;
 	let stopped = false;
 	let spaces: readonly unknown[] = [];
 	try {
-		const connection = await readConnection();
+		const connection = await (await browserService()).readConnection();
 		const response = await fetch(`http://127.0.0.1:${connection.port}/rpc`, {
 			method: "POST",
 			headers: {
@@ -175,8 +177,8 @@ export async function setupBrowser(
 	}
 	let status = await readStatus();
 	if (!status.connected) {
-		const doctor = await doctorBrowserService();
-		if (!doctor.installed || !doctor.running) await installBrowserService();
+		const doctor = await (await browserService()).doctorBrowserService();
+		if (!doctor.installed || !doctor.running) await (await browserService()).installBrowserService();
 		status = await readStatus();
 	}
 	if (status.connected) {
@@ -246,7 +248,7 @@ export function registerBrowserCommands(program: Command, options: BrowserComman
 		.command("status")
 		.description("Read the daemon and extension connection state")
 		.action(async () => {
-			const doctor = await doctorBrowserService();
+			const doctor = await (await browserService()).doctorBrowserService();
 			const status = await readStatus();
 			if (options.isJsonOutput()) {
 				process.stdout.write(`${JSON.stringify({ ...doctor, ...status })}\n`);
@@ -266,7 +268,7 @@ export function registerBrowserCommands(program: Command, options: BrowserComman
 		.command("uninstall")
 		.description("Remove the browser daemon and native-host registration")
 		.action(async () => {
-			const paths = await uninstallBrowserService();
+			const paths = await (await browserService()).uninstallBrowserService();
 			const output = { ok: true, launchAgent: paths.launchAgent, nativeHost: paths.nativeHostManifest };
 			if (options.isJsonOutput()) process.stdout.write(`${JSON.stringify(output)}\n`);
 			else process.stdout.write(`Removed the browser service.\nLaunchAgent: ${paths.launchAgent}\n`);

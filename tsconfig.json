@@ -8,6 +8,7 @@
 			"@opencua/browser": ["./packages/browser/src/index.ts"],
 			"@opencua/core": ["./packages/core/src/index.ts"],
 			"@opencua/core/isolated": ["./packages/core/src/platform/isolated.ts"],
+			"@opencua/core/light": ["./packages/core/src/light.ts"],
 			"@opencua/core/stop": ["./packages/core/src/platform/stop-switch.ts"],
 			"@opencua/test-support": ["./scripts/test-support/bun.ts"]
 		},

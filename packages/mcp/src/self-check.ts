@@ -11,20 +11,12 @@ import {
 } from "@opencua/core";
 import type { AutomationStatus, HostCapabilities, StopStatusSource } from "@opencua/core";
 import { capabilityReport } from "./capability-tools.js";
+import { PERMISSION_REQUEST_FLAG, SELF_CHECK_FLAG } from "./entry-flags.js";
 import { allowedBundleIdsFromProcessEnvironment, deliveryFromProcessEnvironment } from "./native-policy.js";
 import { toolNamesFor } from "./tool-names.js";
 import { resolveServerOptions } from "./toolset.js";
 
-/** `server.js --doctor` prints one self-check report as JSON and exits instead of starting the MCP server. */
-export const SELF_CHECK_FLAG = "--doctor";
-
-/**
- * `server.js --request-permissions <kinds>` shows macOS's permission dialogs for the helper and prints what is
- * granted afterwards as JSON. Kinds, comma-separated: accessibility, screen-recording, input-monitoring,
- * automation:<bundle id>, and
- * automation-status:<bundle id>, which only reads.
- */
-export const PERMISSION_REQUEST_FLAG = "--request-permissions";
+export { PERMISSION_REQUEST_FLAG, SELF_CHECK_FLAG };
 
 /** The apps the server sends Apple Events to on its own: window lookup through System Events, desktop size from Finder. */
 const AUTOMATION_TARGETS = ["com.apple.systemevents", "com.apple.finder"] as const;

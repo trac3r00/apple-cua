@@ -1,4 +1,4 @@
-import { type StopStatusSource, describeUserStop } from "@opencua/core";
+import { type StopStatusSource, describeUserStop } from "@opencua/core/light";
 import type { Command } from "commander";
 
 /**

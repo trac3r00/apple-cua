@@ -1,8 +1,9 @@
 import { writeFileSync } from "node:fs";
-import { IPhoneMirroring, type MirroringSessionState, describeMirroringState, readImagePixelSize } from "@opencua/core";
+import type { IPhoneMirroring } from "@opencua/core";
+import { type MirroringSessionState, describeMirroringState } from "@opencua/core/light";
 import type { Command } from "commander";
 
-export type { MirroringSessionState } from "@opencua/core";
+export type { MirroringSessionState } from "@opencua/core/light";
 type Direction = "up" | "down" | "left" | "right";
 type SwipeKind = "flick" | "drag";
 
@@ -31,7 +32,7 @@ export function registerIosCommands(program: Command, options: RegisterIosOption
 	ios.command("status")
 		.description("Print the iPhone Mirroring session state")
 		.action(async () => {
-			const state = await createMirroring().state();
+			const state = await (await createMirroring()).state();
 			const output = formatIosStatus(state);
 			writeOutput(options, { state, message: output.lines[1] }, output.lines.join("\n"));
 			if (output.exitCode !== 0) process.exitCode = output.exitCode;
@@ -40,7 +41,7 @@ export function registerIosCommands(program: Command, options: RegisterIosOption
 	ios.command("observe")
 		.description("Print visible text, tap centres, window bounds, and capture size")
 		.action(async () => {
-			const observation = await createMirroring().observe();
+			const observation = await (await createMirroring()).observe();
 			const textLines = observation.texts.map((text) => {
 				const centreX = text.x + text.width / 2;
 				const centreY = text.y + text.height / 2;
@@ -62,12 +63,13 @@ export function registerIosCommands(program: Command, options: RegisterIosOption
 		.description("Save the iPhone Mirroring window as a PNG")
 		.requiredOption("-o, --output <path>", "output file path")
 		.action(async (commandOptions: { output: string }) => {
-			const mirroring = createMirroring();
+			const mirroring = await createMirroring();
 			const state = await mirroring.state();
 			if (state !== "ready") {
 				throw new Error(describeMirroringState(state));
 			}
 			const image = await mirroring.screenshot();
+			const { readImagePixelSize } = await import("@opencua/core");
 			const size = readImagePixelSize(image);
 			writeFileSync(commandOptions.output, image);
 			writeOutput(
@@ -82,7 +84,7 @@ export function registerIosCommands(program: Command, options: RegisterIosOption
 		.requiredOption("-x, --x <number>", "x coordinate", parseFiniteNumber)
 		.requiredOption("-y, --y <number>", "y coordinate", parseFiniteNumber)
 		.action(async (commandOptions: { x: number; y: number }) => {
-			await createMirroring().tap(commandOptions.x, commandOptions.y);
+			await (await createMirroring()).tap(commandOptions.x, commandOptions.y);
 			writeActionOutput(options, "tap", commandOptions, `Tapped ${commandOptions.x},${commandOptions.y}`);
 		});
 
@@ -92,7 +94,7 @@ export function registerIosCommands(program: Command, options: RegisterIosOption
 		.option("--index <number>", "zero-based match index", parseNonNegativeInteger)
 		.option("--exact", "require an exact case-insensitive match")
 		.action(async (query: string, commandOptions: { index?: number; exact?: boolean }) => {
-			const text = await createMirroring().tapText(query, commandOptions);
+			const text = await (await createMirroring()).tapText(query, commandOptions);
 			writeOutput(
 				options,
 				{ ok: true, action: "tap-text", query, match: text },
@@ -106,7 +108,7 @@ export function registerIosCommands(program: Command, options: RegisterIosOption
 		.requiredOption("-y, --y <number>", "y coordinate", parseFiniteNumber)
 		.option("--duration <ms>", "hold duration in milliseconds", parsePositiveNumber, 800)
 		.action(async (commandOptions: { x: number; y: number; duration: number }) => {
-			await createMirroring().longPress(commandOptions.x, commandOptions.y, commandOptions.duration);
+			await (await createMirroring()).longPress(commandOptions.x, commandOptions.y, commandOptions.duration);
 			writeActionOutput(
 				options,
 				"long-press",
@@ -121,7 +123,7 @@ export function registerIosCommands(program: Command, options: RegisterIosOption
 		.option("--distance <fraction>", "fraction of the phone window (0..1)", parseFraction, 0.5)
 		.option("--kind <kind>", "flick or drag", parseSwipeKind, "flick")
 		.action(async (direction: Direction, commandOptions: { distance: number; kind: SwipeKind }) => {
-			await createMirroring().swipe(direction, commandOptions);
+			await (await createMirroring()).swipe(direction, commandOptions);
 			writeActionOutput(options, "swipe", { direction, ...commandOptions }, `Swiped ${direction}`);
 		});
 
@@ -148,7 +150,7 @@ export function registerIosCommands(program: Command, options: RegisterIosOption
 						? undefined
 						: { x: commandOptions.atX, y: commandOptions.atY };
 				const borrowPointer = commandOptions.borrowPointer === true;
-				await createMirroring().scroll(direction, {
+				await (await createMirroring()).scroll(direction, {
 					amount: commandOptions.amount,
 					...(at === undefined ? {} : { at }),
 					...(borrowPointer ? { borrowPointer } : {}),
@@ -168,7 +170,7 @@ export function registerIosCommands(program: Command, options: RegisterIosOption
 		.option("--keystrokes", "send keystrokes instead of exact paste")
 		.action(async (text: string, commandOptions: { keystrokes?: boolean }) => {
 			const mode = commandOptions.keystrokes === true ? "keystrokes" : "paste";
-			await createMirroring().typeText(text, { mode });
+			await (await createMirroring()).typeText(text, { mode });
 			writeActionOutput(options, "type", { text, mode }, `Typed ${text.length} characters via ${mode}`);
 		});
 
@@ -176,21 +178,21 @@ export function registerIosCommands(program: Command, options: RegisterIosOption
 		.description("Press a key combination (for example cmd+1)")
 		.argument("<combo>", "key combination")
 		.action(async (combo: string) => {
-			await createMirroring().pressKeys(combo);
+			await (await createMirroring()).pressKeys(combo);
 			writeActionOutput(options, "key", { combo }, `Pressed ${combo}`);
 		});
 
 	ios.command("home")
 		.description("Go to the iPhone Home Screen")
 		.action(async () => {
-			await createMirroring().home();
+			await (await createMirroring()).home();
 			writeActionOutput(options, "home", {}, "Opened the iPhone Home Screen");
 		});
 
 	ios.command("app-switcher")
 		.description("Open the iPhone app switcher")
 		.action(async () => {
-			await createMirroring().appSwitcher();
+			await (await createMirroring()).appSwitcher();
 			writeActionOutput(options, "app-switcher", {}, "Opened the iPhone app switcher");
 		});
 
@@ -198,12 +200,13 @@ export function registerIosCommands(program: Command, options: RegisterIosOption
 		.description("Open an iPhone app by name")
 		.argument("<name>", "app name")
 		.action(async (name: string) => {
-			await createMirroring().openApp(name);
+			await (await createMirroring()).openApp(name);
 			writeActionOutput(options, "open-app", { name }, `Opened ${name}`);
 		});
 }
 
-function createMirroring(): IPhoneMirroring {
+async function createMirroring(): Promise<IPhoneMirroring> {
+	const { IPhoneMirroring } = await import("@opencua/core");
 	return new IPhoneMirroring({ delivery: "background" });
 }
 

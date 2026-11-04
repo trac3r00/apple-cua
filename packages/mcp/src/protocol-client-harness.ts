@@ -11,9 +11,9 @@ import type {
 	JSONRPCMessage,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { AppOpenLauncher, StopStatusSource, SystemPrompt, TopLevelWindow } from "@opencua/core";
+import { type McpServerOptions, createMcpServer } from "./mcp-server.js";
 import type { PhoneToolSource } from "./phone-session.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
-import { type McpServerOptions, createMcpServer } from "./server.js";
 
 class InMemoryTransport implements Transport {
 	peer: InMemoryTransport | undefined;

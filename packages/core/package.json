@@ -24,6 +24,10 @@
 		"./isolated": {
 			"types": "./dist/platform/isolated.d.ts",
 			"import": "./dist/platform/isolated.js"
+		},
+		"./light": {
+			"types": "./dist/light.d.ts",
+			"import": "./dist/light.js"
 		}
 	},
 	"scripts": {

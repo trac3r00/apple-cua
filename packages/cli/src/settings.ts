@@ -10,7 +10,7 @@ import {
 	type CursorMotionConfig,
 	cursorMotionFromEnvironment,
 	parseCursorMotion,
-} from "@opencua/core";
+} from "@opencua/core/light";
 import { type BundleInputs, type BundlePlan, planBundle, readSkillFiles, writeBundle } from "./bundle.js";
 import {
 	CLIENT_NAMES,

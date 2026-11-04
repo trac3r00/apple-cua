@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { lstat, open, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { type HistorySkillDetection, describeHistoryStep } from "@opencua/core";
+import { type HistorySkillDetection, describeHistoryStep } from "@opencua/core/light";
 
 export const SKILL_SUGGESTIONS_FILE = "skill-suggestions.json";
 

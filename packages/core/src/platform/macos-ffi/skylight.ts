@@ -1,5 +1,6 @@
 import type { KoffiFunc } from "koffi";
 import { denyHostInteraction } from "../../computer/host-interaction-policy.js";
+import { isOwnedSurfacePid } from "../owned-surfaces.js";
 import type { CGEventRef, CGPoint } from "./coregraphics-types.js";
 import { koffi } from "./koffi.js";
 
@@ -25,8 +26,14 @@ const skyLight = koffi.load("/System/Library/PrivateFrameworks/SkyLight.framewor
 const objc = koffi.load("/usr/lib/libobjc.A.dylib");
 const CG_POINT = koffi.struct("SLCGPoint", { x: "double", y: "double" });
 
-function SLEventPostToPid(_pid: number, _event: CGEventRef): never {
-	return denyHostInteraction("host-window");
+const SLEventPostToPidNative = skyLight.func("SLEventPostToPid", "void", ["int32_t", "void *"]) as KoffiFunc<
+	(pid: number, event: CGEventRef) => void
+>;
+
+/** Host events reach only windows opencua launched itself; every other process stays refused. */
+function SLEventPostToPid(pid: number, event: CGEventRef): void {
+	if (!isOwnedSurfacePid(pid)) denyHostInteraction("host-window");
+	SLEventPostToPidNative(pid, event);
 }
 
 const SLEventSetAuthenticationMessage = skyLight.func("SLEventSetAuthenticationMessage", "void", [

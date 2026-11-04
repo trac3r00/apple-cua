@@ -418,3 +418,10 @@ export type {
 } from "./platform/linux/index.js";
 export { GuardedPlatformComputer } from "./platform/guarded-platform-computer.js";
 export { denyHostInteraction, HostInteractionDenied } from "./computer/host-interaction-policy.js";
+export {
+	type OwnedSurface,
+	closeOwnedSurface,
+	isOwnedSurfacePid,
+	openOwnedSurface,
+	readOwnedSurfaces,
+} from "./platform/owned-surfaces.js";

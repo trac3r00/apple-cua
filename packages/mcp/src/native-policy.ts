@@ -43,7 +43,9 @@ export function createNativeComputer(platform: NodeJS.Platform = process.platfor
 	}
 	if (platform === "linux") return new GuardedPlatformComputer(createLinuxHostComputer(), { approval: appApproval });
 	if (platform === "win32") return new GuardedPlatformComputer(createWindowsHostComputer(), { approval: appApproval });
-	return new MacOSHostComputer({ appApproval, delivery: deliveryFromProcessEnvironment() });
+	// The person's desktop takes input only for opencua-owned windows, which are always driven in the background.
+	const delivery = process.env["OPENCUA_DELIVERY"] === undefined ? "background" : deliveryFromProcessEnvironment();
+	return new MacOSHostComputer({ appApproval, delivery });
 }
 
 export function createNativeWindowProbe(): WindowProbe | undefined {

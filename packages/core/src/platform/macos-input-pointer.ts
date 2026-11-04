@@ -4,6 +4,7 @@ import type { MouseButton } from "./macos-ffi/coregraphics.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
 import { dragSteps, interpolatePointEased, pointerTravelDuration } from "./macos-input-drag.js";
 import { type GestureSleepOptions, runFocusLeasedGesture } from "./macos-targeted-gesture.js";
+import { isOwnedSurfacePid } from "./owned-surfaces.js";
 
 /** `flags` is the held-modifier CGEventFlags mask to stamp on the event; undefined leaves the flags alone. */
 export type MousePost = (
@@ -176,7 +177,7 @@ export async function runFocusLeasedClick(
 	flags?: number,
 	options: GestureSleepOptions = {},
 ): Promise<void> {
-	await runFocusLeasedGesture(
+	await runLeasedUnlessOwned(
 		targetWindow,
 		position,
 		post,
@@ -192,7 +193,7 @@ export async function runFocusLeasedDoubleClick(
 	flags?: number,
 	options: GestureSleepOptions = {},
 ): Promise<void> {
-	await runFocusLeasedGesture(
+	await runLeasedUnlessOwned(
 		targetWindow,
 		position,
 		post,
@@ -209,11 +210,29 @@ export async function runFocusLeasedDrag(
 	checkpoint?: () => void,
 	sleepOptions: GestureSleepOptions = {},
 ): Promise<void> {
-	await runFocusLeasedGesture(
+	await runLeasedUnlessOwned(
 		targetWindow,
 		dragOptions.from,
 		post,
 		() => postDragSequence(post, dragOptions, targetWindow, flags, checkpoint),
 		sleepOptions,
 	);
+}
+
+/**
+ * An owned surface accepts the first click without becoming key, so its gestures skip the focus lease; the
+ * person's frontmost app is never touched. Every other target still goes through the lease.
+ */
+async function runLeasedUnlessOwned(
+	targetWindow: SkyLightTargetWindow,
+	hoverPosition: Point,
+	post: MousePost,
+	body: () => Promise<void>,
+	options: GestureSleepOptions,
+): Promise<void> {
+	if (options.targetPid !== undefined && isOwnedSurfacePid(options.targetPid)) {
+		await body();
+		return;
+	}
+	await runFocusLeasedGesture(targetWindow, hoverPosition, post, body, options);
 }

@@ -1,6 +1,7 @@
 import type { KoffiFunc } from "koffi";
 import { denyHostInteraction } from "../../computer/host-interaction-policy.js";
 import { isDiscoverableApplication } from "../macos-call-helpers.js";
+import { OWNED_SURFACE_BUNDLE_ID, isOwnedSurfacePid } from "../owned-surfaces.js";
 import { koffi } from "./koffi.js";
 
 const appKit = koffi.load("/System/Library/Frameworks/AppKit.framework/AppKit");
@@ -165,14 +166,16 @@ function readApplicationArray(array: object): WorkspaceRunningApplication[] {
 
 function readApplication(reference: object): WorkspaceRunningApplication | undefined {
 	const name = readStringProperty(reference, localizedNameSelector);
-	const bundleId = readStringProperty(reference, bundleIdentifierSelector);
 	const pid = msgProcessIdentifier(reference, processIdentifierSelector);
+	// An owned surface is a bare accessory process with no bundle; it is listed so agents can observe and drive it.
+	const owned = Number.isSafeInteger(pid) && pid > 0 && isOwnedSurfacePid(pid);
+	const bundleId = readStringProperty(reference, bundleIdentifierSelector) || (owned ? OWNED_SURFACE_BUNDLE_ID : "");
 	if (name.length === 0 || bundleId.length === 0 || !Number.isSafeInteger(pid) || pid <= 0) {
 		return undefined;
 	}
 	const bundleUrl = msgPointer(reference, bundleUrlSelector);
 	const path = bundleUrl === null ? "" : readStringProperty(bundleUrl, pathSelector);
-	if (!isDiscoverableApplication(msgInteger(reference, activationPolicySelector), bundleId, path)) {
+	if (!owned && !isDiscoverableApplication(msgInteger(reference, activationPolicySelector), bundleId, path)) {
 		return undefined;
 	}
 	return {

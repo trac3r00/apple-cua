@@ -60,6 +60,7 @@ import { openWindowsForTargeting } from "./macos-open-windows.js";
 import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
 import { resolveTargetWindow, toTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
+import { isOwnedSurfacePid } from "./owned-surfaces.js";
 
 /**
  * On-screen window ids in the WindowServer's front-to-back order. A window that is minimized or
@@ -452,7 +453,8 @@ export class MacOSInputController {
 	private async activateBehind(pid: number, window: SkyLightTargetWindow): Promise<boolean> {
 		// Notification hosts are nonactivating accessory apps, not document windows.
 		// Priming and later deactivating them can dismiss the hosted banner.
-		if (!this.isBackground || !this.backgroundActivation || window.layer === 21) {
+		// An owned surface takes the first click without activation, and activating it would touch the person's focus.
+		if (!this.isBackground || !this.backgroundActivation || window.layer === 21 || isOwnedSurfacePid(pid)) {
 			return false;
 		}
 		this.cancelActivationRelease(pid);
@@ -759,7 +761,7 @@ export class MacOSInputController {
 					await postClick(post, position, button, 1, targetWindow, flags);
 					this.markPointer(position);
 				} else if (targetWindow !== undefined) {
-					if (this.isBackground) {
+					if (this.isBackground || isOwnedSurfacePid(call.pid)) {
 						await postClick(post, position, button, 1, targetWindow, flags);
 						this.showPointer(position, true, call.pid);
 						return;
@@ -785,7 +787,7 @@ export class MacOSInputController {
 					await postDoubleClick(post, position, targetWindow, flags);
 					this.markPointer(position);
 				} else if (targetWindow !== undefined) {
-					if (this.isBackground) {
+					if (this.isBackground || isOwnedSurfacePid(call.pid)) {
 						await postDoubleClick(post, position, targetWindow, flags);
 						this.showPointer(position, true, call.pid);
 						return;
@@ -1000,7 +1002,7 @@ export class MacOSInputController {
 					await this.postMove(call, options.from);
 					await postDragSequence(post, options, targetWindow, flags, checkpoint);
 				} else if (targetWindow !== undefined) {
-					if (this.isBackground) {
+					if (this.isBackground || isOwnedSurfacePid(call.pid)) {
 						this.showPointer(options.from, false, call.pid);
 						await postDragSequence(post, options, targetWindow, flags, checkpoint);
 						return;

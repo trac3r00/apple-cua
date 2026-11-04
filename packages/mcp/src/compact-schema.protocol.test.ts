@@ -7,9 +7,9 @@ import { compactStepSchema, runStepSchema } from "./tool-schemas.js";
 /** Budgets for the serialized tools/list answer, so tool-list bloat cannot creep back. */
 const LEAN_BUDGET_BYTES = 10_500;
 // Measured revisions of the 32,000 cap: run_hands + get_tool_usage (34,556 bytes on 2026-10-25), then the named
-// cursor-owner fields on manage_workers (36,097 bytes on 2026-10-31). The full list still omits the repeated per-type
-// step schema.
-const FULL_BUDGET_BYTES = 36_500;
+// cursor-owner fields on manage_workers (36,097 bytes on 2026-10-31), then the single `surface` tool for opencua-owned
+// windows (36,978 bytes on 2026-11-04). The full list still omits the repeated per-type step schema.
+const FULL_BUDGET_BYTES = 37_000;
 
 let closeHarness: (() => Promise<void>) | undefined;
 

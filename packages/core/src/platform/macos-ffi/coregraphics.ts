@@ -1,5 +1,5 @@
-import { currentCursorIdentity, currentCursorOwner } from "../../computer/cursor-scope.js";
-import { isOwnedSurfacePid, nameSurfaceCursor, surfaceCursorTag } from "../owned-surfaces.js";
+import { currentCursorIdentity, currentCursorOwner, inContextClick } from "../../computer/cursor-scope.js";
+import { isOwnedSurfacePid, nameSurfaceCursor, surfaceCursorTag, surfaceCursorUserData } from "../owned-surfaces.js";
 import { createNSEventBackedMouseEvent } from "./appkit.js";
 import { cfRelease } from "./corefoundation.js";
 import {
@@ -266,6 +266,6 @@ function stampSurfaceCursor(event: CGEventRef, targetPid: number): void {
 	const identity = currentCursorIdentity();
 	// Every agent event carries a nonzero tag, so the surface can tell it from the person's own clicks.
 	const tag = identity === undefined ? 1 : surfaceCursorTag(identity);
-	setIntegerValueField(event, K_CG_EVENT_SOURCE_USER_DATA, tag);
+	setIntegerValueField(event, K_CG_EVENT_SOURCE_USER_DATA, surfaceCursorUserData(tag, inContextClick()));
 	nameSurfaceCursor(tag, currentCursorOwner()?.agentName ?? identity ?? "opencua");
 }

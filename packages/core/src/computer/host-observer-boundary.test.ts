@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import * as ts from "typescript";
+import { CursorKeyedObservations } from "../platform/cursor-observations.js";
 import { HostInteractionDenied, denyHostInteraction } from "./host-interaction-policy.js";
 
 // Evaluate the actual class, but not its imports or module initializers. Every dependency
@@ -32,6 +33,7 @@ function fixture() {
 		compiled,
 		{
 			exports,
+			CursorKeyedObservations,
 			HostComputer: Object,
 			InputLock: class {
 				run = effect;

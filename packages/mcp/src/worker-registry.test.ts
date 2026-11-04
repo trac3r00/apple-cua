@@ -53,6 +53,14 @@ describe("#given the shared worker registry #when processes claim workers #then 
 		expect(afterExit.find("two")?.ownerPid).toBe(process.pid);
 	});
 
+	it("lets workers of different processes share an owned surface, but not an app one worker holds alone", () => {
+		const live = fileWorkerRegistry(directory, () => true);
+		live.claim([entry({ ownerPid: 999_999, shared: true })]);
+		live.claim([entry({ worker_id: "two", shared: true })]);
+		expect(live.find("two")?.appPid).toBe(1234);
+		expect(() => live.claim([entry({ worker_id: "three" })])).toThrow(/already owned by worker "one"/);
+	});
+
 	it("takes over a lock a crashed process left behind", async () => {
 		await writeFile(join(directory, "registry.json"), JSON.stringify({ workers: [] }));
 		const { mkdir, utimes } = await import("node:fs/promises");

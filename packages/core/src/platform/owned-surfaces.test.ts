@@ -7,6 +7,7 @@ import {
 	readOwnedSurfaces,
 	registerOwnedSurface,
 	surfaceCursorTag,
+	surfaceCursorUserData,
 	unregisterOwnedSurface,
 } from "./owned-surfaces.js";
 
@@ -66,5 +67,14 @@ describe("#given cursor identities #when tagged #then each gets a stable nonzero
 		expect(surfaceCursorTag("painter-1")).toBe(tags[0] ?? -1);
 		expect(new Set(tags).size).toBe(16);
 		for (const tag of tags) expect(tag > 0 && tag <= 0x7fffffff).toBe(true);
+	});
+
+	it("keeps the tag in the low 32 bits and marks a context click in bit 32", () => {
+		const tag = surfaceCursorTag("painter-1");
+
+		expect(surfaceCursorUserData(tag, false)).toBe(tag);
+		const marked = surfaceCursorUserData(tag, true);
+		expect(marked % 2 ** 32).toBe(tag);
+		expect(Math.floor(marked / 2 ** 32)).toBe(1);
 	});
 });

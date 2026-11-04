@@ -9,13 +9,16 @@ export interface SharedWorkerEntry {
 	readonly agent_name?: string;
 	readonly parent_agent_name?: string;
 	readonly appPid: number;
+	/** An opencua-owned surface several workers may share, each with its own cursor. */
+	readonly shared?: boolean;
 	/** The opencua-mcp process that assigned it; its exit frees the claim. */
 	readonly ownerPid: number;
 }
 
 /**
  * Assignments shared across server processes, so a subagent whose session runs its own opencua-mcp can act for a
- * worker its coordinator assigned in another one, while an app still belongs to one worker at a time.
+ * worker its coordinator assigned in another one, while an app still belongs to one worker at a time unless it is a
+ * shared opencua-owned surface.
  */
 export interface WorkerRegistry {
 	/** Claims every entry or none: refuses a worker id or app another live process already holds. */
@@ -101,7 +104,8 @@ export function fileWorkerRegistry(directory: string, ownAlive: (pid: number) =>
 					const held = current.find(
 						(other) =>
 							other.ownerPid !== entry.ownerPid &&
-							(other.worker_id === entry.worker_id || other.appPid === entry.appPid),
+							(other.worker_id === entry.worker_id ||
+								(other.appPid === entry.appPid && !(other.shared === true && entry.shared === true))),
 					);
 					if (held !== undefined) {
 						throw new Error(

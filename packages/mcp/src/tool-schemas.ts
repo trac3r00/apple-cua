@@ -410,7 +410,12 @@ const optionalElementIndex = { element_index: elementIndexSchema.optional() };
  * showing) something, so a whole flow can run in one call without guessing sleeps.
  */
 export const runStepSchema = z.discriminatedUnion("type", [
-	z.object({ type: z.literal("click"), ...clickFields, ...stepTargetFields }),
+	z.object({
+		type: z.literal("click"),
+		...clickFields,
+		context: z.boolean().optional().describe("Tool/color pick, re-applied in a shared window."),
+		...stepTargetFields,
+	}),
 	z.object({
 		type: z.literal("perform_secondary_action"),
 		...performSecondaryActionFields,
@@ -530,6 +535,7 @@ export const compactStepSchema = z.object({
 	y: coordinateSchema.optional(),
 	click_count: z.number().int().positive().optional(),
 	mouse_button: z.enum(["left", "right", "middle"]).optional(),
+	context: z.boolean().optional().describe("click: tool/color pick, re-applied in a shared window."),
 	modifiers: modifiersSchema,
 	action: z.string().optional(),
 	value: z.string().optional(),

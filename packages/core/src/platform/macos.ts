@@ -27,6 +27,7 @@ import type {
 	SelectTextOptions,
 } from "../types/index.js";
 import { type RunningAppInfo, collectAppUsage, getRunningMacOSApps } from "./app-list.js";
+import { CursorKeyedObservations } from "./cursor-observations.js";
 import { execFileStdout, execFileStdoutBuffer } from "./exec-util.js";
 import { HostComputer, type HostComputerOptions } from "./host.js";
 import { parseImageDimensions, sniffImageMimeType } from "./image-format.js";
@@ -168,7 +169,7 @@ export class MacOSHostComputer extends HostComputer {
 	private readonly overlay: PointerOverlay;
 	private readonly displayId: number | undefined;
 	private readonly highlightedApps = new Set<number>();
-	private readonly inputObservations = new Map<number, InputObservation>();
+	private readonly inputObservations = new CursorKeyedObservations<InputObservation>((pid) => isOwnedSurfacePid(pid));
 	private observationGeneration = 0;
 	private readonly isLocked: () => boolean;
 
@@ -559,9 +560,10 @@ export class MacOSHostComputer extends HostComputer {
 			return await this.captureAppState(targetPid, options);
 		} catch (error) {
 			if (targetPid === undefined) {
-				for (const pid of this.inputObservations.keys()) {
+				for (const pid of this.inputObservations.pids()) {
 					this.invalidateInputObservation(pid);
 				}
+				this.inputObservations.clear();
 			} else {
 				this.invalidateInputObservation(targetPid);
 			}

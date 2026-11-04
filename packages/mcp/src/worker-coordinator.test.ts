@@ -403,3 +403,31 @@ describe("WorkerCoordinator #given a worker run is pending #when release is requ
 		}
 	});
 });
+
+describe("WorkerCoordinator #given a worker #when it is assigned or observed #then the observation stays bounded", () => {
+	it("hands the worker a 250-element table on assign and caps observe at 250 unless asked otherwise", async () => {
+		const computer = new FakeGuardedComputer();
+		computer.delivery = "background";
+		const session = new GuardedSession(computer);
+		const coordinator = new WorkerCoordinator(session, computer);
+		const requests: Parameters<GuardedSession["observe"]>[0][] = [];
+		const observe = session.observe.bind(session);
+		vi.spyOn(session, "observe").mockImplementation(async (request) => {
+			requests.push(request);
+			return observe(request);
+		});
+		try {
+			await coordinator.assign([{ worker_id: "one", task: "read", app: "Finder" }]);
+			await coordinator.observe("one");
+			await coordinator.observe("one", { maxElements: 40 });
+
+			expect(requests.map(({ maxElements, elementFormat }) => ({ maxElements, elementFormat }))).toEqual([
+				{ maxElements: 250, elementFormat: "table" },
+				{ maxElements: 250, elementFormat: undefined },
+				{ maxElements: 40, elementFormat: undefined },
+			]);
+		} finally {
+			await coordinator.close();
+		}
+	});
+});

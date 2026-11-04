@@ -72,7 +72,9 @@ const periodic = (keys: readonly string[], minOverlap: number): boolean => {
 	return false;
 };
 const diverse = (steps: readonly HistoryStep[]): boolean =>
-	new Set(steps.map((step) => step.app)).size >= 2 || new Set(steps.filter(informative).map(keyOf)).size >= 2;
+	steps.every((step) => step.action === "switch")
+		? new Set(steps.filter(informative).map(keyOf)).size >= 3
+		: new Set(steps.map((step) => step.app)).size >= 2 || new Set(steps.filter(informative).map(keyOf)).size >= 2;
 const cyclicRun = (inner: readonly string[], cycle: readonly string[]): boolean =>
 	contains(Array.from({ length: Math.ceil(inner.length / cycle.length) + 1 }, () => cycle).flat(), inner);
 
@@ -325,6 +327,27 @@ describe("#given a single-app loop of bare clicks and typing #when detecting #th
 			{ app: "Herdr", action: "type", detail: "" },
 		];
 		const result = detectHistorySkillCandidates([{ id: "s", events: [...titled, ...titled].map(event) }]);
+		expect(result.candidates[0]?.occurrences).toBe(2);
+	});
+});
+
+describe("#given someone moving back and forth between apps #when detecting #then it is not suggested as a workflow", () => {
+	it("drops untitled app switches but keeps switches through three titled windows", () => {
+		const toggling: AbstractStep[] = [
+			{ app: "Brave Browser", action: "switch", detail: "" },
+			{ app: "Herdr", action: "switch", detail: "" },
+		];
+		const back = Array.from({ length: 8 }, () => toggling).flat();
+		expect(detectHistorySkillCandidates([{ id: "s", events: back.map(event) }]).candidates).toEqual([]);
+		const visit: AbstractStep[] = [
+			{ app: "Safari", action: "switch", detail: "Invoice" },
+			{ app: "Numbers", action: "switch", detail: "Ledger" },
+			{ app: "Mail", action: "switch", detail: "Reply" },
+		];
+		const noise = event({ app: "Notes", action: "click", detail: "n" }, 0);
+		const result = detectHistorySkillCandidates([
+			{ id: "s", events: [...visit.map(event), noise, ...visit.map(event)] },
+		]);
 		expect(result.candidates[0]?.occurrences).toBe(2);
 	});
 });

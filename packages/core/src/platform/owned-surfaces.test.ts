@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
+import { type Socket, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	isOwnedSurfacePid,
 	readOwnedSurfaces,
 	registerOwnedSurface,
+	sendSurfacePointer,
 	surfaceCursorTag,
 	surfaceCursorUserData,
+	surfaceSocketPath,
 	unregisterOwnedSurface,
 } from "./owned-surfaces.js";
 
@@ -76,5 +79,40 @@ describe("#given cursor identities #when tagged #then each gets a stable nonzero
 		const marked = surfaceCursorUserData(tag, true);
 		expect(marked % 2 ** 32).toBe(tag);
 		expect(Math.floor(marked / 2 ** 32)).toBe(1);
+	});
+});
+
+describe("#given an owned surface's pointer socket #when agent pointer events are sent #then they arrive whole and in order", () => {
+	it("returns false without writing when the surface has no socket, so the caller posts the event", () => {
+		expect(sendSurfacePointer(4242, { tag: 7, context: false, kind: "down", x: 1, y: 2 }, { stateDir })).toBe(false);
+	});
+
+	it("writes one line per event with the cursor tag, context flag, kind and window point", async () => {
+		const clients: Socket[] = [];
+		let received = "";
+		const expected = "7 0 D 10 20\n7 0 G 10.5 20.3\n9 1 U 3 4\n";
+		const done = new Promise<void>((resolve, reject) => {
+			const timer = setTimeout(() => reject(new Error(`only received ${JSON.stringify(received)}`)), 2_000);
+			const server = createServer((client) => {
+				clients.push(client);
+				client.on("data", (chunk) => {
+					received += chunk.toString();
+					if (received.length >= expected.length) {
+						clearTimeout(timer);
+						for (const open of clients) open.destroy();
+						server.close(() => resolve());
+					}
+				});
+			});
+			server.listen(surfaceSocketPath(4242, { stateDir }), () => {
+				sendSurfacePointer(4242, { tag: 7, context: false, kind: "down", x: 10, y: 20 }, { stateDir });
+				sendSurfacePointer(4242, { tag: 7, context: false, kind: "drag", x: 10.46, y: 20.31 }, { stateDir });
+				sendSurfacePointer(4242, { tag: 9, context: true, kind: "up", x: 3, y: 4 }, { stateDir });
+			});
+		});
+
+		await done;
+
+		expect(received).toBe(expected);
 	});
 });

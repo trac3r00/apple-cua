@@ -1,0 +1,104 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { GuardedSession } from "./guarded-session.js";
+import { FakeGuardedComputer } from "./protocol-test-harness.js";
+import { normalizeToolError } from "./tool-errors.js";
+import { WorkerCoordinator } from "./worker-coordinator.js";
+import { type SharedWorkerEntry, fileWorkerRegistry } from "./worker-registry.js";
+
+let directory: string;
+
+beforeEach(async () => {
+	directory = await realpath(await mkdtemp(join(tmpdir(), "opencua-workers-")));
+});
+
+afterEach(async () => {
+	await rm(directory, { recursive: true, force: true });
+});
+
+const entry = (overrides: Partial<SharedWorkerEntry> = {}): SharedWorkerEntry => ({
+	worker_id: "one",
+	task: "read Finder",
+	app: "Finder",
+	appPid: 1234,
+	ownerPid: process.pid,
+	...overrides,
+});
+
+function coordinator(): WorkerCoordinator {
+	const computer = new FakeGuardedComputer();
+	computer.delivery = "background";
+	return new WorkerCoordinator(new GuardedSession(computer), computer, fileWorkerRegistry(directory));
+}
+
+describe("#given the shared worker registry #when processes claim workers #then an app has one owner", () => {
+	it("finds and releases a claim", () => {
+		const registry = fileWorkerRegistry(directory);
+		registry.claim([entry()]);
+		expect(registry.find("one")?.appPid).toBe(1234);
+		registry.release("one");
+		expect(registry.find("one")).toBeUndefined();
+	});
+
+	it("refuses a worker id or app another live process holds, and frees the claims of a process that exited", () => {
+		const live = fileWorkerRegistry(directory, () => true);
+		live.claim([entry({ ownerPid: 999_999 })]);
+		expect(() => live.claim([entry({ worker_id: "two" })])).toThrow(/already owned by worker "one"/);
+		expect(() => live.claim([entry({ appPid: 42 })])).toThrow(/already assigned by another opencua session/);
+		const afterExit = fileWorkerRegistry(directory, (pid) => pid !== 999_999);
+		expect(afterExit.find("one")).toBeUndefined();
+		afterExit.claim([entry({ worker_id: "two" })]);
+		expect(afterExit.find("two")?.ownerPid).toBe(process.pid);
+	});
+
+	it("takes over a lock a crashed process left behind", async () => {
+		await writeFile(join(directory, "registry.json"), JSON.stringify({ workers: [] }));
+		const { mkdir, utimes } = await import("node:fs/promises");
+		await mkdir(join(directory, "registry.lock"));
+		const old = new Date(Date.now() - 60_000);
+		await utimes(join(directory, "registry.lock"), old, old);
+		fileWorkerRegistry(directory).claim([entry()]);
+		expect(fileWorkerRegistry(directory).find("one")?.worker_id).toBe("one");
+	});
+});
+
+describe("#given a worker assigned by one opencua process #when a subagent's own process uses it #then it works there", () => {
+	it("observes it from another coordinator, keeps the claim when that one closes, and forgets it once released", async () => {
+		const parent = coordinator();
+		const subagent = coordinator();
+		try {
+			await parent.assign([{ worker_id: "one", task: "read Finder", app: "Finder", agent_name: "sub" }]);
+
+			const observed = await subagent.observe("one");
+
+			expect(observed.observation_token).toEqual(expect.any(String));
+			expect(observed.cursor_owner.agentName).toBe("sub");
+			await subagent.close();
+			expect(fileWorkerRegistry(directory).find("one")).toBeDefined();
+			parent.release("one");
+			const later = coordinator();
+			await expect(later.observe("one")).rejects.toThrow(/is not assigned/);
+			await later.close();
+		} finally {
+			await parent.close();
+		}
+	});
+});
+
+describe("#given a worker lookup that fails before anything is sent #when the error is reported #then retrying is safe", () => {
+	it.each([
+		['worker "w" is not assigned', "WORKER_NOT_ASSIGNED"],
+		['worker "w" is busy', "WORKER_BUSY"],
+		['app "Finder" is already owned', "WORKER_CONFLICT"],
+		['app "Finder" is already owned by worker "one" in another opencua session', "WORKER_CONFLICT"],
+	])("%s -> %s", (message, code) => {
+		const normalized = normalizeToolError({
+			isError: true,
+			content: [{ type: "text", text: JSON.stringify({ error: message }) }],
+		});
+		const text = normalized.content[0]?.type === "text" ? normalized.content[0].text : "";
+		expect(JSON.parse(text)).toMatchObject({ code, retry: "safe" });
+	});
+});

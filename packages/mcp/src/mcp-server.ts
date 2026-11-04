@@ -62,6 +62,7 @@ import { type McpServerOptions, type ToolsetProfile, resolveServerOptions, serve
 import { registerUtmTools } from "./utm-tools.js";
 import { registerVisualTools } from "./visual-tools.js";
 import { WorkerCoordinator } from "./worker-coordinator.js";
+import { fileWorkerRegistry } from "./worker-registry.js";
 import { registerWorkerTools } from "./worker-tools.js";
 
 export { FULL_ONLY_TOOL_NAMES, IPHONE_TOOL_NAMES, LEAN_TOOL_NAMES, TOOL_NAMES, toolNamesFor } from "./tool-names.js";
@@ -169,7 +170,11 @@ export function createMcpServer(
 		...(options?.extrasTtlMs === undefined ? {} : { ttlMs: options.extrasTtlMs }),
 		...(stopGate === undefined ? {} : { stopSwitch: stopGate }),
 	});
-	const workers = new WorkerCoordinator(session, resolvedComputer);
+	const workers = new WorkerCoordinator(
+		session,
+		resolvedComputer,
+		computer === undefined ? fileWorkerRegistry(join(resolveStateDir(), "workers")) : undefined,
+	);
 	const server = new ComputerMcpServer(
 		session,
 		dockSession,

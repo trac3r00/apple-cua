@@ -57,6 +57,30 @@ function errorMetadata(
 			suggestion: "Observe the app again and use only that snapshot's refs and token.",
 		};
 	}
+	// The coordinator refuses these before any read or input, so nothing was sent and asking again is safe.
+	if (/^(?:app|worker) ".+" is already (?:owned|assigned)/.test(message)) {
+		return {
+			code: "WORKER_CONFLICT",
+			retry: "safe",
+			suggestion:
+				"Nothing was sent. Pick another app or worker id, or release the worker that holds it, then retry.",
+		};
+	}
+	const worker = /^worker ".+" is (not assigned|busy)$/.exec(message);
+	if (worker !== null) {
+		return worker[1] === "busy"
+			? {
+					code: "WORKER_BUSY",
+					retry: "safe",
+					suggestion: "Nothing was sent. Wait for the worker's current run to finish, then retry.",
+				}
+			: {
+					code: "WORKER_NOT_ASSIGNED",
+					retry: "safe",
+					suggestion:
+						"Nothing was sent. Check manage_workers status for the worker id, or have the coordinator assign it, then retry.",
+				};
+	}
 	if (
 		message.includes("Invalid arguments") ||
 		message.includes("Invalid params") ||

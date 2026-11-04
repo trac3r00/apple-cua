@@ -52,6 +52,9 @@ static const NSTimeInterval kIdle = 0.04;
 // Pages read two presses on the same spot within this time as a double click,
 // so a cursor's pick is re-applied only once this has passed since it was hit.
 static const NSTimeInterval kDoubleClick = 0.45;
+// Picks this close together are alternatives (tools of one toolbox, swatches
+// of one palette): pressing one undoes another.
+static const CGFloat kAlternativeDistance = 80;
 
 @interface MuxEvent : NSObject
 @property(nonatomic) MuxKind kind;
@@ -93,9 +96,9 @@ static const NSTimeInterval kDoubleClick = 0.45;
   NSMutableDictionary<NSNumber *, MuxCursor *> *_cursors;
   NSMutableArray<NSNumber *> *_order;
   NSMutableDictionary<NSString *, NSNumber *> *_lastHit;
+  NSMutableArray<NSValue *> *_picks;
   int64_t _holder;
   BOOL _down;
-  int64_t _contextOwner;
   NSTimeInterval _sliceStart;
 }
 
@@ -105,8 +108,43 @@ static const NSTimeInterval kDoubleClick = 0.45;
     _cursors = [NSMutableDictionary dictionary];
     _order = [NSMutableArray array];
     _lastHit = [NSMutableDictionary dictionary];
+    _picks = [NSMutableArray array];
   }
   return self;
+}
+
+// Every pick pressed on the page, oldest first.
+- (void)picked:(NSPoint)point {
+  [_picks addObject:[NSValue valueWithPoint:point]];
+  while (_picks.count > 64) {
+    [_picks removeObjectAtIndex:0];
+  }
+}
+
+// A cursor's pick must be pressed again only if a nearby alternative was
+// pressed after it (or the page never saw it).
+- (BOOL)undone:(NSPoint)pick {
+  for (NSInteger index = (NSInteger)_picks.count - 1; index >= 0; index -= 1) {
+    NSPoint other = _picks[(NSUInteger)index].pointValue;
+    CGFloat distance = hypot(other.x - pick.x, other.y - pick.y);
+    if (distance < 3) {
+      return NO;
+    }
+    if (distance < kAlternativeDistance) {
+      return YES;
+    }
+  }
+  return YES;
+}
+
+- (NSArray<NSValue *> *)undonePicksOf:(MuxCursor *)cursor {
+  NSMutableArray<NSValue *> *undone = [NSMutableArray array];
+  for (NSValue *value in cursor.context) {
+    if ([self undone:value.pointValue]) {
+      [undone addObject:value];
+    }
+  }
+  return undone;
 }
 
 - (MuxCursor *)cursorFor:(int64_t)tag {
@@ -168,11 +206,8 @@ static NSString *SpotKey(NSPoint point) {
 
 // Whether taking the mouse now would re-apply a pick the page would read as a
 // double click.
-- (BOOL)canReplay:(MuxCursor *)cursor now:(NSTimeInterval)now {
-  if (cursor.context.count == 0) {
-    return YES;
-  }
-  for (NSValue *value in cursor.context) {
+- (BOOL)canReplay:(NSArray<NSValue *> *)picks now:(NSTimeInterval)now {
+  for (NSValue *value in picks) {
     NSNumber *hit = _lastHit[SpotKey(value.pointValue)];
     if (hit != nil && now - hit.doubleValue < kDoubleClick) {
       return NO;
@@ -183,20 +218,18 @@ static NSString *SpotKey(NSPoint point) {
 
 - (BOOL)takeOver:(int64_t)tag now:(NSTimeInterval)now {
   MuxCursor *cursor = [self cursorFor:tag];
-  BOOL replay = cursor.context.count > 0 && _contextOwner != tag;
-  if (replay && ![self canReplay:cursor now:now]) {
+  NSArray<NSValue *> *replay = [self undonePicksOf:cursor];
+  if (![self canReplay:replay now:now]) {
     return NO;
   }
   if (_down) {
     self.emit(MuxUp, [self cursorFor:_holder].last);
     _down = NO;
   }
-  if (replay) {
-    for (NSValue *value in cursor.context) {
-      [self press:MuxDown at:value.pointValue now:now];
-      self.emit(MuxUp, value.pointValue);
-    }
-    _contextOwner = tag;
+  for (NSValue *value in replay) {
+    [self press:MuxDown at:value.pointValue now:now];
+    self.emit(MuxUp, value.pointValue);
+    [self picked:value.pointValue];
   }
   _holder = tag;
   _sliceStart = now;
@@ -217,7 +250,7 @@ static NSString *SpotKey(NSPoint point) {
     }
     if (event.kind == MuxDown && event.context) {
       [self remember:event.point in:cursor];
-      _contextOwner = tag;
+      [self picked:event.point];
     }
   } else if (event.kind == MuxUp) {
     if (_down) {
@@ -512,21 +545,42 @@ static int SelfTest(void) {
   };
   at(1, MuxDown, 5, 5, YES, 0.00);
   at(1, MuxUp, 5, 5, YES, 0.00);
-  at(2, MuxDown, 7, 7, YES, 0.01);
-  at(2, MuxUp, 7, 7, YES, 0.01);
+  at(2, MuxDown, 25, 5, YES, 0.01);
+  at(2, MuxUp, 25, 5, YES, 0.01);
   at(1, MuxDown, 50, 50, NO, 0.02);
-  check(@"replay waits out the double click", @"D5,5 U5,5 D7,7 U7,7");
+  check(@"replay waits out the double click", @"D5,5 U5,5 D25,5 U25,5");
   [mux pump:0.50];
   check(@"replay after the double click window", @"D5,5 U5,5 D50,50");
 
   // A new pick of its own still restores the cursor's earlier picks first.
   at(2, MuxDown, 300, 300, NO, 0.60);
   at(2, MuxUp, 300, 300, NO, 0.61);
-  at(1, MuxDown, 9, 9, YES, 0.62);
+  at(1, MuxDown, 45, 5, YES, 0.62);
   [mux pump:1.00];
-  at(1, MuxUp, 9, 9, YES, 1.00);
+  at(1, MuxUp, 45, 5, YES, 1.00);
   check(@"own new pick after another cursor",
-        @"U50,50 D7,7 U7,7 D300,300 U300,300 D5,5 U5,5 D9,9 U9,9");
+        @"U50,50 D25,5 U25,5 D300,300 U300,300 D5,5 U5,5 D45,5 U45,5");
+
+  // Picking a color does not undo the brush: a tool every cursor shares is not
+  // pressed again, only the swatch another cursor replaced.
+  mux = [CursorMux new];
+  mux.emit = ^(MuxKind kind, NSPoint point) {
+    NSString *name = @[ @"D", @"G", @"U", @"M" ][kind];
+    [out addObject:[NSString stringWithFormat:@"%@%.0f,%.0f", name, point.x,
+                                              point.y]];
+  };
+  at(1, MuxDown, 40, 138, YES, 0.00);
+  at(1, MuxUp, 40, 138, YES, 0.00);
+  at(1, MuxDown, 73, 1333, YES, 0.00);
+  at(1, MuxUp, 73, 1333, YES, 0.00);
+  at(2, MuxDown, 40, 138, YES, 0.01);
+  at(2, MuxUp, 40, 138, YES, 0.01);
+  at(2, MuxDown, 137, 1333, YES, 0.01);
+  at(2, MuxUp, 137, 1333, YES, 0.01);
+  at(1, MuxDown, 500, 500, NO, 0.60);
+  check(@"only replaced picks are pressed again",
+        @"D40,138 U40,138 D73,1333 U73,1333 D40,138 U40,138 D137,1333 "
+        @"U137,1333 D73,1333 U73,1333 D500,500");
 
   // Hover of a cursor that does not hold the mouse is not sent.
   at(2, MuxMove, 400, 400, NO, 1.10);

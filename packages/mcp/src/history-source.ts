@@ -4,8 +4,10 @@ import {
 	historyPaths,
 	readHistorySettings,
 	readHistoryState,
+	readSkillDescriptions,
 	saveHistorySkillDraft,
 	segmentIdForTimestamp,
+	skillDescriptionsEnabled,
 	suggestHistorySkills,
 	writeHistorySettings,
 	writeHistoryState,
@@ -53,6 +55,8 @@ export function createHistorySource(options: HistorySourceOptions): HistoryToolS
 			}
 		},
 		suggestSkills: ({ limit }) => suggestHistorySkills(paths.root, { limit }),
+		skillDescriptions: async () =>
+			(await skillDescriptionsEnabled(paths.root)) ? await readSkillDescriptions(paths.root) : {},
 		saveSkill: (draft) =>
 			saveHistorySkillDraft(options.skillsDirectory ?? join(homedir(), ".agents", "skills"), draft),
 	};

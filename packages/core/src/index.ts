@@ -203,6 +203,17 @@ export {
 	listHistorySegments,
 	parseHistoryDuration,
 } from "./passive-memory/history-management.js";
+export {
+	SKILL_DESCRIPTIONS_FILE,
+	type SkillDescription,
+	type SkillDescriptionGenerator,
+	describeSkillCandidates,
+	parseSkillDescription,
+	readSkillDescriptions,
+	setSkillDescriptionsEnabled,
+	skillDescriptionPrompt,
+	skillDescriptionsEnabled,
+} from "./passive-memory/history-skill-descriptions.js";
 export { resolveHistoryRecorderBinary } from "./passive-memory/history-recorder-binary.js";
 export {
 	type HistorySegmentEvents,

@@ -147,6 +147,25 @@ describe("#given repeated recorded workflows #when suggest_skills is called #the
 	});
 });
 
+describe("#given a description a small model wrote earlier #when suggest_skills is called #then the candidate carries it", () => {
+	it("returns the model's name, title and summary next to the raw steps", async () => {
+		const fake = new FakeHistory();
+		const id = (await fake.suggestSkills({ limit: 1 })).candidates[0]?.id ?? "";
+		const description = {
+			name: "invoice-to-ledger",
+			title: "Move an invoice into the ledger",
+			summary: "Opens the invoice, the ledger and a mail draft in turn.",
+			whenToUse: "When an invoice arrives.",
+		};
+		const described = Object.assign(fake, { skillDescriptions: async () => ({ [id]: description }) });
+		const client = await connect(described);
+		const result = payload(await client.callTool({ name: "cua_history_suggest_skills", arguments: { limit: 1 } }));
+		expect(result["candidates"]).toEqual([
+			expect.objectContaining({ proposedName: "invoice-to-ledger", description, steps: expect.any(Array) }),
+		]);
+	});
+});
+
 describe("#given an approved draft #when save_skill is called #then the source saves it and returns the path", () => {
 	it("saves valid drafts and rejects an invalid name", async () => {
 		const fake = new FakeHistory();

@@ -107,8 +107,9 @@ static NSColor *ColorFromHex(NSString *hex) {
 @end
 
 @implementation SurfaceWindow
-// Agent events carry a nonzero source user data tag and draw that agent's cursor. The window sits one level below
-// normal windows, so agent input can never bring it over the person's work; the person's own click raises it.
+// Agent events carry a nonzero source user data tag and draw that agent's
+// cursor. The window sits one level below normal windows, so agent input can
+// never bring it over the person's work; the person's own click raises it.
 - (void)sendEvent:(NSEvent *)event {
   NSEventType type = event.type;
   BOOL pointer =
@@ -118,7 +119,8 @@ static NSColor *ColorFromHex(NSString *hex) {
   int64_t owner =
       cg == NULL ? 0 : CGEventGetIntegerValueField(cg, kCGEventSourceUserData);
   if (owner == 0) {
-    // The person clicked it: from now on it is an ordinary window they chose to look at.
+    // The person clicked it: from now on it is an ordinary window they chose to
+    // look at.
     if (type == NSEventTypeLeftMouseDown && self.level < NSNormalWindowLevel) {
       self.level = NSNormalWindowLevel;
     }
@@ -184,9 +186,11 @@ int main(int argc, const char *argv[]) {
         [[SurfaceWebView alloc] initWithFrame:root.bounds
                                 configuration:[WKWebViewConfiguration new]];
     web.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    // WebKit stops painting a window it believes is covered; the surface sits behind the person's windows on purpose,
-    // so keep it rendering or agents would capture a blank page.
-    SEL occlusion = NSSelectorFromString(@"_setWindowOcclusionDetectionEnabled:");
+    // WebKit stops painting a window it believes is covered; the surface sits
+    // behind the person's windows on purpose, so keep it rendering or agents
+    // would capture a blank page.
+    SEL occlusion =
+        NSSelectorFromString(@"_setWindowOcclusionDetectionEnabled:");
     if ([web respondsToSelector:occlusion]) {
       ((void (*)(id, SEL, BOOL))objc_msgSend)(web, occlusion, NO);
     }
@@ -199,9 +203,16 @@ int main(int argc, const char *argv[]) {
     [root addSubview:layer];
     window.cursorLayer = layer;
     [web loadRequest:[NSURLRequest requestWithURL:url]];
-    // Shown behind every other window and never activated, so it never covers what the person is doing; they bring it
-		// forward themselves to watch.
-		window.level = NSNormalWindowLevel - 1;
+    // Shown behind every other window and never activated, so it never covers
+    // what the person is doing; they bring it forward themselves to watch.
+    window.level = NSNormalWindowLevel - 1;
+    // Follow the person across Spaces (including full-screen ones) without ever
+    // switching Spaces for them; otherwise a Space change takes the surface off
+    // screen and every agent working in it loses its window mid-task.
+    window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                NSWindowCollectionBehaviorStationary |
+                                NSWindowCollectionBehaviorIgnoresCycle |
+                                NSWindowCollectionBehaviorFullScreenAuxiliary;
     [window orderBack:nil];
     [NSTimer
         scheduledTimerWithTimeInterval:1.0

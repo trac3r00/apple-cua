@@ -64,6 +64,9 @@ static const NSTimeInterval kIdle = 0.04;
 // Measured on this side; the page reads its own clock and can fall behind
 // under load, so the margin is wide.
 static const NSTimeInterval kDoubleClick = 1.0;
+// With paced input, a press the page has not reported within this time no
+// longer holds the next one back, so a page that never answers cannot stall.
+static const NSTimeInterval kAckTimeout = 2.0;
 // Picks in one row band (a palette, a toolbar) or one narrow column (a tool
 // column) are alternatives: pressing one undoes another.
 static BOOL Alternatives(NSPoint a, NSPoint b) {
@@ -108,6 +111,12 @@ static BOOL Alternatives(NSPoint a, NSPoint b) {
        context:(BOOL)context
            now:(NSTimeInterval)now;
 - (void)pump:(NSTimeInterval)now;
+// The page reported that it handled a press (down) or release at this point.
+- (void)acked:(BOOL)down at:(NSPoint)point now:(NSTimeInterval)now;
+// Paced: a cursor's next press waits until the page has handled the presses
+// and releases already sent, and double clicks are timed from when the page
+// handled a press. A busy page then never falls behind the cursors.
+@property(nonatomic) BOOL paced;
 @end
 
 @implementation CursorMux {
@@ -115,6 +124,9 @@ static BOOL Alternatives(NSPoint a, NSPoint b) {
   NSMutableArray<NSNumber *> *_order;
   NSMutableArray<NSValue *> *_hitPoints;
   NSMutableArray<NSNumber *> *_hitTimes;
+  NSMutableArray<NSNumber *> *_hitAcked;
+  NSInteger _awaiting;
+  NSTimeInterval _lastProgress;
   NSMutableArray<NSValue *> *_picks;
   int64_t _holder;
   BOOL _down;
@@ -128,6 +140,7 @@ static BOOL Alternatives(NSPoint a, NSPoint b) {
     _order = [NSMutableArray array];
     _hitPoints = [NSMutableArray array];
     _hitTimes = [NSMutableArray array];
+    _hitAcked = [NSMutableArray array];
     _picks = [NSMutableArray array];
   }
   return self;
@@ -183,16 +196,48 @@ static BOOL Alternatives(NSPoint a, NSPoint b) {
 // tool a pixel or two apart.
 static const CGFloat kSameSpot = 7;
 
+- (void)send:(MuxKind)kind at:(NSPoint)point now:(NSTimeInterval)now {
+  if (self.paced && (kind == MuxDown || kind == MuxUp)) {
+    _awaiting += 1;
+    _lastProgress = now;
+  }
+  self.emit(kind, point);
+}
+
 - (void)press:(MuxKind)kind at:(NSPoint)point now:(NSTimeInterval)now {
   if (kind == MuxDown) {
     [_hitPoints addObject:[NSValue valueWithPoint:point]];
     [_hitTimes addObject:@(now)];
+    [_hitAcked addObject:@(!self.paced)];
     while (_hitPoints.count > 64) {
       [_hitPoints removeObjectAtIndex:0];
       [_hitTimes removeObjectAtIndex:0];
+      [_hitAcked removeObjectAtIndex:0];
     }
   }
-  self.emit(kind, point);
+  [self send:kind at:point now:now];
+}
+
+- (void)acked:(BOOL)down at:(NSPoint)point now:(NSTimeInterval)now {
+  _awaiting = MAX(0, _awaiting - 1);
+  _lastProgress = now;
+  if (!down) {
+    return;
+  }
+  for (NSUInteger index = 0; index < _hitPoints.count; index += 1) {
+    NSPoint hit = _hitPoints[index].pointValue;
+    if (!_hitAcked[index].boolValue &&
+        hypot(hit.x - point.x, hit.y - point.y) < 4) {
+      _hitTimes[index] = @(now);
+      _hitAcked[index] = @YES;
+      return;
+    }
+  }
+}
+
+// Whether the next press may go out now.
+- (BOOL)ready:(NSTimeInterval)now {
+  return !self.paced || _awaiting == 0 || now - _lastProgress > kAckTimeout;
 }
 
 - (void)remember:(NSPoint)point in:(MuxCursor *)cursor {
@@ -233,8 +278,11 @@ static const CGFloat kSameSpot = 7;
 - (BOOL)hitRecently:(NSPoint)point now:(NSTimeInterval)now {
   for (NSUInteger index = 0; index < _hitPoints.count; index += 1) {
     NSPoint hit = _hitPoints[index].pointValue;
-    if (hypot(hit.x - point.x, hit.y - point.y) < kSameSpot &&
-        now - _hitTimes[index].doubleValue < kDoubleClick) {
+    if (hypot(hit.x - point.x, hit.y - point.y) >= kSameSpot) {
+      continue;
+    }
+    NSTimeInterval age = now - _hitTimes[index].doubleValue;
+    if (age < (_hitAcked[index].boolValue ? kDoubleClick : kAckTimeout)) {
       return YES;
     }
   }
@@ -259,12 +307,12 @@ static const CGFloat kSameSpot = 7;
     return NO;
   }
   if (_down) {
-    self.emit(MuxUp, [self cursorFor:_holder].last);
+    [self send:MuxUp at:[self cursorFor:_holder].last now:now];
     _down = NO;
   }
   for (NSValue *value in replay) {
     [self press:MuxDown at:value.pointValue now:now];
-    self.emit(MuxUp, value.pointValue);
+    [self send:MuxUp at:value.pointValue now:now];
     [self picked:value.pointValue];
   }
   _holder = tag;
@@ -298,7 +346,7 @@ static const CGFloat kSameSpot = 7;
     if (event.kind == MuxDown) {
       [self press:MuxDown at:event.point now:now];
     } else {
-      self.emit(MuxDrag, event.point);
+      [self send:MuxDrag at:event.point now:now];
     }
     if (event.kind == MuxDown && event.context) {
       [self remember:event.point in:cursor];
@@ -306,11 +354,11 @@ static const CGFloat kSameSpot = 7;
     }
   } else if (event.kind == MuxUp) {
     if (_down) {
-      self.emit(MuxUp, event.point);
+      [self send:MuxUp at:event.point now:now];
       _down = NO;
     }
   } else {
-    self.emit(MuxMove, event.point);
+    [self send:MuxMove at:event.point now:now];
   }
   cursor.last = event.point;
   cursor.hasLast = YES;
@@ -361,6 +409,18 @@ static const CGFloat kSameSpot = 7;
 - (void)pump:(NSTimeInterval)now {
   [self absorbPicksInEffect:now];
   for (;;) {
+    if (![self ready:now]) {
+      // Only the press already going on may continue: its drags and release.
+      MuxCursor *current = _holder == 0 ? nil : _cursors[@(_holder)];
+      MuxEvent *next = current.pending.firstObject;
+      if (_down && next != nil &&
+          (next.kind == MuxDrag || next.kind == MuxUp)) {
+        [current.pending removeObjectAtIndex:0];
+        [self deliver:next for:_holder now:now];
+        continue;
+      }
+      return;
+    }
     MuxCursor *holder = _holder == 0 ? nil : _cursors[@(_holder)];
     BOOL others = [self othersWaitingBesides:_holder];
     BOOL keep =
@@ -556,6 +616,36 @@ static BOOL ParseAgentLine(const char *line, int64_t *tag, BOOL *context,
 
 static AgentChannel *gAgentChannel;
 
+// Tells the window each time its page handled a press or a release, so the
+// cursors' input never runs ahead of a busy page. It only reports; it does not
+// change what the page does with the input.
+static NSString *const kPageAckScript =
+    @"(function(){function r(k,e){try{webkit.messageHandlers.opencuaInput."
+    @"postMessage([k,e.clientX,e.clientY]);}catch(_){}}"
+    @"addEventListener('pointerdown',function(e){r('d',e);},true);"
+    @"addEventListener('pointerup',function(e){r('u',e);},true);})();";
+
+@interface PageAck : NSObject <WKScriptMessageHandler>
+@property(nonatomic, weak) NSWindow *window;
+@property(nonatomic, weak) WKWebView *web;
+@property(nonatomic, copy) void (^handled)(BOOL down, NSPoint location);
+@end
+
+@implementation PageAck
+- (void)userContentController:(WKUserContentController *)controller
+      didReceiveScriptMessage:(WKScriptMessage *)message {
+  NSArray *body = [message.body isKindOfClass:NSArray.class] ? message.body : nil;
+  WKWebView *web = self.web;
+  if (body.count != 3 || web == nil || ![body[1] isKindOfClass:NSNumber.class] ||
+      ![body[2] isKindOfClass:NSNumber.class]) {
+    return;
+  }
+  NSPoint client = NSMakePoint([body[1] doubleValue], [body[2] doubleValue]);
+  NSPoint location = [web convertPoint:client toView:nil];
+  self.handled([body[0] isEqual:@"d"], location);
+}
+@end
+
 @interface CursorMark : NSObject
 @property(nonatomic) NSPoint point;
 @property(nonatomic) NSTimeInterval seen;
@@ -636,6 +726,8 @@ static NSColor *ColorFromHex(NSString *hex) {
          kind:(MuxKind)kind
            at:(NSPoint)location
       context:(BOOL)context;
+@property(nonatomic) BOOL paced;
+- (void)pageHandled:(BOOL)down at:(NSPoint)location;
 @end
 
 @implementation SurfaceWindow
@@ -670,6 +762,10 @@ static NSColor *ColorFromHex(NSString *hex) {
   [self agent:owner kind:kind at:event.locationInWindow context:context];
 }
 
+- (void)pageHandled:(BOOL)down at:(NSPoint)location {
+  [self.mux acked:down at:location now:NSProcessInfo.processInfo.systemUptime];
+}
+
 // Draws the agent's cursor where its input landed and merges that input with
 // every other cursor's into the page's one mouse.
 - (void)agent:(int64_t)owner
@@ -687,6 +783,7 @@ static NSColor *ColorFromHex(NSString *hex) {
   }
   if (self.mux == nil) {
     self.mux = [CursorMux new];
+    self.mux.paced = self.paced;
     __weak SurfaceWindow *weakSelf = self;
     self.mux.emit = ^(MuxKind merged, NSPoint point) {
       [weakSelf deliver:merged at:point];
@@ -871,6 +968,41 @@ static int SelfTest(void) {
   // already in effect.
   check(@"nearby pick after the double click margin", @"D89,1317 U89,1317");
 
+  // Paced: the next press waits until the page handled the previous ones.
+  reset();
+  mux.paced = YES;
+  at(1, MuxDown, 89, 1317, YES, 0.00);
+  at(1, MuxUp, 89, 1317, YES, 0.00);
+  at(1, MuxDown, 100, 100, NO, 0.01);
+  at(1, MuxDrag, 110, 100, NO, 0.02);
+  check(@"paced: the stroke waits for the page", @"D89,1317 U89,1317");
+  [mux acked:YES at:NSMakePoint(89, 1317) now:0.60];
+  [mux acked:NO at:NSMakePoint(89, 1317) now:0.61];
+  [mux pump:0.62];
+  check(@"paced: the stroke goes once the page caught up",
+        @"D100,100 G110,100");
+  at(1, MuxUp, 110, 100, NO, 0.63);
+  check(@"paced: a press already going on finishes", @"U110,100");
+
+  // Paced double clicks are timed from when the page handled the press.
+  at(2, MuxDown, 105, 1317, YES, 0.70);
+  at(2, MuxUp, 105, 1317, YES, 0.70);
+  [mux acked:YES at:NSMakePoint(100, 100) now:0.70];
+  [mux acked:NO at:NSMakePoint(110, 100) now:0.70];
+  [mux pump:0.71];
+  check(@"paced: the next cursor's pick", @"D105,1317 U105,1317");
+  [mux acked:YES at:NSMakePoint(105, 1317) now:0.80];
+  [mux acked:NO at:NSMakePoint(105, 1317) now:0.80];
+  at(1, MuxDown, 200, 200, NO, 1.40);
+  check(@"paced: the old pick waits a second after the page handled it",
+        @"");
+  [mux pump:1.70];
+  check(@"paced: then it is re-applied", @"D89,1317 U89,1317");
+
+  // A page that never answers does not stall the cursors.
+  [mux pump:3.80];
+  check(@"paced: no answer for two seconds lets input go", @"D200,200");
+
   // Lines of the agent pointer channel.
   {
     int64_t tag = 0;
@@ -939,9 +1071,24 @@ int main(int argc, const char *argv[]) {
         [[NSView alloc] initWithFrame:((NSView *)window.contentView).bounds];
     root.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     window.contentView = root;
+    WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
+    PageAck *ack = [PageAck new];
+    [configuration.userContentController
+        addUserScript:[[WKUserScript alloc]
+                            initWithSource:kPageAckScript
+                             injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                          forMainFrameOnly:YES]];
+    [configuration.userContentController addScriptMessageHandler:ack
+                                                            name:@"opencuaInput"];
     SurfaceWebView *web =
         [[SurfaceWebView alloc] initWithFrame:root.bounds
-                                configuration:[WKWebViewConfiguration new]];
+                                configuration:configuration];
+    ack.web = web;
+    __weak SurfaceWindow *ackTarget = window;
+    ack.handled = ^(BOOL down, NSPoint location) {
+      [ackTarget pageHandled:down at:location];
+    };
+    window.paced = YES;
     web.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     // WebKit stops painting a window it believes is covered; the surface sits
     // behind the person's windows on purpose, so keep it rendering or agents

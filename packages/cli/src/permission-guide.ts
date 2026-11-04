@@ -23,6 +23,11 @@ export interface GrantDependencies {
 	/** Shows macOS's dialogs for the helper; an Automation dialog blocks until it is answered. */
 	readonly request: (kinds: readonly string[]) => PermissionRequestAnswer | undefined;
 	readonly openUrl: (url: string) => Promise<boolean>;
+	/**
+	 * Clears the helper's own earlier decision for a TCC service. macOS shows no Screen Recording dialog, and lists
+	 * nothing to switch on, while an older decision (a past Deny, an earlier build) is on record.
+	 */
+	readonly resetDecision?: (service: "ScreenCapture") => void;
 	/** Re-checks until `granted` holds or the person skips; true when it holds. */
 	readonly waitFor: (granted: () => boolean) => Promise<boolean>;
 	readonly print: (text: string) => void;
@@ -97,6 +102,7 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 		readonly pane: string;
 		readonly url: string;
 		readonly kind: string;
+		readonly tccService?: "ScreenCapture";
 		readonly why: string;
 		readonly has: (current: HelperPermissions | undefined) => boolean;
 	}[] = [];
@@ -114,6 +120,7 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 			pane: "Screen & System Audio Recording",
 			url: PRIVACY_PANES.screenRecording,
 			kind: "screen-recording",
+			tccService: "ScreenCapture",
 			why: "take screenshots of app windows",
 			has: (current: HelperPermissions | undefined) => current?.screenRecording === true,
 		},
@@ -147,6 +154,9 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 		}
 		deps.print(`\n${grant.label} lets ${NAME} ${grant.why}.`);
 		deps.print(`  macOS shows a dialog for ${NAME}: choose Open System Settings, then switch on ${NAME}.`);
+		if (grant.tccService !== undefined) {
+			deps.resetDecision?.(grant.tccService);
+		}
 		deps.request([grant.kind]);
 		await open(grant.url, grant.pane);
 		deps.print(waiting);

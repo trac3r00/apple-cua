@@ -12,6 +12,7 @@ import { notificationsEnabled, postNotification } from "./notify.js";
 import { createRunStepDriver } from "./step-actions.js";
 import type { ToolResult } from "./tool-result.js";
 import type { RunStep } from "./tool-schemas.js";
+import type { WorkerRegistry } from "./worker-registry.js";
 
 export type WorkerAssignmentInput = {
 	readonly worker_id: string;
@@ -114,12 +115,14 @@ export class WorkerControlRefusal extends Error {
 export class WorkerCoordinator {
 	private readonly sessionId = randomUUID();
 	private readonly workers = new Map<string, WorkerState>();
+	private readonly adopted = new Set<string>();
 	private attendedTail: Promise<void> = Promise.resolve();
 	private closed = false;
 
 	constructor(
 		private readonly session: GuardedSession,
 		private readonly computer: GuardedComputerInterface,
+		private readonly registry?: WorkerRegistry,
 	) {
 		// The shared session owns token validation and per-app mutation queues.
 	}
@@ -146,6 +149,17 @@ export class WorkerCoordinator {
 			pids.add(pid);
 		}
 
+		this.registry?.claim(
+			resolved.map(({ assignment, pid }) => ({
+				worker_id: assignment.worker_id,
+				task: assignment.task,
+				app: assignment.app,
+				...(assignment.agent_name === undefined ? {} : { agent_name: assignment.agent_name }),
+				...(assignment.parent_agent_name === undefined ? {} : { parent_agent_name: assignment.parent_agent_name }),
+				appPid: pid,
+				ownerPid: process.pid,
+			})),
+		);
 		const provisional = resolved.map(({ assignment, pid }) => {
 			const worker: WorkerState = {
 				assignment: {
@@ -172,7 +186,14 @@ export class WorkerCoordinator {
 		});
 		try {
 			const settled = await Promise.allSettled(
-				provisional.map(async (worker) => ({ worker, observed: await this.observeState(worker, {}) })),
+				provisional.map(async (worker) => ({
+					worker,
+					observed: await this.observeState(worker, {
+						// A bounded table, not every worker's full tree: a worker that needs more observes again.
+						maxElements: 250,
+						elementFormat: "table",
+					}),
+				})),
 			);
 			// Keep every app claimed until all sibling reads finish, even when one fails.
 			const observations = settled.map((outcome) => {
@@ -209,6 +230,7 @@ export class WorkerCoordinator {
 		} catch (error: unknown) {
 			for (const worker of provisional) {
 				this.workers.delete(worker.assignment.worker_id);
+				this.registry?.release(worker.assignment.worker_id);
 			}
 			throw error;
 		}
@@ -216,7 +238,7 @@ export class WorkerCoordinator {
 
 	async observe(workerId: string, options: WorkerObservationOptions = {}): Promise<WorkerObservation> {
 		this.assertOpen();
-		const worker = this.workers.get(workerId);
+		const worker = this.lookup(workerId);
 		if (worker === undefined) {
 			throw new Error(`worker "${workerId}" is not assigned`);
 		}
@@ -229,7 +251,10 @@ export class WorkerCoordinator {
 		worker.busy = true;
 		worker.assignment = { ...worker.assignment, observation_token: undefined };
 		try {
-			const result = await this.observeState(worker, options);
+			const result = await this.observeState(worker, {
+				maxElements: 250,
+				...options,
+			});
 			worker.assignment = {
 				...worker.assignment,
 				observation_token: result.observation_token,
@@ -266,7 +291,7 @@ export class WorkerCoordinator {
 
 	release(workerId: string): void {
 		this.assertOpen();
-		const worker = this.workers.get(workerId);
+		const worker = this.lookup(workerId);
 		if (worker === undefined) {
 			throw new Error(`worker "${workerId}" is not assigned`);
 		}
@@ -274,6 +299,8 @@ export class WorkerCoordinator {
 			throw new Error(`worker "${workerId}" is busy`);
 		}
 		this.workers.delete(workerId);
+		this.adopted.delete(workerId);
+		this.registry?.release(workerId);
 	}
 
 	/** Take Over: cancel the worker's in-flight run between guarded steps and refuse new runs until resume. */
@@ -313,7 +340,7 @@ export class WorkerCoordinator {
 		executionOptions: RunControl = {},
 	): Promise<WorkerRunResult> {
 		this.assertOpen();
-		const worker = this.workers.get(workerId);
+		const worker = this.lookup(workerId);
 		if (worker === undefined) {
 			throw new Error(`worker "${workerId}" is not assigned`);
 		}
@@ -412,13 +439,48 @@ export class WorkerCoordinator {
 
 	async close(): Promise<void> {
 		this.closed = true;
+		for (const workerId of this.workers.keys()) {
+			if (!this.adopted.has(workerId)) this.registry?.release(workerId);
+		}
 		this.workers.clear();
 		await this.session.close();
 	}
 
+	/** A worker this process assigned, or one another opencua process assigned that this one now acts for. */
+	private lookup(workerId: string): WorkerState | undefined {
+		const local = this.workers.get(workerId);
+		const shared = local === undefined ? this.registry?.find(workerId) : undefined;
+		if (shared === undefined) return local;
+		const worker: WorkerState = {
+			assignment: {
+				worker_id: shared.worker_id,
+				task: shared.task,
+				app: shared.app,
+				...(shared.agent_name === undefined ? {} : { agent_name: shared.agent_name }),
+				...(shared.parent_agent_name === undefined ? {} : { parent_agent_name: shared.parent_agent_name }),
+				cursor_id: randomUUID(),
+				cursor_owner: {
+					agentName: shared.agent_name ?? shared.worker_id,
+					sessionId: this.sessionId,
+					...(shared.parent_agent_name === undefined ? {} : { parentAgentName: shared.parent_agent_name }),
+				},
+				observation_token: undefined,
+				observation: undefined,
+			},
+			pid: shared.appPid,
+			busy: false,
+			control: "running",
+			activeRun: undefined,
+			lastRun: undefined,
+		};
+		this.workers.set(workerId, worker);
+		this.adopted.add(workerId);
+		return worker;
+	}
+
 	private controlled(workerId: string): WorkerState {
 		this.assertOpen();
-		const worker = this.workers.get(workerId);
+		const worker = this.lookup(workerId);
 		if (worker === undefined) {
 			throw new Error(`worker "${workerId}" is not assigned`);
 		}

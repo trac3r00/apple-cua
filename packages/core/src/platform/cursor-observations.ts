@@ -4,6 +4,8 @@ import { currentCursorIdentity } from "../computer/cursor-scope.js";
  * The latest observation of each app. An app that `shared` accepts (an opencua-owned surface) keeps one observation per
  * acting cursor, so agents sharing that window do not replace each other's observation.
  */
+const MAX_ENTRIES = 256;
+
 export class CursorKeyedObservations<T> {
 	private readonly entries = new Map<number | string, { readonly pid: number; readonly value: T }>();
 
@@ -18,8 +20,13 @@ export class CursorKeyedObservations<T> {
 		return this.entries.get(this.key(pid))?.value;
 	}
 
+	/** Keeps the most recent entries only, so cursors that came and went do not pile up. */
 	set(pid: number, value: T): void {
-		this.entries.set(this.key(pid), { pid, value });
+		const key = this.key(pid);
+		this.entries.delete(key);
+		this.entries.set(key, { pid, value });
+		const oldest = this.entries.keys().next();
+		if (this.entries.size > MAX_ENTRIES && oldest.done !== true) this.entries.delete(oldest.value);
 	}
 
 	delete(pid: number): void {

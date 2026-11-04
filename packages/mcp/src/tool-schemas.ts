@@ -535,6 +535,7 @@ export const compactStepSchema = z.object({
 	y: coordinateSchema.optional(),
 	click_count: z.number().int().positive().optional(),
 	mouse_button: z.enum(["left", "right", "middle"]).optional(),
+	context: z.boolean().optional().describe("click: tool/color pick, re-applied in a shared window."),
 	modifiers: modifiersSchema,
 	action: z.string().optional(),
 	value: z.string().optional(),

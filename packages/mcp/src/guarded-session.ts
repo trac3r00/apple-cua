@@ -2598,10 +2598,15 @@ export class GuardedSession {
 			this.reusableReads.delete(this.laneKey(pid));
 			return;
 		}
+		const now = Date.now();
+		// Cursors on a shared surface each leave a read behind; one past its reuse window is never taken again.
+		for (const [key, read] of this.reusableReads) {
+			if (now - read.at > READ_REUSE_MILLISECONDS) this.reusableReads.delete(key);
+		}
 		this.reusableReads.set(this.laneKey(pid), {
 			observation,
 			elements: new Map(state.elements.map((element) => [element.id, element] as const)),
-			at: Date.now(),
+			at: now,
 		});
 	}
 

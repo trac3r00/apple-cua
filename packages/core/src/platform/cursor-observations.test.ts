@@ -20,4 +20,12 @@ describe("#given observations of a shared surface and an ordinary app #when curs
 		expect(withCursorIdentity("painter-1", () => store.get(7))).toBeUndefined();
 		expect(withCursorIdentity("painter-2", () => store.get(7))).toBe("right");
 	});
+
+	it("keeps only the most recent cursors, so workers that came and went do not pile up", () => {
+		const store = new CursorKeyedObservations<number>(() => true);
+		for (let index = 0; index < 300; index += 1) withCursorIdentity(`painter-${index}`, () => store.set(7, index));
+
+		expect(withCursorIdentity("painter-0", () => store.get(7))).toBeUndefined();
+		expect(withCursorIdentity("painter-299", () => store.get(7))).toBe(299);
+	});
 });

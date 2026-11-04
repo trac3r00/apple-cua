@@ -115,7 +115,9 @@ static const NSUInteger kMaxContextClicks = 4;
       _down = NO;
     }
     if (!_down) {
-      if (!context && cursor.context.count > 0 && _contextOwner != tag) {
+      // Restore this cursor's own picks first, also before a new pick of its
+      // own: the page may hold another cursor's tool.
+      if (cursor.context.count > 0 && _contextOwner != tag) {
         for (NSValue *value in cursor.context) {
           self.emit(MuxDown, value.pointValue);
           self.emit(MuxUp, value.pointValue);
@@ -347,6 +349,15 @@ static int SelfTest(void) {
   [mux cursor:1 kind:MuxUp at:NSMakePoint(60, 50) context:NO];
   [mux cursor:2 kind:MuxMove at:NSMakePoint(310, 300) context:NO];
   check(@"hover while pressed", @"U60,50 M310,300");
+
+  // A new pick of its own still restores the cursor's earlier picks first.
+  [mux cursor:2 kind:MuxDown at:NSMakePoint(300, 300) context:NO];
+  [mux cursor:2 kind:MuxUp at:NSMakePoint(300, 300) context:NO];
+  [mux cursor:1 kind:MuxDown at:NSMakePoint(9, 9) context:YES];
+  [mux cursor:1 kind:MuxUp at:NSMakePoint(9, 9) context:YES];
+  [mux cursor:1 kind:MuxDown at:NSMakePoint(70, 70) context:NO];
+  check(@"own new pick after another cursor",
+        @"D7,7 U7,7 D300,300 U300,300 D5,5 U5,5 D9,9 U9,9 D70,70");
 
   if (failures == 0) {
     printf("SELF-TEST OK\n");

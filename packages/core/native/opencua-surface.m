@@ -51,16 +51,26 @@ typedef NS_ENUM(NSInteger, MuxKind) {
 };
 
 static const NSUInteger kMaxContextClicks = 4;
-// How long a cursor keeps the page's one mouse before a waiting cursor gets it.
-static const NSTimeInterval kSlice = 0.12;
+// How long a cursor keeps the page's one mouse, stroke after stroke, before a
+// waiting cursor gets it. A stroke is never cut: the mouse changes hands only
+// between strokes, so a cursor's picks are re-applied about once per slice.
+static const NSTimeInterval kSlice = 1.0;
+// A holder whose press has had no input for this long is treated as stuck.
+static const NSTimeInterval kStuck = 0.5;
 // A holder with no input for this long gives the mouse up to a waiting cursor.
 static const NSTimeInterval kIdle = 0.04;
 // Pages read two presses on the same spot within this time as a double click,
 // so a cursor's pick is re-applied only once this has passed since it was hit.
-static const NSTimeInterval kDoubleClick = 0.45;
-// Picks this close together are alternatives (tools of one toolbox, swatches
-// of one palette): pressing one undoes another.
-static const CGFloat kAlternativeDistance = 80;
+// Measured on this side; the page reads its own clock and can fall behind
+// under load, so the margin is wide.
+static const NSTimeInterval kDoubleClick = 1.0;
+// Picks in one row band (a palette, a toolbar) or one narrow column (a tool
+// column) are alternatives: pressing one undoes another.
+static BOOL Alternatives(NSPoint a, NSPoint b) {
+  CGFloat dx = fabs(a.x - b.x);
+  CGFloat dy = fabs(a.y - b.y);
+  return dy <= 24 || (dx <= 30 && dy <= 200);
+}
 
 @interface MuxEvent : NSObject
 @property(nonatomic) MuxKind kind;
@@ -140,7 +150,7 @@ static const CGFloat kAlternativeDistance = 80;
     if (distance < 3) {
       return NO;
     }
-    if (distance < kAlternativeDistance) {
+    if (Alternatives(other, pick)) {
       return YES;
     }
   }
@@ -353,10 +363,11 @@ static const CGFloat kSameSpot = 7;
   for (;;) {
     MuxCursor *holder = _holder == 0 ? nil : _cursors[@(_holder)];
     BOOL others = [self othersWaitingBesides:_holder];
-    BOOL keep = holder != nil &&
-                (!others || (now - _sliceStart < kSlice &&
-                             (holder.pending.count > 0 ||
-                              (_down && now - holder.seen < kIdle))));
+    BOOL keep =
+        holder != nil &&
+        (!others || (_down && now - holder.seen < kStuck) ||
+         (now - _sliceStart < kSlice &&
+          (holder.pending.count > 0 || now - holder.seen < kIdle)));
     BOOL holderWaits = holder != nil && [self mustWait:holder now:now];
     if (keep && !holderWaits) {
       if (holder.pending.count == 0) {
@@ -746,65 +757,66 @@ static int SelfTest(void) {
         [mux cursor:tag kind:kind at:NSMakePoint(x, y) context:context now:now];
       };
 
+  void (^reset)(void) = ^{
+    mux = [CursorMux new];
+    mux.emit = ^(MuxKind kind, NSPoint point) {
+      NSString *name = @[ @"D", @"G", @"U", @"M" ][kind];
+      [out addObject:[NSString stringWithFormat:@"%@%.0f,%.0f", name, point.x,
+                                                point.y]];
+    };
+  };
+
   // A second cursor waits while the first one's stroke goes on, then draws.
+  reset();
   at(1, MuxDown, 0, 0, NO, 0.000);
   at(2, MuxDown, 100, 100, NO, 0.001);
   at(1, MuxDrag, 10, 0, NO, 0.010);
   at(2, MuxDrag, 110, 100, NO, 0.011);
   at(1, MuxUp, 10, 0, NO, 0.020);
   at(2, MuxUp, 110, 100, NO, 0.021);
+  [mux pump:0.10];
   check(@"queued strokes", @"D0,0 G10,0 U10,0 D100,100 G110,100 U110,100");
 
-  // When the holder's slice ends, the waiting cursor takes over, and the
-  // first stroke resumes where it was.
-  mux = [CursorMux new];
-  mux.emit = ^(MuxKind kind, NSPoint point) {
-    NSString *name = @[ @"D", @"G", @"U", @"M" ][kind];
-    [out addObject:[NSString stringWithFormat:@"%@%.0f,%.0f", name, point.x,
-                                              point.y]];
-  };
+  // A stroke is never cut for a waiting cursor; it gets the mouse after.
+  reset();
   at(1, MuxDown, 0, 0, NO, 0.00);
   at(1, MuxDrag, 1, 0, NO, 0.05);
   at(2, MuxDown, 50, 50, NO, 0.06);
   at(1, MuxDrag, 2, 0, NO, 0.10);
   at(1, MuxDrag, 3, 0, NO, 0.13);
-  check(@"slice handover",
-        @"D0,0 G1,0 G2,0 U2,0 D50,50 U50,50 D2,0 G3,0");
+  check(@"a stroke is never cut", @"D0,0 G1,0 G2,0 G3,0");
+  at(1, MuxUp, 3, 0, NO, 0.20);
+  [mux pump:0.30];
+  check(@"the waiting cursor draws after the stroke", @"U3,0 D50,50");
 
-  // A cursor's own pick is re-applied before it continues, but only once that
-  // cannot read as a double click on the same spot.
-  mux = [CursorMux new];
-  mux.emit = ^(MuxKind kind, NSPoint point) {
-    NSString *name = @[ @"D", @"G", @"U", @"M" ][kind];
-    [out addObject:[NSString stringWithFormat:@"%@%.0f,%.0f", name, point.x,
-                                              point.y]];
-  };
-  at(1, MuxDown, 5, 5, YES, 0.00);
-  at(1, MuxUp, 5, 5, YES, 0.00);
-  at(2, MuxDown, 25, 5, YES, 0.01);
-  at(2, MuxUp, 25, 5, YES, 0.01);
-  at(1, MuxDown, 50, 50, NO, 0.02);
-  check(@"replay waits out the double click", @"D5,5 U5,5 D25,5 U25,5");
-  [mux pump:0.50];
-  check(@"replay after the double click window", @"D5,5 U5,5 D50,50");
+  // A press that stops getting input does not hold the mouse forever.
+  reset();
+  at(1, MuxDown, 0, 0, NO, 0.00);
+  at(2, MuxDown, 50, 50, NO, 0.10);
+  [mux pump:0.40];
+  check(@"a quiet press keeps the mouse a while", @"D0,0");
+  [mux pump:0.60];
+  check(@"a stuck press lets the next cursor in", @"U0,0 D50,50");
 
-  // A new pick of its own still restores the cursor's earlier picks first.
-  at(2, MuxDown, 300, 300, NO, 0.60);
-  at(2, MuxUp, 300, 300, NO, 0.61);
-  at(1, MuxDown, 45, 5, YES, 0.62);
-  [mux pump:1.00];
-  at(1, MuxUp, 45, 5, YES, 1.00);
-  check(@"own new pick after another cursor",
-        @"U50,50 D25,5 U25,5 D300,300 U300,300 D5,5 U5,5 D45,5 U45,5");
+  // Every swatch of a palette row replaces the others, however far apart.
+  reset();
+  at(1, MuxDown, 41, 1317, YES, 0.00);
+  at(1, MuxUp, 41, 1317, YES, 0.00);
+  at(1, MuxDown, 100, 100, NO, 0.01);
+  at(1, MuxUp, 100, 100, NO, 0.02);
+  at(2, MuxDown, 249, 1333, YES, 0.03);
+  at(2, MuxUp, 249, 1333, YES, 0.03);
+  at(2, MuxDown, 200, 200, NO, 0.04);
+  at(2, MuxUp, 200, 200, NO, 0.05);
+  [mux pump:0.10];
+  at(1, MuxDown, 110, 100, NO, 1.20);
+  [mux pump:1.30];
+  check(@"far swatches of one palette replace each other",
+        @"D41,1317 U41,1317 D100,100 U100,100 D249,1333 U249,1333 D200,200 "
+        @"U200,200 D41,1317 U41,1317 D110,100");
 
-  // Picking a color does not undo the brush: a tool every cursor shares is not
-  // pressed again, only the swatch another cursor replaced.
-  mux = [CursorMux new];
-  mux.emit = ^(MuxKind kind, NSPoint point) {
-    NSString *name = @[ @"D", @"G", @"U", @"M" ][kind];
-    [out addObject:[NSString stringWithFormat:@"%@%.0f,%.0f", name, point.x,
-                                              point.y]];
-  };
+  // A tool every cursor shares is not pressed again, only the replaced swatch.
+  reset();
   at(1, MuxDown, 40, 138, YES, 0.00);
   at(1, MuxUp, 40, 138, YES, 0.00);
   at(1, MuxDown, 73, 1333, YES, 0.00);
@@ -813,23 +825,20 @@ static int SelfTest(void) {
   at(2, MuxUp, 40, 138, YES, 0.01);
   at(2, MuxDown, 137, 1333, YES, 0.01);
   at(2, MuxUp, 137, 1333, YES, 0.01);
-  at(1, MuxDown, 500, 500, NO, 0.60);
+  [mux pump:0.10];
+  at(1, MuxDown, 500, 500, NO, 1.20);
+  [mux pump:1.30];
   check(@"only replaced picks are pressed again",
         @"D40,138 U40,138 D73,1333 U73,1333 D137,1333 U137,1333 D73,1333 "
         @"U73,1333 D500,500");
 
   // Hover of a cursor that does not hold the mouse is not sent.
-  at(2, MuxMove, 400, 400, NO, 1.10);
+  at(2, MuxMove, 400, 400, NO, 1.40);
   check(@"hover of a waiting cursor", @"");
 
   // Two cursors picking the same swatch: the page already has it, so the
   // second pick is not pressed again, and that cursor draws with it.
-  mux = [CursorMux new];
-  mux.emit = ^(MuxKind kind, NSPoint point) {
-    NSString *name = @[ @"D", @"G", @"U", @"M" ][kind];
-    [out addObject:[NSString stringWithFormat:@"%@%.0f,%.0f", name, point.x,
-                                              point.y]];
-  };
+  reset();
   at(1, MuxDown, 73, 1333, YES, 0.00);
   at(1, MuxUp, 73, 1333, YES, 0.00);
   at(1, MuxDown, 100, 100, NO, 0.01);
@@ -839,30 +848,28 @@ static int SelfTest(void) {
   at(1, MuxUp, 110, 100, NO, 0.31);
   check(@"same pick by another cursor is not pressed again",
         @"D73,1333 U73,1333 D100,100 G110,100 U110,100");
-  [mux pump:0.50];
-  at(2, MuxDown, 200, 200, NO, 0.60);
+  [mux pump:1.20];
+  at(2, MuxDown, 200, 200, NO, 1.30);
   check(@"the other cursor draws with the pick in effect", @"D200,200");
 
   // Going back to a swatch pressed a moment ago (after another cursor picked a
-  // neighbour) waits out the double-click time, even aimed a pixel apart.
-  mux = [CursorMux new];
-  mux.emit = ^(MuxKind kind, NSPoint point) {
-    NSString *name = @[ @"D", @"G", @"U", @"M" ][kind];
-    [out addObject:[NSString stringWithFormat:@"%@%.0f,%.0f", name, point.x,
-                                              point.y]];
-  };
+  // neighbour) waits out the double-click margin, even aimed a pixel apart.
+  reset();
   at(1, MuxDown, 89, 1317, YES, 0.00);
   at(1, MuxUp, 89, 1317, YES, 0.00);
-  at(2, MuxDown, 105, 1317, YES, 0.05);
-  at(2, MuxUp, 105, 1317, YES, 0.05);
+  [mux pump:0.05];
+  at(2, MuxDown, 105, 1317, YES, 0.06);
+  at(2, MuxUp, 105, 1317, YES, 0.06);
+  [mux pump:0.15];
   at(1, MuxDown, 90, 1318, YES, 0.20);
   at(1, MuxUp, 90, 1318, YES, 0.20);
+  [mux pump:0.90];
   check(@"nearby pick waits out the double click",
         @"D89,1317 U89,1317 D105,1317 U105,1317");
-  [mux pump:0.50];
+  [mux pump:1.30];
   // Its own earlier pick is restored first, so the new one a pixel away is
   // already in effect.
-  check(@"nearby pick after the double click time", @"D89,1317 U89,1317");
+  check(@"nearby pick after the double click margin", @"D89,1317 U89,1317");
 
   // Lines of the agent pointer channel.
   {

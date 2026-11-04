@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { type Socket, connect } from "node:net";
 import { join } from "node:path";
 import { resolveStateDir } from "./stop-switch.js";
 
@@ -166,6 +167,7 @@ export function openOwnedSurface(request: OpenSurfaceRequest, options: OwnedSurf
 export function closeOwnedSurface(pid: number, options: OwnedSurfaceOptions = {}): boolean {
 	if (!isOwnedSurfacePid(pid, options)) return false;
 	process.kill(pid, "SIGTERM");
+	rmSync(surfaceSocketPath(pid, options), { force: true });
 	unregisterOwnedSurface(pid, options);
 	return true;
 }
@@ -210,4 +212,51 @@ export function nameSurfaceCursor(tag: number, name: string, options: OwnedSurfa
 	writeFileSync(temporary, `${JSON.stringify(names)}\n`, { mode: 0o600 });
 	renameSync(temporary, path);
 	namedTags.add(tag);
+}
+
+/** The socket an owned surface listens on for its agents' pointer input. */
+export function surfaceSocketPath(pid: number, options: OwnedSurfaceOptions = {}): string {
+	return join(options.stateDir ?? resolveStateDir(), `surface-${pid}.sock`);
+}
+
+/** One agent pointer event for an owned surface, at a point in window coordinates from its top-left corner. */
+export interface SurfacePointerEvent {
+	readonly tag: number;
+	readonly context: boolean;
+	readonly kind: "down" | "drag" | "up" | "move";
+	readonly x: number;
+	readonly y: number;
+}
+
+const POINTER_KINDS = { down: "D", drag: "G", up: "U", move: "M" } as const;
+const channels = new Map<string, Socket>();
+
+/**
+ * Sends an agent's pointer event straight to an owned surface. The window server merges consecutive drag events
+ * posted to one app, which would mix one cursor's tag with another cursor's position; the surface's own socket keeps
+ * each cursor's events whole and in order. False when the surface has no socket, so the caller posts the event.
+ */
+export function sendSurfacePointer(
+	pid: number,
+	event: SurfacePointerEvent,
+	options: OwnedSurfaceOptions = {},
+): boolean {
+	const path = surfaceSocketPath(pid, options);
+	let channel = channels.get(path);
+	if (channel === undefined) {
+		if (!existsSync(path)) return false;
+		const socket = connect(path);
+		socket.on("error", () => {
+			channels.delete(path);
+			socket.destroy();
+		});
+		socket.on("close", () => channels.delete(path));
+		socket.unref();
+		channels.set(path, socket);
+		channel = socket;
+	}
+	const x = Math.round(event.x * 10) / 10;
+	const y = Math.round(event.y * 10) / 10;
+	channel.write(`${event.tag} ${event.context ? 1 : 0} ${POINTER_KINDS[event.kind]} ${x} ${y}\n`);
+	return true;
 }

@@ -21,6 +21,12 @@
 //        opencua-surface --self-test
 
 #import <AppKit/AppKit.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
+#include <unistd.h>
 #import <WebKit/WebKit.h>
 #import <objc/message.h>
 
@@ -320,6 +326,153 @@ static NSString *SpotKey(NSPoint point) {
 }
 @end
 
+// One line of the agent pointer channel: "<tag> <context> <kind> <x> <y>",
+// kind D, G, U or M (down, drag, up, move), x and y in window points from the
+// window's top-left corner.
+static BOOL ParseAgentLine(const char *line, int64_t *tag, BOOL *context,
+                           MuxKind *kind, NSPoint *topLeft) {
+  long long value = 0;
+  int flag = 0;
+  char letter = 0;
+  double x = 0;
+  double y = 0;
+  if (sscanf(line, "%lld %d %c %lf %lf", &value, &flag, &letter, &x, &y) !=
+      5) {
+    return NO;
+  }
+  const char *kinds = "DGUM";
+  const char *found = letter == 0 ? NULL : strchr(kinds, letter);
+  if (value <= 0 || value > 0xffffffffLL || found == NULL || !isfinite(x) ||
+      !isfinite(y)) {
+    return NO;
+  }
+  *tag = value;
+  *context = flag == 1;
+  *kind = (MuxKind)(found - kinds);
+  *topLeft = NSMakePoint(x, y);
+  return YES;
+}
+
+// Agent pointer input sent straight to this process over a Unix socket. The
+// window server merges consecutive drag events posted to one app, which mixes
+// one cursor's tag with another cursor's position; this channel keeps every
+// cursor's events whole and in order.
+@interface AgentChannel : NSObject
+- (BOOL)listenAt:(NSString *)path
+         deliver:(void (^)(int64_t tag, BOOL context, MuxKind kind,
+                           NSPoint topLeft))deliver;
+@end
+
+@implementation AgentChannel {
+  dispatch_source_t _accept;
+  NSMutableSet *_clients;
+  void (^_deliver)(int64_t, BOOL, MuxKind, NSPoint);
+}
+
+- (BOOL)listenAt:(NSString *)path
+         deliver:(void (^)(int64_t, BOOL, MuxKind, NSPoint))deliver {
+  struct sockaddr_un address;
+  memset(&address, 0, sizeof(address));
+  address.sun_family = AF_UNIX;
+  const char *file = path.fileSystemRepresentation;
+  if (strlen(file) >= sizeof(address.sun_path)) {
+    return NO;
+  }
+  strlcpy(address.sun_path, file, sizeof(address.sun_path));
+  int listener = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (listener < 0) {
+    return NO;
+  }
+  unlink(address.sun_path);
+  mode_t previous = umask(0077);
+  int bound = bind(listener, (struct sockaddr *)&address, sizeof(address));
+  umask(previous);
+  if (bound != 0 || listen(listener, 16) != 0) {
+    close(listener);
+    return NO;
+  }
+  fcntl(listener, F_SETFL, O_NONBLOCK);
+  _deliver = [deliver copy];
+  _clients = [NSMutableSet set];
+  _accept = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ,
+                                   (uintptr_t)listener, 0,
+                                   dispatch_get_main_queue());
+  __weak AgentChannel *weakSelf = self;
+  dispatch_source_set_event_handler(_accept, ^{
+    int client = accept(listener, NULL, NULL);
+    if (client >= 0) {
+      [weakSelf readFrom:client];
+    }
+  });
+  dispatch_resume(_accept);
+  return YES;
+}
+
+- (void)readFrom:(int)client {
+  fcntl(client, F_SETFL, O_NONBLOCK);
+  NSMutableData *buffer = [NSMutableData data];
+  dispatch_source_t source = dispatch_source_create(
+      DISPATCH_SOURCE_TYPE_READ, (uintptr_t)client, 0,
+      dispatch_get_main_queue());
+  __weak AgentChannel *weakSelf = self;
+  __weak dispatch_source_t weakSource = source;
+  dispatch_source_set_event_handler(source, ^{
+    char chunk[8192];
+    ssize_t count = read(client, chunk, sizeof(chunk));
+    if (count < 0 && errno == EAGAIN) {
+      return;
+    }
+    if (count <= 0) {
+      dispatch_source_t ended = weakSource;
+      if (ended != nil) {
+        dispatch_source_cancel(ended);
+      }
+      return;
+    }
+    [buffer appendBytes:chunk length:(NSUInteger)count];
+    [weakSelf drain:buffer];
+  });
+  dispatch_source_set_cancel_handler(source, ^{
+    close(client);
+    AgentChannel *strongSelf = weakSelf;
+    dispatch_source_t ended = weakSource;
+    if (strongSelf != nil && ended != nil) {
+      [strongSelf->_clients removeObject:ended];
+    }
+  });
+  [_clients addObject:source];
+  dispatch_resume(source);
+}
+
+- (void)drain:(NSMutableData *)buffer {
+  const char *bytes = buffer.bytes;
+  NSUInteger start = 0;
+  for (NSUInteger index = 0; index < buffer.length; index += 1) {
+    if (bytes[index] != '\n') {
+      continue;
+    }
+    NSUInteger length = MIN(index - start, (NSUInteger)255);
+    char line[256];
+    memcpy(line, bytes + start, length);
+    line[length] = 0;
+    int64_t tag = 0;
+    BOOL context = NO;
+    MuxKind kind = MuxMove;
+    NSPoint point = NSZeroPoint;
+    if (ParseAgentLine(line, &tag, &context, &kind, &point)) {
+      _deliver(tag, context, kind, point);
+    }
+    start = index + 1;
+  }
+  [buffer replaceBytesInRange:NSMakeRange(0, start) withBytes:NULL length:0];
+  if (buffer.length > 4096) {
+    [buffer setLength:0];
+  }
+}
+@end
+
+static AgentChannel *gAgentChannel;
+
 @interface CursorMark : NSObject
 @property(nonatomic) NSPoint point;
 @property(nonatomic) NSTimeInterval seen;
@@ -396,6 +549,10 @@ static NSColor *ColorFromHex(NSString *hex) {
 @interface SurfaceWindow : NSWindow
 @property(nonatomic, weak) CursorLayerView *cursorLayer;
 @property(nonatomic, strong) CursorMux *mux;
+- (void)agent:(int64_t)owner
+         kind:(MuxKind)kind
+           at:(NSPoint)location
+      context:(BOOL)context;
 @end
 
 @implementation SurfaceWindow
@@ -423,22 +580,33 @@ static NSColor *ColorFromHex(NSString *hex) {
     [super sendEvent:event];
     return;
   }
+  MuxKind kind = type == NSEventTypeLeftMouseDown      ? MuxDown
+                 : type == NSEventTypeLeftMouseDragged ? MuxDrag
+                 : type == NSEventTypeLeftMouseUp      ? MuxUp
+                                                       : MuxMove;
+  [self agent:owner kind:kind at:event.locationInWindow context:context];
+}
+
+// Draws the agent's cursor where its input landed and merges that input with
+// every other cursor's into the page's one mouse.
+- (void)agent:(int64_t)owner
+         kind:(MuxKind)kind
+           at:(NSPoint)location
+      context:(BOOL)context {
   if (self.cursorLayer != nil) {
     NSNumber *key = @(owner);
     CursorMark *mark = self.cursorLayer.marks[key] ?: [CursorMark new];
-    mark.point = [self.cursorLayer convertPoint:event.locationInWindow
-                                       fromView:nil];
+    mark.point = [self.cursorLayer convertPoint:location fromView:nil];
     mark.seen = NSDate.timeIntervalSinceReferenceDate;
-    mark.down =
-        type == NSEventTypeLeftMouseDown || type == NSEventTypeLeftMouseDragged;
+    mark.down = kind == MuxDown || kind == MuxDrag;
     self.cursorLayer.marks[key] = mark;
     self.cursorLayer.needsDisplay = YES;
   }
   if (self.mux == nil) {
     self.mux = [CursorMux new];
     __weak SurfaceWindow *weakSelf = self;
-    self.mux.emit = ^(MuxKind kind, NSPoint point) {
-      [weakSelf deliver:kind at:point];
+    self.mux.emit = ^(MuxKind merged, NSPoint point) {
+      [weakSelf deliver:merged at:point];
     };
     // Waiting cursors get the mouse when the holder's slice ends, even if no
     // new input arrives to trigger it.
@@ -450,13 +618,9 @@ static NSColor *ColorFromHex(NSString *hex) {
                                                      .systemUptime];
                                       }];
   }
-  MuxKind kind = type == NSEventTypeLeftMouseDown      ? MuxDown
-                 : type == NSEventTypeLeftMouseDragged ? MuxDrag
-                 : type == NSEventTypeLeftMouseUp      ? MuxUp
-                                                       : MuxMove;
   [self.mux cursor:owner
               kind:kind
-                at:event.locationInWindow
+                at:location
            context:context
                now:NSProcessInfo.processInfo.systemUptime];
 }
@@ -586,6 +750,29 @@ static int SelfTest(void) {
   at(2, MuxMove, 400, 400, NO, 1.10);
   check(@"hover of a waiting cursor", @"");
 
+  // Lines of the agent pointer channel.
+  {
+    int64_t tag = 0;
+    BOOL context = NO;
+    MuxKind kind = MuxMove;
+    NSPoint point = NSZeroPoint;
+    BOOL parsed = ParseAgentLine("4294967295 1 G 12.5 300", &tag, &context,
+                                 &kind, &point);
+    if (!parsed || tag != 4294967295LL || !context || kind != MuxDrag ||
+        point.x != 12.5 || point.y != 300) {
+      failures += 1;
+      fprintf(stderr, "FAIL channel line\n");
+    }
+    const char *bad[] = {"0 0 D 1 1", "4294967296 0 D 1 1", "7 0 X 1 1",
+                         "7 0 D 1", "", "7 0 D nan 1"};
+    for (size_t index = 0; index < sizeof(bad) / sizeof(bad[0]); index += 1) {
+      if (ParseAgentLine(bad[index], &tag, &context, &kind, &point)) {
+        failures += 1;
+        fprintf(stderr, "FAIL channel accepted \"%s\"\n", bad[index]);
+      }
+    }
+  }
+
   if (failures == 0) {
     printf("SELF-TEST OK\n");
   }
@@ -651,6 +838,27 @@ int main(int argc, const char *argv[]) {
     layer.names = @{};
     [root addSubview:layer];
     window.cursorLayer = layer;
+    if (argc >= 5) {
+      NSString *socketPath = [[@(argv[4]) stringByDeletingLastPathComponent]
+          stringByAppendingPathComponent:
+              [NSString stringWithFormat:@"surface-%d.sock", getpid()]];
+      gAgentChannel = [AgentChannel new];
+      __weak SurfaceWindow *target = window;
+      if (![gAgentChannel
+              listenAt:socketPath
+               deliver:^(int64_t tag, BOOL context, MuxKind kind,
+                         NSPoint topLeft) {
+                 SurfaceWindow *surface = target;
+                 if (surface == nil) {
+                   return;
+                 }
+                 NSPoint location = NSMakePoint(
+                     topLeft.x, surface.frame.size.height - topLeft.y);
+                 [surface agent:tag kind:kind at:location context:context];
+               }]) {
+        gAgentChannel = nil;
+      }
+    }
     [web loadRequest:[NSURLRequest requestWithURL:url]];
     // Shown behind every other window and never activated, so it never covers
     // what the person is doing; they bring it forward themselves to watch.

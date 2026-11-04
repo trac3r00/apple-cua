@@ -87,6 +87,30 @@ describe("#given a worker assigned by one opencua process #when a subagent's own
 	});
 });
 
+describe("#given a worker assigned by another process #when the subagent runs steps for it #then they run there", () => {
+	it("accepts the token the subagent observed and runs its steps", async () => {
+		const parent = coordinator();
+		const subagent = coordinator();
+		try {
+			await parent.assign([{ worker_id: "one", task: "fill Finder", app: "Finder" }]);
+			const observed = await subagent.observe("one");
+
+			const run = await subagent.run(
+				"one",
+				observed.observation_token ?? "",
+				[{ type: "set_value", element_index: "20", value: "worker" }],
+				undefined,
+			);
+
+			expect(run.worker_id).toBe("one");
+			expect(run.result.isError).not.toBe(true);
+		} finally {
+			await subagent.close();
+			await parent.close();
+		}
+	});
+});
+
 describe("#given a worker lookup that fails before anything is sent #when the error is reported #then retrying is safe", () => {
 	it.each([
 		['worker "w" is not assigned', "WORKER_NOT_ASSIGNED"],

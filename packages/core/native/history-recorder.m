@@ -210,7 +210,10 @@ static void SeedSegmentCounts(NSString *segmentId) {
 static NSString *RollSegment(time_t now) {
   time_t start = WindowStart(now);
   NSString *segmentId = IsoAt(start, YES);
-  if (![segmentId isEqualToString:gCurrentSegmentId]) {
+  // A segment the person deleted (opencua history delete) is started again rather than written into a
+  // directory that no longer exists, so recording continues and its counts restart from what is on disk.
+  if (![segmentId isEqualToString:gCurrentSegmentId] ||
+      ![NSFileManager.defaultManager fileExistsAtPath:SegmentDir(segmentId)]) {
     gCurrentSegmentId = segmentId;
     EnsureDir(SegmentDir(segmentId));
     SeedSegmentCounts(segmentId);

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, rmSync, rmdirSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
-import { StopSwitch } from "@opencua/core";
+import { StopSwitch } from "@opencua/core/light";
 import { z } from "zod/v4";
 import { syncSkillLinks } from "./client-skills.js";
 import {

@@ -254,3 +254,24 @@ describe("#given a recorder paused only by the old missing-settings block #when 
 		}
 	});
 });
+
+describe("#given the segment being recorded was deleted #when the next event arrives #then recording continues in a fresh segment", () => {
+	it("recreates the directory and counts only the events written after the delete", async () => {
+		const root = await mkdtemp(join(scratch, "forget-"));
+		try {
+			expect(await runNative("forget-current", root)).toBe(1);
+			const segmentsDir = join(root, "cua-history", "segments");
+			const segments = await readdir(segmentsDir);
+			expect(segments).toHaveLength(1);
+			const [segment] = segments;
+			const events = (await readFile(join(segmentsDir, String(segment), "events.jsonl"), "utf8")).trim().split("\n");
+			const metadata: unknown = JSON.parse(
+				await readFile(join(segmentsDir, String(segment), "metadata.json"), "utf8"),
+			);
+			expect(events).toHaveLength(1);
+			expect(metadata).toMatchObject({ eventCount: 1 });
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+});

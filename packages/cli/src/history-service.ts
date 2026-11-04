@@ -4,7 +4,7 @@ import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { historyPaths, readHistoryState, resolveHistoryRecorderBinary, writeHistoryState } from "@opencua/core";
+import { historyPaths, readHistoryState, resolveHistoryRecorderBinary, writeHistoryState } from "@opencua/core/light";
 import { resolveStateDir } from "@opencua/core/stop";
 import { resolveLayout } from "./layout.js";
 

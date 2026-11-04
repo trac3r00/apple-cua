@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { AppApprovalStore } from "@opencua/core";
 import { vi } from "@opencua/test-support";
+import { toolNamesFor } from "./mcp-server.js";
 import { allowedBundleIdsFromEnvironment } from "./native-policy.js";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import type { FakeGuardedComputer } from "./protocol-test-harness.js";
-import { toolNamesFor } from "./server.js";
 
 const MUTATION_NAMES = [
 	"click",

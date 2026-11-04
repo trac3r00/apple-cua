@@ -1,5 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type HistorySkillDetection, type HistorySkillDraft, describeHistoryStep } from "@opencua/core";
+import {
+	type HistorySkillDetection,
+	type HistorySkillDraft,
+	type SkillDescription,
+	describeHistoryStep,
+} from "@opencua/core";
 import { z } from "zod/v4";
 import { textResult } from "./tool-result.js";
 
@@ -38,6 +43,8 @@ export interface HistoryToolSource {
 	pause(): void | Promise<void>;
 	resume(): void | Promise<void>;
 	suggestSkills(options: { readonly limit: number }): Promise<HistorySkillDetection>;
+	/** Descriptions a small model wrote earlier, by candidate id; empty when the person turned them off. */
+	skillDescriptions?(): Promise<Readonly<Record<string, SkillDescription>>>;
 	saveSkill(draft: HistorySkillDraft): Promise<string>;
 }
 
@@ -94,18 +101,20 @@ export function registerHistoryTools(server: McpServer, source: HistoryToolSourc
 		"cua_history_suggest_skills",
 		{
 			description:
-				"Detect repeated workflows in recent local history (no model call, nothing leaves the machine) and return ranked skill candidates inline. Typed text is never included.",
+				"Detect repeated workflows in recent local history and return ranked skill candidates inline, each with the title and summary a small model wrote earlier when there is one. This call itself asks no model. Typed text is never included.",
 			inputSchema: z.object({ limit: z.number().int().min(1).max(20).optional() }),
 			annotations: { readOnlyHint: true, destructiveHint: false },
 		},
 		async (input) => {
 			const detection = await source.suggestSkills({ limit: input.limit ?? 5 });
+			const descriptions = (await source.skillDescriptions?.()) ?? {};
 			return textResult(
 				JSON.stringify({
 					candidates: detection.candidates.map((candidate, index) => ({
 						number: index + 1,
 						id: candidate.id,
-						proposedName: candidate.proposedName,
+						proposedName: descriptions[candidate.id]?.name ?? candidate.proposedName,
+						...(descriptions[candidate.id] === undefined ? {} : { description: descriptions[candidate.id] }),
 						occurrences: candidate.occurrences,
 						apps: candidate.apps,
 						lastSeenAt: candidate.lastSeenAt,

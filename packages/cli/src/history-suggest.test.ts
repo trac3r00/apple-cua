@@ -49,3 +49,26 @@ describe("#given a history root #when writing menu suggestions #then the file is
 		await expect(writeMenuSuggestions(join(base, "link"), detection)).rejects.toThrow("real directory");
 	});
 });
+
+describe("#given a description a small model wrote #when suggestions are shown #then people see what the skill does", () => {
+	const id = detection.candidates[0]?.id ?? "";
+	const description = {
+		name: "invoice-to-ledger",
+		title: "Move an invoice into the ledger",
+		summary: "Opens the invoice, the ledger and a mail draft in turn.",
+		whenToUse: "When an invoice arrives.",
+	};
+
+	it("titles the menu item with the description and names the skill in the agent prompt", () => {
+		const [item] = menuSuggestions(detection, { [id]: description });
+		expect(item?.title).toBe(`${description.title} (2x)`);
+		expect(item?.prompt).toContain(description.name);
+	});
+
+	it("prints the title, summary and when to use it, and still the raw steps without one", () => {
+		const described = formatSuggestions(detection, { [id]: description });
+		for (const text of [description.title, description.summary, description.whenToUse])
+			expect(described).toContain(text);
+		expect(formatSuggestions(detection)).toContain(detection.candidates[0]?.proposedName ?? "missing");
+	});
+});

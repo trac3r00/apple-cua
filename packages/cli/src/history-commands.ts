@@ -5,11 +5,17 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import {
 	type HistorySegmentSummary,
+	type HistorySkillDetection,
+	type SkillDescription,
 	deleteHistorySegments,
+	describeSkillCandidates,
 	historyPaths,
 	listHistorySegments,
 	parseHistoryDuration,
 	readHistoryState,
+	readSkillDescriptions,
+	setSkillDescriptionsEnabled,
+	skillDescriptionsEnabled,
 	writeHistoryState,
 } from "@opencua/core/light";
 import { resolveStateDir } from "@opencua/core/stop";
@@ -97,10 +103,11 @@ export function registerHistoryCommands(program: Command, options: HistoryComman
 
 	history
 		.command("suggest")
-		.description("List repeated workflows detected locally in recent history as skill suggestions (no model call)")
+		.description("List repeated workflows from recent history as skill suggestions, each described by a small model")
 		.option("--limit <count>", "Maximum suggestions", "5")
 		.option("--write", "Also write skill-suggestions.json for the menu bar")
-		.action(async (command: { readonly limit: string; readonly write?: boolean }) => {
+		.option("--no-describe", "show the recorded steps without asking a model for descriptions")
+		.action(async (command: { readonly limit: string; readonly write?: boolean; readonly describe: boolean }) => {
 			const limit = Number.parseInt(command.limit, 10);
 			if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) {
 				throw new Error("--limit must be an integer from 1 to 20.");
@@ -109,14 +116,36 @@ export function registerHistoryCommands(program: Command, options: HistoryComman
 			const { formatSuggestions, menuSuggestions, writeMenuSuggestions } = await import("./history-suggest.js");
 			const paths = historyPaths(resolveStateDir());
 			const detection = await suggestHistorySkills(paths.root, { limit });
+			const descriptions = await describedSuggestions(paths.root, detection, command.describe);
 			if (command.write === true) {
 				await mkdir(paths.root, { recursive: true, mode: 0o700 });
-				await writeMenuSuggestions(paths.root, detection);
+				await writeMenuSuggestions(paths.root, detection, descriptions);
 			}
 			process.stdout.write(
 				options.isJsonOutput()
-					? `${JSON.stringify({ ...detection, suggestions: menuSuggestions(detection) })}\n`
-					: formatSuggestions(detection),
+					? `${JSON.stringify({ ...detection, descriptions, suggestions: menuSuggestions(detection, descriptions) })}\n`
+					: formatSuggestions(detection, descriptions),
+			);
+		});
+
+	history
+		.command("descriptions")
+		.description("Show, or turn on or off, the small-model descriptions of suggested skills (on by default)")
+		.argument("[state]", "on or off")
+		.action(async (state: string | undefined) => {
+			const paths = historyPaths(resolveStateDir());
+			if (state !== undefined) {
+				if (state !== "on" && state !== "off") throw new Error('Pass "on" or "off".');
+				await mkdir(paths.root, { recursive: true, mode: 0o700 });
+				await setSkillDescriptionsEnabled(paths.root, state === "on");
+			}
+			const enabled = await skillDescriptionsEnabled(paths.root);
+			process.stdout.write(
+				options.isJsonOutput()
+					? `${JSON.stringify({ enabled })}\n`
+					: enabled
+						? "Skill descriptions are on: each suggestion's recorded steps (never typed text) go to a small model.\n"
+						: "Skill descriptions are off: suggestions show their recorded steps only.\n",
 			);
 		});
 
@@ -179,8 +208,9 @@ export function registerHistoryCommands(program: Command, options: HistoryComman
 				if (command.web !== true) {
 					const { suggestHistorySkills } = await import("@opencua/core");
 					const { formatSuggestions } = await import("./history-suggest.js");
-					const detection = await suggestHistorySkills(historyPaths(resolveStateDir()).root, { limit: 5 });
-					process.stdout.write(formatSuggestions(detection));
+					const root = historyPaths(resolveStateDir()).root;
+					const detection = await suggestHistorySkills(root, { limit: 5 });
+					process.stdout.write(formatSuggestions(detection, await describedSuggestions(root, detection, false)));
 					return;
 				}
 				const { startHistoryUi } = await import("./history-ui.js");
@@ -313,4 +343,31 @@ function formatSegment(segment: HistorySegmentSummary): string {
 	const day = new Date(segment.startedAt).toLocaleDateString();
 	const apps = segment.apps.length === 0 ? "no app events" : segment.apps.join(", ");
 	return `${segment.id}  ${day} ${time(segment.startedAt)}-${time(segment.endedAt)}  ${segment.eventCount} event(s)  ${apps}`;
+}
+
+/**
+ * Descriptions for the detected candidates. With the setting on and a model allowed, the missing ones are written by a
+ * small model and cached; otherwise only cached ones are shown, and none at all once the person turned it off.
+ */
+async function describedSuggestions(
+	root: string,
+	detection: HistorySkillDetection,
+	allowModel: boolean,
+): Promise<Record<string, SkillDescription>> {
+	if (detection.candidates.length === 0 || !(await skillDescriptionsEnabled(root))) return {};
+	if (!allowModel) {
+		const cached = await readSkillDescriptions(root);
+		return Object.fromEntries(
+			detection.candidates.flatMap((candidate) => {
+				const description = cached[candidate.id];
+				return description === undefined ? [] : [[candidate.id, description] as const];
+			}),
+		);
+	}
+	const { generateHistoryText, skillDescriptionCommand } = await import("./history-agent.js");
+	const command = skillDescriptionCommand();
+	await mkdir(root, { recursive: true, mode: 0o700 });
+	return await describeSkillCandidates(root, detection.candidates, (prompt) =>
+		generateHistoryText(prompt, { ...command, timeoutMs: 45_000 }),
+	);
 }

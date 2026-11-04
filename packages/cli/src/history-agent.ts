@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 const MAX_PROMPT_BYTES = 120_000;
 const MAX_OUTPUT_BYTES = 256 * 1024;
@@ -21,6 +21,31 @@ const ARGUMENTS = [
 export interface HistoryAgentOptions {
 	readonly signal?: AbortSignal;
 	readonly executable?: string;
+	readonly args?: readonly string[];
+	readonly timeoutMs?: number;
+}
+
+export interface HistoryAgentCommand {
+	readonly executable: string;
+	readonly args: readonly string[];
+}
+
+/**
+ * The command that writes short skill descriptions: a small, cheap model (OPENCUA_HISTORY_MODEL, default haiku)
+ * through Claude Code when it is installed, else through omo. OPENCUA_HISTORY_AGENT names another executable.
+ */
+export function skillDescriptionCommand(
+	env: NodeJS.ProcessEnv = process.env,
+	exists: (path: string) => boolean = existsSync,
+	home: string = homedir(),
+): HistoryAgentCommand {
+	const model = env["OPENCUA_HISTORY_MODEL"] || "haiku";
+	const claude = [join(home, ".local/bin/claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude"].find(exists);
+	const executable = env["OPENCUA_HISTORY_AGENT"] || claude || defaultExecutable();
+	if (basename(executable) === "claude") {
+		return { executable, args: ["-p", "--model", model, "--max-turns", "1", "--output-format", "text"] };
+	}
+	return { executable, args: [...ARGUMENTS.slice(0, -1), "--model", model, "-"] };
 }
 
 type StopReason = "abort" | "timeout" | "oversize";
@@ -52,8 +77,9 @@ export async function generateHistoryText(prompt: string, options: HistoryAgentO
 		let stopReason: StopReason | undefined;
 		let spawnError: Error | undefined;
 		let settled = false;
-		const child = spawn(executable, ARGUMENTS, { stdio: ["pipe", "pipe", "pipe"] });
-		const timer = setTimeout(() => stop("timeout"), TIMEOUT_MILLISECONDS);
+		const child = spawn(executable, [...(options.args ?? ARGUMENTS)], { stdio: ["pipe", "pipe", "pipe"] });
+		const timeoutMs = options.timeoutMs ?? TIMEOUT_MILLISECONDS;
+		const timer = setTimeout(() => stop("timeout"), timeoutMs);
 
 		const cleanup = (): void => {
 			clearTimeout(timer);
@@ -96,7 +122,7 @@ export async function generateHistoryText(prompt: string, options: HistoryAgentO
 			if (stopReason === "abort") {
 				reject(new Error("History generation aborted."));
 			} else if (stopReason === "timeout") {
-				reject(new Error(`History generation timed out after ${TIMEOUT_MILLISECONDS / 1000} seconds.`));
+				reject(new Error(`History generation timed out after ${timeoutMs / 1000} seconds.`));
 			} else if (stopReason === "oversize") {
 				reject(new Error(`History generation output exceeds ${MAX_OUTPUT_BYTES} bytes.`));
 			} else if (spawnError) {

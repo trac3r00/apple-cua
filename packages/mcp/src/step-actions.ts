@@ -1,4 +1,4 @@
-import { parseElementIndex } from "@opencua/core";
+import { parseElementIndex, withContextClick } from "@opencua/core";
 import type { ElementQuery, GuardedComputerInterface, InputObservation, Point } from "@opencua/core";
 import type { RunStepDriver, StepDispatchOptions, StepTarget, StepWait, VerifyRequest } from "./guarded-session.js";
 import { validateElement } from "./guarded-session.js";
@@ -194,7 +194,9 @@ async function dispatchStep(
 	}
 	switch (step.type) {
 		case "click":
-			return await click(computer, targetPid, observation, step, actions);
+			return step.context === true
+				? await withContextClick(() => click(computer, targetPid, observation, step, actions))
+				: await click(computer, targetPid, observation, step, actions);
 		case "perform_secondary_action":
 			await computer.performAction(targetPid, requiredElementIndex(step), step.action);
 			return { route: "accessibility", delivery: "background" };

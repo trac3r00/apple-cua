@@ -44,6 +44,7 @@ describe("#given named workers #when assigned #then virtual cursor ownership use
 				exports: {},
 				randomUUID: () => `test-id-${++nextId}`,
 				withCursorIdentity,
+				isOwnedSurfacePid: () => false,
 				resolveAppPid: async (_computer: unknown, app: string) => (app === "First" ? 101 : 202),
 				computer: { delivery: "background" },
 				session: {

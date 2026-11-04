@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { resolveAppPid, withCursorIdentity } from "@opencua/core";
+import { isOwnedSurfacePid, resolveAppPid, withCursorIdentity } from "@opencua/core";
 import type { CursorOwner, GuardedComputerInterface } from "@opencua/core";
 import type {
 	GuardedSession,
@@ -123,6 +123,8 @@ export class WorkerCoordinator {
 		private readonly session: GuardedSession,
 		private readonly computer: GuardedComputerInterface,
 		private readonly registry?: WorkerRegistry,
+		/** Apps several workers may share, each driving its own cursor: opencua-owned surfaces. */
+		private readonly sharedApp: (pid: number) => boolean = isOwnedSurfacePid,
 	) {
 		// The shared session owns token validation and per-app mutation queues.
 	}
@@ -142,7 +144,10 @@ export class WorkerCoordinator {
 			if (workerIds.has(assignment.worker_id) || this.workers.has(assignment.worker_id)) {
 				throw new Error(`worker "${assignment.worker_id}" is already assigned`);
 			}
-			if (pids.has(pid) || [...this.workers.values()].some((worker) => worker.pid === pid)) {
+			if (
+				!this.sharedApp(pid) &&
+				(pids.has(pid) || [...this.workers.values()].some((worker) => worker.pid === pid))
+			) {
 				throw new Error(`app "${assignment.app}" is already owned`);
 			}
 			workerIds.add(assignment.worker_id);
@@ -157,6 +162,7 @@ export class WorkerCoordinator {
 				...(assignment.agent_name === undefined ? {} : { agent_name: assignment.agent_name }),
 				...(assignment.parent_agent_name === undefined ? {} : { parent_agent_name: assignment.parent_agent_name }),
 				appPid: pid,
+				...(this.sharedApp(pid) ? { shared: true } : {}),
 				ownerPid: process.pid,
 			})),
 		);

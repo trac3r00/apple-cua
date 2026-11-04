@@ -180,6 +180,16 @@ export function surfaceCursorTag(identity: string): number {
 	return hash & 0x7fffffff || 1;
 }
 
+const CONTEXT_CLICK_FLAG = 2 ** 32;
+
+/**
+ * The source user data an agent event carries: the cursor tag in the low 32 bits, plus bit 32 for a context click
+ * (a tool or color pick) that the surface replays for this cursor when another cursor cut in.
+ */
+export function surfaceCursorUserData(tag: number, contextClick: boolean): number {
+	return contextClick ? tag + CONTEXT_CLICK_FLAG : tag;
+}
+
 const namedTags = new Set<number>();
 
 /** Publishes the agent name for a cursor tag so owned surfaces can label it; written once per tag. */

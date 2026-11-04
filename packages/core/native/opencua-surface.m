@@ -9,8 +9,16 @@
 // agent's arrow and name where the event actually landed, so the cursors on
 // screen are the real input, not an animation.
 //
+// Many agents can share one surface, each with its own cursor. The page sees a
+// single mouse, so the window merges their input into one valid stream: when a
+// different cursor needs the button it ends the current press where it was,
+// re-applies that cursor's own tool and color picks (its context clicks) when
+// another cursor changed them, and presses again where that cursor was, so
+// every cursor's stroke continues without waiting for the others to finish.
+//
 // usage: opencua-surface <url> <title> <x,y,width,height in top-left screen
 // points> [cursor-names.json]
+//        opencua-surface --self-test
 
 #import <AppKit/AppKit.h>
 #import <WebKit/WebKit.h>
@@ -26,6 +34,115 @@ static NSString *gNamesPath = nil;
 // stroke would only focus the view.
 - (BOOL)acceptsFirstMouse:(NSEvent *)event {
   return YES;
+}
+@end
+
+typedef NS_ENUM(NSInteger, MuxKind) {
+  MuxDown,
+  MuxDrag,
+  MuxUp,
+  MuxMove,
+};
+
+static const NSUInteger kMaxContextClicks = 4;
+
+@interface MuxCursor : NSObject
+@property(nonatomic) NSPoint last;
+@property(nonatomic) BOOL hasLast;
+@property(nonatomic, strong) NSMutableArray<NSValue *> *context;
+@end
+
+@implementation MuxCursor
+@end
+
+// Merges the pointer streams of many cursors into the one stream a page can
+// take. Pure state, so --self-test can check it without a window.
+@interface CursorMux : NSObject
+@property(nonatomic, copy) void (^emit)(MuxKind kind, NSPoint point);
+- (void)cursor:(int64_t)tag
+          kind:(MuxKind)kind
+            at:(NSPoint)point
+       context:(BOOL)context;
+@end
+
+@implementation CursorMux {
+  NSMutableDictionary<NSNumber *, MuxCursor *> *_cursors;
+  int64_t _holder;
+  BOOL _down;
+  int64_t _contextOwner;
+}
+
+- (instancetype)init {
+  self = [super init];
+  if (self != nil) {
+    _cursors = [NSMutableDictionary dictionary];
+  }
+  return self;
+}
+
+- (MuxCursor *)cursorFor:(int64_t)tag {
+  MuxCursor *cursor = _cursors[@(tag)];
+  if (cursor == nil) {
+    cursor = [MuxCursor new];
+    cursor.context = [NSMutableArray array];
+    _cursors[@(tag)] = cursor;
+  }
+  return cursor;
+}
+
+- (void)remember:(NSPoint)point in:(MuxCursor *)cursor {
+  NSIndexSet *same = [cursor.context
+      indexesOfObjectsPassingTest:^BOOL(NSValue *value, NSUInteger index,
+                                        BOOL *stop) {
+        NSPoint old = value.pointValue;
+        return fabs(old.x - point.x) < 3 && fabs(old.y - point.y) < 3;
+      }];
+  [cursor.context removeObjectsAtIndexes:same];
+  [cursor.context addObject:[NSValue valueWithPoint:point]];
+  while (cursor.context.count > kMaxContextClicks) {
+    [cursor.context removeObjectAtIndex:0];
+  }
+}
+
+- (void)cursor:(int64_t)tag
+          kind:(MuxKind)kind
+            at:(NSPoint)point
+       context:(BOOL)context {
+  MuxCursor *cursor = [self cursorFor:tag];
+  if (kind == MuxDown || kind == MuxDrag) {
+    if (_down && _holder != tag) {
+      self.emit(MuxUp, [self cursorFor:_holder].last);
+      _down = NO;
+    }
+    if (!_down) {
+      if (!context && cursor.context.count > 0 && _contextOwner != tag) {
+        for (NSValue *value in cursor.context) {
+          self.emit(MuxDown, value.pointValue);
+          self.emit(MuxUp, value.pointValue);
+        }
+        _contextOwner = tag;
+      }
+      if (kind == MuxDrag) {
+        self.emit(MuxDown, cursor.hasLast ? cursor.last : point);
+      }
+      _holder = tag;
+      _down = YES;
+    }
+    self.emit(kind, point);
+    if (kind == MuxDown && context) {
+      [self remember:point in:cursor];
+      _contextOwner = tag;
+    }
+  } else if (kind == MuxUp) {
+    if (_down && _holder == tag) {
+      self.emit(MuxUp, point);
+      _down = NO;
+    }
+  } else if (!_down || _holder == tag) {
+    self.emit(MuxMove, point);
+  }
+  cursor.last = point;
+  cursor.hasLast = YES;
 }
 @end
 
@@ -104,6 +221,7 @@ static NSColor *ColorFromHex(NSString *hex) {
 
 @interface SurfaceWindow : NSWindow
 @property(nonatomic, weak) CursorLayerView *cursorLayer;
+@property(nonatomic, strong) CursorMux *mux;
 @end
 
 @implementation SurfaceWindow
@@ -116,8 +234,12 @@ static NSColor *ColorFromHex(NSString *hex) {
       type == NSEventTypeLeftMouseDown || type == NSEventTypeLeftMouseDragged ||
       type == NSEventTypeLeftMouseUp || type == NSEventTypeMouseMoved;
   CGEventRef cg = pointer ? event.CGEvent : NULL;
-  int64_t owner =
+  int64_t data =
       cg == NULL ? 0 : CGEventGetIntegerValueField(cg, kCGEventSourceUserData);
+  // Low 32 bits: the agent's cursor tag. Bit 32: a context click (tool, size
+  // or color pick) to re-apply for that cursor after another cursor cut in.
+  int64_t owner = data & 0xffffffff;
+  BOOL context = ((data >> 32) & 1) == 1;
   if (owner == 0) {
     // The person clicked it: from now on it is an ordinary window they chose to
     // look at.
@@ -138,7 +260,36 @@ static NSColor *ColorFromHex(NSString *hex) {
     self.cursorLayer.marks[key] = mark;
     self.cursorLayer.needsDisplay = YES;
   }
-  [super sendEvent:event];
+  if (self.mux == nil) {
+    self.mux = [CursorMux new];
+    __weak SurfaceWindow *weakSelf = self;
+    self.mux.emit = ^(MuxKind kind, NSPoint point) {
+      [weakSelf deliver:kind at:point];
+    };
+  }
+  MuxKind kind = type == NSEventTypeLeftMouseDown      ? MuxDown
+                 : type == NSEventTypeLeftMouseDragged ? MuxDrag
+                 : type == NSEventTypeLeftMouseUp      ? MuxUp
+                                                       : MuxMove;
+  [self.mux cursor:owner kind:kind at:event.locationInWindow context:context];
+}
+
+- (void)deliver:(MuxKind)kind at:(NSPoint)point {
+  NSEventType type = kind == MuxDown   ? NSEventTypeLeftMouseDown
+                     : kind == MuxDrag ? NSEventTypeLeftMouseDragged
+                     : kind == MuxUp   ? NSEventTypeLeftMouseUp
+                                       : NSEventTypeMouseMoved;
+  NSEvent *merged =
+      [NSEvent mouseEventWithType:type
+                         location:point
+                    modifierFlags:0
+                        timestamp:NSProcessInfo.processInfo.systemUptime
+                     windowNumber:self.windowNumber
+                          context:nil
+                      eventNumber:0
+                       clickCount:1
+                         pressure:(kind == MuxDown || kind == MuxDrag) ? 1 : 0];
+  [super sendEvent:merged];
 }
 
 - (BOOL)canBecomeKeyWindow {
@@ -146,8 +297,68 @@ static NSColor *ColorFromHex(NSString *hex) {
 }
 @end
 
+// Replays scripted cursor input through CursorMux and compares the merged
+// stream with what the page must receive.
+static int SelfTest(void) {
+  NSMutableArray<NSString *> *out = [NSMutableArray array];
+  CursorMux *mux = [CursorMux new];
+  mux.emit = ^(MuxKind kind, NSPoint point) {
+    NSString *name = @[ @"D", @"G", @"U", @"M" ][kind];
+    [out addObject:[NSString stringWithFormat:@"%@%.0f,%.0f", name, point.x,
+                                              point.y]];
+  };
+  __block int failures = 0;
+  void (^check)(NSString *, NSString *) = ^(NSString *label, NSString *want) {
+    NSString *got = [out componentsJoinedByString:@" "];
+    if (![got isEqualToString:want]) {
+      failures += 1;
+      fprintf(stderr, "FAIL %s\n  want: %s\n  got:  %s\n", label.UTF8String,
+              want.UTF8String, got.UTF8String);
+    }
+    [out removeAllObjects];
+  };
+
+  // Two cursors drawing at once: each keeps a continuous stroke of its own.
+  [mux cursor:1 kind:MuxDown at:NSMakePoint(0, 0) context:NO];
+  [mux cursor:2 kind:MuxDown at:NSMakePoint(100, 100) context:NO];
+  [mux cursor:1 kind:MuxDrag at:NSMakePoint(10, 0) context:NO];
+  [mux cursor:2 kind:MuxDrag at:NSMakePoint(110, 100) context:NO];
+  [mux cursor:1 kind:MuxUp at:NSMakePoint(10, 0) context:NO];
+  [mux cursor:2 kind:MuxUp at:NSMakePoint(110, 100) context:NO];
+  check(@"interleaved strokes",
+        @"D0,0 U0,0 D100,100 U100,100 D0,0 G10,0 U10,0 D100,100 G110,100 "
+        @"U110,100");
+
+  // A cursor's own color pick is re-applied after another cursor picked its
+  // own color, before its stroke continues.
+  [mux cursor:1 kind:MuxDown at:NSMakePoint(5, 5) context:YES];
+  [mux cursor:1 kind:MuxUp at:NSMakePoint(5, 5) context:YES];
+  [mux cursor:1 kind:MuxDown at:NSMakePoint(50, 50) context:NO];
+  [mux cursor:2 kind:MuxDown at:NSMakePoint(7, 7) context:YES];
+  [mux cursor:2 kind:MuxUp at:NSMakePoint(7, 7) context:YES];
+  [mux cursor:2 kind:MuxDown at:NSMakePoint(200, 200) context:NO];
+  [mux cursor:1 kind:MuxDrag at:NSMakePoint(60, 50) context:NO];
+  check(@"context replay",
+        @"D5,5 U5,5 D50,50 U50,50 D7,7 U7,7 D200,200 U200,200 D5,5 U5,5 "
+        @"D50,50 G60,50");
+
+  // While one cursor holds the button, another cursor's hover is not sent.
+  [mux cursor:2 kind:MuxMove at:NSMakePoint(300, 300) context:NO];
+  [mux cursor:1 kind:MuxUp at:NSMakePoint(60, 50) context:NO];
+  [mux cursor:2 kind:MuxMove at:NSMakePoint(310, 300) context:NO];
+  check(@"hover while pressed", @"U60,50 M310,300");
+
+  if (failures == 0) {
+    printf("SELF-TEST OK\n");
+  }
+  return failures == 0 ? 0 : 1;
+}
+
 int main(int argc, const char *argv[]) {
   @autoreleasepool {
+    if (argc == 2 && strcmp(argv[1], "--self-test") == 0) {
+      return SelfTest();
+    }
     if (argc < 4) {
       fprintf(stderr, "usage: opencua-surface <url> <title> <x,y,width,height> "
                       "[cursor-names.json]\n");

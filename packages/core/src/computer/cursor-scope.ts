@@ -42,3 +42,17 @@ export function currentCursorIdentity(): string | undefined {
 export function currentCursorOwner(): CursorOwner | undefined {
 	return cursorIdentity.getStore()?.owner;
 }
+
+const contextClick = new AsyncLocalStorage<true>();
+
+/**
+ * Marks the input sent inside `callback` as a context click: picking a tool, size or color. A window several cursors
+ * share replays a cursor's context clicks before it continues, after another cursor changed that state.
+ */
+export function withContextClick<T>(callback: () => T): T {
+	return contextClick.run(true, callback);
+}
+
+export function inContextClick(): boolean {
+	return contextClick.getStore() === true;
+}

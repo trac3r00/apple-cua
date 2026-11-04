@@ -31,6 +31,8 @@ export {
 	type CursorOwner,
 	currentCursorIdentity,
 	currentCursorOwner,
+	inContextClick,
+	withContextClick,
 	withCursorIdentity,
 } from "./computer/cursor-scope.js";
 export {

@@ -765,6 +765,13 @@ function grantDependencies(layout: Layout, say: Say, open: boolean, mode: GrantM
 			};
 		},
 		openUrl: async (url) => open && (await openPrivacyPane(url)),
+		resetDecision: (service) => {
+			// Only this helper's own decision, and the guide calls it only while the permission is off.
+			const bundleId = findAppBundleId(layout.helperApp, layout.home);
+			if (bundleId !== undefined) {
+				spawnSync("/usr/bin/tccutil", ["reset", service, bundleId], { stdio: "ignore" });
+			}
+		},
 		waitFor: mode === "terminal" ? waitUntilGranted : (granted) => watchUntilGranted(granted, say),
 		print: say,
 	};
@@ -810,6 +817,7 @@ function runGrant(layout: Layout, say: Say, open: boolean, mode: GrantMode): Pro
 		{
 			mode,
 			openPanes: open,
+			helperApp: layout.helperApp,
 			extraAutomationTargets: approvedBrowsers(layout),
 			inputMonitoring: existsSync(historyLaunchAgentPath(layout.home)),
 		},

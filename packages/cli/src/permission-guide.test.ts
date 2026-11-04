@@ -310,3 +310,69 @@ describe("#given a permission changes while the guide is open #when the next pan
 		expect(outcome).toEqual({ granted: ["Accessibility"], missing: [], notAsked: [] });
 	});
 });
+
+describe("#given an earlier Screen Recording decision on record #when the guide asks #then it clears that decision first so macOS shows its dialog", () => {
+	function staleMac() {
+		let stale = true;
+		let pending = false;
+		const mac: FakeMac = {
+			state: { accessibility: true, screenRecording: false, automation: {} },
+			onRequest: {
+				// macOS answers without a dialog, and adds nothing to switch on, while the old decision stands.
+				"screen-recording": () => {
+					pending = !stale;
+				},
+				"switch-on": () => {
+					if (pending) {
+						mac.state.screenRecording = true;
+					}
+				},
+			},
+			switchesOn: [true],
+		};
+		const clear = (): void => {
+			stale = false;
+		};
+		return { mac, clear };
+	}
+
+	it("resets ScreenCapture before the request and ends with Screen Recording granted", async () => {
+		const { mac, clear } = staleMac();
+		const { deps, calls } = fake(mac);
+		const reset: GrantDependencies = {
+			...deps,
+			resetDecision: (service) => {
+				calls.push(`reset ${service}`);
+				clear();
+			},
+		};
+
+		const outcome = await grantPermissions({ mode: "terminal", openPanes: true, extraAutomationTargets: [] }, reset);
+
+		expect(calls.slice(0, 2)).toEqual(["reset ScreenCapture", "request screen-recording"]);
+		expect(outcome.granted).toEqual(["Screen Recording"]);
+	});
+
+	it("tells how to add the helper with + when macOS leaves it out of the list", async () => {
+		const { mac } = staleMac();
+		const { deps, printed } = fake(mac);
+		const helperApp = "/Users/someone/.opencua/app/packages/mcp/dist/opencua-mcp.app";
+
+		await grantPermissions({ mode: "terminal", openPanes: true, extraAutomationTargets: [], helperApp }, deps);
+
+		expect(printed()).toContain(`paste ${helperApp}, choose Open`);
+	});
+
+	it("never resets a permission that is already granted", async () => {
+		const { mac } = staleMac();
+		mac.state.screenRecording = true;
+		const { deps, calls } = fake(mac);
+
+		await grantPermissions(
+			{ mode: "terminal", openPanes: true, extraAutomationTargets: [] },
+			{ ...deps, resetDecision: (service) => calls.push(`reset ${service}`) },
+		);
+
+		expect(calls).not.toContain("reset ScreenCapture");
+	});
+});

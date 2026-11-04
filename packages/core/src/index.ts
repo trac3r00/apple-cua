@@ -195,6 +195,14 @@ export {
 	readHistorySettings,
 	writeHistorySettings,
 } from "./passive-memory/history-control.js";
+export {
+	type HistoryDeletion,
+	type HistorySegmentSummary,
+	deleteHistorySegments,
+	isHistorySegmentId,
+	listHistorySegments,
+	parseHistoryDuration,
+} from "./passive-memory/history-management.js";
 export { resolveHistoryRecorderBinary } from "./passive-memory/history-recorder-binary.js";
 export {
 	type HistorySegmentEvents,

@@ -75,6 +75,16 @@ int main(int argc, const char *argv[]) {
         printf("%s %s\n", ShouldObserveApp(@"com.example.Notes") ? "observe" : "skip",
                ShouldObserveApp(@"com.example.Other") ? "observe" : "skip");
         return 0;
+      } else if ([mode isEqualToString:@"forget-current"]) {
+        gRoot = [root stringByAppendingPathComponent:@"cua-history"];
+        gSegmentsDir = [gRoot stringByAppendingPathComponent:@"segments"];
+        EnsureDir(gSegmentsDir);
+        AppendEvent([@{@"kind" : @"session.started"} mutableCopy]);
+        AppendEvent([@{@"kind" : @"session.started"} mutableCopy]);
+        [NSFileManager.defaultManager removeItemAtPath:SegmentDir(gCurrentSegmentId) error:NULL];
+        AppendEvent([@{@"kind" : @"session.started"} mutableCopy]);
+        printf("%ld\n", gCurrentEventCount);
+        return 0;
       } else if ([mode isEqualToString:@"tick"]) {
         gRoot = [root stringByAppendingPathComponent:@"cua-history"];
         gSegmentsDir = [gRoot stringByAppendingPathComponent:@"segments"];

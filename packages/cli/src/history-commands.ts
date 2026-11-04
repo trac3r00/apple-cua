@@ -3,7 +3,15 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { historyPaths, readHistoryState, writeHistoryState } from "@opencua/core/light";
+import {
+	type HistorySegmentSummary,
+	deleteHistorySegments,
+	historyPaths,
+	listHistorySegments,
+	parseHistoryDuration,
+	readHistoryState,
+	writeHistoryState,
+} from "@opencua/core/light";
 import { resolveStateDir } from "@opencua/core/stop";
 import type { Command } from "commander";
 import { z } from "zod/v4";
@@ -15,6 +23,77 @@ type HistoryCommandOptions = {
 
 export function registerHistoryCommands(program: Command, options: HistoryCommandOptions): void {
 	const history = program.command("history").description("Control the always-on cua-history watcher");
+
+	history
+		.command("list")
+		.description("List recorded 10-minute history segments, newest first, with the apps each one holds")
+		.option("--limit <count>", "Most segments to show", "36")
+		.action((command: { readonly limit: string }) => {
+			const limit = Number.parseInt(command.limit, 10);
+			if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) {
+				throw new Error("--limit must be an integer from 1 to 1000.");
+			}
+			const segments = listHistorySegments(historyPaths(resolveStateDir()));
+			const shown = segments.slice(0, limit);
+			if (options.isJsonOutput()) {
+				process.stdout.write(`${JSON.stringify({ total: segments.length, segments: shown })}\n`);
+				return;
+			}
+			if (segments.length === 0) {
+				process.stdout.write("No history recorded yet.\n");
+				return;
+			}
+			process.stdout.write(`${shown.map(formatSegment).join("\n")}\n`);
+			if (shown.length < segments.length) {
+				process.stdout.write(
+					`${segments.length - shown.length} older segment(s) not shown; pass --limit to see them.\n`,
+				);
+			}
+		});
+
+	history
+		.command("delete")
+		.description("Delete recorded history: exact segment ids, the last period (--last 1h), or all of it (--all)")
+		.argument("[segment-ids...]", "segment ids from opencua history list")
+		.option("--last <duration>", "delete every segment overlapping the last 15m, 2h, 1d, ...")
+		.option("--all", "delete every recorded segment")
+		.option("--yes", "confirm the deletion")
+		.action(
+			async (
+				ids: readonly string[],
+				command: { readonly last?: string; readonly all?: boolean; readonly yes?: boolean },
+			) => {
+				const selectors = [ids.length > 0, command.last !== undefined, command.all === true].filter(Boolean).length;
+				if (selectors !== 1) {
+					throw new Error("Name what to delete with exactly one of: segment ids, --last <duration>, or --all.");
+				}
+				const deletion =
+					ids.length > 0
+						? { ids }
+						: command.last !== undefined
+							? { withinMs: parseHistoryDuration(command.last) }
+							: { all: true as const };
+				if (command.yes !== true) {
+					throw new Error("Deleting history cannot be undone; add --yes to confirm.");
+				}
+				const paths = historyPaths(resolveStateDir());
+				const deleted = deleteHistorySegments(paths, deletion);
+				// Suggestions are derived from the segments, so rebuild them: deleted activity must not stay in the menu.
+				const { suggestHistorySkills } = await import("@opencua/core");
+				const { writeMenuSuggestions } = await import("./history-suggest.js");
+				await mkdir(paths.root, { recursive: true, mode: 0o700 });
+				await writeMenuSuggestions(paths.root, await suggestHistorySkills(paths.root, { limit: 5 }));
+				if (options.isJsonOutput()) {
+					process.stdout.write(`${JSON.stringify({ deleted })}\n`);
+					return;
+				}
+				process.stdout.write(
+					deleted.length === 0
+						? "Nothing to delete.\n"
+						: `Deleted ${deleted.length} segment(s): ${deleted.join(", ")}. Skill suggestions were rebuilt without them; recording continues.\n`,
+				);
+			},
+		);
 
 	history
 		.command("suggest")
@@ -226,4 +305,12 @@ export function registerHistoryCommands(program: Command, options: HistoryComman
 				`installed: ${status.installed}\nrunning: ${status.running}\nstate: ${status.state}${status.reason === undefined ? "" : ` (${status.reason})`}\ndata: ${status.eventStreamRootPath}\n`,
 			);
 		});
+}
+
+function formatSegment(segment: HistorySegmentSummary): string {
+	const time = (iso: string): string =>
+		new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+	const day = new Date(segment.startedAt).toLocaleDateString();
+	const apps = segment.apps.length === 0 ? "no app events" : segment.apps.join(", ");
+	return `${segment.id}  ${day} ${time(segment.startedAt)}-${time(segment.endedAt)}  ${segment.eventCount} event(s)  ${apps}`;
 }

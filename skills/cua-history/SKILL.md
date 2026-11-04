@@ -128,8 +128,14 @@ Manage observation only through the MCP tools; do not read or edit `settings.jso
 The watcher is a native macOS menu-bar app (`history-recorder`) that ships inside the
 `opencua-mcp.app` bundle, so it is the same app and the same code identity as the rest of
 opencua. It is started and kept alive by a launchd LaunchAgent via `opencua history start`; `opencua history status` and
-`opencua history stop` manage it. Its menu-bar item shows the state and offers Open history,
-Record a skill, Pause, Resume, Reveal data folder, and Quit.
+`opencua history stop` manage it. Its menu-bar item shows the state and offers Don't record (the
+app in front), Open history, Record a skill, Pause, Resume, Reveal data folder, and Quit.
+
+The person can inspect and delete what was recorded from the terminal: `opencua history list`
+shows each 10-minute segment with its time, event count and apps, and `opencua history delete`
+removes exact segment ids, everything overlapping the last period (`--last 30m`, `2h`, `1d`), or
+all of it (`--all`); it needs `--yes`, rebuilds the skill suggestions without the deleted
+activity, and recording continues. Only the person runs these; never delete history for them.
 
 The watcher is code-signed with OpenCUA's own bundle identifier (`dev.opencua.mcp`), so macOS
 charges its permissions to the **same "opencua-mcp" entry** the rest of OpenCUA already uses, not a

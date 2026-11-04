@@ -3,6 +3,14 @@
 import "./env-compat.js";
 export { type HistorySkillDetection, describeHistoryStep } from "./passive-memory/history-skill-candidates.js";
 export { historyPaths, readHistoryState, writeHistoryState } from "./passive-memory/history-control.js";
+export {
+	type HistoryDeletion,
+	type HistorySegmentSummary,
+	deleteHistorySegments,
+	isHistorySegmentId,
+	listHistorySegments,
+	parseHistoryDuration,
+} from "./passive-memory/history-management.js";
 export { resolveHistoryRecorderBinary } from "./passive-memory/history-recorder-binary.js";
 export { AppApprovalStore } from "./permission/app-approval.js";
 export { isBrowserBundle } from "./permission/url-blocklist.js";

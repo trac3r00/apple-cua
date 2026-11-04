@@ -270,6 +270,17 @@ static NSString *SpotKey(NSPoint point) {
   cursor.hasLast = YES;
 }
 
+// A pick on a spot pressed within the double-click time would open whatever
+// the page shows on a double click (JS Paint: Edit Colors), so it waits.
+- (BOOL)mustWait:(MuxCursor *)cursor now:(NSTimeInterval)now {
+  MuxEvent *event = cursor.pending.firstObject;
+  if (event == nil || event.kind != MuxDown || !event.context) {
+    return NO;
+  }
+  NSNumber *hit = _lastHit[SpotKey(event.point)];
+  return hit != nil && now - hit.doubleValue < kDoubleClick;
+}
+
 - (BOOL)othersWaitingBesides:(int64_t)tag {
   for (NSNumber *key in _order) {
     if (key.longLongValue != tag && _cursors[key].pending.count > 0) {
@@ -287,7 +298,8 @@ static NSString *SpotKey(NSPoint point) {
                 (!others || (now - _sliceStart < kSlice &&
                              (holder.pending.count > 0 ||
                               (_down && now - holder.seen < kIdle))));
-    if (keep) {
+    BOOL holderWaits = holder != nil && [self mustWait:holder now:now];
+    if (keep && !holderWaits) {
       if (holder.pending.count == 0) {
         return;
       }
@@ -305,7 +317,8 @@ static NSString *SpotKey(NSPoint point) {
     BOOL switched = NO;
     for (NSUInteger step = 0; step < _order.count; step += 1) {
       NSNumber *key = _order[(start + step) % _order.count];
-      if (key.longLongValue == _holder || _cursors[key].pending.count == 0) {
+      if (key.longLongValue == _holder || _cursors[key].pending.count == 0 ||
+          [self mustWait:_cursors[key] now:now]) {
         continue;
       }
       if ([self takeOver:key.longLongValue now:now]) {
@@ -314,7 +327,7 @@ static NSString *SpotKey(NSPoint point) {
       }
     }
     if (!switched) {
-      if (holder != nil && holder.pending.count > 0) {
+      if (holder != nil && holder.pending.count > 0 && !holderWaits) {
         MuxEvent *event = holder.pending.firstObject;
         [holder.pending removeObjectAtIndex:0];
         [self deliver:event for:_holder now:now];
@@ -749,6 +762,26 @@ static int SelfTest(void) {
   // Hover of a cursor that does not hold the mouse is not sent.
   at(2, MuxMove, 400, 400, NO, 1.10);
   check(@"hover of a waiting cursor", @"");
+
+  // Two cursors picking the same swatch: the second pick waits out the
+  // double-click time while the first cursor keeps drawing.
+  mux = [CursorMux new];
+  mux.emit = ^(MuxKind kind, NSPoint point) {
+    NSString *name = @[ @"D", @"G", @"U", @"M" ][kind];
+    [out addObject:[NSString stringWithFormat:@"%@%.0f,%.0f", name, point.x,
+                                              point.y]];
+  };
+  at(1, MuxDown, 73, 1333, YES, 0.00);
+  at(1, MuxUp, 73, 1333, YES, 0.00);
+  at(1, MuxDown, 100, 100, NO, 0.01);
+  at(2, MuxDown, 73, 1333, YES, 0.20);
+  at(2, MuxUp, 73, 1333, YES, 0.20);
+  at(1, MuxDrag, 110, 100, NO, 0.30);
+  at(1, MuxUp, 110, 100, NO, 0.31);
+  check(@"same pick by another cursor waits",
+        @"D73,1333 U73,1333 D100,100 G110,100 U110,100");
+  [mux pump:0.50];
+  check(@"same pick after the double click time", @"D73,1333 U73,1333");
 
   // Lines of the agent pointer channel.
   {

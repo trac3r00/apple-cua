@@ -49,6 +49,7 @@ const {
 	setPointWindowIdsForTesting,
 } = await import("./macos-input.js");
 const { setOpenWindowsSourceForTesting } = await import("./macos-open-windows.js");
+const ownedSurfaces = await import("./owned-surfaces.js");
 
 import type { InputScope } from "../computer/input-scope.js";
 
@@ -520,6 +521,32 @@ describe("#given two gestures for one background app #when the first drag is par
 			.map(([event]) => event)
 			.filter((event) => event.targetPid === 42);
 		expect(samePidEvents.map((event) => event.kind)).toEqual(["down", "drag", "drag", "up", "down", "up"]);
+		controller.close();
+	});
+});
+
+describe("#given an opencua-owned surface #when two cursors act on it #then neither waits for the other's gesture", () => {
+	it("posts the second cursor's click while the first cursor's drag is still held", async () => {
+		vi.useFakeTimers();
+		vi.spyOn(ownedSurfaces, "isOwnedSurfacePid").mockImplementation((pid) => pid === 42);
+		const controller = backgroundController();
+		const drag = withCursorIdentity("painter-1", () =>
+			runInInputScope(boundTo(42, 12), () =>
+				controller.drag({ from: { x: 350, y: 150 }, to: { x: 400, y: 200 }, duration: 32 }),
+			),
+		);
+		await vi.advanceTimersByTimeAsync(0);
+		const click = withCursorIdentity("painter-2", () =>
+			runInInputScope(boundTo(42, 12), () => controller.click({ x: 380, y: 180 })),
+		);
+		await vi.advanceTimersByTimeAsync(0);
+
+		const beforeRelease = coreGraphicsMock.postMouseEvent.mock.calls.map(([event]) => event);
+		expect(beforeRelease.some((event) => event.kind === "down" && event.position.x === 380)).toBe(true);
+		expect(beforeRelease.some((event) => event.kind === "up" && event.position.x === 400)).toBe(false);
+
+		await vi.runAllTimersAsync();
+		await Promise.all([drag, click]);
 		controller.close();
 	});
 });

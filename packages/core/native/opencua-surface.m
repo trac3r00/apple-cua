@@ -45,37 +45,66 @@ typedef NS_ENUM(NSInteger, MuxKind) {
 };
 
 static const NSUInteger kMaxContextClicks = 4;
+// How long a cursor keeps the page's one mouse before a waiting cursor gets it.
+static const NSTimeInterval kSlice = 0.12;
+// A holder with no input for this long gives the mouse up to a waiting cursor.
+static const NSTimeInterval kIdle = 0.04;
+// Pages read two presses on the same spot within this time as a double click,
+// so a cursor's pick is re-applied only once this has passed since it was hit.
+static const NSTimeInterval kDoubleClick = 0.45;
+
+@interface MuxEvent : NSObject
+@property(nonatomic) MuxKind kind;
+@property(nonatomic) NSPoint point;
+@property(nonatomic) BOOL context;
+@end
+
+@implementation MuxEvent
+@end
 
 @interface MuxCursor : NSObject
 @property(nonatomic) NSPoint last;
 @property(nonatomic) BOOL hasLast;
+@property(nonatomic) NSTimeInterval seen;
 @property(nonatomic, strong) NSMutableArray<NSValue *> *context;
+@property(nonatomic, strong) NSMutableArray<MuxEvent *> *pending;
 @end
 
 @implementation MuxCursor
 @end
 
 // Merges the pointer streams of many cursors into the one stream a page can
-// take. Pure state, so --self-test can check it without a window.
+// take. A cursor holds the stream for a short slice while the others' input
+// waits in order; then the next waiting cursor takes over: the current press
+// ends where it was, that cursor's own picks are re-applied if another cursor
+// changed them, and its press resumes where it was. Pure state with explicit
+// times, so --self-test can check it without a window.
 @interface CursorMux : NSObject
 @property(nonatomic, copy) void (^emit)(MuxKind kind, NSPoint point);
 - (void)cursor:(int64_t)tag
           kind:(MuxKind)kind
             at:(NSPoint)point
-       context:(BOOL)context;
+       context:(BOOL)context
+           now:(NSTimeInterval)now;
+- (void)pump:(NSTimeInterval)now;
 @end
 
 @implementation CursorMux {
   NSMutableDictionary<NSNumber *, MuxCursor *> *_cursors;
+  NSMutableArray<NSNumber *> *_order;
+  NSMutableDictionary<NSString *, NSNumber *> *_lastHit;
   int64_t _holder;
   BOOL _down;
   int64_t _contextOwner;
+  NSTimeInterval _sliceStart;
 }
 
 - (instancetype)init {
   self = [super init];
   if (self != nil) {
     _cursors = [NSMutableDictionary dictionary];
+    _order = [NSMutableArray array];
+    _lastHit = [NSMutableDictionary dictionary];
   }
   return self;
 }
@@ -85,9 +114,22 @@ static const NSUInteger kMaxContextClicks = 4;
   if (cursor == nil) {
     cursor = [MuxCursor new];
     cursor.context = [NSMutableArray array];
+    cursor.pending = [NSMutableArray array];
     _cursors[@(tag)] = cursor;
+    [_order addObject:@(tag)];
   }
   return cursor;
+}
+
+static NSString *SpotKey(NSPoint point) {
+  return [NSString stringWithFormat:@"%.0f,%.0f", point.x, point.y];
+}
+
+- (void)press:(MuxKind)kind at:(NSPoint)point now:(NSTimeInterval)now {
+  if (kind == MuxDown) {
+    _lastHit[SpotKey(point)] = @(now);
+  }
+  self.emit(kind, point);
 }
 
 - (void)remember:(NSPoint)point in:(MuxCursor *)cursor {
@@ -107,44 +149,141 @@ static const NSUInteger kMaxContextClicks = 4;
 - (void)cursor:(int64_t)tag
           kind:(MuxKind)kind
             at:(NSPoint)point
-       context:(BOOL)context {
+       context:(BOOL)context
+           now:(NSTimeInterval)now {
   MuxCursor *cursor = [self cursorFor:tag];
-  if (kind == MuxDown || kind == MuxDrag) {
-    if (_down && _holder != tag) {
-      self.emit(MuxUp, [self cursorFor:_holder].last);
-      _down = NO;
+  // Hover of a cursor that does not hold the mouse would only move the page's
+  // one pointer away from the holder's stroke.
+  if (kind == MuxMove && _holder != 0 && _holder != tag) {
+    return;
+  }
+  MuxEvent *event = [MuxEvent new];
+  event.kind = kind;
+  event.point = point;
+  event.context = context;
+  [cursor.pending addObject:event];
+  cursor.seen = now;
+  [self pump:now];
+}
+
+// Whether taking the mouse now would re-apply a pick the page would read as a
+// double click.
+- (BOOL)canReplay:(MuxCursor *)cursor now:(NSTimeInterval)now {
+  if (cursor.context.count == 0) {
+    return YES;
+  }
+  for (NSValue *value in cursor.context) {
+    NSNumber *hit = _lastHit[SpotKey(value.pointValue)];
+    if (hit != nil && now - hit.doubleValue < kDoubleClick) {
+      return NO;
     }
-    if (!_down) {
-      // Restore this cursor's own picks first, also before a new pick of its
-      // own: the page may hold another cursor's tool.
-      if (cursor.context.count > 0 && _contextOwner != tag) {
-        for (NSValue *value in cursor.context) {
-          self.emit(MuxDown, value.pointValue);
-          self.emit(MuxUp, value.pointValue);
-        }
-        _contextOwner = tag;
-      }
-      if (kind == MuxDrag) {
-        self.emit(MuxDown, cursor.hasLast ? cursor.last : point);
-      }
-      _holder = tag;
-      _down = YES;
+  }
+  return YES;
+}
+
+- (BOOL)takeOver:(int64_t)tag now:(NSTimeInterval)now {
+  MuxCursor *cursor = [self cursorFor:tag];
+  BOOL replay = cursor.context.count > 0 && _contextOwner != tag;
+  if (replay && ![self canReplay:cursor now:now]) {
+    return NO;
+  }
+  if (_down) {
+    self.emit(MuxUp, [self cursorFor:_holder].last);
+    _down = NO;
+  }
+  if (replay) {
+    for (NSValue *value in cursor.context) {
+      [self press:MuxDown at:value.pointValue now:now];
+      self.emit(MuxUp, value.pointValue);
     }
-    self.emit(kind, point);
-    if (kind == MuxDown && context) {
-      [self remember:point in:cursor];
+    _contextOwner = tag;
+  }
+  _holder = tag;
+  _sliceStart = now;
+  return YES;
+}
+
+- (void)deliver:(MuxEvent *)event for:(int64_t)tag now:(NSTimeInterval)now {
+  MuxCursor *cursor = [self cursorFor:tag];
+  if (event.kind == MuxDown || event.kind == MuxDrag) {
+    if (!_down && event.kind == MuxDrag) {
+      [self press:MuxDown at:(cursor.hasLast ? cursor.last : event.point) now:now];
+    }
+    _down = YES;
+    if (event.kind == MuxDown) {
+      [self press:MuxDown at:event.point now:now];
+    } else {
+      self.emit(MuxDrag, event.point);
+    }
+    if (event.kind == MuxDown && event.context) {
+      [self remember:event.point in:cursor];
       _contextOwner = tag;
     }
-  } else if (kind == MuxUp) {
-    if (_down && _holder == tag) {
-      self.emit(MuxUp, point);
+  } else if (event.kind == MuxUp) {
+    if (_down) {
+      self.emit(MuxUp, event.point);
       _down = NO;
     }
-  } else if (!_down || _holder == tag) {
-    self.emit(MuxMove, point);
+  } else {
+    self.emit(MuxMove, event.point);
   }
-  cursor.last = point;
+  cursor.last = event.point;
   cursor.hasLast = YES;
+}
+
+- (BOOL)othersWaitingBesides:(int64_t)tag {
+  for (NSNumber *key in _order) {
+    if (key.longLongValue != tag && _cursors[key].pending.count > 0) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+- (void)pump:(NSTimeInterval)now {
+  for (;;) {
+    MuxCursor *holder = _holder == 0 ? nil : _cursors[@(_holder)];
+    BOOL others = [self othersWaitingBesides:_holder];
+    BOOL keep = holder != nil &&
+                (!others || (now - _sliceStart < kSlice &&
+                             (holder.pending.count > 0 ||
+                              (_down && now - holder.seen < kIdle))));
+    if (keep) {
+      if (holder.pending.count == 0) {
+        return;
+      }
+      MuxEvent *event = holder.pending.firstObject;
+      [holder.pending removeObjectAtIndex:0];
+      [self deliver:event for:_holder now:now];
+      continue;
+    }
+    // Round robin from the cursor after the holder.
+    NSUInteger start = 0;
+    if (_holder != 0) {
+      NSUInteger index = [_order indexOfObject:@(_holder)];
+      start = index == NSNotFound ? 0 : index + 1;
+    }
+    BOOL switched = NO;
+    for (NSUInteger step = 0; step < _order.count; step += 1) {
+      NSNumber *key = _order[(start + step) % _order.count];
+      if (key.longLongValue == _holder || _cursors[key].pending.count == 0) {
+        continue;
+      }
+      if ([self takeOver:key.longLongValue now:now]) {
+        switched = YES;
+        break;
+      }
+    }
+    if (!switched) {
+      if (holder != nil && holder.pending.count > 0) {
+        MuxEvent *event = holder.pending.firstObject;
+        [holder.pending removeObjectAtIndex:0];
+        [self deliver:event for:_holder now:now];
+        continue;
+      }
+      return;
+    }
+  }
 }
 @end
 
@@ -268,12 +407,25 @@ static NSColor *ColorFromHex(NSString *hex) {
     self.mux.emit = ^(MuxKind kind, NSPoint point) {
       [weakSelf deliver:kind at:point];
     };
+    // Waiting cursors get the mouse when the holder's slice ends, even if no
+    // new input arrives to trigger it.
+    [NSTimer scheduledTimerWithTimeInterval:0.008
+                                    repeats:YES
+                                      block:^(NSTimer *timer) {
+                                        [weakSelf.mux
+                                            pump:NSProcessInfo.processInfo
+                                                     .systemUptime];
+                                      }];
   }
   MuxKind kind = type == NSEventTypeLeftMouseDown      ? MuxDown
                  : type == NSEventTypeLeftMouseDragged ? MuxDrag
                  : type == NSEventTypeLeftMouseUp      ? MuxUp
                                                        : MuxMove;
-  [self.mux cursor:owner kind:kind at:event.locationInWindow context:context];
+  [self.mux cursor:owner
+              kind:kind
+                at:event.locationInWindow
+           context:context
+               now:NSProcessInfo.processInfo.systemUptime];
 }
 
 - (void)deliver:(MuxKind)kind at:(NSPoint)point {
@@ -299,11 +451,11 @@ static NSColor *ColorFromHex(NSString *hex) {
 }
 @end
 
-// Replays scripted cursor input through CursorMux and compares the merged
-// stream with what the page must receive.
+// Replays scripted cursor input through CursorMux at explicit times and
+// compares the merged stream with what the page must receive.
 static int SelfTest(void) {
   NSMutableArray<NSString *> *out = [NSMutableArray array];
-  CursorMux *mux = [CursorMux new];
+  __block CursorMux *mux = [CursorMux new];
   mux.emit = ^(MuxKind kind, NSPoint point) {
     NSString *name = @[ @"D", @"G", @"U", @"M" ][kind];
     [out addObject:[NSString stringWithFormat:@"%@%.0f,%.0f", name, point.x,
@@ -319,45 +471,66 @@ static int SelfTest(void) {
     }
     [out removeAllObjects];
   };
+  void (^at)(int64_t, MuxKind, CGFloat, CGFloat, BOOL, NSTimeInterval) =
+      ^(int64_t tag, MuxKind kind, CGFloat x, CGFloat y, BOOL context,
+        NSTimeInterval now) {
+        [mux cursor:tag kind:kind at:NSMakePoint(x, y) context:context now:now];
+      };
 
-  // Two cursors drawing at once: each keeps a continuous stroke of its own.
-  [mux cursor:1 kind:MuxDown at:NSMakePoint(0, 0) context:NO];
-  [mux cursor:2 kind:MuxDown at:NSMakePoint(100, 100) context:NO];
-  [mux cursor:1 kind:MuxDrag at:NSMakePoint(10, 0) context:NO];
-  [mux cursor:2 kind:MuxDrag at:NSMakePoint(110, 100) context:NO];
-  [mux cursor:1 kind:MuxUp at:NSMakePoint(10, 0) context:NO];
-  [mux cursor:2 kind:MuxUp at:NSMakePoint(110, 100) context:NO];
-  check(@"interleaved strokes",
-        @"D0,0 U0,0 D100,100 U100,100 D0,0 G10,0 U10,0 D100,100 G110,100 "
-        @"U110,100");
+  // A second cursor waits while the first one's stroke goes on, then draws.
+  at(1, MuxDown, 0, 0, NO, 0.000);
+  at(2, MuxDown, 100, 100, NO, 0.001);
+  at(1, MuxDrag, 10, 0, NO, 0.010);
+  at(2, MuxDrag, 110, 100, NO, 0.011);
+  at(1, MuxUp, 10, 0, NO, 0.020);
+  at(2, MuxUp, 110, 100, NO, 0.021);
+  check(@"queued strokes", @"D0,0 G10,0 U10,0 D100,100 G110,100 U110,100");
 
-  // A cursor's own color pick is re-applied after another cursor picked its
-  // own color, before its stroke continues.
-  [mux cursor:1 kind:MuxDown at:NSMakePoint(5, 5) context:YES];
-  [mux cursor:1 kind:MuxUp at:NSMakePoint(5, 5) context:YES];
-  [mux cursor:1 kind:MuxDown at:NSMakePoint(50, 50) context:NO];
-  [mux cursor:2 kind:MuxDown at:NSMakePoint(7, 7) context:YES];
-  [mux cursor:2 kind:MuxUp at:NSMakePoint(7, 7) context:YES];
-  [mux cursor:2 kind:MuxDown at:NSMakePoint(200, 200) context:NO];
-  [mux cursor:1 kind:MuxDrag at:NSMakePoint(60, 50) context:NO];
-  check(@"context replay",
-        @"D5,5 U5,5 D50,50 U50,50 D7,7 U7,7 D200,200 U200,200 D5,5 U5,5 "
-        @"D50,50 G60,50");
+  // When the holder's slice ends, the waiting cursor takes over, and the
+  // first stroke resumes where it was.
+  mux = [CursorMux new];
+  mux.emit = ^(MuxKind kind, NSPoint point) {
+    NSString *name = @[ @"D", @"G", @"U", @"M" ][kind];
+    [out addObject:[NSString stringWithFormat:@"%@%.0f,%.0f", name, point.x,
+                                              point.y]];
+  };
+  at(1, MuxDown, 0, 0, NO, 0.00);
+  at(1, MuxDrag, 1, 0, NO, 0.05);
+  at(2, MuxDown, 50, 50, NO, 0.06);
+  at(1, MuxDrag, 2, 0, NO, 0.10);
+  at(1, MuxDrag, 3, 0, NO, 0.13);
+  check(@"slice handover",
+        @"D0,0 G1,0 G2,0 U2,0 D50,50 U50,50 D2,0 G3,0");
 
-  // While one cursor holds the button, another cursor's hover is not sent.
-  [mux cursor:2 kind:MuxMove at:NSMakePoint(300, 300) context:NO];
-  [mux cursor:1 kind:MuxUp at:NSMakePoint(60, 50) context:NO];
-  [mux cursor:2 kind:MuxMove at:NSMakePoint(310, 300) context:NO];
-  check(@"hover while pressed", @"U60,50 M310,300");
+  // A cursor's own pick is re-applied before it continues, but only once that
+  // cannot read as a double click on the same spot.
+  mux = [CursorMux new];
+  mux.emit = ^(MuxKind kind, NSPoint point) {
+    NSString *name = @[ @"D", @"G", @"U", @"M" ][kind];
+    [out addObject:[NSString stringWithFormat:@"%@%.0f,%.0f", name, point.x,
+                                              point.y]];
+  };
+  at(1, MuxDown, 5, 5, YES, 0.00);
+  at(1, MuxUp, 5, 5, YES, 0.00);
+  at(2, MuxDown, 7, 7, YES, 0.01);
+  at(2, MuxUp, 7, 7, YES, 0.01);
+  at(1, MuxDown, 50, 50, NO, 0.02);
+  check(@"replay waits out the double click", @"D5,5 U5,5 D7,7 U7,7");
+  [mux pump:0.50];
+  check(@"replay after the double click window", @"D5,5 U5,5 D50,50");
 
   // A new pick of its own still restores the cursor's earlier picks first.
-  [mux cursor:2 kind:MuxDown at:NSMakePoint(300, 300) context:NO];
-  [mux cursor:2 kind:MuxUp at:NSMakePoint(300, 300) context:NO];
-  [mux cursor:1 kind:MuxDown at:NSMakePoint(9, 9) context:YES];
-  [mux cursor:1 kind:MuxUp at:NSMakePoint(9, 9) context:YES];
-  [mux cursor:1 kind:MuxDown at:NSMakePoint(70, 70) context:NO];
+  at(2, MuxDown, 300, 300, NO, 0.60);
+  at(2, MuxUp, 300, 300, NO, 0.61);
+  at(1, MuxDown, 9, 9, YES, 0.62);
+  [mux pump:1.00];
+  at(1, MuxUp, 9, 9, YES, 1.00);
   check(@"own new pick after another cursor",
-        @"D7,7 U7,7 D300,300 U300,300 D5,5 U5,5 D9,9 U9,9 D70,70");
+        @"U50,50 D7,7 U7,7 D300,300 U300,300 D5,5 U5,5 D9,9 U9,9");
+
+  // Hover of a cursor that does not hold the mouse is not sent.
+  at(2, MuxMove, 400, 400, NO, 1.10);
+  check(@"hover of a waiting cursor", @"");
 
   if (failures == 0) {
     printf("SELF-TEST OK\n");

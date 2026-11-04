@@ -292,7 +292,7 @@ export class MacOSInputController {
 	private readonly isLocked: () => boolean;
 	private readonly displaySleep: DisplaySleepAssertion;
 	private globalGestureChain: Promise<void> = Promise.resolve();
-	private readonly appGestureChains = new Map<number, Promise<void>>();
+	private readonly appGestureChains = new Map<number | string, Promise<void>>();
 	private readonly delivery: InputDelivery;
 	/** Whether background delivery may tell an app behind the person's that it is active (see activateBehind). */
 	private readonly backgroundActivation: boolean;
@@ -632,17 +632,23 @@ export class MacOSInputController {
 
 	private serialize<T>(pid: number | undefined, run: () => Promise<T>): Promise<T> {
 		const appLane = this.isBackground && pid !== undefined;
-		const previous = appLane ? (this.appGestureChains.get(pid) ?? Promise.resolve()) : this.globalGestureChain;
+		// An owned surface merges its cursors' input itself, so each cursor there gets its own gesture chain.
+		const identity = currentCursorIdentity();
+		const lane = pid !== undefined && identity !== undefined && isOwnedSurfacePid(pid) ? `${pid}:${identity}` : pid;
+		const previous =
+			appLane && lane !== undefined
+				? (this.appGestureChains.get(lane) ?? Promise.resolve())
+				: this.globalGestureChain;
 		const result = previous.then(run, run);
 		const next = result.then(
 			() => undefined,
 			() => undefined,
 		);
-		if (appLane) {
-			this.appGestureChains.set(pid, next);
+		if (appLane && lane !== undefined) {
+			this.appGestureChains.set(lane, next);
 			void next.then(() => {
-				if (this.appGestureChains.get(pid) === next) {
-					this.appGestureChains.delete(pid);
+				if (this.appGestureChains.get(lane) === next) {
+					this.appGestureChains.delete(lane);
 				}
 			});
 		} else {

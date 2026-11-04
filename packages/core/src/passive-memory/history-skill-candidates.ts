@@ -194,8 +194,15 @@ function isCyclicRun(inner: readonly string[], cycle: readonly string[]): boolea
 	return isContiguousSubsequence(inner, Array.from({ length: repeats }, () => cycle).flat());
 }
 
-/** A workflow spans two apps, or names at least two distinct informative steps; bare click/type loops do not count. */
+/**
+ * A workflow spans two apps, or names at least two distinct informative steps; bare click/type loops do not count.
+ * Steps that only switch apps are someone moving between windows, not a workflow, unless they visit three distinct
+ * titled windows.
+ */
 function isMeaningful(steps: readonly HistoryStep[]): boolean {
+	if (steps.every((step) => step.action === "switch")) {
+		return new Set(steps.filter(isInformative).map(stepKey)).size >= 3;
+	}
 	if (new Set(steps.map((step) => step.app)).size >= 2) return true;
 	return new Set(steps.filter(isInformative).map(stepKey)).size >= 2;
 }

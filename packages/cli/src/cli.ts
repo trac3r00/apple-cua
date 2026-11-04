@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { execFile } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { execFile, spawnSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,7 @@ import type {
 import { AppApprovalStore, StopSwitch } from "@opencua/core/light";
 import { Command } from "commander";
 import { registerBrowserCommands } from "./browser-commands.js";
+import { IN_HELPER_ENV, needsHelperPermissions } from "./helper-route.js";
 import { registerHistoryCommands } from "./history-commands.js";
 import { registerIosCommands } from "./ios.js";
 import { resolveLayout } from "./layout.js";
@@ -144,7 +145,7 @@ program
 	.option("--no-cursor", "hide the synthetic white+blue cursor overlay (shown by default to mark where input lands)")
 	.option(
 		"--background",
-		"deliver input without changing the frontmost app or moving the cursor; actions that need foreground delivery are refused",
+		"deliver input without changing the frontmost app or moving the cursor (the default; kept for scripts that pass it)",
 	);
 
 program
@@ -598,9 +599,32 @@ program.hook("preAction", (_program, actionCommand) => {
 	) {
 		throw new Error("app-target-required: pass --target-pid or --target-bundle-id before sending input");
 	}
+	if (needsHelperPermissions(commandPath)) {
+		relaunchInHelper();
+	}
 });
 
 await program.parseAsync().catch(handleError);
+
+/**
+ * Runs this command again inside the "opencua-mcp" helper, which holds the macOS permissions the person granted, and
+ * exits with its status. A source run (tests, development) or a checkout without a built helper stays in place.
+ */
+function relaunchInHelper(): void {
+	const script = fileURLToPath(import.meta.url);
+	if (process.platform !== "darwin" || process.env[IN_HELPER_ENV] === "1" || !script.endsWith(".js")) {
+		return;
+	}
+	const { helperExecutable } = resolveLayout();
+	if (!existsSync(helperExecutable)) {
+		return;
+	}
+	const result = spawnSync(helperExecutable, [script, ...process.argv.slice(2)], {
+		stdio: "inherit",
+		env: { ...process.env, [IN_HELPER_ENV]: "1" },
+	});
+	process.exit(result.status ?? 1);
+}
 
 /** Resolve an app name/bundleId to a pid, reusing the same matching as `apps state`. */
 async function resolveAppPidForCli(computer: MacOSHostComputer, app: string): Promise<number> {
@@ -645,7 +669,6 @@ async function withComputer(
 	// is shown by default. When hidden, inject the no-op overlay so no helper spawns.
 	const { MacOSHostComputer, NOOP_POINTER_OVERLAY, agentCursorEnabled } = await import("@opencua/core");
 	const showCursor = program.opts<GlobalOptions>().cursor !== false && agentCursorEnabled();
-	const background = program.opts<GlobalOptions>().background === true;
 	const computer = new MacOSHostComputer({
 		appApproval: new AppApprovalStore(
 			process.env["OPENCUA_ALLOWED_BUNDLE_IDS"]
@@ -653,7 +676,8 @@ async function withComputer(
 				.map((bundleId) => bundleId.trim())
 				.filter((bundleId) => bundleId.length > 0),
 		),
-		delivery: background ? "background" : "attended",
+		// The person's desktop takes background delivery only; attended delivery is refused there.
+		delivery: "background",
 		...(showCursor ? { cursorMotion: resolveCursorMotion(resolveLayout().configPath) } : {}),
 		...hostOptions,
 		...(showCursor ? {} : { overlay: NOOP_POINTER_OVERLAY }),

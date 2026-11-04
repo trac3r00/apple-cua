@@ -412,6 +412,18 @@ run_pnpm() {
 	(cd "$repo" && "${pnpm_command[@]}" "$@")
 }
 
+# pnpm's own output (download progress, native addon builds, bin links that wait for the build, its approve-builds
+# notice) means nothing to someone installing opencua, so it goes to a log that is shown only when the step fails.
+run_pnpm_logged() {
+	local log="$opencua_home/logs/$1.log"
+	shift
+	mkdir -p "$opencua_home/logs"
+	if ! run_pnpm "$@" >"$log" 2>&1; then
+		tail -n 40 "$log" | sed 's/^/          /'
+		fail "pnpm $* did not finish" "the full output is in $log"
+	fi
+}
+
 # --- The opencua command ----------------------------------------------------------------------------------------
 
 # A launcher that runs this checkout's CLI with the node setup used, and with the OPENCUA_HOME and
@@ -604,8 +616,8 @@ ok "pnpm $pnpm_version via ${pnpm_command[*]} (the version package.json pins)"
 # --- 5. Dependencies ---------------------------------------------------------------------------------------------
 
 step "dependencies (pnpm install --frozen-lockfile)"
-run_pnpm install --frozen-lockfile
-ok "node_modules matches pnpm-lock.yaml"
+run_pnpm_logged setup-dependencies install --frozen-lockfile
+ok "node_modules matches pnpm-lock.yaml (log: $opencua_home/logs/setup-dependencies.log)"
 
 # --- 6. Native binaries ------------------------------------------------------------------------------------------
 
@@ -641,8 +653,9 @@ fi
 # --- 7. TypeScript -----------------------------------------------------------------------------------------------
 
 step "TypeScript build"
-run_pnpm --filter @opencua/core run build:ts
-run_pnpm --filter @opencua/mcp --filter @opencua/cli --filter @opencua/pi-extension --filter @opencua/agent --filter @opencua/browser run build
+run_pnpm_logged setup-build-core --filter @opencua/core run build:ts
+run_pnpm_logged setup-build --filter @opencua/mcp --filter @opencua/cli --filter @opencua/pi-extension --filter @opencua/agent \
+	--filter @opencua/browser run build
 ok "built core, mcp, cli, pi-extension, agent and browser"
 
 # --- 8. Signed helper app ----------------------------------------------------------------------------------------

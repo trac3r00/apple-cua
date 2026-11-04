@@ -353,6 +353,16 @@ describe("#given an earlier Screen Recording decision on record #when the guide 
 		expect(outcome.granted).toEqual(["Screen Recording"]);
 	});
 
+	it("tells how to add the helper with + when macOS leaves it out of the list", async () => {
+		const { mac } = staleMac();
+		const { deps, printed } = fake(mac);
+		const helperApp = "/Users/someone/.opencua/app/packages/mcp/dist/opencua-mcp.app";
+
+		await grantPermissions({ mode: "terminal", openPanes: true, extraAutomationTargets: [], helperApp }, deps);
+
+		expect(printed()).toContain(`paste ${helperApp}, choose Open`);
+	});
+
 	it("never resets a permission that is already granted", async () => {
 		const { mac } = staleMac();
 		mac.state.screenRecording = true;

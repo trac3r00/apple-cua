@@ -46,6 +46,8 @@ export interface GrantOptions {
 	readonly openPanes: boolean;
 	/** Apps beyond the helper's own Automation targets to ask about, e.g. approved browsers. */
 	readonly extraAutomationTargets: readonly string[];
+	/** The helper app's path, for adding it by hand when macOS leaves it out of the Screen Recording list. */
+	readonly helperApp?: string;
 	/** Also walk through Input Monitoring, which only the cua-history watcher needs. */
 	readonly inputMonitoring?: boolean;
 }
@@ -154,6 +156,12 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 		}
 		deps.print(`\n${grant.label} lets ${NAME} ${grant.why}.`);
 		deps.print(`  macOS shows a dialog for ${NAME}: choose Open System Settings, then switch on ${NAME}.`);
+		if (grant.tccService === "ScreenCapture" && options.helperApp !== undefined) {
+			// macOS can show the dialog and still leave the app out of this list; adding it with + always works.
+			deps.print(
+				`  If ${NAME} is not in the list: click + below it, press Command-Shift-G, paste ${options.helperApp}, choose Open, then switch it on.`,
+			);
+		}
 		if (grant.tccService !== undefined) {
 			deps.resetDecision?.(grant.tccService);
 		}

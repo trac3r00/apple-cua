@@ -817,6 +817,7 @@ function runGrant(layout: Layout, say: Say, open: boolean, mode: GrantMode): Pro
 		{
 			mode,
 			openPanes: open,
+			helperApp: layout.helperApp,
 			extraAutomationTargets: approvedBrowsers(layout),
 			inputMonitoring: existsSync(historyLaunchAgentPath(layout.home)),
 		},

@@ -101,7 +101,8 @@ static const CGFloat kAlternativeDistance = 80;
 @implementation CursorMux {
   NSMutableDictionary<NSNumber *, MuxCursor *> *_cursors;
   NSMutableArray<NSNumber *> *_order;
-  NSMutableDictionary<NSString *, NSNumber *> *_lastHit;
+  NSMutableArray<NSValue *> *_hitPoints;
+  NSMutableArray<NSNumber *> *_hitTimes;
   NSMutableArray<NSValue *> *_picks;
   int64_t _holder;
   BOOL _down;
@@ -113,7 +114,8 @@ static const CGFloat kAlternativeDistance = 80;
   if (self != nil) {
     _cursors = [NSMutableDictionary dictionary];
     _order = [NSMutableArray array];
-    _lastHit = [NSMutableDictionary dictionary];
+    _hitPoints = [NSMutableArray array];
+    _hitTimes = [NSMutableArray array];
     _picks = [NSMutableArray array];
   }
   return self;
@@ -165,13 +167,18 @@ static const CGFloat kAlternativeDistance = 80;
   return cursor;
 }
 
-static NSString *SpotKey(NSPoint point) {
-  return [NSString stringWithFormat:@"%.0f,%.0f", point.x, point.y];
-}
+// Presses this close are on the same control: two cursors aim at a swatch or
+// tool a pixel or two apart.
+static const CGFloat kSameSpot = 7;
 
 - (void)press:(MuxKind)kind at:(NSPoint)point now:(NSTimeInterval)now {
   if (kind == MuxDown) {
-    _lastHit[SpotKey(point)] = @(now);
+    [_hitPoints addObject:[NSValue valueWithPoint:point]];
+    [_hitTimes addObject:@(now)];
+    while (_hitPoints.count > 64) {
+      [_hitPoints removeObjectAtIndex:0];
+      [_hitTimes removeObjectAtIndex:0];
+    }
   }
   self.emit(kind, point);
 }
@@ -210,12 +217,23 @@ static NSString *SpotKey(NSPoint point) {
   [self pump:now];
 }
 
+// Whether a press on this spot now would read as a double click.
+- (BOOL)hitRecently:(NSPoint)point now:(NSTimeInterval)now {
+  for (NSUInteger index = 0; index < _hitPoints.count; index += 1) {
+    NSPoint hit = _hitPoints[index].pointValue;
+    if (hypot(hit.x - point.x, hit.y - point.y) < kSameSpot &&
+        now - _hitTimes[index].doubleValue < kDoubleClick) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 // Whether taking the mouse now would re-apply a pick the page would read as a
 // double click.
 - (BOOL)canReplay:(NSArray<NSValue *> *)picks now:(NSTimeInterval)now {
   for (NSValue *value in picks) {
-    NSNumber *hit = _lastHit[SpotKey(value.pointValue)];
-    if (hit != nil && now - hit.doubleValue < kDoubleClick) {
+    if ([self hitRecently:value.pointValue now:now]) {
       return NO;
     }
   }
@@ -277,8 +295,7 @@ static NSString *SpotKey(NSPoint point) {
   if (event == nil || event.kind != MuxDown || !event.context) {
     return NO;
   }
-  NSNumber *hit = _lastHit[SpotKey(event.point)];
-  return hit != nil && now - hit.doubleValue < kDoubleClick;
+  return [self hitRecently:event.point now:now];
 }
 
 - (BOOL)othersWaitingBesides:(int64_t)tag {
@@ -782,6 +799,24 @@ static int SelfTest(void) {
         @"D73,1333 U73,1333 D100,100 G110,100 U110,100");
   [mux pump:0.50];
   check(@"same pick after the double click time", @"D73,1333 U73,1333");
+
+  // The same swatch aimed at a pixel apart by another cursor also waits.
+  mux = [CursorMux new];
+  mux.emit = ^(MuxKind kind, NSPoint point) {
+    NSString *name = @[ @"D", @"G", @"U", @"M" ][kind];
+    [out addObject:[NSString stringWithFormat:@"%@%.0f,%.0f", name, point.x,
+                                              point.y]];
+  };
+  at(1, MuxDown, 89, 1317, YES, 0.00);
+  at(1, MuxUp, 89, 1317, YES, 0.00);
+  at(1, MuxDown, 100, 100, NO, 0.01);
+  at(2, MuxDown, 90, 1318, YES, 0.20);
+  at(2, MuxUp, 90, 1318, YES, 0.20);
+  at(1, MuxUp, 100, 100, NO, 0.30);
+  check(@"nearby pick by another cursor waits",
+        @"D89,1317 U89,1317 D100,100 U100,100");
+  [mux pump:0.50];
+  check(@"nearby pick after the double click time", @"D90,1318 U90,1318");
 
   // Lines of the agent pointer channel.
   {

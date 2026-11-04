@@ -82,6 +82,7 @@ import {
 } from "./macos-ffi/select-text.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
 import { recognizeTextInImage } from "./macos-ffi/vision.js";
+import { listWindows as listOwnedCandidateWindows } from "./macos-ffi/window-list.js";
 import { MacOSInputController } from "./macos-input.js";
 import type { InputDelivery } from "./macos-input.js";
 import { currentOnscreenWindowIds, guardAgainstFocusSteal } from "./macos-input.js";
@@ -103,6 +104,7 @@ import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.j
 import { resolveTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
 import { resolveOcrCrop } from "./ocr-region.js";
+import { isOwnedSurfacePid } from "./owned-surfaces.js";
 import { currentSystemPrompts } from "./system-prompts.js";
 
 const execFileAsync = promisify(execFile);
@@ -207,7 +209,7 @@ export class MacOSHostComputer extends HostComputer {
 
 	private async captureScreenshot(options?: ScreenshotOptions, windowId?: number): Promise<ScreenshotResult> {
 		// Even an otherwise permitted host capture can raise macOS capture-consent UI.
-		if (!this.capabilities.supportsScreenshot) denyHostInteraction("host-window");
+		if (!this.capabilities.supportsScreenshot && !this.isOwnedWindow(windowId)) denyHostInteraction("host-window");
 		if (!screenCaptureAllowed()) {
 			throw new Error(
 				"Screen Recording permission is not granted to the process running opencua, so no image was captured (capturing would raise macOS's permission prompt). Grant it in System Settings > Privacy & Security > Screen Recording to the app that launches this server, then restart the server.",
@@ -331,7 +333,7 @@ export class MacOSHostComputer extends HostComputer {
 	 * told it is active when that is what keeps the command disabled (see invokeWindowMenu).
 	 */
 	async invokeMenu(targetPid: number, path: readonly string[]): Promise<InvokeMenuResult> {
-		this.assertInputAvailable();
+		this.assertInputAvailable(targetPid);
 		const normalized = normalizeMenuPath(path);
 		await this.assertBackgroundFinderCommand(targetPid, { path: normalized });
 		const command = normalized.length === 2 && normalized[0] === "Edit" ? normalized[1] : undefined;
@@ -686,7 +688,7 @@ export class MacOSHostComputer extends HostComputer {
 		const screenshotUnavailable =
 			options?.includeScreenshot === false
 				? undefined
-				: !this.capabilities.supportsScreenshot
+				: !this.capabilities.supportsScreenshot && !this.isOwnedWindow(targetWindow?.id)
 					? ("isolated-session-required" as const)
 					: screenCaptureAllowed()
 						? undefined
@@ -889,8 +891,16 @@ export class MacOSHostComputer extends HostComputer {
 		}
 	}
 
-	private assertInputAvailable(): void {
-		if (!this.capabilities.supportsInput) denyHostInteraction("host-window");
+	/** The person's own apps stay refused; only windows opencua launched itself take host input. */
+	private assertInputAvailable(targetPid: number | undefined = this.input.currentTargetPid): void {
+		if (this.capabilities.supportsInput || (targetPid !== undefined && isOwnedSurfacePid(targetPid))) return;
+		denyHostInteraction("host-window");
+	}
+
+	private isOwnedWindow(windowId: number | undefined): boolean {
+		if (windowId === undefined) return false;
+		const window = listOwnedCandidateWindows()?.find((candidate) => candidate.id === windowId);
+		return window !== undefined && isOwnedSurfacePid(window.ownerPid);
 	}
 
 	/**
@@ -1004,7 +1014,7 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async setValue(targetPid: number, elementIndex: number, value: string): Promise<void> {
-		this.assertInputAvailable();
+		this.assertInputAvailable(targetPid);
 		this.showElement(targetPid, elementIndex, false);
 		setValueByIndex(targetPid, elementIndex, value);
 		this.input.showKeyboard();
@@ -1012,14 +1022,14 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async selectText(targetPid: number, elementIndex: number, options: SelectTextOptions): Promise<void> {
-		this.assertInputAvailable();
+		this.assertInputAvailable(targetPid);
 		this.showElement(targetPid, elementIndex, false);
 		selectTextByIndex(targetPid, elementIndex, options);
 		this.input.showKeyboard();
 	}
 
 	async performAction(targetPid: number, elementIndex: number, action: string): Promise<void> {
-		this.assertInputAvailable();
+		this.assertInputAvailable(targetPid);
 		this.showElement(targetPid, elementIndex, !action.startsWith("AXScroll"), action.startsWith("AXScroll"));
 		// Pressing or focusing an element can make its app activate itself (Safari does for a web
 		// field); background delivery hands the front back to the person's app when that happens.
@@ -1057,7 +1067,7 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async pressAtPosition(targetPid: number, position: Point): Promise<boolean> {
-		this.assertInputAvailable();
+		this.assertInputAvailable(targetPid);
 		this.input.showPointer(position, true, targetPid);
 		// A press inside a dispatch bound to an observed window only takes an element of that window.
 		const target = currentInputScope()?.target;
@@ -1092,7 +1102,7 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async scrollElementIntoView(targetPid: number, elementIndex: number): Promise<Rect | undefined> {
-		this.assertInputAvailable();
+		this.assertInputAvailable(targetPid);
 		if (!scrollToVisibleByIndex(targetPid, elementIndex)) {
 			return undefined;
 		}
@@ -1116,7 +1126,7 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async recognizeWindowText(targetPid: number, options?: { readonly region?: Rect }): Promise<WindowTextRead> {
-		if (!this.capabilities.supportsScreenshot) {
+		if (!this.capabilities.supportsScreenshot && !isOwnedSurfacePid(targetPid)) {
 			return { unavailable: "isolated-session-required" };
 		}
 		if (!screenCaptureAllowed()) {
@@ -1193,7 +1203,7 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async preflightInput(expected: InputObservation, options?: PreflightOptions): Promise<PreflightResult> {
-		if (!this.capabilities.supportsInput) {
+		if (!this.capabilities.supportsInput && !(expected !== undefined && isOwnedSurfacePid(expected.pid))) {
 			return { ok: false, reason: "isolated-session-required" };
 		}
 		const stored = this.inputObservations.get(expected.pid);

@@ -47,6 +47,7 @@ import { registerPowerTools } from "./power-tools.js";
 import { registerScriptTools } from "./script-tools.js";
 import { SERVER_INFO } from "./server-info.js";
 import { SUPERVISED_CHILD_FLAG } from "./supervisor.js";
+import { registerSurfaceTools } from "./surface-tools.js";
 import { TerminalGuardSession } from "./terminal-session.js";
 import { installToolErrorEnvelope } from "./tool-errors.js";
 import { toolNamesFor } from "./tool-names.js";
@@ -307,6 +308,7 @@ export function createMcpServer(
 		registerDecisionTools(server, session);
 		registerParallelTools(server, session, resolvedComputer);
 		registerWorkerTools(server, workers, () => spawnGuidance(host().name, resolvedComputer.delivery ?? "attended"));
+		registerSurfaceTools(server, resolvedComputer);
 	}
 	registerHumanTools(server, session);
 	registerVisualTools(server, session);

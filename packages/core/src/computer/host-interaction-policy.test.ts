@@ -92,6 +92,9 @@ describe("#given native dispatch wrappers #when invoked in a fake-only context #
 				processSerialNumberForWindow: () => Buffer.alloc(8),
 				buildMouseEventRecord: () => Buffer.alloc(248),
 				SLPSSetFrontProcessWithOptions: () => nativeEffects++,
+				// No pid in these inputs is an opencua-owned surface, so the gate must refuse every one.
+				isOwnedSurfacePid: () => false,
+				SLEventPostToPidNative: () => nativeEffects++,
 				SLPSPostEventRecordTo: () => {
 					nativeEffects++;
 					return 0;
@@ -124,6 +127,36 @@ describe("#given native dispatch wrappers #when invoked in a fake-only context #
 		};
 		expect(() => assertDenied(unsafe)).toThrow();
 		expect(fakeEffects).toBe(1);
+	});
+});
+
+describe("#given the per-process event gate #when a pid is an opencua-owned surface #then only that pid receives input", () => {
+	it("posts once to the owned surface and still refuses every other pid", () => {
+		const source = dispatchSources.get("skylight");
+		const declaration = source?.statements.find(
+			(statement): statement is ts.FunctionDeclaration =>
+				ts.isFunctionDeclaration(statement) && statement.name?.text === "SLEventPostToPid",
+		);
+		if (source === undefined || declaration === undefined) throw new Error("Missing SLEventPostToPid");
+		const compiled = ts.transpileModule(`${declaration.getText(source)}\nexports.post = SLEventPostToPid;`, {
+			compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+		}).outputText;
+		const exports: Record<string, unknown> = {};
+		const posted: number[] = [];
+		runInNewContext(compiled, {
+			exports,
+			denyHostInteraction,
+			isOwnedSurfacePid: (pid: number) => pid === 4242,
+			SLEventPostToPidNative: (pid: number) => posted.push(pid),
+		});
+		const post = exports["post"];
+		if (typeof post !== "function") throw new Error("Wrapper was not exported");
+
+		post(4242, {});
+
+		expect(posted).toEqual([4242]);
+		expect(() => post(4243, {})).toThrow(HostInteractionDenied);
+		expect(posted).toEqual([4242]);
 	});
 });
 

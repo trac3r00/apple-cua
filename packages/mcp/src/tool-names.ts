@@ -24,6 +24,7 @@ export const FULL_ONLY_TOOL_NAMES = [
 	"clipboard_write",
 	"clipboard_clear",
 	"run_decision",
+	"surface",
 ] as const;
 
 /** The small observe / script / verify surface registered by `OPENCUA_TOOLSET=lean`. */

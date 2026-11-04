@@ -1,3 +1,5 @@
+import { currentCursorIdentity, currentCursorOwner } from "../../computer/cursor-scope.js";
+import { isOwnedSurfacePid, nameSurfaceCursor, surfaceCursorTag } from "../owned-surfaces.js";
 import { createNSEventBackedMouseEvent } from "./appkit.js";
 import { cfRelease } from "./corefoundation.js";
 import {
@@ -253,4 +255,17 @@ function stampTargetedMouseEvent(
 		setSkyLightWindowLocation(event, position);
 	}
 	setSkyLightIntegerField(event, 40, targetPid);
+	stampSurfaceCursor(event, targetPid);
+}
+
+/** kCGEventSourceUserData: an owned surface reads it to draw the sending agent's cursor where the event landed. */
+const K_CG_EVENT_SOURCE_USER_DATA = 42;
+
+function stampSurfaceCursor(event: CGEventRef, targetPid: number): void {
+	if (!isOwnedSurfacePid(targetPid)) return;
+	const identity = currentCursorIdentity();
+	// Every agent event carries a nonzero tag, so the surface can tell it from the person's own clicks.
+	const tag = identity === undefined ? 1 : surfaceCursorTag(identity);
+	setIntegerValueField(event, K_CG_EVENT_SOURCE_USER_DATA, tag);
+	nameSurfaceCursor(tag, currentCursorOwner()?.agentName ?? identity ?? "opencua");
 }

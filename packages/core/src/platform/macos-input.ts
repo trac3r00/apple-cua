@@ -61,6 +61,7 @@ import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.j
 import type { MacOSWindowInfo } from "./macos-window-target.js";
 import { resolveTargetWindow, toTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
 import { isOwnedSurfacePid } from "./owned-surfaces.js";
+import { humanBaseMilliseconds, humanCharacterDelay, typingRhythm } from "./typing-rhythm.js";
 
 /**
  * On-screen window ids in the WindowServer's front-to-back order. A window that is minimized or
@@ -820,6 +821,7 @@ export class MacOSInputController {
 		// A small inter-character delay lets each keystroke be consumed before the next,
 		// so a single delivery per char is reliable (no drops) without doubling.
 		const pacing = typeCharacterDelayMilliseconds();
+		const rhythm = typingRhythm();
 		const segments = Array.from(text);
 		for (let i = 0; i < segments.length; i++) {
 			const segment = segments[i];
@@ -832,8 +834,12 @@ export class MacOSInputController {
 			postUnicodeText(segment, keyboardPid, targetWindow);
 			if (!this.isBackground || this.backgroundCues) this.overlay.keyPress?.(call.pid);
 			this.noteKeyboardInput(call.pid);
-			if (pacing > 0 && i < segments.length - 1) {
-				await delayMilliseconds(pacing);
+			const delay =
+				rhythm === "human"
+					? humanCharacterDelay(segments[i - 1], segment, humanBaseMilliseconds(pacing), Math.random)
+					: pacing;
+			if (delay > 0 && i < segments.length - 1) {
+				await delayMilliseconds(delay);
 			}
 		}
 	}

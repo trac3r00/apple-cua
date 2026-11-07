@@ -47,7 +47,7 @@ aliases for saving a `SKILL.md`.
 `packages/mcp/src/parallel-tools.ts`; `packages/core/src/computer/hands.ts`;
 `packages/core/src/platform/input-lock.ts`.
 
-The existing `docs/expectations/team-cua-2026-10-26.md` is an active plan. Its
+The existing `docs/internal/expectations/team-cua-2026-10-26.md` is an active plan. Its
 historical measurements were not rerun here and are not new performance evidence.
 
 ## Alternatives

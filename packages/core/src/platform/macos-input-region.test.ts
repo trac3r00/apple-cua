@@ -13,6 +13,18 @@ const coreGraphicsMock = vi.hoisted(() => ({
 const WINDOW = { id: 99, owner: { processId: 1234 }, bounds: { x: 10, y: 20, width: 300, height: 200 } };
 
 vi.mock("get-windows", () => ({ openWindows: () => Promise.resolve([WINDOW]) }));
+// Deterministic accessibility: no live Accessibility state decides how these keyboard and pointer paths route.
+vi.mock("./macos-ffi/accessibility.js", () => ({
+	focusedElementFrame: () => undefined,
+	focusedElementInWebArea: () => false,
+	focusedWindowIdForPid: () => 99,
+	focusedWindowIsModal: () => false,
+	focusedWindowShowsFilePanel: () => false,
+	raiseWindowInApp: () => true,
+	windowIdsAtScreenPoint: () => undefined,
+	windowMinimizedForPid: () => false,
+	windowTitlesForPid: () => new Map(),
+}));
 vi.mock("./macos-ffi/lock-screen.js", () => ({ isScreenLocked: () => false }));
 vi.mock("./macos-ffi/skylight.js", () => ({
 	focusGuardFor: () => null,
@@ -106,6 +118,48 @@ describe("#given a confined worker's region #when pointer input is posted #then 
 			await withInputRegion(LEFT_HALF, () => input.scroll({ direction: "down", amount: 1 }));
 			expect(coreGraphicsMock.postScrollEvent).toHaveBeenCalled();
 			expect(JSON.stringify(coreGraphicsMock.postScrollEvent.mock.calls[0])).toContain('"x":85,"y":120');
+		} finally {
+			input.close();
+		}
+	});
+});
+
+describe("#given a confined worker whose pointer rests outside its region #when it clicks inside #then the travel stays inside", () => {
+	it("#given the pointer outside the region #when it moves to a point inside #then every posted point lies in the region", async () => {
+		const input = controller();
+		try {
+			await input.click({ x: 280, y: 200 });
+			vi.clearAllMocks();
+			await withInputRegion(LEFT_HALF, () => input.move({ x: 50, y: 70 }));
+			const points = coreGraphicsMock.postMouseEvent.mock.calls.map(
+				([event]) => (event as { readonly position: { readonly x: number; readonly y: number } }).position,
+			);
+			expect(points.length).toBeGreaterThan(0);
+			for (const point of points) {
+				expect(point.x).toBeGreaterThanOrEqual(LEFT_HALF.x);
+				expect(point.x).toBeLessThan(LEFT_HALF.x + LEFT_HALF.width);
+			}
+		} finally {
+			input.close();
+		}
+	});
+});
+
+describe("#given text being typed #when focus moves out of the region part-way #then typing stops before the next character", () => {
+	it("#given focus that leaves after the first character #when typing #then only that character goes out", async () => {
+		const input = controller();
+		try {
+			await input.click({ x: 50, y: 70 });
+			vi.clearAllMocks();
+			let reads = 0;
+			setFocusedFrameSourceForTesting(() => {
+				reads += 1;
+				return reads <= 2 ? { x: 40, y: 60, width: 20, height: 10 } : { x: 240, y: 60, width: 20, height: 10 };
+			});
+			await expect(withInputRegion(LEFT_HALF, () => input.typeText("abc"))).rejects.toBeInstanceOf(
+				InputOutsideRegion,
+			);
+			expect(coreGraphicsMock.postUnicodeText).toHaveBeenCalledTimes(1);
 		} finally {
 			input.close();
 		}

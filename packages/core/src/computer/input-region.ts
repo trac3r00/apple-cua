@@ -37,6 +37,19 @@ function contains(region: Readonly<Rect>, point: Point): boolean {
 	);
 }
 
+/**
+ * The start of a pointer path for a confined flow: a point outside the region is moved to the nearest point inside it,
+ * so the animated travel toward an in-region target never sweeps through other workers' parts of the window.
+ */
+export function clampToInputRegion(point: Point): Point {
+	const region = currentInputRegion();
+	if (region === undefined || contains(region, point)) return point;
+	return {
+		x: Math.max(region.x, Math.min(region.x + Math.max(0, region.width - 1), point.x)),
+		y: Math.max(region.y, Math.min(region.y + Math.max(0, region.height - 1), point.y)),
+	};
+}
+
 /** Refuses a pointer event outside the current region; no-op when the flow is not confined. */
 export function assertPointInInputRegion(point: Point, what: string): void {
 	const region = currentInputRegion();
@@ -50,16 +63,22 @@ export function assertPointInInputRegion(point: Point, what: string): void {
  * that cannot be read is refused too. No-op when the flow is not confined.
  */
 export function assertFocusInInputRegion(readFocusedFrame: () => Rect | undefined): void {
+	assertElementInInputRegion(readFocusedFrame, "keyboard input to the focused element");
+}
+
+/**
+ * Refuses an accessibility change (a value, a selection, an action, a scroll) to an element whose centre is not inside
+ * the current region, or whose frame cannot be read. The frame is read only when the flow is confined.
+ */
+export function assertElementInInputRegion(readFrame: () => Rect | undefined, what: string): void {
 	const region = currentInputRegion();
 	if (region === undefined) return;
-	const frame = readFocusedFrame();
+	const frame = readFrame();
 	if (frame === undefined || !(frame.width > 0 && frame.height > 0)) {
-		throw new InputOutsideRegion("keyboard input with no readable focused element");
+		throw new InputOutsideRegion(`${what} with no readable frame`);
 	}
 	const center = { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 };
 	if (!contains(region, center)) {
-		throw new InputOutsideRegion(
-			`keyboard input to the focused element centred at (${Math.round(center.x)}, ${Math.round(center.y)})`,
-		);
+		throw new InputOutsideRegion(`${what} centred at (${Math.round(center.x)}, ${Math.round(center.y)})`);
 	}
 }

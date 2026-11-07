@@ -1,6 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { currentCursorIdentity } from "../computer/cursor-scope.js";
-import { assertFocusInInputRegion, assertPointInInputRegion, currentInputRegion } from "../computer/input-region.js";
+import {
+	assertFocusInInputRegion,
+	assertPointInInputRegion,
+	clampToInputRegion,
+	currentInputRegion,
+} from "../computer/input-region.js";
 import {
 	InputInterrupted,
 	type InputScope,
@@ -562,6 +567,7 @@ export class MacOSInputController {
 	/** Mouse events for `pid`, whichever app the controller is aimed at right now. */
 	private mousePostFor(pid: number): MousePost {
 		return async (kind, position, button, clickState, targetWindow, flags) => {
+			assertPointInInputRegion(position, `pointer ${kind}`);
 			postMouseEvent({ kind, position, button, clickState, targetPid: pid, targetWindow, flags });
 		};
 	}
@@ -718,6 +724,7 @@ export class MacOSInputController {
 					y: Math.max(window.bounds.y, Math.min(window.bounds.y + window.bounds.height - 1, previous.y)),
 				};
 			}
+			from = clampToInputRegion(from);
 			const duration = pointerTravelDuration(from, position);
 			const steps = dragSteps(duration);
 			if (this.delivery !== "background") {
@@ -747,7 +754,7 @@ export class MacOSInputController {
 			return post;
 		}
 		return async (kind, position, button, clickState, window, flags) => {
-			const from = this.pointerFor(call.pid).position();
+			const from = clampToInputRegion(this.pointerFor(call.pid).position());
 			if (kind === "move" && Math.hypot(position.x - from.x, position.y - from.y) > 8) {
 				const duration = pointerTravelDuration(from, position);
 				const steps = dragSteps(duration);
@@ -849,6 +856,8 @@ export class MacOSInputController {
 			// Read before every character, so a stop or a cancel ends a long text part-way rather than after it.
 			this.checkpoint(call);
 			this.assertDeliverable(keyboardPid);
+			// Focus can move between characters (another worker clicks elsewhere): recheck it before each one.
+			assertFocusInInputRegion(() => (keyboardPid === undefined ? undefined : focusedFrameSource(keyboardPid)));
 			postUnicodeText(segment, keyboardPid, targetWindow);
 			if (!this.isBackground || this.backgroundCues) this.overlay.keyPress?.(call.pid);
 			this.noteKeyboardInput(call.pid);
@@ -1151,6 +1160,8 @@ export class MacOSInputController {
 	private mousePost(call: InputCall): MousePost {
 		return async (kind, position, button, clickState, targetWindow, flags) => {
 			this.assertDeliverable(call.pid);
+			// Every posted point, interpolated moves included, stays inside a confined worker's region.
+			assertPointInInputRegion(position, `pointer ${kind}`);
 			postMouseEvent({ kind, position, button, clickState, targetPid: call.pid, targetWindow, flags });
 		};
 	}

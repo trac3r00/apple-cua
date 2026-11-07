@@ -165,9 +165,9 @@ async function main() {
 							command: "node",
 							args: [serverFor[kind]],
 							env: {
-								APPLE_CUA_ALLOWED_BUNDLE_IDS:
+								OPENCUA_ALLOWED_BUNDLE_IDS:
 									"com.apple.finder,com.apple.TextEdit,com.apple.Safari,com.apple.systempreferences,com.apple.calculator",
-								APPLE_CUA_DELIVERY: "background",
+								OPENCUA_DELIVERY: "background",
 							},
 						})
 					: new McpClient({

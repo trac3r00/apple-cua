@@ -8,7 +8,7 @@ animations, libraries, or page startup windows.
 
 ## Reference
 
-The existing options captures under `.omo/evidence/apple-cua-browser` are the
+The existing options captures under `.omo/evidence/opencua-browser` are the
 visual baseline. Retain system fonts, system light/dark colors, one centered
 column, visible labels, masked local keys and in-place status feedback.
 

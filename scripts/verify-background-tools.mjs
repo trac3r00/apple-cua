@@ -8,14 +8,12 @@ import { McpClient } from "./bench-v2/client.mjs";
 const windowId = Number(process.argv[2]);
 assert.ok(Number.isSafeInteger(windowId) && windowId > 0, "provide a scratch Keynote window ID");
 const client = new McpClient({
-	command: fileURLToPath(
-		new URL("../packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp", import.meta.url),
-	),
+	command: fileURLToPath(new URL("../packages/mcp/dist/opencua-mcp.app/Contents/MacOS/opencua-mcp", import.meta.url)),
 	args: [fileURLToPath(new URL("../packages/mcp/dist/server.js", import.meta.url))],
 	env: {
-		APPLE_CUA_DELIVERY: "background",
-		APPLE_CUA_CURSOR: "off",
-		APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.iWork.Keynote",
+		OPENCUA_DELIVERY: "background",
+		OPENCUA_CURSOR: "off",
+		OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.iWork.Keynote",
 	},
 });
 function payload(result) {

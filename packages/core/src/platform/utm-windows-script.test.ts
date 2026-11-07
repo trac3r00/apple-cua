@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { gunzipSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
 import { windowsGuestDisplay } from "./utm-guest.js";
 import { windowsDisplayDiagnostic, windowsDisplayNativeSource, windowsDisplayScript } from "./utm-windows-script.js";
 

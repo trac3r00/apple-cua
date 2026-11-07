@@ -1,4 +1,4 @@
-import { axScrollActionFor, describeQuery, matchElements, suggestNearMisses } from "@apple-cua/core";
+import { axScrollActionFor, describeQuery, matchElements, suggestNearMisses } from "@opencua/core";
 import type {
 	AXTreeElement,
 	ElementQuery,
@@ -8,7 +8,7 @@ import type {
 	Point,
 	Rect,
 	WindowTextRead,
-} from "@apple-cua/core";
+} from "@opencua/core";
 import type { RunStepReport } from "./tool-result.js";
 
 export type FindDirection = "up" | "down" | "left" | "right";
@@ -525,7 +525,9 @@ export async function findByScrolling(
 				if (!("entries" in read)) {
 					if (find.vision === "only") {
 						return missing(
-							`vision "only" cannot read the window (${read.unavailable}); grant Screen Recording to the app that runs this server, or use vision "auto" with an accessibility target`,
+							read.unavailable === "isolated-session-required"
+								? `vision "only" cannot read the window: host capture is refused by design (isolated-session-required); use vision "auto" with an accessibility target, or an agent-owned isolated desktop`
+								: `vision "only" cannot read the window (${read.unavailable}); grant Screen Recording to the app that runs this server, or use vision "auto" with an accessibility target`,
 						);
 					}
 				} else {

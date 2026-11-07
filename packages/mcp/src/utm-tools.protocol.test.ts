@@ -1,8 +1,9 @@
-import type { StopStatusSource, UTMObservation } from "@apple-cua/core";
+import { afterEach, describe, expect, it } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import type { StopStatusSource, UTMObservation } from "@opencua/core";
+import { vi } from "@opencua/test-support";
 import { z } from "zod/v4";
 import { UTM } from "../../core/src/platform/utm.js";
 import { createHarness } from "./protocol-client-harness.js";
@@ -97,7 +98,7 @@ async function connect(
 	source: FakeUtm,
 	options: { stopSwitch?: StopStatusSource; now?: () => number; ttlMs?: number } = {},
 ): Promise<Client> {
-	vi.stubEnv("APPLE_CUA_ALLOWED_BUNDLE_IDS", "com.utmapp.UTM");
+	vi.stubEnv("OPENCUA_ALLOWED_BUNDLE_IDS", "com.utmapp.UTM");
 	const server = new McpServer({ name: "utm-protocol-test", version: "0.0.0" });
 	registerUtmTools(server, source, options);
 	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -257,7 +258,7 @@ describe("optional UTM MCP protocol", () => {
 		const client = await connect(source);
 		const token = await observe(client);
 		source.beforeObserve = async () => {
-			vi.stubEnv("APPLE_CUA_ALLOWED_BUNDLE_IDS", "com.apple.finder");
+			vi.stubEnv("OPENCUA_ALLOWED_BUNDLE_IDS", "com.apple.finder");
 		};
 		expect(payload(await run(client, token, VM, [{ action: "click-image", x: 400, y: 320 }]))["reason"]).toBe(
 			"app-not-allowed",
@@ -569,7 +570,7 @@ describe("optional UTM MCP protocol", () => {
 			const client = await connect(source);
 			const token = await observe(client);
 			const reads = source.listCalls;
-			vi.stubEnv("APPLE_CUA_ALLOWED_BUNDLE_IDS", allowed);
+			vi.stubEnv("OPENCUA_ALLOWED_BUNDLE_IDS", allowed);
 			const results = await Promise.all([
 				client.callTool({ name: "utm_list", arguments: {} }),
 				client.callTool({ name: "utm_observe", arguments: { vm: VM } }),
@@ -587,7 +588,7 @@ describe("optional UTM MCP protocol", () => {
 		async (allowed) => {
 			const source = new FakeUtm();
 			const client = await connect(source);
-			vi.stubEnv("APPLE_CUA_ALLOWED_BUNDLE_IDS", allowed);
+			vi.stubEnv("OPENCUA_ALLOWED_BUNDLE_IDS", allowed);
 			expect((await client.callTool({ name: "utm_list", arguments: {} })).isError).not.toBe(true);
 			const token = await observe(client);
 			expect((await run(client, token)).isError).not.toBe(true);
@@ -622,10 +623,10 @@ describe("optional UTM MCP protocol", () => {
 	});
 
 	it.each(["0", "1"])(
-		"#given APPLE_CUA_UTM=%s #when server tools list #then matches opt-in capability names",
+		"#given OPENCUA_UTM=%s #when server tools list #then matches opt-in capability names",
 		async (flag) => {
-			vi.stubEnv("APPLE_CUA_UTM", flag);
-			vi.stubEnv("APPLE_CUA_BROWSER", "off");
+			vi.stubEnv("OPENCUA_UTM", flag);
+			vi.stubEnv("OPENCUA_BROWSER", "off");
 			const harness = await createHarness(undefined, undefined, undefined, {
 				serverOptions: { toolset: "lean", iphone: false },
 			});

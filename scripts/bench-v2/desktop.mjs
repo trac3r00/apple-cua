@@ -25,7 +25,7 @@ export function desktopProbe() {
 		closeWindow(pid, title) {
 			execFileSync(binary, ["close", String(pid), title], { timeout: 10000 });
 		},
-		// Cmd+W aimed at one window through apple-cua's own background keyboard route. Measured to work
+		// Cmd+W aimed at one window through opencua's own background keyboard route. Measured to work
 		// in an off-console session, where AppleScript window scripting and accessibility do not.
 		async closeWindowByNumber(bundleId, pid, number) {
 			const { AppApprovalStore, MacOSHostComputer, NOOP_POINTER_OVERLAY } = await import(

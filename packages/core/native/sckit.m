@@ -1,4 +1,4 @@
-// sckit.m — ScreenCaptureKit FFI shim for @apple-cua/core
+// sckit.m — ScreenCaptureKit FFI shim for @opencua/core
 //
 // Build: see build.sh in the same directory.
 //

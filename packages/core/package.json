@@ -1,5 +1,5 @@
 {
-	"name": "@apple-cua/core",
+	"name": "@opencua/core",
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Platform-abstracted computer-use interfaces",
@@ -7,7 +7,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/trac3r00/apple-cua.git",
+		"url": "https://github.com/trac3r00/opencua.git",
 		"directory": "packages/core"
 	},
 	"main": "./dist/index.js",
@@ -20,14 +20,22 @@
 		"./stop": {
 			"types": "./dist/platform/stop-switch.d.ts",
 			"import": "./dist/platform/stop-switch.js"
+		},
+		"./isolated": {
+			"types": "./dist/platform/isolated.d.ts",
+			"import": "./dist/platform/isolated.js"
+		},
+		"./light": {
+			"types": "./dist/light.d.ts",
+			"import": "./dist/light.js"
 		}
 	},
 	"scripts": {
-		"build": "pnpm run build:native && tsgo",
-		"build:ts": "tsgo",
+		"build": "pnpm run build:native && tsgo -p tsconfig.build.json",
+		"build:ts": "tsgo -p tsconfig.build.json",
 		"build:native": "./native/build.sh",
 		"typecheck": "tsgo --noEmit",
-		"test": "vitest --run"
+		"test": "bun test --isolate --parallel=4"
 	},
 	"files": [
 		"dist",
@@ -37,7 +45,9 @@
 		"native/build-inputs.sha256",
 		"native/libsckit.dylib",
 		"native/cursor-overlay.m",
-		"native/cursor-overlay"
+		"native/cursor-overlay",
+		"native/history-recorder.m",
+		"native/history-recorder"
 	],
 	"dependencies": {
 		"get-windows": "9.3.0",
@@ -49,7 +59,6 @@
 	},
 	"devDependencies": {
 		"typescript": "^5.7.0",
-		"vitest": "^2.1.0",
 		"@types/node": "^20.0.0"
 	},
 	"publishConfig": {

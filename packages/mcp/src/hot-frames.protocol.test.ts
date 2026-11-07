@@ -1,6 +1,7 @@
-import type { HotFrameWorker } from "@apple-cua/core";
-import { HotFrameSource } from "@apple-cua/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
+import type { HotFrameWorker } from "@opencua/core";
+import { HotFrameSource } from "@opencua/core";
+import { vi } from "@opencua/test-support";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 
@@ -39,7 +40,8 @@ function fakeWorker(): TestWorker {
 describe("#given an engaged hot frame source #when a vision call needs pixels #then it answers from the warm frame without a capture read", () => {
 	it("serves the latest frame and labels its age", async () => {
 		const worker = fakeWorker();
-		const hotFrames = new HotFrameSource({ spawnWorker: () => worker });
+		// The warm-frame path, not the 300 ms default window: the stale fallback has its own test below.
+		const hotFrames = new HotFrameSource({ spawnWorker: () => worker, maxAgeMs: 60_000 });
 		hotFrames.start(1234, 71, { width: 1000, height: 800 });
 		const jpeg = Buffer.from("warm-jpeg-bytes");
 		worker.deliver({ type: "frame", bytes: new Uint8Array(jpeg), width: 1000, height: 800, hash: "warm-frame" });

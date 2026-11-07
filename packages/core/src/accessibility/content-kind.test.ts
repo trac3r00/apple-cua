@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import { classifyContentKind } from "./content-kind.js";
 import type { AXTreeElement } from "./types.js";

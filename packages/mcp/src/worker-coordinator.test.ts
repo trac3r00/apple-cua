@@ -1,5 +1,6 @@
-import { currentCursorIdentity, currentInputScope } from "@apple-cua/core";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { currentCursorIdentity, currentInputScope } from "@opencua/core";
+import { copyForMatch, vi, whenSettled } from "@opencua/test-support";
 import { GuardedSession } from "./guarded-session.js";
 import * as notify from "./notify.js";
 import { Deferred, FakeGuardedComputer } from "./protocol-test-harness.js";
@@ -29,7 +30,7 @@ describe("WorkerCoordinator #given a failed assignment #when sibling reads remai
 			{ worker_id: "one", task: "first", app: "Finder" },
 			{ worker_id: "two", task: "second", app: "Other" },
 		]);
-		const failure = expect(assignment).rejects.toThrow("first app unavailable");
+		const failure = whenSettled(assignment, (settled) => expect(settled).rejects.toThrow("first app unavailable"));
 		try {
 			await reading.promise;
 			await expect(coordinator.assign([{ worker_id: "three", task: "overlapping", app: "Other" }])).rejects.toThrow(
@@ -116,7 +117,7 @@ describe("WorkerCoordinator #given a worker run #when it succeeds or rejects #th
 				errorSummary: failure.slice(0, 200),
 			});
 			expect(notification).toHaveBeenCalledTimes(1);
-			expect(notification).toHaveBeenCalledWith("apple-cua", `worker one task failed: ${failure.slice(0, 120)}`);
+			expect(notification).toHaveBeenCalledWith("opencua", `worker one task failed: ${failure.slice(0, 120)}`);
 		} finally {
 			notification.mockRestore();
 			await coordinator.close();
@@ -340,7 +341,7 @@ describe("WorkerCoordinator #given a run produces no successor token #when the w
 			const run = await coordinator.run("one", worker.observation_token, steps, undefined);
 			expect(run.observation_token).toBeUndefined();
 			const observed = await coordinator.observe("one", { includeScreenshot: false, maxElements: 4 });
-			expect(observed).toMatchObject({
+			expect(copyForMatch(observed)).toMatchObject({
 				worker_id: "one",
 				task: "edit note",
 				app: "Finder",
@@ -398,6 +399,34 @@ describe("WorkerCoordinator #given a worker run is pending #when release is requ
 			expect(coordinator.status()).toEqual([]);
 		} finally {
 			resolveInput?.();
+			await coordinator.close();
+		}
+	});
+});
+
+describe("WorkerCoordinator #given a worker #when it is assigned or observed #then the observation stays bounded", () => {
+	it("hands the worker a 250-element table on assign and caps observe at 250 unless asked otherwise", async () => {
+		const computer = new FakeGuardedComputer();
+		computer.delivery = "background";
+		const session = new GuardedSession(computer);
+		const coordinator = new WorkerCoordinator(session, computer);
+		const requests: Parameters<GuardedSession["observe"]>[0][] = [];
+		const observe = session.observe.bind(session);
+		vi.spyOn(session, "observe").mockImplementation(async (request) => {
+			requests.push(request);
+			return observe(request);
+		});
+		try {
+			await coordinator.assign([{ worker_id: "one", task: "read", app: "Finder" }]);
+			await coordinator.observe("one");
+			await coordinator.observe("one", { maxElements: 40 });
+
+			expect(requests.map(({ maxElements, elementFormat }) => ({ maxElements, elementFormat }))).toEqual([
+				{ maxElements: 250, elementFormat: "table" },
+				{ maxElements: 250, elementFormat: undefined },
+				{ maxElements: 40, elementFormat: undefined },
+			]);
+		} finally {
 			await coordinator.close();
 		}
 	});

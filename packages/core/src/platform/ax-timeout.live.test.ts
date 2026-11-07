@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { describe, expect, it } from "vitest";
 import { MacOSHostComputer } from "./macos.js";
 
 /**
@@ -8,10 +8,10 @@ import { MacOSHostComputer } from "./macos.js";
  * observation of that app timed out behind it. With a finite messaging timeout the same call fails
  * bounded, naming the cause.
  *
- * Opt-in because it stops a real process: APPLE_CUA_LIVE_AX=1, target app in APPLE_CUA_LIVE_AX_APP.
+ * Opt-in because it stops a real process: OPENCUA_LIVE_AX=1, target app in OPENCUA_LIVE_AX_APP.
  */
-const enabled = process.env["APPLE_CUA_LIVE_AX"] === "1";
-const appName = process.env["APPLE_CUA_LIVE_AX_APP"] ?? "TextEdit";
+const enabled = process.env["OPENCUA_LIVE_AX"] === "1";
+const appName = process.env["OPENCUA_LIVE_AX_APP"] ?? "TextEdit";
 
 function signal(pid: number, name: "STOP" | "CONT"): void {
 	try {

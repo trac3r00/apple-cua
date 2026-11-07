@@ -495,7 +495,7 @@ async function ensureContext(state) {
 	if (state.frameId !== frame.id || !state.contextId) {
 		const world = await chrome.debugger.sendCommand({ tabId: state.tabId }, "Page.createIsolatedWorld", {
 			frameId: frame.id,
-			worldName: "appleCuaBridge",
+			worldName: "openCuaBridge",
 			grantUniveralAccess: false,
 		});
 		if (!Number.isInteger(world?.executionContextId)) throw new Error("Isolated context unavailable");
@@ -504,7 +504,7 @@ async function ensureContext(state) {
 		state.contextGeneration++;
 		state.revision = undefined;
 		const installed = await chrome.debugger.sendCommand({ tabId: state.tabId }, "Runtime.evaluate", {
-			expression: `globalThis.__appleCuaPageRuntime = (${PAGE_RUNTIME}); void 0`,
+			expression: `globalThis.__openCuaPageRuntime = (${PAGE_RUNTIME}); void 0`,
 			contextId: state.contextId,
 		});
 		if (installed.exceptionDetails) throw new Error("Could not install the isolated page runtime");
@@ -514,7 +514,7 @@ async function ensureContext(state) {
 
 async function evaluate(state, method, args = {}) {
 	const contextId = await ensureContext(state);
-	const expression = `globalThis.__appleCuaPageRuntime(${JSON.stringify({ method, ...args })})`;
+	const expression = `globalThis.__openCuaPageRuntime(${JSON.stringify({ method, ...args })})`;
 	const result = await chrome.debugger.sendCommand({ tabId: state.tabId }, "Runtime.evaluate", {
 		expression,
 		contextId,

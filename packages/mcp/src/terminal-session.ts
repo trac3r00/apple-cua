@@ -1,5 +1,5 @@
-import type { HostCapabilities, StopStatusSource } from "@apple-cua/core";
-import { describeUserStop, dispatchTerminalCommand, readVisibleText } from "@apple-cua/core";
+import type { HostCapabilities, StopStatusSource } from "@opencua/core";
+import { describeUserStop, dispatchTerminalCommand, readVisibleText } from "@opencua/core";
 import type { ToolResult } from "./tool-result.js";
 import { refusalResult, textResult } from "./tool-result.js";
 
@@ -75,7 +75,7 @@ export class TerminalGuardSession {
 		) {
 			return refusalResult(
 				"terminal-not-approved",
-				"Allow com.apple.Terminal in APPLE_CUA_ALLOWED_BUNDLE_IDS to use Terminal.app.",
+				"Allow com.apple.Terminal in OPENCUA_ALLOWED_BUNDLE_IDS to use Terminal.app.",
 			);
 		}
 		const host = this.options.probeHost();

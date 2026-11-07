@@ -1,0 +1,262 @@
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { type Socket, connect } from "node:net";
+import { join } from "node:path";
+import { resolveStateDir } from "./stop-switch.js";
+
+/**
+ * A window opencua launched itself on the person's desktop. It is the only kind of host window opencua may send
+ * input to or capture: the person's own apps stay refused. Ownership is the launched pid plus its process start
+ * time, so a later process that reuses the pid is not treated as owned.
+ */
+export interface OwnedSurface {
+	readonly pid: number;
+	readonly startedAt: string;
+	readonly title: string;
+	readonly url: string;
+}
+
+export interface OwnedSurfaceOptions {
+	readonly stateDir?: string;
+	readonly startTime?: (pid: number) => string | undefined;
+}
+
+export interface OpenSurfaceRequest {
+	readonly url: string;
+	readonly title: string;
+	/** Top-left screen points. */
+	readonly frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+}
+
+export const OWNED_SURFACE_BUNDLE_ID = "dev.opencua.surface";
+const REGISTRY = "owned-surfaces.json";
+const CURSOR_NAMES = "surface-cursors.json";
+const RECHECK_MS = 2_000;
+const CURSOR_COLORS = [
+	"#ff4d4d",
+	"#ffa64d",
+	"#ffe14d",
+	"#9be15d",
+	"#4de1a6",
+	"#4dd2ff",
+	"#4d7dff",
+	"#a64dff",
+	"#ff4dd2",
+	"#ff8080",
+	"#c0ff80",
+	"#80ffe0",
+	"#80b0ff",
+	"#e080ff",
+	"#ffd080",
+	"#ffffff",
+];
+
+export function processStartTime(pid: number): string | undefined {
+	try {
+		const out = execFileSync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).trim();
+		return out.length > 0 ? out : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function registryPath(options: OwnedSurfaceOptions): string {
+	return join(options.stateDir ?? resolveStateDir(), REGISTRY);
+}
+
+function isSurface(value: unknown): value is OwnedSurface {
+	if (typeof value !== "object" || value === null) return false;
+	const entry = value as Record<string, unknown>;
+	return (
+		Number.isSafeInteger(entry["pid"]) &&
+		typeof entry["startedAt"] === "string" &&
+		typeof entry["title"] === "string" &&
+		typeof entry["url"] === "string"
+	);
+}
+
+export function readOwnedSurfaces(options: OwnedSurfaceOptions = {}): OwnedSurface[] {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(registryPath(options), "utf8"));
+		const surfaces = typeof parsed === "object" && parsed !== null ? Reflect.get(parsed, "surfaces") : undefined;
+		return Array.isArray(surfaces) ? surfaces.filter(isSurface) : [];
+	} catch {
+		return [];
+	}
+}
+
+function writeOwnedSurfaces(surfaces: readonly OwnedSurface[], options: OwnedSurfaceOptions): void {
+	const path = registryPath(options);
+	mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
+	const temporary = `${path}.${process.pid}.tmp`;
+	writeFileSync(temporary, `${JSON.stringify({ surfaces })}\n`, { mode: 0o600 });
+	renameSync(temporary, path);
+}
+
+const verified = new Map<number, { readonly owned: boolean; readonly at: number }>();
+let cachedRegistry: { readonly path: string; readonly mtimeMs: number; readonly surfaces: OwnedSurface[] } | undefined;
+
+function currentRegistry(options: OwnedSurfaceOptions): OwnedSurface[] {
+	const path = registryPath(options);
+	let mtimeMs: number;
+	try {
+		mtimeMs = statSync(path).mtimeMs;
+	} catch {
+		return [];
+	}
+	if (cachedRegistry?.path !== path || cachedRegistry.mtimeMs !== mtimeMs) {
+		cachedRegistry = { path, mtimeMs, surfaces: readOwnedSurfaces(options) };
+		verified.clear();
+	}
+	return cachedRegistry.surfaces;
+}
+
+/** Whether `pid` is a window process opencua launched and still running as the same process. */
+export function isOwnedSurfacePid(pid: number, options: OwnedSurfaceOptions = {}, now = Date.now()): boolean {
+	const entry = currentRegistry(options).find((surface) => surface.pid === pid);
+	if (entry === undefined) return false;
+	const cached = verified.get(pid);
+	if (cached !== undefined && now - cached.at < RECHECK_MS) return cached.owned;
+	const owned = (options.startTime ?? processStartTime)(pid) === entry.startedAt;
+	verified.set(pid, { owned, at: now });
+	return owned;
+}
+
+/** Records a process opencua just launched as an owned surface. */
+export function registerOwnedSurface(
+	surface: Omit<OwnedSurface, "startedAt">,
+	options: OwnedSurfaceOptions = {},
+): OwnedSurface {
+	const startedAt = (options.startTime ?? processStartTime)(surface.pid);
+	if (startedAt === undefined) throw new Error(`owned surface process ${surface.pid} is not running`);
+	const live = readOwnedSurfaces(options).filter(
+		(entry) => entry.pid !== surface.pid && (options.startTime ?? processStartTime)(entry.pid) === entry.startedAt,
+	);
+	const registered: OwnedSurface = { ...surface, startedAt };
+	writeOwnedSurfaces([...live, registered], options);
+	return registered;
+}
+
+export function unregisterOwnedSurface(pid: number, options: OwnedSurfaceOptions = {}): void {
+	writeOwnedSurfaces(
+		readOwnedSurfaces(options).filter((entry) => entry.pid !== pid),
+		options,
+	);
+	verified.delete(pid);
+}
+
+/** The opencua-surface binary built next to the other native helpers. */
+export function surfaceBinaryPath(): string {
+	return new URL("../../native/opencua-surface", import.meta.url).pathname;
+}
+
+/** Launches an owned surface window showing `url` and records it; the window never takes the person's focus. */
+export function openOwnedSurface(request: OpenSurfaceRequest, options: OwnedSurfaceOptions = {}): OwnedSurface {
+	const stateDir = options.stateDir ?? resolveStateDir();
+	const { x, y, width, height } = request.frame;
+	const child = spawn(
+		surfaceBinaryPath(),
+		[request.url, request.title, `${x},${y},${width},${height}`, join(stateDir, CURSOR_NAMES)],
+		{ stdio: "ignore", detached: true },
+	);
+	child.unref();
+	if (child.pid === undefined) throw new Error("opencua-surface did not start");
+	return registerOwnedSurface({ pid: child.pid, title: request.title, url: request.url }, { ...options, stateDir });
+}
+
+export function closeOwnedSurface(pid: number, options: OwnedSurfaceOptions = {}): boolean {
+	if (!isOwnedSurfacePid(pid, options)) return false;
+	process.kill(pid, "SIGTERM");
+	rmSync(surfaceSocketPath(pid, options), { force: true });
+	unregisterOwnedSurface(pid, options);
+	return true;
+}
+
+/** A small nonzero tag for a cursor identity, stamped into the events it sends so a surface can draw its owner. */
+export function surfaceCursorTag(identity: string): number {
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < identity.length; index += 1) {
+		hash ^= identity.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	return hash & 0x7fffffff || 1;
+}
+
+const CONTEXT_CLICK_FLAG = 2 ** 32;
+
+/**
+ * The source user data an agent event carries: the cursor tag in the low 32 bits, plus bit 32 for a context click
+ * (a tool or color pick) that the surface replays for this cursor when another cursor cut in.
+ */
+export function surfaceCursorUserData(tag: number, contextClick: boolean): number {
+	return contextClick ? tag + CONTEXT_CLICK_FLAG : tag;
+}
+
+const namedTags = new Set<number>();
+
+/** Publishes the agent name for a cursor tag so owned surfaces can label it; written once per tag. */
+export function nameSurfaceCursor(tag: number, name: string, options: OwnedSurfaceOptions = {}): void {
+	if (namedTags.has(tag)) return;
+	const path = join(options.stateDir ?? resolveStateDir(), CURSOR_NAMES);
+	let names: Record<string, unknown> = {};
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+		if (typeof parsed === "object" && parsed !== null) names = parsed as Record<string, unknown>;
+	} catch {
+		names = {};
+	}
+	const color = CURSOR_COLORS[Object.keys(names).length % CURSOR_COLORS.length] ?? "#ffffff";
+	names[String(tag)] = { name, color };
+	mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
+	const temporary = `${path}.${process.pid}.tmp`;
+	writeFileSync(temporary, `${JSON.stringify(names)}\n`, { mode: 0o600 });
+	renameSync(temporary, path);
+	namedTags.add(tag);
+}
+
+/** The socket an owned surface listens on for its agents' pointer input. */
+export function surfaceSocketPath(pid: number, options: OwnedSurfaceOptions = {}): string {
+	return join(options.stateDir ?? resolveStateDir(), `surface-${pid}.sock`);
+}
+
+/** One agent pointer event for an owned surface, at a point in window coordinates from its top-left corner. */
+export interface SurfacePointerEvent {
+	readonly tag: number;
+	readonly context: boolean;
+	readonly kind: "down" | "drag" | "up" | "move";
+	readonly x: number;
+	readonly y: number;
+}
+
+const POINTER_KINDS = { down: "D", drag: "G", up: "U", move: "M" } as const;
+const channels = new Map<string, Socket>();
+
+/**
+ * Sends an agent's pointer event straight to an owned surface. The window server merges consecutive drag events
+ * posted to one app, which would mix one cursor's tag with another cursor's position; the surface's own socket keeps
+ * each cursor's events whole and in order. False when the surface has no socket, so the caller posts the event.
+ */
+export function sendSurfacePointer(
+	pid: number,
+	event: SurfacePointerEvent,
+	options: OwnedSurfaceOptions = {},
+): boolean {
+	const path = surfaceSocketPath(pid, options);
+	let channel = channels.get(path);
+	if (channel === undefined) {
+		if (!existsSync(path)) return false;
+		const socket = connect(path);
+		socket.on("error", () => {
+			channels.delete(path);
+			socket.destroy();
+		});
+		socket.on("close", () => channels.delete(path));
+		socket.unref();
+		channels.set(path, socket);
+		channel = socket;
+	}
+	const x = Math.round(event.x * 10) / 10;
+	const y = Math.round(event.y * 10) / 10;
+	channel.write(`${event.tag} ${event.context ? 1 : 0} ${POINTER_KINDS[event.kind]} ${x} ${y}\n`);
+	return true;
+}

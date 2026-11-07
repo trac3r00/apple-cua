@@ -17,7 +17,7 @@ export const NOOP_DISPLAY_SLEEP: DisplaySleepAssertion = {
 	release(): void {},
 };
 
-const ASSERTION_REASON = "apple-cua Computer Use";
+const ASSERTION_REASON = "opencua Computer Use";
 
 export function createDisplaySleepAssertion(binding: AssertionBinding = defaultBinding): DisplaySleepAssertion {
 	let assertionId: number | undefined;

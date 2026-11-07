@@ -1,5 +1,6 @@
-import type { DockSnapshot, DockSource, HostCapabilities, StopStatus, StopStatusSource } from "@apple-cua/core";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import type { DockSnapshot, DockSource, HostCapabilities, StopStatus, StopStatusSource } from "@opencua/core";
+import { vi } from "@opencua/test-support";
 import { DockGuardSession } from "./dock-session.js";
 import type { ToolResult } from "./tool-result.js";
 
@@ -106,7 +107,7 @@ describe("DockGuardSession", () => {
 		expect(read).not.toHaveBeenCalled();
 	});
 
-	it.each([undefined, ["COM.APPLE.DOCK"]])(
+	it.each([[undefined], [["COM.APPLE.DOCK"]]])(
 		"#given unrestricted or exact Dock authorization %j #when observing #then it issues a token",
 		async (allowedBundleIds) => {
 			const session = new DockGuardSession(

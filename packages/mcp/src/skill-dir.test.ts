@@ -1,18 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { resolveSkillDir } from "./capability-tools.js";
 
 describe("resolveSkillDir", () => {
 	it("#given a packaged skill #when resolving #then the package-local directory wins", () => {
 		const dir = resolveSkillDir(
-			"/pkg/skills/apple-cua",
-			"/repo/skills/apple-cua",
-			(path) => path === "/pkg/skills/apple-cua/SKILL.md",
+			"/pkg/skills/opencua",
+			"/repo/skills/opencua",
+			(path) => path === "/pkg/skills/opencua/SKILL.md",
 		);
-		expect(dir).toBe("/pkg/skills/apple-cua");
+		expect(dir).toBe("/pkg/skills/opencua");
 	});
 
 	it("#given no packaged skill #when resolving #then the checkout directory is used", () => {
-		const dir = resolveSkillDir("/pkg/skills/apple-cua", "/repo/skills/apple-cua", () => false);
-		expect(dir).toBe("/repo/skills/apple-cua");
+		const dir = resolveSkillDir("/pkg/skills/opencua", "/repo/skills/opencua", () => false);
+		expect(dir).toBe("/repo/skills/opencua");
 	});
 });

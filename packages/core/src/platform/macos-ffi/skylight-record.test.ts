@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { CGS_EVENT_LEFT_MOUSE_DOWN, CGS_EVENT_LEFT_MOUSE_DRAGGED, buildMouseEventRecord } from "./skylight.js";
 
 const window = { id: 4242, bounds: { x: 100, y: 200, width: 300, height: 600 } };

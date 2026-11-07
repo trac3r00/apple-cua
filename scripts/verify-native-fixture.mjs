@@ -7,7 +7,7 @@ import { listWindows } from "../packages/core/dist/platform/macos-ffi/window-lis
 import { getRunningApplications } from "../packages/core/dist/platform/macos-ffi/workspace.js";
 import { MacOSHostComputer, captureMacOSScreenshot } from "../packages/core/dist/platform/macos.js";
 
-const fixtureTitle = process.env.APPLE_CUA_FIXTURE_TITLE ?? "apple-cua Background Input QA";
+const fixtureTitle = process.env.OPENCUA_FIXTURE_TITLE ?? "opencua Background Input QA";
 const window = listWindows({ onScreenOnly: false })
 	?.filter((item) => item.title === fixtureTitle)
 	.sort((first, second) => second.id - first.id)[0];
@@ -63,9 +63,7 @@ try {
 	await computer.click(center("Text"));
 	await computer.click(center("Text input"));
 	const log =
-		process.env.APPLE_CUA_FIXTURE_LOG ??
-		process.env.APPLE_CUA_FIXTURE_FIRST_LOG ??
-		"/tmp/apple-cua-fixture-focus.jsonl";
+		process.env.OPENCUA_FIXTURE_LOG ?? process.env.OPENCUA_FIXTURE_FIRST_LOG ?? "/tmp/opencua-fixture-focus.jsonl";
 	const offset = statSync(log).size;
 	let watcher;
 	let timer;
@@ -101,7 +99,7 @@ try {
 	assert.equal(after.front, before.front, "foreground app changed");
 	assert.deepEqual(after.pointer, before.pointer, "hardware pointer changed during native QA");
 	assert.deepEqual(after.frame, before.frame, "fixture window moved");
-	if (process.env.APPLE_CUA_FIXTURE_SCREENSHOT !== undefined) {
+	if (process.env.OPENCUA_FIXTURE_SCREENSHOT !== undefined) {
 		const captured = await captureMacOSScreenshot(
 			{ width: before.frame.width * 2, height: before.frame.height * 2 },
 			window.id,
@@ -109,7 +107,7 @@ try {
 			85,
 		);
 		assert.ok(captured.length > 0, "fixture screenshot was unavailable");
-		await writeFile(process.env.APPLE_CUA_FIXTURE_SCREENSHOT, captured);
+		await writeFile(process.env.OPENCUA_FIXTURE_SCREENSHOT, captured);
 	}
 	process.stdout.write(
 		`${JSON.stringify({ verified: true, pid, windowId: window.id, initialState, state, before, after })}\n`,

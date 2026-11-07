@@ -1070,7 +1070,7 @@ The non-Cua pilot stopped on its first route, codex-native, after a failed
 save/verification and cleanup timeout. Raw transcript records six native calls:
 window/menu selection, AX setValue plus Save, then repeated observation
 timeouts. Model remains unknown. Trace recorded 453.07 px pointer movement
-and no activation. A subsequent independent apple-cua capture of exact owned
+and no activation. A subsequent independent OpenCUA capture of exact owned
 window 5629 shows the marker visually; that is not saved-file completion.
 The owned window 5630 remains alongside it. TextEdit PID 84584 refuses AX
 queries after 2 s and AppleEvents queries time out. Capabilities independently
@@ -1381,7 +1381,7 @@ unverified until an independent read-back establishes their identities.
 - [ ] Apply the preregistered extension rule where inconclusive
 
 ### Phase 5 — fixes
-- [ ] Failing regression test, then fix, per observed apple-cua weakness
+- [ ] Failing regression test, then fix, per observed OpenCUA weakness
 - [ ] Rerun affected scenarios and `pnpm check` after each fix
 
 ### Phase 6 — verdict
@@ -1663,7 +1663,7 @@ All raw outcomes remain unchanged.
 
 The four audit-created `/tmp/audit479*.js` scripts were inspected and deleted;
 enumeration confirms no matching scratch scripts remain. The current
-apple-cua MCP now reports that its session/server configuration was replaced.
+OpenCUA MCP now reports that its session/server configuration was replaced.
 Rediscovery returned the same unavailable capability call, so live observation
 remains unavailable and was not bypassed with another control channel.
 
@@ -1803,7 +1803,7 @@ matrix monitor correctly failed cleanup preflight at browser-agent-run.mjs:79.
 The old matrix/daemon PIDs and browser socket are absent; the temporary
 agent-workspace root is also absent. Logs already archived through slot
 440 remain durable, while later temporary-log availability is unresolved.
-An exact fixture scan returned CHROME_NOT_RUNNING. Native apple-cua reports
+An exact fixture scan returned CHROME_NOT_RUNNING. Native OpenCUA reports
 both grants present, unlocked console, background delivery and stop=false;
 Cua Driver's executable remains present.
 
@@ -2016,7 +2016,7 @@ the runner and regression file. Existing sequential measurement and analysis
 monitors remain active; no duplicate desktop run was launched.
 
 Continuation: `drivers.mjs` background-only adapter tests pass 3/3.
-`protocol.mjs` independently exercised real apple-cua and Cua Driver stdio:
+`protocol.mjs` independently exercised real OpenCUA and Cua Driver stdio:
 fragmented requests, coalesced requests, read-only cancellation responsiveness,
 and immediate rejection after process death passed for both. Mutation cancellation
 is explicitly unmeasured; these probes do not prove desktop task recovery.
@@ -2575,12 +2575,12 @@ raw rows remain unchanged and old pooled intervals are also stale.
 |---|---|---|---|
 | 08:26 | PR #1 | MERGED 08:25:26, merge commit `e62e06f` | `/tmp/pr1-watch.log` |
 | 08:27 | Native binaries rebuilt by `pnpm build` | restored to committed bytes; future builds run `tsgo` only | git status |
-| 08:28 | MCP probe (first) | apple-cua 26 tools; Cua Spaces `cua mcp` 35 tools but every computer tool needs a sandbox; Codex CU 10 tools | `.bench/v3/mcp-probe.json` (superseded) |
+| 08:28 | MCP probe (first) | OpenCUA 26 tools; Cua Spaces `cua mcp` 35 tools but every computer tool needs a sandbox; Codex CU 10 tools | `.bench/v3/mcp-probe.json` (superseded) |
 | 08:29 | Codex CU direct MCP call | `Sender process is not authenticated` — only callable from Codex | console |
 | 13:18 | User | Cua Spaces uninstalled; use cua-driver from GitHub; Codex and Claude logged in | — |
 | 13:19 | Cua Driver 0.34.0 | archive SHA-256 matches release SHA256SUMS; notarized Developer ID, team YCK386LBJ7; copied to /Applications without the upstream installer (which may run `tccutil reset`) | `/tmp/cuadrv` |
 | 13:20 | Cua Driver permissions | Accessibility and Screen Recording granted to `com.trycua.driver` (pre-existing rows); none changed | `cua-driver permissions status --json` |
-| 13:20 | MCP probe | apple-cua 26 tools; cua-driver 58 tools; Codex CU 10 tools | `.bench/v3/mcp-probe.json` |
+| 13:20 | MCP probe | OpenCUA 26 tools; cua-driver 58 tools; Codex CU 10 tools | `.bench/v3/mcp-probe.json` |
 | 13:21 | Codex agent | `codex exec` runs Codex CU via `cua_repl`; model `gpt-6-astra` | `/tmp/cxprobe/out2.jsonl` |
 | 13:20 | Claude Code | logged in; "weekly limit · resets Oct 11 at 1pm" | console |
 | 13:22 | OmO model pin | `chatgpt-subscription/gpt-6-astra` honoured (no fallback) | console |

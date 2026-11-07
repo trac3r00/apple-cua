@@ -1,15 +1,15 @@
-import { AppApprovalStore, listTopLevelWindows } from "@apple-cua/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	allowedBundleIdsFromProcessEnvironment,
-	createNativeWindowProbe,
-	deliveryFromProcessEnvironment,
-} from "./native-policy.js";
+import { afterEach, describe, expect, it } from "bun:test";
+import { vi } from "@opencua/test-support";
 
-vi.mock("@apple-cua/core", async (importOriginal) => ({
-	...(await importOriginal<typeof import("@apple-cua/core")>()),
+const actualCore = { ...(await import("@opencua/core")) };
+vi.mock("@opencua/core", () => ({
+	...actualCore,
 	listTopLevelWindows: vi.fn(async () => []),
 }));
+
+const { AppApprovalStore, listTopLevelWindows } = await import("@opencua/core");
+const { allowedBundleIdsFromProcessEnvironment, createNativeWindowProbe, deliveryFromProcessEnvironment } =
+	await import("./native-policy.js");
 
 afterEach(() => {
 	vi.unstubAllEnvs();
@@ -22,7 +22,7 @@ describe("#given native window discovery #when its delivery policy is selected #
 		{ delivery: "attended", includeOffscreen: undefined, expected: false },
 		{ delivery: undefined, includeOffscreen: false, expected: false },
 	])("preserves explicit scope under $delivery delivery", async ({ delivery, includeOffscreen, expected }) => {
-		vi.stubEnv("APPLE_CUA_DELIVERY", delivery);
+		vi.stubEnv("OPENCUA_DELIVERY", delivery);
 		const probe = createNativeWindowProbe();
 		if (probe === undefined) {
 			expect(process.platform).not.toBe("darwin");
@@ -37,14 +37,14 @@ describe("#given native window discovery #when its delivery policy is selected #
 });
 
 describe("#given the allowlist variable #when the process environment is read #then it lists the approved apps", () => {
-	it("splits APPLE_CUA_ALLOWED_BUNDLE_IDS on commas and trims each id", () => {
-		vi.stubEnv("APPLE_CUA_ALLOWED_BUNDLE_IDS", "com.apple.TextEdit, com.apple.Finder");
+	it("splits OPENCUA_ALLOWED_BUNDLE_IDS on commas and trims each id", () => {
+		vi.stubEnv("OPENCUA_ALLOWED_BUNDLE_IDS", "com.apple.TextEdit, com.apple.Finder");
 
 		expect(allowedBundleIdsFromProcessEnvironment()).toEqual(["com.apple.TextEdit", "com.apple.Finder"]);
 	});
 
 	it("allows any explicitly named app when it is not set", () => {
-		vi.stubEnv("APPLE_CUA_ALLOWED_BUNDLE_IDS", undefined);
+		vi.stubEnv("OPENCUA_ALLOWED_BUNDLE_IDS", undefined);
 
 		const allowed = allowedBundleIdsFromProcessEnvironment();
 		expect(allowed).toBeUndefined();
@@ -52,7 +52,7 @@ describe("#given the allowlist variable #when the process environment is read #t
 	});
 
 	it.each(["", " ,  , "])("keeps an explicitly empty restriction closed: %j", (value) => {
-		vi.stubEnv("APPLE_CUA_ALLOWED_BUNDLE_IDS", value);
+		vi.stubEnv("OPENCUA_ALLOWED_BUNDLE_IDS", value);
 
 		const allowed = allowedBundleIdsFromProcessEnvironment();
 		expect(allowed).toEqual([]);
@@ -62,13 +62,13 @@ describe("#given the allowlist variable #when the process environment is read #t
 
 describe("#given the delivery variable #when the process environment is read #then background is the default", () => {
 	it("defaults to background delivery when it is not set", () => {
-		vi.stubEnv("APPLE_CUA_DELIVERY", undefined);
+		vi.stubEnv("OPENCUA_DELIVERY", undefined);
 
 		expect(deliveryFromProcessEnvironment()).toBe("background");
 	});
 
 	it("selects attended delivery only when asked for", () => {
-		vi.stubEnv("APPLE_CUA_DELIVERY", "attended");
+		vi.stubEnv("OPENCUA_DELIVERY", "attended");
 
 		expect(deliveryFromProcessEnvironment()).toBe("attended");
 	});

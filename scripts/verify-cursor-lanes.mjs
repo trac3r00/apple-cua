@@ -7,8 +7,7 @@ import { promisify } from "node:util";
 // Run against the freshly built native helper. Each state response is a barrier
 // after all preceding commands; no timer-based settling is used.
 const binary =
-	process.env.APPLE_CUA_QA_OVERLAY ??
-	fileURLToPath(new URL("../packages/core/native/cursor-overlay", import.meta.url));
+	process.env.OPENCUA_QA_OVERLAY ?? fileURLToPath(new URL("../packages/core/native/cursor-overlay", import.meta.url));
 const child = spawn(binary, [], { stdio: ["pipe", "pipe", "inherit"] });
 const lines = createInterface({ input: child.stdout });
 const pending = [];

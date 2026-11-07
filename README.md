@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./docs/assets/banner.svg" alt="apple-cua: native macOS computer use for AI agents" width="100%" />
+  <img src="./docs/assets/banner.svg" alt="opencua: native macOS computer use for AI agents" width="100%" />
 </p>
 
 <p align="center">
@@ -21,21 +21,26 @@
 
 ---
 
-**apple-cua** lets AI agents see and operate the apps on your Mac — directly, through native macOS APIs.
-It speaks the app-oriented computer-use vocabulary models already know (`list_apps`, `get_app_state`, `click`,
-`type_text`, `press_keys`, `scroll`, `drag`), and executes it on the host with ScreenCaptureKit, CoreGraphics and the
-Accessibility API. No Docker, no VM, no VNC, no cloud API key.
+**OpenCUA** (formerly apple-cua) lets AI agents see and operate the apps on your computer through each OS's native
+accessibility APIs: the Accessibility API, ScreenCaptureKit and CoreGraphics on macOS, UI Automation on Windows, and
+AT-SPI on Linux. It speaks the app-oriented computer-use vocabulary models already know (`list_apps`,
+`get_app_state`, `click`, `type_text`, `press_keys`, `scroll`, `drag`). No Docker, no VM, no VNC, no cloud API key.
 
 By default it works **in the background**: input goes to the target app's own window, so your frontmost app and your
 real cursor stay where you left them while the agent works.
 
+Upgrading from apple-cua: the old `apple-cua` command, `APPLE_CUA_*` variables and `~/.apple-cua` state keep
+working, and setup replaces the old `apple-cua` MCP entry in each client. The helper's macOS bundle ID moved from
+`dev.applecua.mcp` to `dev.opencua.mcp`, so after updating, grant "opencua-mcp" its permissions once more; setup
+removes the old entries so Privacy & Security lists it only once.
+
 ## Quickstart
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | bash
 ```
 
-That one line clones apple-cua into `~/.apple-cua/app`, builds it, installs the `apple-cua` command into
+That one line clones OpenCUA into `~/.opencua/app`, builds it, installs the `opencua` command into
 `~/.local/bin`, and starts the guided setup: it asks which agent clients to connect, walks you through the macOS
 permission dialogs, and finishes with a health check.
 
@@ -44,33 +49,33 @@ permission dialogs, and finishes with a health check.
 
 ```bash
 # Also put ~/.local/bin on your PATH (your shell startup file is backed up first)
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash -s -- --add-to-path
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | bash -s -- --add-to-path
 
 # Connect specific agent clients during install
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash -s -- --register claude,codex
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | bash -s -- --register claude,codex
 
 # Unattended (CI, provisioning): ask nothing; the closing doctor run lists what is left
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | bash -s -- --yes
 
 # Pin a branch, tag or commit, or install somewhere else
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh | APPLE_CUA_REF=main APPLE_CUA_HOME=~/tools/apple-cua bash
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh | OPENCUA_REF=main OPENCUA_HOME=~/tools/opencua bash
 
 # Read the script first, then run it
-curl -fsSL https://raw.githubusercontent.com/trac3r00/apple-cua/main/install.sh -o install.sh && less install.sh && bash install.sh
+curl -fsSL https://raw.githubusercontent.com/trac3r00/opencua/main/install.sh -o install.sh && less install.sh && bash install.sh
 
 # From a clone of your own
-git clone https://github.com/trac3r00/apple-cua.git && cd apple-cua && ./scripts/setup.sh
+git clone https://github.com/trac3r00/opencua.git opencua && cd opencua && ./scripts/setup.sh
 ```
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `APPLE_CUA_HOME` | `~/.apple-cua` | State directory; the checkout lives in `app/` |
-| `APPLE_CUA_REPO` | `https://github.com/trac3r00/apple-cua.git` | Repository to clone |
-| `APPLE_CUA_REF` | `main` | Branch, tag or commit to install |
-| `APPLE_CUA_BIN_DIR` | `~/.local/bin` | Where the `apple-cua` command goes |
+| `OPENCUA_HOME` | `~/.opencua` | State directory; the checkout lives in `app/` |
+| `OPENCUA_REPO` | `https://github.com/trac3r00/opencua.git` | Repository to clone |
+| `OPENCUA_REF` | `main` | Branch, tag or commit to install |
+| `OPENCUA_BIN_DIR` | `~/.local/bin` | Where the `opencua` command goes |
 
 The installer is safe to re-run: every step checks before it acts, and a run after a failure picks up where the
-last one stopped. Node.js 20+ is used from `PATH`, or the official LTS build is downloaded into `~/.apple-cua/node`
+last one stopped. Node.js 20+ is used from `PATH`, or the official LTS build is downloaded into `~/.opencua/node`
 and verified against nodejs.org's `SHASUMS256.txt`. Client config files are merged, never replaced, and each one is
 backed up before it changes.
 
@@ -87,39 +92,39 @@ backed up before it changes.
 **1 · Install**
 
 Run the [one-liner](#quickstart). Setup builds everything, including a small signed helper app,
-**apple-cua-mcp**. macOS ties its privacy permissions to that helper, so one grant covers every agent client.
+**opencua-mcp**. macOS ties its privacy permissions to that helper, so one grant covers every agent client.
 
 **2 · Grant permissions**
 
 Setup opens each macOS dialog and waits for you. You can run it again later:
 
 ```bash
-apple-cua permissions grant
+opencua permissions grant
 ```
 
 Grant **Accessibility** (read windows, send input), **Screen Recording** (screenshots) and **Automation** (Apple
-Events) to **apple-cua-mcp**.
+Events) to **opencua-mcp**.
 
 **3 · Connect your agent**
 
 ```bash
-apple-cua config --detect          # which clients are installed
-apple-cua config --register claude # or omo, codex, gemini, cursor, ...
+opencua config --detect          # which clients are installed
+opencua config --register claude # or omo, codex, gemini, cursor, ...
 ```
 
 **4 · Verify**
 
 ```bash
-apple-cua doctor        # read-only; exit 0 when ready
-apple-cua doctor --fix  # repair what is safe, ask before the rest
+opencua doctor        # read-only; exit 0 when ready
+opencua doctor --fix  # repair what is safe, ask before the rest
 ```
 
 Restart the agent client, and ask it to use an app by name.
 
 ### UTM virtual machines
 
-Control UTM guests through native background scripting with `apple-cua utm list`, `apple-cua utm key Windows win+r`,
-and `apple-cua utm screenshot Windows -o windows.png`. Enable MCP tools with `APPLE_CUA_UTM=1`.
+Control UTM guests through native background scripting with `opencua utm list`, `opencua utm key Windows win+r`,
+and `opencua utm screenshot Windows -o windows.png`. Enable MCP tools with `OPENCUA_UTM=1`.
 See [UTM support](docs/utm.md) for setup, guest coordinates, and backend limits.
 
 ### Browser and iPhone
@@ -129,8 +134,8 @@ installed. One command installs it, opens the extensions page in the background,
 unpacked-extension folder path:
 
 ```bash
-apple-cua browser setup     # one human step: Developer mode -> Load unpacked
-apple-cua browser status
+opencua browser setup     # one human step: Developer mode -> Load unpacked
+opencua browser status
 ```
 
 Agent pages stay in a minimized background window; they are never raised or moved into your
@@ -138,36 +143,51 @@ Space. For the phone, enable the iPhone Mirroring tools once (the phone must be 
 and the screen unlocked while the agent works):
 
 ```bash
-apple-cua config --iphone
-apple-cua ios status
+opencua config --iphone
+opencua ios status
 ```
 
-Use the `apple-cua-browser` skill for web pages and the `apple-cua` skill for native apps and the
+Use the `cua-browser` skill for web pages and the `opencua` skill for native apps and the
 phone. Both skills explain the one-cursor-per-subagent workflow and the non-disruption rules.
 For a question-driven install an AI can run end to end, see the
-[AI setup guide](skills/apple-cua-browser/README.md).
+[AI setup guide](skills/cua-browser/README.md).
+
+`cua-history` is an opt-in, private, local record of recent desktop activity for answering "what
+was I just doing?". `opencua history start` installs an always-on native menu-bar watcher (a
+launchd login item) that records foreground app, window title, keystrokes, and clicks into
+10-minute segments under the state directory, with per-app observation rules, pause/resume, and
+a 6-hour retention window; keystroke/click capture needs Input Monitoring and window titles need
+Accessibility, granted to the **same "opencua-mcp" entry** in System Settings (the watcher is signed
+with OpenCUA's identifier, so there is no separate recorder to approve). With
+`OPENCUA_HISTORY=1` the MCP server exposes the `cua-history` tools that read and control that
+watcher. Native capture cannot classify URLs or private browser windows, so the default
+privacy policy blocks it rather than ignoring exclusions. See [native recording limits and
+history-to-skill workflows](docs/history-skills.md) before enabling it. Capture is local;
+explicitly consented generation sends selected, redacted evidence to the configured model.
+Retention cleanup runs while the watcher is running, including when paused; stopped watchers
+cannot expire files.
 
 <p align="center">
-  <img src="./docs/assets/doctor.svg" alt="apple-cua doctor output: every check reports ok, ending in 'Ready: apple-cua is installed and holds its permissions.'" width="760" />
+  <img src="./docs/assets/doctor.svg" alt="OpenCUA doctor output: every check reports ok, ending in 'Ready: OpenCUA is installed and holds its permissions.'" width="760" />
   <br />
-  <sub>Real <code>apple-cua doctor</code> output from a configured Mac (two path-only lines omitted for width).</sub>
+  <sub>Real <code>opencua doctor</code> output from a configured Mac (two path-only lines omitted for width).</sub>
 </p>
 
 Day-to-day lifecycle:
 
 | Command | What it does |
 |---|---|
-| `apple-cua config` | Choose allowed apps and connected clients (interactive, or by flags) |
-| `apple-cua permissions grant` | Walk through Accessibility, Screen Recording and Automation |
-| `apple-cua doctor [--fix]` | Check everything without triggering a permission prompt |
-| `apple-cua update` | Fast-forward, rebuild, re-apply registrations, run the doctor |
-| `apple-cua stop` / `resume` | Stop every agent on this Mac at once / lift the stop |
-| `apple-cua uninstall` | Remove registrations (backed up), helper, command, PATH line and `~/.apple-cua` |
+| `opencua config` | Choose allowed apps and connected clients (interactive, or by flags) |
+| `opencua permissions grant` | Walk through Accessibility, Screen Recording and Automation |
+| `opencua doctor [--fix]` | Check everything without triggering a permission prompt |
+| `opencua update` | Fast-forward, rebuild, re-apply registrations, run the doctor |
+| `opencua stop` / `resume` | Stop every agent on this Mac at once / lift the stop |
+| `opencua uninstall` | Remove owned registrations/login services, helper, command, PATH line and installation state; retain recorded history and summaries at the reported path |
 
 ## See it work
 
 These are real captures from a finished-work acceptance run. An agent driving Freeform and Keynote through
-apple-cua built the board and the deck. Nothing here is a mockup.
+OpenCUA built the board and the deck. Nothing here is a mockup.
 ([How the run was judged](docs/fluent-workflow-acceptance.md))
 
 <table>
@@ -222,7 +242,7 @@ Every action re-checks that the session is ready.
 <td valign="top">
 
 ### 🛑 A stop switch you own
-Hold **Control + Option + Command**, or run `apple-cua stop`. Every apple-cua agent on the Mac refuses input
+Hold **Control + Option + Command**, or run `opencua stop`. Every OpenCUA agent on the Mac refuses input
 until *you* resume it.
 
 </td>
@@ -236,9 +256,9 @@ setting updates every client's registration.
 </tr>
 </table>
 
-### How apple-cua compares
+### How OpenCUA compares
 
-| | apple-cua | [trycua/cua](https://github.com/trycua/cua) | Codex Computer Use |
+| | OpenCUA | [trycua/cua](https://github.com/trycua/cua) | Codex Computer Use |
 |---|---|---|---|
 | Runs on | Your Mac, directly | VM / container / cloud | Your Mac, directly |
 | Needs a VM | No | Yes (default) | No |
@@ -249,15 +269,15 @@ setting updates every client's registration.
 | Isolation | macOS permissions + app scoping | VM sandbox | macOS permissions + app scoping |
 
 If you need strong VM isolation, use cua. If you want low-latency control of the Mac you are sitting at, use
-apple-cua. Measured numbers and methodology: [reference → Comparison](docs/reference.md#comparison-vs-cua--codex).
+opencua. Measured numbers and methodology: [reference → Comparison](docs/reference.md#comparison-vs-cua--codex).
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    A["AI agent<br/>Claude Code · Codex · Gemini · Cursor · OmO · pi"] -->|MCP stdio| M["apple-cua-mcp<br/>(signed helper)"]
-    C["apple-cua CLI"] --> K
-    M --> K["@apple-cua/core<br/>guarded session · observation tokens"]
+    A["AI agent<br/>Claude Code · Codex · Gemini · Cursor · OmO · pi"] -->|MCP stdio| M["opencua-mcp<br/>(signed helper)"]
+    C["opencua CLI"] --> K
+    M --> K["@opencua/core<br/>guarded session · observation tokens"]
     K --> S["ScreenCaptureKit<br/>capture"]
     K --> X["Accessibility API<br/>app state · actions"]
     K --> G["CoreGraphics + SkyLight<br/>per-app input"]
@@ -270,13 +290,13 @@ gets fresh state back. If the window moved, changed or disappeared, the action i
 
 | Package | Role |
 |---|---|
-| [`@apple-cua/core`](packages/core) | `ComputerInterface`, the native macOS computer, the guarded token layer and targeting |
-| [`@apple-cua/mcp`](packages/mcp) | The stdio MCP server and signed helper app |
-| [`@apple-cua/cli`](packages/cli) | The `apple-cua` command: lifecycle, input, apps, iPhone |
-| [`@apple-cua/browser`](packages/browser) | Compact Chromium automation behind the same stop gate |
-| [`@apple-cua/agent`](packages/agent) | Decision layer: an indexed action space over observations |
-| [`@apple-cua/pi-extension`](packages/pi-extension) | pi coding-agent bridge to the MCP server |
-| [`skills/apple-cua`](skills/apple-cua) | The portable agent skill: workflow, usage, permissions, harness setup |
+| [`@opencua/core`](packages/core) | `ComputerInterface`, the native macOS computer, the guarded token layer and targeting |
+| [`@opencua/mcp`](packages/mcp) | The stdio MCP server and signed helper app |
+| [`@opencua/cli`](packages/cli) | The `opencua` command: lifecycle, input, apps, iPhone |
+| [`@opencua/browser`](packages/browser) | Compact Chromium automation behind the same stop gate |
+| [`@opencua/agent`](packages/agent) | Decision layer: an indexed action space over observations |
+| [`@opencua/pi-extension`](packages/pi-extension) | pi coding-agent bridge to the MCP server |
+| [`skills/opencua`](skills/opencua) | The portable agent skill: workflow, usage, permissions, harness setup |
 
 ## Works with your agent
 
@@ -293,18 +313,18 @@ gets fresh state back. If the window moved, changed or disappeared, the action i
 | Anything else | `--register json` | Prints a config block to paste |
 
 Details, caveats and manual setups: [reference → Agent clients](docs/reference.md#agent-clients) and the
-[harness guide](skills/apple-cua/references/harnesses.md).
+[harness guide](skills/opencua/references/harnesses.md).
 
 ## Safety and control
 
 - **Explicit targets only.** Agents name an app by name, bundle ID or PID, and nothing ever implicitly targets the
-  frontmost app. You can optionally restrict agents to a list of apps with `apple-cua config --allow`.
+  frontmost app. You can optionally restrict agents to a list of apps with `opencua config --allow`.
 - **Observation tokens.** Input is accepted only against a fresh observation of the exact window it targets.
 - **Background by default.** Your focus and cursor stay put. In attended mode, a drawn agent cursor (not your real
   one) shows where each action lands.
 - **Global stop.** **Control + Option + Command** stops every agent at once. Reads keep working so the agent can tell
   you what it was doing, and only you can resume.
-- **Permissions stay yours.** Only a person can grant macOS privacy permissions. `apple-cua doctor` reports their
+- **Permissions stay yours.** Only a person can grant macOS privacy permissions. `opencua doctor` reports their
   state without ever raising a prompt.
 
 Tokens prove that the agent observed the context. They do not prove your consent, so agents are instructed to ask
@@ -315,32 +335,33 @@ before irreversible actions.
 | | |
 |---|---|
 | [Full reference](docs/reference.md) | Every option, surface, tool, permission and benchmark |
-| [Agent skill](skills/apple-cua/SKILL.md) | How agents should observe, act and verify |
-| [Installation guide](skills/apple-cua/references/installation.md) | Permissions walkthrough and manual setup |
-| [Troubleshooting](skills/apple-cua/references/troubleshooting.md) | Common failures and fixes |
-| [iPhone automation](skills/apple-cua/references/ios-automation.md) | Driving a real iPhone through Mirroring |
-| [Design notes](docs/unified-cua.md) | What apple-cua took from Codex, Cua Driver and OmO |
+| [Agent skill](skills/opencua/SKILL.md) | How agents should observe, act and verify |
+| [Installation guide](skills/opencua/references/installation.md) | Permissions walkthrough and manual setup |
+| [Troubleshooting](skills/opencua/references/troubleshooting.md) | Common failures and fixes |
+| [iPhone automation](skills/opencua/references/ios-automation.md) | Driving a real iPhone through Mirroring |
+| [Design notes](docs/unified-cua.md) | What OpenCUA took from Codex, Cua Driver and OmO |
 
 ## Development
 
 ```bash
-git clone https://github.com/trac3r00/apple-cua.git && cd apple-cua
+git clone https://github.com/trac3r00/opencua.git opencua && cd opencua
 ./scripts/setup.sh     # install, build and check everything (safe to re-run)
 pnpm check             # lint, typecheck, tests
 pnpm doctor            # is this Mac ready?
 ```
 
-The codebase uses strict TypeScript, ESM, Biome and Vitest; [`AGENTS.md`](AGENTS.md) has the conventions. CI runs
+The codebase uses strict TypeScript, ESM, Biome and Bun's test runner; [`AGENTS.md`](AGENTS.md) has the conventions. CI runs
 setup and `pnpm check` on macOS 15 and macOS 26, each on Apple Silicon and Intel.
 
-The shipped runtime is Node. Bun is an optional local lane for the browser package only:
+The shipped runtime is Node; the tests run on Bun. `pnpm check` and `pnpm test` need Bun 1.4.4 (the version CI
+uses), which `setup.sh` does not install. The browser package also has a read-only Bun load check:
 
 ```bash
 bun run test:browser:bun
 bun run smoke:browser:bun
 ```
 
-It does not change `setup.sh`, the LaunchAgent, or the bundled helper app.
+Bun does not run `setup.sh`, the LaunchAgent, or the bundled helper app.
 
 ## License
 

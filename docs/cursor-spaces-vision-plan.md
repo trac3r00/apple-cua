@@ -130,7 +130,7 @@ connected-model evidence.
   Standalone MCP typecheck could not resolve the unbuilt core workspace package;
   integration verification must build core TypeScript first.
 - Real native fixture: window 1766, PID 43591, bundle
-  `dev.apple-cua.task-owned-qa`. Initial capture contains top and bottom buttons,
+  `dev.opencua.task-owned-qa`. Initial capture contains top and bottom buttons,
   an editable middle field, an icon-only star button, and static text.
 - Moved only this fixture window from Space 3 to Space 4. WindowServer confirms
   it is absent from the onscreen list and present in the all-windows list.

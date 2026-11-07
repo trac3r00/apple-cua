@@ -5,16 +5,16 @@ without activating UTM or moving the host pointer. The local `~/Applications/UTM
 then `/Applications/UTM.app`; `--app` overrides it.
 
 ```bash
-apple-cua utm --app "$HOME/Applications/UTM.app" list
-apple-cua utm screenshot Windows -o windows.png
-apple-cua utm key Windows win+r
-apple-cua utm type Windows notepad
-apple-cua utm key Windows enter
-apple-cua utm click Windows -x 200 -y 300
-apple-cua utm observe Windows --output windows.png
-apple-cua utm move Windows -x 300 -y 744
-apple-cua utm click-text Windows Search
-apple-cua utm click Windows -x 300 -y 784 --image-coordinates
+opencua utm --app "$HOME/Applications/UTM.app" list
+opencua utm screenshot Windows -o windows.png
+opencua utm key Windows win+r
+opencua utm type Windows notepad
+opencua utm key Windows enter
+opencua utm click Windows -x 200 -y 300
+opencua utm observe Windows --output windows.png
+opencua utm move Windows -x 300 -y 744
+opencua utm click-text Windows Search
+opencua utm click Windows -x 300 -y 784 --image-coordinates
 ```
 
 `start`, `suspend`, and `stop` provide lifecycle control. Stop requests a graceful guest shutdown rather than
@@ -23,8 +23,8 @@ UUIDs avoid inventory-selection ambiguity; window observation additionally requi
 
 ## MCP
 
-Set `APPLE_CUA_UTM=1` in the MCP server environment and reconnect the client. Optionally set
-`APPLE_CUA_UTM_APP` to your absolute UTM.app path (`$HOME/Applications/UTM.app` in a shell; expand it before
+Set `OPENCUA_UTM=1` in the MCP server environment and reconnect the client. Optionally set
+`OPENCUA_UTM_APP` to your absolute UTM.app path (`$HOME/Applications/UTM.app` in a shell; expand it before
 placing it in JSON configuration). The opt-in adds `utm_list`, `utm_observe`, and `utm_run`.
 Observe before input; run requires the returned one-use observation token and returns a new observation.
 The machine-wide stop switch also applies to UTM input.

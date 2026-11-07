@@ -11,8 +11,8 @@ const targets =
 	process.argv[2] === "session"
 		? []
 		: [
-				{ app: "Keynote", bundleId: "com.apple.iWork.Keynote", prefix: "APPLE_CUA_KEYNOTE" },
-				{ app: "Freeform", bundleId: "com.apple.freeform", prefix: "APPLE_CUA_FREEFORM" },
+				{ app: "Keynote", bundleId: "com.apple.iWork.Keynote", prefix: "OPENCUA_KEYNOTE" },
+				{ app: "Freeform", bundleId: "com.apple.freeform", prefix: "OPENCUA_FREEFORM" },
 			]
 				.filter((target) => !["Keynote", "Freeform"].includes(process.argv[2]) || target.app === process.argv[2])
 				.map((target) => {
@@ -20,25 +20,23 @@ const targets =
 					const title = process.env[`${target.prefix}_WINDOW_TITLE`];
 					assert.ok(Number.isSafeInteger(windowId) && windowId > 0, `set ${target.prefix}_WINDOW_ID`);
 					assert.ok(title?.trim(), `set ${target.prefix}_WINDOW_TITLE to the intended scratch document title`);
-					const expectedLabel = process.env.APPLE_CUA_KEYNOTE_EXPECT_LABEL;
-					const expectedTitle = process.env.APPLE_CUA_FREEFORM_EXPECT_TITLE;
+					const expectedLabel = process.env.OPENCUA_KEYNOTE_EXPECT_LABEL;
+					const expectedTitle = process.env.OPENCUA_FREEFORM_EXPECT_TITLE;
 					if (process.argv[2] === "Keynote") {
-						assert.ok(expectedLabel?.trim(), "set APPLE_CUA_KEYNOTE_EXPECT_LABEL to a newly opened picker label");
+						assert.ok(expectedLabel?.trim(), "set OPENCUA_KEYNOTE_EXPECT_LABEL to a newly opened picker label");
 					}
 					if (process.argv[2] === "Freeform") {
-						assert.ok(expectedTitle?.trim(), "set APPLE_CUA_FREEFORM_EXPECT_TITLE to the new board title");
+						assert.ok(expectedTitle?.trim(), "set OPENCUA_FREEFORM_EXPECT_TITLE to the new board title");
 					}
 					return { ...target, windowId, title, expectedLabel, expectedTitle };
 				});
 
 const client = new McpClient({
-	command: fileURLToPath(
-		new URL("../packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp", import.meta.url),
-	),
+	command: fileURLToPath(new URL("../packages/mcp/dist/opencua-mcp.app/Contents/MacOS/opencua-mcp", import.meta.url)),
 	args: [fileURLToPath(new URL("../packages/mcp/dist/server.js", import.meta.url))],
 	env: {
-		APPLE_CUA_DELIVERY: "background",
-		APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.freeform,com.apple.iWork.Keynote",
+		OPENCUA_DELIVERY: "background",
+		OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.freeform,com.apple.iWork.Keynote",
 	},
 });
 function payload(result) {

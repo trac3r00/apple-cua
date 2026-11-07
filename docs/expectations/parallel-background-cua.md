@@ -1,4 +1,4 @@
-# Expectation contract: parallel, background, self-refreshing apple-cua
+# Expectation contract: parallel, background, self-refreshing OpenCUA
 
 Status: active (2026-10-22). Source: user request in OmO session 01a1619b
 (prompt-builder + loe + fdd + preflight), items 1-4.
@@ -6,17 +6,17 @@ Status: active (2026-10-22). Source: user request in OmO session 01a1619b
 ## Base
 
 Reviewed against `main` at 8880d25 (after PR #11 unified the browser tools and added
-`skills/apple-cua/references/subagents.md`). Per-host spawn guidance lives there.
+`skills/opencua/references/subagents.md`). Per-host spawn guidance lives there.
 
 ## Outcome and intended users
 
 - **Host agents** (OmO/senpi, Codex, Claude Code, Pi, OpenClaw, Hermes) that drive
-  apple-cua over MCP. They need to know which harness they are in, how to fan out one
+  OpenCUA over MCP. They need to know which harness they are in, how to fan out one
   subagent per worker in that harness, and to pay fewer tokens and less wall time per
   observed action.
 - **The person at the Mac.** Their screen, cursor and focus stay theirs. They can take
   over the agent's browser and give it back, and the agent respects that. They never
-  need to restart a session because apple-cua was updated, crashed, or was just granted
+  need to restart a session because OpenCUA was updated, crashed, or was just granted
   a permission.
 
 ## In scope
@@ -43,7 +43,7 @@ Reviewed against `main` at 8880d25 (after PR #11 unified the browser tools and a
 
 | ID | Requirement (source) | Start + action | Pass observable | Evidence |
 |---|---|---|---|---|
-| EXP-001 | Know the harness (req 1) | Client initializes with clientInfo `claude-code` / `codex-mcp-client` / `apple-cua-pi-extension`, or with no known name but a host env marker; call `get_capabilities` | `host.name` is `claude-code` / `codex` / `pi` / `omo` / ...; `host.source` is `client_info` or `environment`; unknown is `unknown`, never a guess | protocol test |
+| EXP-001 | Know the harness (req 1) | Client initializes with clientInfo `claude-code` / `codex-mcp-client` / `opencua-pi-extension`, or with no known name but a host env marker; call `get_capabilities` | `host.name` is `claude-code` / `codex` / `pi` / `omo` / ...; `host.source` is `client_info` or `environment`; unknown is `unknown`, never a guess | protocol test |
 | EXP-002 | Spawn one subagent per worker (req 1) | Detected host; `manage_workers` assign 2 apps | Result carries `spawn` naming that host's mechanism and whether input runs concurrently (background) or serialized (attended) | protocol test; skill reference |
 | EXP-003 | Lower latency + tokens for workers (req 1, 2) | assign/observe worker without `include_screenshot` | No image content and the observation was requested with `includeScreenshot: false`; `include_screenshot: true` still returns an image | protocol test |
 | EXP-004 | Workers really run in parallel (req 1) | Background delivery, two workers on distinct apps, first run blocked in the fake | Second worker's run dispatches before the first finishes; attended stays serialized | protocol test |
@@ -84,7 +84,7 @@ models need from tool descriptions. On 2026-10-25 the full list measured 34,556 
 - EXP-010: the user named Cua Driver (cua.ai) as the reference. Its model is "windows
   behind yours, a cursor of its own, a browser window of its own", with the known limit
   that launching an app can raise its window
-  (https://cua.ai/docs/cua-driver/concepts/how-cua-driver-works). apple-cua already
+  (https://cua.ai/docs/cua-driver/concepts/how-cua-driver-works). OpenCUA already
   matches the first three; EXP-010 closes the launch limit. No virtual display is built.
 
 ## Work plan (parallel tracks, disjoint write scopes)

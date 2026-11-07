@@ -1,4 +1,4 @@
-/** The upstream planner surface consumed by apple-cua; see README.md for provenance. */
+/** The upstream planner surface consumed by opencua; see README.md for provenance. */
 export interface MotionParams {
 	readonly style?: "signature_arc" | "spring_settle" | "magnetic" | "comet_swoop" | "adaptive" | "classic";
 	readonly timing?: "native" | "fitts" | "fixed";

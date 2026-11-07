@@ -1,7 +1,8 @@
+import { describe, expect, it } from "bun:test";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { describe, expect, it, vi } from "vitest";
+import { vi } from "@opencua/test-support";
 
-import { FAKE_TOOLS } from "../test/support/fake-apple-cua.js";
+import { FAKE_TOOLS } from "../test/support/fake-opencua.js";
 import type { CallOptions } from "./mcp-bridge.js";
 import { mcpToolDefinitions } from "./mcp-tools.js";
 import type { ExtensionContext } from "./pi/index.js";

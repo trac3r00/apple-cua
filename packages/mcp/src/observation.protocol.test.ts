@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
+import { copyForMatch, vi } from "@opencua/test-support";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 
 let closeHarness: (() => Promise<void>) | undefined;
@@ -113,7 +114,7 @@ describe("post-action observation #given dispatched input #when capture outcome 
 	});
 
 	it("reports measured capture timing with an injected clock", async () => {
-		vi.stubEnv("APPLE_CUA_TIMING", "1");
+		vi.stubEnv("OPENCUA_TIMING", "1");
 		const clock = vi.spyOn(performance, "now");
 		let now = 0;
 		clock.mockImplementation(() => {
@@ -136,7 +137,7 @@ describe("post-action observation #given dispatched input #when capture outcome 
 	});
 
 	it("still reports server timing without capture when collection is disabled", async () => {
-		vi.stubEnv("APPLE_CUA_TIMING", "0");
+		vi.stubEnv("OPENCUA_TIMING", "0");
 		const harness = await createHarness();
 		closeHarness = harness.close;
 
@@ -147,7 +148,10 @@ describe("post-action observation #given dispatched input #when capture outcome 
 			}),
 		);
 
-		expect(payload["timing_ms"]).toMatchObject({ total: expect.any(Number), handler: expect.any(Number) });
+		expect(copyForMatch(payload["timing_ms"])).toMatchObject({
+			total: expect.any(Number),
+			handler: expect.any(Number),
+		});
 		expect(payload["timing_ms"]).not.toHaveProperty("capture");
 	});
 

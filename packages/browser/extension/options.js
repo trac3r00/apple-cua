@@ -19,7 +19,7 @@ function renderConnection(state) {
 			? "Disconnected. Start the local service or check manual connection settings."
 			: state.bridgeStopped
 				? "Actions stopped. Reconnect when ready."
-				: "Connected to apple-cua.";
+				: "Connected to opencua.";
 }
 
 const connectionKeys = ["bridgeConnected", "bridgeStopped", "bridgePausedByUser"];

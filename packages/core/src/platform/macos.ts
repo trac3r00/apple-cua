@@ -8,6 +8,7 @@ import type { OcrTextEntry, WindowInventoryEntry } from "../accessibility/types.
 import { resolveAppInstructions } from "../app-instructions/index.js";
 import { resolveDisplayMetadata } from "../computer/display-metadata.js";
 import type { InputObservation, PreflightOptions, PreflightResult } from "../computer/guarded-interface.js";
+import { denyHostInteraction } from "../computer/host-interaction-policy.js";
 import { currentInputScope } from "../computer/input-scope.js";
 import type { ComputerInterface, ScreenshotResult, WindowTextRead } from "../computer/interface.js";
 import { assertScreenUnlocked } from "../computer/lock-guard.js";
@@ -26,6 +27,7 @@ import type {
 	SelectTextOptions,
 } from "../types/index.js";
 import { type RunningAppInfo, collectAppUsage, getRunningMacOSApps } from "./app-list.js";
+import { CursorKeyedObservations } from "./cursor-observations.js";
 import { execFileStdout, execFileStdoutBuffer } from "./exec-util.js";
 import { HostComputer, type HostComputerOptions } from "./host.js";
 import { parseImageDimensions, sniffImageMimeType } from "./image-format.js";
@@ -54,17 +56,16 @@ import {
 } from "./macos-ffi/accessibility.js";
 import type { AccessibilityTreeOptions } from "./macos-ffi/accessibility.js";
 import { createAxEventWaiter, waitForAxQuiet } from "./macos-ffi/ax-observer.js";
-import { cursorBackgroundCuesEnabled } from "./macos-ffi/cursor-background-cues.js";
 import {
 	type CursorMotionConfig,
 	cursorMotionFromEnvironment,
 	parseCursorMotion,
 } from "./macos-ffi/cursor-motion-config.js";
-import { NOOP_POINTER_OVERLAY, type PointerOverlay, createCursorOverlay } from "./macos-ffi/cursor-overlay.js";
+import { NOOP_POINTER_OVERLAY, type PointerOverlay } from "./macos-ffi/cursor-overlay.js";
 import { onlineDisplayInfo } from "./macos-ffi/display-list.js";
 import { isScreenLocked } from "./macos-ffi/lock-screen.js";
 import { readClipboard, writeClipboard } from "./macos-ffi/pasteboard.js";
-import { createDisplaySleepAssertion } from "./macos-ffi/power.js";
+import { NOOP_DISPLAY_SLEEP } from "./macos-ffi/power.js";
 import {
 	captureDisplayImage,
 	captureDisplayRegionImage,
@@ -82,6 +83,7 @@ import {
 } from "./macos-ffi/select-text.js";
 import type { SkyLightTargetWindow } from "./macos-ffi/skylight.js";
 import { recognizeTextInImage } from "./macos-ffi/vision.js";
+import { listWindows as listOwnedCandidateWindows } from "./macos-ffi/window-list.js";
 import { MacOSInputController } from "./macos-input.js";
 import type { InputDelivery } from "./macos-input.js";
 import { currentOnscreenWindowIds, guardAgainstFocusSteal } from "./macos-input.js";
@@ -103,6 +105,7 @@ import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.j
 import { resolveTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
 import { resolveOcrCrop } from "./ocr-region.js";
+import { isOwnedSurfacePid } from "./owned-surfaces.js";
 import { currentSystemPrompts } from "./system-prompts.js";
 
 const execFileAsync = promisify(execFile);
@@ -131,15 +134,13 @@ const SETTLE_SIGNATURE_MAX_ELEMENTS = 250;
 export interface MacOSHostComputerOptions extends HostComputerOptions {
 	defaultTargetPid?: number;
 	overlay?: PointerOverlay;
-	/** Omit to use APPLE_CUA_CURSOR_MOTION; null keeps the original native glide. */
+	/** Omit to use OPENCUA_CURSOR_MOTION; null keeps the original native glide. */
 	readonly cursorMotion?: CursorMotionConfig | null | undefined;
 	appApproval?: AppApprovalStore;
 	urlBlocklist?: readonly string[];
 	/**
-	 * "attended" keeps the current behaviour, where a targeted click may briefly take focus and
-	 * put it back. "background" refuses every route that would change the frontmost app or move
-	 * the cursor, so a run can proceed while the person keeps using the machine; actions that
-	 * need foreground delivery are refused instead of quietly taking over.
+	 * The shared host is observation-only. "attended" is rejected; "background" does not
+	 * grant input capability. Mutations require an agent-owned isolated backend.
 	 */
 	delivery?: InputDelivery;
 	/** Reports whether the Mac is locked. Defaults to the console session's lock flag. */
@@ -147,12 +148,12 @@ export interface MacOSHostComputerOptions extends HostComputerOptions {
 }
 
 export class MacOSHostComputer extends HostComputer {
-	readonly capabilities: ComputerInterface["capabilities"] = {
-		supportsScreenshot: true,
-		supportsInput: true,
+	readonly capabilities: ComputerInterface["capabilities"] = Object.freeze({
+		supportsScreenshot: false,
+		supportsInput: false,
 		supportsAccessibility: true,
-		supportsClipboard: true,
-	};
+		supportsClipboard: false,
+	});
 
 	private readonly input: MacOSInputController;
 	private readonly inputLock = new InputLock();
@@ -168,31 +169,26 @@ export class MacOSHostComputer extends HostComputer {
 	private readonly overlay: PointerOverlay;
 	private readonly displayId: number | undefined;
 	private readonly highlightedApps = new Set<number>();
-	private readonly inputObservations = new Map<number, InputObservation>();
+	private readonly inputObservations = new CursorKeyedObservations<InputObservation>((pid) => isOwnedSurfacePid(pid));
 	private observationGeneration = 0;
 	private readonly isLocked: () => boolean;
 
 	constructor(options: MacOSHostComputerOptions = {}) {
 		super();
+		if (options.delivery === "attended") denyHostInteraction("global-input");
 		this.appApproval = options.appApproval;
 		this.delivery = options.delivery ?? "background";
 		this.urlBlocklist = options.urlBlocklist ?? [];
 		const cursorMotion =
 			options.cursorMotion !== undefined ? parseCursorMotion(options.cursorMotion) : cursorMotionFromEnvironment();
 		const cursorTravelEnabled = cursorMotion !== undefined;
-		this.overlay =
-			options.overlay ??
-			(this.delivery === "background" && !cursorBackgroundCuesEnabled()
-				? NOOP_POINTER_OVERLAY
-				: agentCursorEnabled()
-					? createCursorOverlay(undefined, options.cursorMotion)
-					: NOOP_POINTER_OVERLAY);
+		this.overlay = options.overlay ?? NOOP_POINTER_OVERLAY;
 		this.isLocked = options.isLocked ?? isScreenLocked;
 		this.input = new MacOSInputController(
 			options.defaultTargetPid,
 			this.overlay,
 			this.isLocked,
-			createDisplaySleepAssertion(),
+			NOOP_DISPLAY_SLEEP,
 			this.delivery,
 			undefined,
 			cursorTravelEnabled,
@@ -213,9 +209,11 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	private async captureScreenshot(options?: ScreenshotOptions, windowId?: number): Promise<ScreenshotResult> {
+		// Even an otherwise permitted host capture can raise macOS capture-consent UI.
+		if (!this.capabilities.supportsScreenshot && !this.isOwnedWindow(windowId)) denyHostInteraction("host-window");
 		if (!screenCaptureAllowed()) {
 			throw new Error(
-				"Screen Recording permission is not granted to the process running apple-cua, so no image was captured (capturing would raise macOS's permission prompt). Grant it in System Settings > Privacy & Security > Screen Recording to the app that launches this server, then restart the server.",
+				"Screen Recording permission is not granted to the process running opencua, so no image was captured (capturing would raise macOS's permission prompt). Grant it in System Settings > Privacy & Security > Screen Recording to the app that launches this server, then restart the server.",
 			);
 		}
 		const size = options?.targetSize ?? (await this.getScreenSize());
@@ -255,30 +253,37 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async move(position: Point): Promise<void> {
+		this.assertInputAvailable();
 		await this.inputLock.run(() => this.input.move(position));
 	}
 
 	async click(position: Point, options?: PointerOptions): Promise<void> {
+		this.assertInputAvailable();
 		await this.inputLock.run(() => this.input.click(position, "left", options?.modifiers));
 	}
 
 	async rightClick(position: Point, options?: PointerOptions): Promise<void> {
+		this.assertInputAvailable();
 		await this.inputLock.run(() => this.input.click(position, "right", options?.modifiers));
 	}
 
 	async middleClick(position: Point, options?: PointerOptions): Promise<void> {
+		this.assertInputAvailable();
 		await this.inputLock.run(() => this.input.click(position, "middle", options?.modifiers));
 	}
 
 	async doubleClick(position: Point, options?: PointerOptions): Promise<void> {
+		this.assertInputAvailable();
 		await this.inputLock.run(() => this.input.doubleClick(position, options?.modifiers));
 	}
 
 	async type(text: string): Promise<void> {
+		this.assertInputAvailable();
 		await this.inputLock.run(() => this.input.typeText(text));
 	}
 
 	async key(key: string, options?: KeyOptions): Promise<void> {
+		this.assertInputAvailable();
 		const pid = this.input.currentTargetPid;
 		const modifiers = options?.modifiers ?? [];
 		if (this.delivery === "background" && pid !== undefined && commandChordMask(modifiers) !== undefined) {
@@ -329,6 +334,7 @@ export class MacOSHostComputer extends HostComputer {
 	 * told it is active when that is what keeps the command disabled (see invokeWindowMenu).
 	 */
 	async invokeMenu(targetPid: number, path: readonly string[]): Promise<InvokeMenuResult> {
+		this.assertInputAvailable(targetPid);
 		const normalized = normalizeMenuPath(path);
 		await this.assertBackgroundFinderCommand(targetPid, { path: normalized });
 		const command = normalized.length === 2 && normalized[0] === "Edit" ? normalized[1] : undefined;
@@ -527,14 +533,17 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async scroll(options: ScrollOptions): Promise<void> {
+		this.assertInputAvailable();
 		await this.inputLock.run(() => this.input.scroll(options));
 	}
 
 	async drag(options: DragOptions): Promise<void> {
+		this.assertInputAvailable();
 		await this.inputLock.run(() => this.input.drag(options));
 	}
 
 	async getCursorPosition(): Promise<Point> {
+		this.assertInputAvailable();
 		return this.input.getCursorPosition();
 	}
 
@@ -551,9 +560,10 @@ export class MacOSHostComputer extends HostComputer {
 			return await this.captureAppState(targetPid, options);
 		} catch (error) {
 			if (targetPid === undefined) {
-				for (const pid of this.inputObservations.keys()) {
+				for (const pid of this.inputObservations.pids()) {
 					this.invalidateInputObservation(pid);
 				}
+				this.inputObservations.clear();
 			} else {
 				this.invalidateInputObservation(targetPid);
 			}
@@ -675,11 +685,18 @@ export class MacOSHostComputer extends HostComputer {
 		const size =
 			options?.screenshotSize ??
 			(targetWindow !== undefined ? resolveWindowScreenshotSize(targetWindow.bounds) : await this.getScreenSize());
-		// Without Screen Recording a capture would raise macOS's permission prompt mid-task; observe the
-		// elements anyway and say why the image is missing.
-		const screenshotRefused = options?.includeScreenshot !== false && !screenCaptureAllowed();
+		// The person's desktop is never captured, and without Screen Recording a capture would raise macOS's
+		// permission prompt mid-task; observe the elements anyway and say why the image is missing.
+		const screenshotUnavailable =
+			options?.includeScreenshot === false
+				? undefined
+				: !this.capabilities.supportsScreenshot && !this.isOwnedWindow(targetWindow?.id)
+					? ("isolated-session-required" as const)
+					: screenCaptureAllowed()
+						? undefined
+						: ("screen-recording-permission" as const);
 		const screenshot =
-			options?.includeScreenshot === false || screenshotRefused
+			options?.includeScreenshot === false || screenshotUnavailable !== undefined
 				? { data: Buffer.alloc(0), mimeType: "image/png" as const, width: size.width, height: size.height }
 				: await this.captureScreenshot({ targetSize: size, format: "jpeg" }, targetWindow?.id);
 		const tree = captureTree ? extractAccessibilityTree(app.pid, walkOptions) : undefined;
@@ -726,7 +743,7 @@ export class MacOSHostComputer extends HostComputer {
 			this.lastViewportByPid.set(app.pid, viewport);
 			windowBounds = viewport.windowBounds;
 			elements = tree === undefined ? [] : remapElementFramesToScreenshot(tree.elements, viewport);
-			if (!this.highlightedApps.has(app.pid) && (this.delivery !== "background" || cursorBackgroundCuesEnabled())) {
+			if (this.capabilities.supportsInput && !this.highlightedApps.has(app.pid)) {
 				this.highlightedApps.add(app.pid);
 				this.overlay.highlight(viewport.windowBounds, app.pid);
 			}
@@ -779,7 +796,7 @@ export class MacOSHostComputer extends HostComputer {
 			...(windowCandidates !== undefined ? { windowCandidates } : {}),
 			...(tree?.windowContentUnavailable === true ? { windowContentUnavailable: true } : {}),
 			...(ocrText !== undefined ? { ocrText } : {}),
-			...(screenshotRefused ? { screenshotUnavailable: "screen-recording-permission" as const } : {}),
+			...(screenshotUnavailable === undefined ? {} : { screenshotUnavailable }),
 			...(systemPrompts.length > 0 ? { systemPrompts } : {}),
 		};
 		if (targetWindow === undefined) {
@@ -801,7 +818,7 @@ export class MacOSHostComputer extends HostComputer {
 			});
 		}
 		// The agent reads this observation next, so the overlay dot pulses until the next action.
-		if (options?.probe !== true) {
+		if (this.capabilities.supportsInput && options?.probe !== true) {
 			this.input.showThinking();
 		}
 		return state;
@@ -874,6 +891,18 @@ export class MacOSHostComputer extends HostComputer {
 		if (decision === "needs-approval") {
 			throw new Error(`Computer Use needs your approval to use '${app.name}'. Approve the app and try again.`);
 		}
+	}
+
+	/** The person's own apps stay refused; only windows opencua launched itself take host input. */
+	private assertInputAvailable(targetPid: number | undefined = this.input.currentTargetPid): void {
+		if (this.capabilities.supportsInput || (targetPid !== undefined && isOwnedSurfacePid(targetPid))) return;
+		denyHostInteraction("host-window");
+	}
+
+	private isOwnedWindow(windowId: number | undefined): boolean {
+		if (windowId === undefined) return false;
+		const window = listOwnedCandidateWindows()?.find((candidate) => candidate.id === windowId);
+		return window !== undefined && isOwnedSurfacePid(window.ownerPid);
 	}
 
 	/**
@@ -987,6 +1016,7 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async setValue(targetPid: number, elementIndex: number, value: string): Promise<void> {
+		this.assertInputAvailable(targetPid);
 		this.showElement(targetPid, elementIndex, false);
 		setValueByIndex(targetPid, elementIndex, value);
 		this.input.showKeyboard();
@@ -994,12 +1024,14 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async selectText(targetPid: number, elementIndex: number, options: SelectTextOptions): Promise<void> {
+		this.assertInputAvailable(targetPid);
 		this.showElement(targetPid, elementIndex, false);
 		selectTextByIndex(targetPid, elementIndex, options);
 		this.input.showKeyboard();
 	}
 
 	async performAction(targetPid: number, elementIndex: number, action: string): Promise<void> {
+		this.assertInputAvailable(targetPid);
 		this.showElement(targetPid, elementIndex, !action.startsWith("AXScroll"), action.startsWith("AXScroll"));
 		// Pressing or focusing an element can make its app activate itself (Safari does for a web
 		// field); background delivery hands the front back to the person's app when that happens.
@@ -1037,6 +1069,7 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async pressAtPosition(targetPid: number, position: Point): Promise<boolean> {
+		this.assertInputAvailable(targetPid);
 		this.input.showPointer(position, true, targetPid);
 		// A press inside a dispatch bound to an observed window only takes an element of that window.
 		const target = currentInputScope()?.target;
@@ -1071,6 +1104,7 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async scrollElementIntoView(targetPid: number, elementIndex: number): Promise<Rect | undefined> {
+		this.assertInputAvailable(targetPid);
 		if (!scrollToVisibleByIndex(targetPid, elementIndex)) {
 			return undefined;
 		}
@@ -1094,6 +1128,9 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async recognizeWindowText(targetPid: number, options?: { readonly region?: Rect }): Promise<WindowTextRead> {
+		if (!this.capabilities.supportsScreenshot && !isOwnedSurfacePid(targetPid)) {
+			return { unavailable: "isolated-session-required" };
+		}
 		if (!screenCaptureAllowed()) {
 			return { unavailable: "screen-recording-permission" };
 		}
@@ -1112,6 +1149,7 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	showPointerAt(position: Point, press: boolean): void {
+		this.assertInputAvailable();
 		this.input.showPointer(position, press);
 	}
 
@@ -1120,6 +1158,7 @@ export class MacOSHostComputer extends HostComputer {
 		text: string,
 		options?: { readonly settleWrite?: boolean },
 	): Promise<boolean> {
+		this.assertInputAvailable();
 		// Keys posted just before (Cmd+A) still wait in the app's event queue, while this write lands at
 		// once: without the fence the text lands at the old caret instead of replacing the selection.
 		await awaitKeyboardFence(
@@ -1166,6 +1205,9 @@ export class MacOSHostComputer extends HostComputer {
 	}
 
 	async preflightInput(expected: InputObservation, options?: PreflightOptions): Promise<PreflightResult> {
+		if (!this.capabilities.supportsInput && !(expected !== undefined && isOwnedSurfacePid(expected.pid))) {
+			return { ok: false, reason: "isolated-session-required" };
+		}
 		const stored = this.inputObservations.get(expected.pid);
 		if (stored === undefined || !sameObservation(stored, expected)) {
 			return { ok: false, reason: "observation-replaced" };
@@ -1322,9 +1364,9 @@ function sameObservation(left: InputObservation, right: InputObservation): boole
 	);
 }
 
-/** The drawn agent cursor is on unless APPLE_CUA_CURSOR turns it off (off, 0, false, no). */
+/** The drawn agent cursor is on unless OPENCUA_CURSOR turns it off (off, 0, false, no). */
 export function agentCursorEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
-	const value = environment["APPLE_CUA_CURSOR"]?.trim().toLowerCase();
+	const value = environment["OPENCUA_CURSOR"]?.trim().toLowerCase();
 	return !(value === "off" || value === "0" || value === "false" || value === "no");
 }
 
@@ -1458,12 +1500,12 @@ async function captureWindowScreenshotViaCli(
 			: 'sips -z "$2" "$1" "$tmp" --out "$out" >/dev/null';
 	const script = [
 		"set -eu",
-		'tmp=$(mktemp "${TMPDIR:-/tmp}/apple-cua-shot.XXXXXX")',
+		'tmp=$(mktemp "${TMPDIR:-/tmp}/opencua-shot.XXXXXX")',
 		'out=""',
 		'cleanup() { rm -f "$tmp"; if [ -n "$out" ]; then rm -f "$out"; fi; }',
 		"trap cleanup EXIT",
 		captureCommand,
-		'out=$(mktemp "${TMPDIR:-/tmp}/apple-cua-shot-resized.XXXXXX")',
+		'out=$(mktemp "${TMPDIR:-/tmp}/opencua-shot-resized.XXXXXX")',
 		resizeCommand,
 		'cat "$out"',
 	].join("\n");
@@ -1472,7 +1514,7 @@ async function captureWindowScreenshotViaCli(
 		[
 			"-c",
 			script,
-			"apple-cua-screenshot",
+			"opencua-screenshot",
 			String(targetSize.width),
 			String(targetSize.height),
 			format,

@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { isOwnedSurfacePid, parseElementIndex, resolveAppPid, withCursorIdentity } from "@opencua/core";
+import {
+	isOwnedSurfacePid,
+	parseElementIndex,
+	resolveAppPid,
+	withCursorIdentity,
+	withInputRegion,
+} from "@opencua/core";
 import type { CursorOwner, GuardedComputerInterface, InputObservation, Point } from "@opencua/core";
 import type {
 	GuardedSession,
@@ -142,6 +148,21 @@ function assertRegion(workerId: string, region: WorkerRegion): void {
 	if (!finite || region.width <= 0 || region.height <= 0) {
 		throw new Error(`worker "${workerId}" region must have finite x, y, width, height with width and height > 0`);
 	}
+}
+
+/** A region in window screenshot pixels as global screen points, through the observed viewport. */
+function regionOnScreen(region: WorkerRegion, observation: InputObservation | undefined): WorkerRegion | undefined {
+	const viewport = observation?.screenshotViewport;
+	if (viewport === undefined || !(viewport.width > 0 && viewport.height > 0)) return undefined;
+	const { bounds } = viewport;
+	const scaleX = bounds.width / viewport.width;
+	const scaleY = bounds.height / viewport.height;
+	return {
+		x: bounds.x + region.x * scaleX,
+		y: bounds.y + region.y * scaleY,
+		width: region.width * scaleX,
+		height: region.height * scaleY,
+	};
 }
 
 /** Positive-area intersection; regions that only share an edge do not overlap. */
@@ -522,22 +543,33 @@ export class WorkerCoordinator {
 				withCursorIdentity(
 					worker.assignment.cursor_id,
 					async () => {
-						if (region !== undefined) {
-							// Every target known before the run is checked before any of its input goes out.
-							const observation = this.computer.getInputObservation(worker.pid);
-							for (const [index, step] of steps.entries()) {
-								await this.assertInRegion(worker, region, index, pointerTargets(step) ?? [], observation);
-							}
+						const runAll = () =>
+							this.session.runSteps(
+								token,
+								String(worker.pid),
+								steps,
+								expect,
+								region === undefined ? driver : this.confinedDriver(driver, worker, region, steps),
+								resultOptions,
+								{ ...executionOptions, signal },
+							);
+						if (region === undefined) return await runAll();
+						// Every target known before the run is checked before any of its input goes out.
+						const observation = this.computer.getInputObservation(worker.pid);
+						for (const [index, step] of steps.entries()) {
+							await this.assertInRegion(worker, region, index, pointerTargets(step) ?? [], observation);
 						}
-						return await this.session.runSteps(
-							token,
-							String(worker.pid),
-							steps,
-							expect,
-							region === undefined ? driver : this.confinedDriver(driver, worker, region, steps),
-							resultOptions,
-							{ ...executionOptions, signal },
-						);
+						const screenRegion = regionOnScreen(region, observation);
+						if (screenRegion === undefined) {
+							throw new WorkerRegionRefusal(
+								worker.assignment.worker_id,
+								0,
+								region,
+								"has no observed window to place its region on",
+							);
+						}
+						// The input layer refuses any event or keystroke outside the region right before posting it.
+						return await withInputRegion(screenRegion, runAll);
 					},
 					worker.assignment.cursor_owner,
 				);

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { currentInputRegion } from "@opencua/core";
 import { GuardedSession } from "./guarded-session.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 import type { RunStep } from "./tool-schemas.js";
@@ -240,6 +241,76 @@ describe("#given a worker confined to a region #when run_worker aims the pointer
 			);
 			const text = ran.result.content.find((content) => content.type === "text")?.text ?? "";
 			expect(text).toMatch(/step 1 clicks element 9 .*outside its region .*nothing was sent/);
+			expect(computer.effects).toEqual([]);
+		} finally {
+			await coordinator.close();
+		}
+	});
+
+	it("#given a confined worker #when its click is dispatched #then the input layer sees its region in screen points", async () => {
+		const { computer, coordinator } = setup();
+		try {
+			const token = await assignLeftPainter(coordinator);
+			const seen: unknown[] = [];
+			const click = computer.click.bind(computer);
+			computer.click = async (...args: Parameters<typeof click>) => {
+				seen.push(currentInputRegion());
+				await click(...args);
+			};
+			await coordinator.run("left", token, [{ type: "click", x: 100, y: 100 }], undefined);
+			// The 500x400 screenshot covers screen {x: 300, y: 150, width: 1000, height: 800}: twice the pixels.
+			expect(seen).toEqual([{ x: 300, y: 150, width: 500, height: 800 }]);
+		} finally {
+			await coordinator.close();
+		}
+	});
+
+	it("#given a list inside the worker's region #when a click searches below the fold #then it pages that list and clicks the row", async () => {
+		const { computer, coordinator } = setup();
+		computer.scrollList = {
+			rows: Array.from({ length: 40 }, (_, index) => `row-${index}`),
+			visibleRows: 5,
+			virtualized: true,
+		};
+		try {
+			// The fake list spans the window's left 300 px, so this worker's region holds all of it.
+			const [lister] = await coordinator.assign([
+				{ worker_id: "lister", task: "pick a row", app: "Finder", region: { x: 0, y: 0, width: 320, height: 400 } },
+			]);
+			if (lister?.observation_token === undefined) throw new Error("the lister needs an observation token");
+			await coordinator.run(
+				"lister",
+				lister.observation_token,
+				[{ type: "click", target: { text: "row-23" }, find: { vision: "off", max_pages: 10 } }],
+				undefined,
+			);
+			expect(computer.effects.filter((effect) => effect.kind === "performAction")).toHaveLength(4);
+			expect(computer.effects.filter((effect) => effect.kind === "click")).toHaveLength(1);
+		} finally {
+			await coordinator.close();
+		}
+	});
+
+	it("#given a list outside the worker's region #when a click searches below the fold #then nothing is scrolled or clicked", async () => {
+		const { computer, coordinator } = setup();
+		computer.scrollList = {
+			rows: Array.from({ length: 40 }, (_, index) => `row-${index}`),
+			visibleRows: 5,
+			virtualized: true,
+		};
+		try {
+			const [right] = await coordinator.assign([
+				{ worker_id: "right", task: "paint right", app: "Finder", region: RIGHT },
+			]);
+			if (right?.observation_token === undefined) throw new Error("the right worker needs an observation token");
+			await expect(
+				coordinator.run(
+					"right",
+					right.observation_token,
+					[{ type: "click", target: { text: "row-23" }, find: { vision: "off", max_pages: 10 } }],
+					undefined,
+				),
+			).rejects.toThrow(/searching would scroll the area at .*outside the worker's region/);
 			expect(computer.effects).toEqual([]);
 		} finally {
 			await coordinator.close();

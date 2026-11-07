@@ -12,6 +12,9 @@
 //
 // Memory: returned bytes are malloc'd; caller MUST call sck_free.
 
+#import <CoreAudio/AudioHardware.h>
+#import <CoreAudio/AudioHardwareTapping.h>
+#import <CoreAudio/CATapDescription.h>
 #import <CoreFoundation/CoreFoundation.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
@@ -657,6 +660,108 @@ static uint8_t *captureWindow(
 void sck_free(uint8_t *bytes) {
 	if (bytes != NULL) {
 		free(bytes);
+	}
+}
+
+// Listens to one process's audio output through a CoreAudio process tap for
+// durationMs (50..10000) and reports its level: RMS and peak of the float
+// samples, and how many samples were heard. Nothing is kept. The tap is
+// private and unmuted, so the process keeps playing to its device as before.
+// Needs the Audio Capture permission; a refusal returns SCK_ERR_CAPTURE_FAILED.
+int32_t sck_measure_process_audio(
+	int32_t pid,
+	int32_t durationMs,
+	double *outRms,
+	double *outPeak,
+	int64_t *outSamples) {
+	if (pid <= 0 || durationMs < 50 || durationMs > 10000 || outRms == NULL ||
+		outPeak == NULL || outSamples == NULL) {
+		return SCK_ERR_INVALID_ARGS;
+	}
+	*outRms = 0;
+	*outPeak = 0;
+	*outSamples = 0;
+	@autoreleasepool {
+		AudioObjectPropertyAddress translate = {
+			kAudioHardwarePropertyTranslatePIDToProcessObject,
+			kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
+		AudioObjectID process = kAudioObjectUnknown;
+		UInt32 size = sizeof(process);
+		pid_t qualifier = pid;
+		if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &translate,
+				sizeof(qualifier), &qualifier, &size, &process) != noErr ||
+			process == kAudioObjectUnknown) {
+			return SCK_ERR_NO_SHAREABLE_CONTENT;
+		}
+		CATapDescription *description =
+			[[CATapDescription alloc] initStereoMixdownOfProcesses:@[ @(process) ]];
+		description.privateTap = YES;
+		description.muteBehavior = CATapUnmuted;
+		AudioObjectID tap = kAudioObjectUnknown;
+		if (AudioHardwareCreateProcessTap(description, &tap) != noErr) {
+			return SCK_ERR_CAPTURE_FAILED;
+		}
+		NSDictionary *aggregate = @{
+			@kAudioAggregateDeviceUIDKey : NSUUID.UUID.UUIDString,
+			@kAudioAggregateDeviceNameKey : @"opencua surface listener",
+			@kAudioAggregateDeviceIsPrivateKey : @YES,
+			@kAudioAggregateDeviceTapAutoStartKey : @YES,
+			@kAudioAggregateDeviceTapListKey : @[ @{@kAudioSubTapUIDKey : description.UUID.UUIDString} ],
+		};
+		AudioObjectID device = kAudioObjectUnknown;
+		if (AudioHardwareCreateAggregateDevice((__bridge CFDictionaryRef)aggregate, &device) != noErr) {
+			AudioHardwareDestroyProcessTap(tap);
+			return SCK_ERR_CAPTURE_FAILED;
+		}
+		__block double squares = 0;
+		__block double peak = 0;
+		__block int64_t samples = 0;
+		os_unfair_lock *lock = malloc(sizeof(os_unfair_lock));
+		*lock = OS_UNFAIR_LOCK_INIT;
+		dispatch_queue_t queue = dispatch_queue_create("com.macoscua.sckit.tap", DISPATCH_QUEUE_SERIAL);
+		AudioDeviceIOProcID proc = NULL;
+		OSStatus created = AudioDeviceCreateIOProcIDWithBlock(&proc, device, queue,
+			^(const AudioTimeStamp *now, const AudioBufferList *input, const AudioTimeStamp *inputTime,
+				AudioBufferList *output, const AudioTimeStamp *outputTime) {
+				double localSquares = 0;
+				double localPeak = 0;
+				int64_t count = 0;
+				for (UInt32 index = 0; input != NULL && index < input->mNumberBuffers; index += 1) {
+					const float *data = input->mBuffers[index].mData;
+					size_t length = input->mBuffers[index].mDataByteSize / sizeof(float);
+					for (size_t sample = 0; data != NULL && sample < length; sample += 1) {
+						double value = data[sample];
+						if (!isfinite(value)) continue;
+						localSquares += value * value;
+						localPeak = fmax(localPeak, fabs(value));
+						count += 1;
+					}
+				}
+				os_unfair_lock_lock(lock);
+				squares += localSquares;
+				peak = fmax(peak, localPeak);
+				samples += count;
+				os_unfair_lock_unlock(lock);
+			});
+		int32_t result = SCK_OK;
+		if (created != noErr || AudioDeviceStart(device, proc) != noErr) {
+			result = SCK_ERR_CAPTURE_FAILED;
+		} else {
+			usleep((useconds_t)durationMs * 1000);
+			AudioDeviceStop(device, proc);
+		}
+		if (proc != NULL) AudioDeviceDestroyIOProcID(device, proc);
+		dispatch_sync(queue, ^{
+		});
+		AudioHardwareDestroyAggregateDevice(device);
+		AudioHardwareDestroyProcessTap(tap);
+		os_unfair_lock_lock(lock);
+		*outRms = samples > 0 ? sqrt(squares / (double)samples) : 0;
+		*outPeak = peak;
+		*outSamples = samples;
+		os_unfair_lock_unlock(lock);
+		free(lock);
+		return result;
 	}
 }
 

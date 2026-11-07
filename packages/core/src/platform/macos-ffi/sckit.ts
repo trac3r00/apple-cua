@@ -25,6 +25,9 @@ type SckBindings = {
 			outLen: [number],
 		) => Buffer | null
 	>;
+	readonly measureProcessAudio: KoffiFunc<
+		(pid: number, durationMs: number, outRms: [number], outPeak: [number], outSamples: [number | bigint]) => number
+	>;
 	readonly freeBytes: KoffiFunc<(bytes: Buffer) => void>;
 	readonly invalidateCache: KoffiFunc<() => void>;
 };
@@ -85,9 +88,16 @@ function tryLoadSckitBindings(): SckBindings | null {
 				"int32_t",
 				koffi.out("int32_t *"),
 			]) as SckBindings["captureWindow"];
+			const measureProcessAudio = library.func("sck_measure_process_audio", "int32_t", [
+				"int32_t",
+				"int32_t",
+				koffi.out("double *"),
+				koffi.out("double *"),
+				koffi.out("int64_t *"),
+			]) as SckBindings["measureProcessAudio"];
 			const freeBytes = library.func("sck_free", "void", ["uint8_t *"]) as SckBindings["freeBytes"];
 			const invalidateCache = library.func("sck_invalidate_cache", "void", []) as SckBindings["invalidateCache"];
-			cachedBindings = { capture, captureWindow, freeBytes, invalidateCache };
+			cachedBindings = { capture, captureWindow, measureProcessAudio, freeBytes, invalidateCache };
 			return cachedBindings;
 		} catch (error) {
 			loadErrorMessage = error instanceof Error ? error.message : String(error);
@@ -184,6 +194,29 @@ export function captureWindowViaSck(
 	} finally {
 		bindings.freeBytes(bytesPointer);
 	}
+}
+
+export interface ProcessAudioLevel {
+	readonly rms: number;
+	readonly peak: number;
+	readonly samples: number;
+}
+
+/**
+ * Listens to one process's audio output for `durationMs` through a CoreAudio process tap (macOS Audio Capture
+ * permission) and returns its level; null when the native library is unavailable. Throws when the tap fails.
+ */
+export function measureProcessAudioViaSck(pid: number, durationMs: number): ProcessAudioLevel | null {
+	const bindings = tryLoadSckitBindings();
+	if (bindings === null) return null;
+	const rms: [number] = [0];
+	const peak: [number] = [0];
+	const samples: [number | bigint] = [0];
+	const code = bindings.measureProcessAudio(pid, durationMs, rms, peak, samples);
+	if (code !== SCK_OK) {
+		throw new Error(`process audio tap failed: ${describeSckError(code)} (code ${code})`);
+	}
+	return { rms: rms[0], peak: peak[0], samples: Number(samples[0]) };
 }
 
 function describeSckError(code: number): string {

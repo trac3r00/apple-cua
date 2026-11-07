@@ -436,3 +436,4 @@ export {
 	type SurfaceAudioState,
 	surfaceAudioState,
 } from "./platform/owned-surfaces.js";
+export { type SurfaceListening, listenToSurface } from "./platform/surface-listen.js";

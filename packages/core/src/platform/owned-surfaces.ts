@@ -219,6 +219,29 @@ export function nameSurfaceCursor(tag: number, name: string, options: OwnedSurfa
 export interface SurfaceAudioState {
 	readonly playing: boolean;
 	readonly changedAt: number;
+	/** The page's WebAudio output level, in dBFS, when it has played through an AudioContext; media elements are not measured. */
+	readonly level?: SurfaceAudioLevel;
+	/** The WebKit GPU process that plays the page's sound, once the page has used audio. */
+	readonly gpuPid?: number;
+}
+
+export interface SurfaceAudioLevel {
+	readonly rmsDb: number;
+	readonly peakDb: number;
+	/** Peak dB in eight log-spaced bands from 20 Hz to the Nyquist frequency. */
+	readonly bands: readonly number[];
+	/** When the level was measured (epoch ms). */
+	readonly at: number;
+}
+
+function parseAudioLevel(value: unknown): SurfaceAudioLevel | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const { rmsDb, peakDb, bands, at } = value as Record<string, unknown>;
+	const finite = (number: unknown): number is number => typeof number === "number" && Number.isFinite(number);
+	if (!finite(rmsDb) || !finite(peakDb) || !finite(at) || !Array.isArray(bands) || bands.length !== 8)
+		return undefined;
+	if (!bands.every(finite)) return undefined;
+	return { rmsDb, peakDb, bands: bands.slice(), at };
 }
 
 /** The file an owned surface writes its audio state to on every change. */
@@ -239,7 +262,17 @@ export function surfaceAudioState(pid: number, options: OwnedSurfaceOptions = {}
 	}
 	const { playing, changedAt } = parsed;
 	if (typeof playing !== "boolean" || typeof changedAt !== "number" || !Number.isFinite(changedAt)) return undefined;
-	return { playing, changedAt };
+	const level = "level" in parsed ? parseAudioLevel(parsed.level) : undefined;
+	const gpuPid =
+		"gpuPid" in parsed && Number.isSafeInteger(parsed.gpuPid) && Number(parsed.gpuPid) > 0
+			? Number(parsed.gpuPid)
+			: undefined;
+	return {
+		playing,
+		changedAt,
+		...(level === undefined ? {} : { level }),
+		...(gpuPid === undefined ? {} : { gpuPid }),
+	};
 }
 
 /** The socket an owned surface listens on for its agents' pointer input. */

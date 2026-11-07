@@ -1036,16 +1036,71 @@ static int SelfTest(void) {
 // its own GPU process, so app-filtered audio capture cannot attribute it to this
 // surface. WebKit's own playing-audio state can, and it is written as
 // {"playing":bool,"changedAt":ms} next to the surface socket on every change.
-@interface AudioStateWriter : NSObject
+@interface AudioStateWriter : NSObject <WKScriptMessageHandler>
 @property(nonatomic, copy) NSString *path;
+@property(nonatomic) BOOL playing;
+@property(nonatomic) int64_t changedAt;
+@property(nonatomic, copy) NSDictionary *level;
+@property(nonatomic, weak) WKWebView *web;
 @end
+
+// WebAudio output level, measured inside the page: every AudioContext's output
+// passes through one AnalyserNode on its way to the speakers, sampled four
+// times a second while it is audible (and once more when it falls silent).
+// Media elements are not tapped: routing them through WebAudio would silence
+// cross-origin media.
+static NSString *const kAudioTapScript = @"(() => {\n  const Context = window.AudioContext || window.webkitAudioContext;\n  const handler = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.opencuaAudio;\n  if (!Context || !handler || AudioNode.prototype.__opencuaTapped) return;\n  AudioNode.prototype.__opencuaTapped = true;\n  const taps = new WeakMap();\n  const live = [];\n  const connect = AudioNode.prototype.connect;\n  AudioNode.prototype.connect = function (target, output, input) {\n    const context = this.context;\n    if (context instanceof Context && target === context.destination && taps.get(context) !== this) {\n      let tap = taps.get(context);\n      if (!tap) {\n        tap = context.createAnalyser();\n        tap.fftSize = 2048;\n        connect.call(tap, context.destination);\n        taps.set(context, tap);\n        live.push(new WeakRef(tap));\n      }\n      connect.call(this, tap, output === undefined ? 0 : output);\n      return target;\n    }\n    return connect.apply(this, arguments);\n  };\n  const BANDS = 8;\n  let audible = false;\n  setInterval(() => {\n    let sum = 0, count = 0, peak = 0;\n    const bands = new Array(BANDS).fill(-160);\n    for (let index = live.length - 1; index >= 0; index -= 1) {\n      const tap = live[index].deref();\n      if (!tap) { live.splice(index, 1); continue; }\n      if (tap.context.state !== \"running\") continue;\n      const wave = new Float32Array(tap.fftSize);\n      tap.getFloatTimeDomainData(wave);\n      for (const sample of wave) { sum += sample * sample; count += 1; peak = Math.max(peak, Math.abs(sample)); }\n      const spectrum = new Float32Array(tap.frequencyBinCount);\n      tap.getFloatFrequencyData(spectrum);\n      const nyquist = tap.context.sampleRate / 2;\n      for (let band = 0; band < BANDS; band += 1) {\n        const low = 20 * Math.pow(nyquist / 20, band / BANDS);\n        const high = 20 * Math.pow(nyquist / 20, (band + 1) / BANDS);\n        const from = Math.floor((low / nyquist) * spectrum.length);\n        const to = Math.max(from + 1, Math.floor((high / nyquist) * spectrum.length));\n        let level = -160;\n        for (let bin = from; bin < to && bin < spectrum.length; bin += 1) level = Math.max(level, spectrum[bin]);\n        bands[band] = Math.max(bands[band], Number.isFinite(level) ? level : -160);\n      }\n    }\n    const rms = count > 0 ? Math.sqrt(sum / count) : 0;\n    const rmsDb = rms > 0 ? Math.max(-160, 20 * Math.log10(rms)) : -160;\n    const peakDb = peak > 0 ? Math.max(-160, 20 * Math.log10(peak)) : -160;\n    const now = rmsDb > -100;\n    if (now || audible) handler.postMessage({ rmsDb, peakDb, bands });\n    audible = now;\n  }, 250);\n})();";
 
 @implementation AudioStateWriter
 - (void)write:(BOOL)playing {
-  NSDictionary *state = @{
-    @"playing" : @(playing),
-    @"changedAt" : @((int64_t)(NSDate.date.timeIntervalSince1970 * 1000))
+  self.playing = playing;
+  self.changedAt = (int64_t)(NSDate.date.timeIntervalSince1970 * 1000);
+  [self flush];
+}
+- (void)userContentController:(WKUserContentController *)controller
+      didReceiveScriptMessage:(WKScriptMessage *)message {
+  NSDictionary *body =
+      [message.body isKindOfClass:NSDictionary.class] ? message.body : nil;
+  NSNumber *rms = body[@"rmsDb"];
+  NSNumber *peak = body[@"peakDb"];
+  NSArray *bands = body[@"bands"];
+  if (![rms isKindOfClass:NSNumber.class] ||
+      ![peak isKindOfClass:NSNumber.class] ||
+      ![bands isKindOfClass:NSArray.class] || bands.count != 8 ||
+      !isfinite(rms.doubleValue) || !isfinite(peak.doubleValue)) {
+    return;
+  }
+  for (id band in bands) {
+    if (![band isKindOfClass:NSNumber.class] || !isfinite([band doubleValue])) {
+      return;
+    }
+  }
+  self.level = @{
+    @"rmsDb" : rms,
+    @"peakDb" : peak,
+    @"bands" : bands,
+    @"at" : @((int64_t)(NSDate.date.timeIntervalSince1970 * 1000))
   };
+  [self flush];
+}
+- (void)flush {
+  NSMutableDictionary *state = [@{
+    @"playing" : @(self.playing),
+    @"changedAt" : @(self.changedAt)
+  } mutableCopy];
+  if (self.level != nil) {
+    state[@"level"] = self.level;
+  }
+  // The process that plays this page's sound: WebKit renders audio in a GPU
+  // process of the surface's own, which an agent may tap to hear media too.
+  SEL gpu = NSSelectorFromString(@"_gpuProcessIdentifier");
+  WKWebView *web = self.web;
+  if (web != nil && [web respondsToSelector:gpu]) {
+    pid_t gpuPid = ((pid_t(*)(id, SEL))objc_msgSend)(web, gpu);
+    if (gpuPid > 0) {
+      state[@"gpuPid"] = @(gpuPid);
+    }
+  }
   NSData *data = [NSJSONSerialization dataWithJSONObject:state
                                                  options:0
                                                    error:NULL];
@@ -1166,10 +1221,18 @@ int main(int argc, const char *argv[]) {
     if (argc >= 5 &&
         [web respondsToSelector:NSSelectorFromString(@"_isPlayingAudio")]) {
       gAudioState = [AudioStateWriter new];
+      gAudioState.web = web;
       gAudioState.path = [[@(argv[4]) stringByDeletingLastPathComponent]
           stringByAppendingPathComponent:
               [NSString stringWithFormat:@"surface-%d.audio.json", getpid()]];
       [gAudioState write:NO];
+      [configuration.userContentController
+          addUserScript:[[WKUserScript alloc]
+                            initWithSource:kAudioTapScript
+                             injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                          forMainFrameOnly:NO]];
+      [configuration.userContentController addScriptMessageHandler:gAudioState
+                                                              name:@"opencuaAudio"];
       [web addObserver:gAudioState
             forKeyPath:@"_isPlayingAudio"
                options:NSKeyValueObservingOptionNew

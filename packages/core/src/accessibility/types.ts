@@ -62,6 +62,11 @@ export interface AppState {
 	app: string;
 	bundleId: string;
 	pid: number;
+	/**
+	 * Whether an opencua-owned surface's page is playing sound and when that last changed (epoch ms). Only owned
+	 * surfaces report it; the person's own apps are never listened to.
+	 */
+	audio?: { readonly playing: boolean; readonly changedAt: number };
 	frontmost: boolean;
 	axAvailable: boolean;
 	elements: AXTreeElement[];

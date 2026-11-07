@@ -426,4 +426,6 @@ export {
 	isOwnedSurfacePid,
 	openOwnedSurface,
 	readOwnedSurfaces,
+	type SurfaceAudioState,
+	surfaceAudioState,
 } from "./platform/owned-surfaces.js";

@@ -105,7 +105,7 @@ import { selectSystemEventsTargetWindow } from "./macos-window-target-fallback.j
 import { resolveTargetWindow, visibleWindowsForPid } from "./macos-window-target.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
 import { resolveOcrCrop } from "./ocr-region.js";
-import { isOwnedSurfacePid } from "./owned-surfaces.js";
+import { isOwnedSurfacePid, surfaceAudioState } from "./owned-surfaces.js";
 import { currentSystemPrompts } from "./system-prompts.js";
 
 const execFileAsync = promisify(execFile);
@@ -767,10 +767,12 @@ export class MacOSHostComputer extends HostComputer {
 		const windowDisplays = windowBounds === undefined ? [] : displaysForWindow(windowBounds, displays);
 		const windowDisplayId = windowDisplays[0]?.id;
 
+		const audio = isOwnedSurfacePid(app.pid) ? surfaceAudioState(app.pid) : undefined;
 		const state: AppState = {
 			app: app.name,
 			bundleId: app.bundleId,
 			pid: app.pid,
+			...(audio === undefined ? {} : { audio }),
 			frontmost: app.isActive,
 			axAvailable: tree?.axAvailable ?? true,
 			elements: diffOnly ? [] : elements,

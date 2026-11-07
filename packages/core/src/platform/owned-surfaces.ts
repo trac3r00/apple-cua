@@ -168,6 +168,7 @@ export function closeOwnedSurface(pid: number, options: OwnedSurfaceOptions = {}
 	if (!isOwnedSurfacePid(pid, options)) return false;
 	process.kill(pid, "SIGTERM");
 	rmSync(surfaceSocketPath(pid, options), { force: true });
+	rmSync(surfaceAudioStatePath(pid, options), { force: true });
 	unregisterOwnedSurface(pid, options);
 	return true;
 }
@@ -212,6 +213,33 @@ export function nameSurfaceCursor(tag: number, name: string, options: OwnedSurfa
 	writeFileSync(temporary, `${JSON.stringify(names)}\n`, { mode: 0o600 });
 	renameSync(temporary, path);
 	namedTags.add(tag);
+}
+
+/** Whether an owned surface's page is playing sound, as WebKit reports it, and when that last changed (epoch ms). */
+export interface SurfaceAudioState {
+	readonly playing: boolean;
+	readonly changedAt: number;
+}
+
+/** The file an owned surface writes its audio state to on every change. */
+export function surfaceAudioStatePath(pid: number, options: OwnedSurfaceOptions = {}): string {
+	return join(options.stateDir ?? resolveStateDir(), `surface-${pid}.audio.json`);
+}
+
+/** The surface's last reported audio state; undefined when it reports none (an older surface build) or the file is unreadable. */
+export function surfaceAudioState(pid: number, options: OwnedSurfaceOptions = {}): SurfaceAudioState | undefined {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(surfaceAudioStatePath(pid, options), "utf8"));
+	} catch {
+		return undefined;
+	}
+	if (typeof parsed !== "object" || parsed === null || !("playing" in parsed) || !("changedAt" in parsed)) {
+		return undefined;
+	}
+	const { playing, changedAt } = parsed;
+	if (typeof playing !== "boolean" || typeof changedAt !== "number" || !Number.isFinite(changedAt)) return undefined;
+	return { playing, changedAt };
 }
 
 /** The socket an owned surface listens on for its agents' pointer input. */

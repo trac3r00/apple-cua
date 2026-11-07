@@ -1032,6 +1032,36 @@ static int SelfTest(void) {
   return failures == 0 ? 0 : 1;
 }
 
+// The page's sound, for agents that must hear it: WebKit plays page audio in
+// its own GPU process, so app-filtered audio capture cannot attribute it to this
+// surface. WebKit's own playing-audio state can, and it is written as
+// {"playing":bool,"changedAt":ms} next to the surface socket on every change.
+@interface AudioStateWriter : NSObject
+@property(nonatomic, copy) NSString *path;
+@end
+
+@implementation AudioStateWriter
+- (void)write:(BOOL)playing {
+  NSDictionary *state = @{
+    @"playing" : @(playing),
+    @"changedAt" : @((int64_t)(NSDate.date.timeIntervalSince1970 * 1000))
+  };
+  NSData *data = [NSJSONSerialization dataWithJSONObject:state
+                                                 options:0
+                                                   error:NULL];
+  [data writeToFile:self.path atomically:YES];
+}
+- (void)observeValueForKeyPath:(NSString *)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary<NSKeyValueChangeKey, id> *)change
+                       context:(void *)context {
+  id value = change[NSKeyValueChangeNewKey];
+  [self write:[value isKindOfClass:NSNumber.class] && [value boolValue]];
+}
+@end
+
+static AudioStateWriter *gAudioState = nil;
+
 int main(int argc, const char *argv[]) {
   @autoreleasepool {
     if (argc == 2 && strcmp(argv[1], "--self-test") == 0) {
@@ -1126,6 +1156,18 @@ int main(int argc, const char *argv[]) {
                }]) {
         gAgentChannel = nil;
       }
+    }
+    if (argc >= 5 &&
+        [web respondsToSelector:NSSelectorFromString(@"_isPlayingAudio")]) {
+      gAudioState = [AudioStateWriter new];
+      gAudioState.path = [[@(argv[4]) stringByDeletingLastPathComponent]
+          stringByAppendingPathComponent:
+              [NSString stringWithFormat:@"surface-%d.audio.json", getpid()]];
+      [gAudioState write:NO];
+      [web addObserver:gAudioState
+            forKeyPath:@"_isPlayingAudio"
+               options:NSKeyValueObservingOptionNew
+               context:NULL];
     }
     [web loadRequest:[NSURLRequest requestWithURL:url]];
     // Shown behind every other window and never activated, so it never covers

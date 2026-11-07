@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { type Socket, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,8 @@ import {
 	readOwnedSurfaces,
 	registerOwnedSurface,
 	sendSurfacePointer,
+	surfaceAudioState,
+	surfaceAudioStatePath,
 	surfaceCursorTag,
 	surfaceCursorUserData,
 	surfaceSocketPath,
@@ -114,5 +116,30 @@ describe("#given an owned surface's pointer socket #when agent pointer events ar
 		await done;
 
 		expect(received).toBe(expected);
+	});
+});
+
+describe("#given an owned surface's audio state file #when it is read #then only a well-formed state is reported", () => {
+	it("#given a playing state written by the surface #when read #then it reports playing and the change time", () => {
+		writeFileSync(surfaceAudioStatePath(4242, { stateDir }), '{"playing":true,"changedAt":1794031639000}');
+		expect(surfaceAudioState(4242, { stateDir })).toEqual({ playing: true, changedAt: 1794031639000 });
+	});
+
+	it("#given no file #when read #then there is no audio state", () => {
+		expect(surfaceAudioState(4242, { stateDir })).toBeUndefined();
+	});
+
+	it("#given malformed or mistyped files #when read #then there is no audio state", () => {
+		for (const text of [
+			"",
+			"not json",
+			"null",
+			'{"playing":"yes","changedAt":1}',
+			'{"playing":true}',
+			'{"playing":false,"changedAt":"1"}',
+		]) {
+			writeFileSync(surfaceAudioStatePath(4242, { stateDir }), text);
+			expect(surfaceAudioState(4242, { stateDir })).toBeUndefined();
+		}
 	});
 });

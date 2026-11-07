@@ -1049,6 +1049,12 @@ static int SelfTest(void) {
   NSData *data = [NSJSONSerialization dataWithJSONObject:state
                                                  options:0
                                                    error:NULL];
+  // The surface can start before its launcher creates the state directory.
+  [NSFileManager.defaultManager
+            createDirectoryAtPath:[self.path stringByDeletingLastPathComponent]
+      withIntermediateDirectories:YES
+                       attributes:@{NSFilePosixPermissions : @0700}
+                            error:NULL];
   [data writeToFile:self.path atomically:YES];
 }
 - (void)observeValueForKeyPath:(NSString *)keyPath

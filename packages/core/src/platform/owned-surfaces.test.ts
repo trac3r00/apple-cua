@@ -125,6 +125,11 @@ describe("#given an owned surface's audio state file #when it is read #then only
 		expect(surfaceAudioState(4242, { stateDir })).toEqual({ playing: true, changedAt: 1794031639000 });
 	});
 
+	it("#given the silent state a surface writes at startup #when read #then it reports not playing rather than nothing", () => {
+		writeFileSync(surfaceAudioStatePath(4242, { stateDir }), '{"playing":false,"changedAt":1794031639000}');
+		expect(surfaceAudioState(4242, { stateDir })).toEqual({ playing: false, changedAt: 1794031639000 });
+	});
+
 	it("#given no file #when read #then there is no audio state", () => {
 		expect(surfaceAudioState(4242, { stateDir })).toBeUndefined();
 	});

@@ -38,6 +38,9 @@ through virtual cursors on windows it owns (owned surfaces) and in isolated sess
 - Region checks read an element's frame right before its step is dispatched, and the step driver reads it again when
   it posts. A control that moves between those two reads can still be clicked just outside the region. Closing this
   needs the driver to accept the checked frame.
+- Regions confine pointer targets and element edits only. A target search can scroll the shared window, keyboard steps
+  type wherever focus is, and an element-less scroll is not checked, so these can still change content in another
+  worker's region. A refusal after such a search reports that nothing was sent.
 - `screenshot.ts` keeps its own typed CoreFoundation bindings, including an Int32 CFNumber helper that duplicates
   `toCFInt32Number`. Unifying them is a separate refactor of those bindings.
 - The surface socket path must fit `sun_path` (104 bytes). A long `OPENCUA_STATE_DIR` makes the surface run without a

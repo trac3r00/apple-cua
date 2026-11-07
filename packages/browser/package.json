@@ -1,7 +1,6 @@
 {
 	"name": "@opencua/browser",
 	"version": "0.1.0",
-	"private": true,
 	"type": "module",
 	"description": "Compact Chromium browser automation with the opencua stop gate",
 	"bin": {
@@ -27,5 +26,18 @@
 	},
 	"devDependencies": {
 		"@types/ws": "^8.5.13"
+	},
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/trac3r00/opencua.git",
+		"directory": "packages/browser"
+	},
+	"files": ["dist", "extension", "README.md", "LICENSE"],
+	"publishConfig": {
+		"access": "public"
+	},
+	"engines": {
+		"node": ">=20.0.0"
 	}
 }

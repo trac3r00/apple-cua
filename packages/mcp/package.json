@@ -19,7 +19,8 @@
 	"scripts": {
 		"build": "tsgo -p tsconfig.build.json",
 		"typecheck": "tsgo --noEmit",
-		"test": "bun test --isolate --parallel=4"
+		"test": "bun test --isolate --parallel=4",
+		"prepack": "node scripts/copy-skills.mjs"
 	},
 	"dependencies": {
 		"@opencua/agent": "workspace:*",
@@ -34,5 +35,9 @@
 	},
 	"engines": {
 		"node": ">=20.0.0"
+	},
+	"files": ["dist", "!dist/opencua-mcp.app", "!dist/appicon.iconset", "assets", "skills", "README.md", "LICENSE"],
+	"publishConfig": {
+		"access": "public"
 	}
 }

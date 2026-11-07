@@ -21,6 +21,7 @@ export const DEFAULT_PORT = 47953;
 export type ServicePaths = {
 	readonly launchAgent: string;
 	readonly nativeHostManifest: string;
+	readonly nativeHostManifests: readonly string[];
 	readonly nativeHostProgram: string;
 	readonly nativeHostLauncher: string;
 	readonly stateDirectory: string;
@@ -53,6 +54,7 @@ export type DoctorResult = {
 	readonly connectionReady: boolean;
 	readonly launchAgent: string;
 	readonly nativeHostManifest: string;
+	readonly nativeHostManifests: readonly string[];
 };
 
 export async function initializeConnectionMetadata(stateDirectory?: string): Promise<Connection> {
@@ -66,19 +68,39 @@ export async function initializeConnectionMetadata(stateDirectory?: string): Pro
 	return connection;
 }
 
+const BRAVE_BROWSER_DIRECTORY = "BraveSoftware/Brave-Browser";
+// Chromium-family browser support directories under ~/Library/Application Support.
+const BROWSER_SUPPORT_DIRECTORIES = [
+	BRAVE_BROWSER_DIRECTORY,
+	"Google/Chrome",
+	"Google/Chrome Beta",
+	"Google/Chrome Canary",
+	"Chromium",
+	"Microsoft Edge",
+	"Arc/User Data",
+	"Vivaldi",
+] as const;
+
+function nativeHostManifestPath(libraryDirectory: string, browserDirectory: string): string {
+	return join(
+		libraryDirectory,
+		"Application Support",
+		browserDirectory,
+		"NativeMessagingHosts",
+		`${NATIVE_HOST_NAME}.json`,
+	);
+}
+
 function pathsFor(homeDirectory: string, packageRoot: string, stateDirectory: string): ServicePaths {
 	const libraryDirectory = join(homeDirectory, "Library");
 	const logDirectory = join(libraryDirectory, "Logs", "Browser-Skill-OmO");
-	const nativeHostDirectory = join(
-		libraryDirectory,
-		"Application Support",
-		"BraveSoftware",
-		"Brave-Browser",
-		"NativeMessagingHosts",
+	const nativeHostManifests = BROWSER_SUPPORT_DIRECTORIES.map((browserDirectory) =>
+		nativeHostManifestPath(libraryDirectory, browserDirectory),
 	);
 	return {
 		launchAgent: join(libraryDirectory, "LaunchAgents", `${SERVICE_LABEL}.plist`),
-		nativeHostManifest: join(nativeHostDirectory, `${NATIVE_HOST_NAME}.json`),
+		nativeHostManifest: nativeHostManifestPath(libraryDirectory, BRAVE_BROWSER_DIRECTORY),
+		nativeHostManifests,
 		nativeHostProgram: join(packageRoot, "dist", "native-host.js"),
 		nativeHostLauncher: join(stateDirectory, "browser-native-host"),
 		stateDirectory,
@@ -189,6 +211,40 @@ async function portIsListening(port: number): Promise<boolean> {
 	});
 }
 
+async function directoryExists(path: string): Promise<boolean> {
+	return await stat(path).then(
+		(entry) => entry.isDirectory(),
+		(error: unknown) => {
+			if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+			throw error;
+		},
+	);
+}
+
+async function anyFileExists(paths: readonly string[]): Promise<boolean> {
+	const found = await Promise.all(
+		paths.map((path) =>
+			stat(path).then(
+				() => true,
+				(error: unknown) => {
+					if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+					throw error;
+				},
+			),
+		),
+	);
+	return found.includes(true);
+}
+
+// Manifests go to every browser whose support directory exists; Brave is the fallback when none does.
+async function registeredManifestPaths(paths: ServicePaths): Promise<string[]> {
+	const present = await Promise.all(
+		paths.nativeHostManifests.map((manifest) => directoryExists(dirname(dirname(manifest)))),
+	);
+	const selected = paths.nativeHostManifests.filter((_, index) => present[index] === true);
+	return selected.length > 0 ? selected : [paths.nativeHostManifest];
+}
+
 async function writePrivateFile(path: string, contents: string): Promise<void> {
 	await mkdir(dirname(path), { recursive: true, mode: 0o700 });
 	await writeFile(path, contents, { mode: 0o600 });
@@ -259,11 +315,11 @@ export async function installBrowserService(options: ServiceOptions = {}): Promi
 			contents: renderNativeHostLauncher(context.paths, context.nodePath, extensionId),
 			mode: 0o700,
 		},
-		{
-			path: context.paths.nativeHostManifest,
+		...(await registeredManifestPaths(context.paths)).map((path) => ({
+			path,
 			contents: renderNativeHostManifest(context.paths, extensionId),
 			mode: 0o600,
-		},
+		})),
 	];
 	const backups = await Promise.all(
 		artifacts.map(async ({ path }) => {
@@ -314,13 +370,7 @@ export async function doctorBrowserService(options: ServiceOptions = {}): Promis
 				throw error;
 			},
 		),
-		readFile(context.paths.nativeHostManifest, "utf8").then(
-			() => true,
-			(error: unknown) => {
-				if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
-				throw error;
-			},
-		),
+		anyFileExists(context.paths.nativeHostManifests),
 		readFile(context.paths.nativeHostLauncher).then(
 			() => true,
 			(error: unknown) => {
@@ -343,6 +393,7 @@ export async function doctorBrowserService(options: ServiceOptions = {}): Promis
 		connectionReady,
 		launchAgent: context.paths.launchAgent,
 		nativeHostManifest: context.paths.nativeHostManifest,
+		nativeHostManifests: context.paths.nativeHostManifests,
 	};
 }
 
@@ -360,7 +411,7 @@ export async function uninstallBrowserService(options: ServiceOptions = {}): Pro
 	}
 	await Promise.all([
 		rm(context.paths.launchAgent, { force: true }),
-		rm(context.paths.nativeHostManifest, { force: true }),
+		...context.paths.nativeHostManifests.map((path) => rm(path, { force: true })),
 		rm(context.paths.nativeHostLauncher, { force: true }),
 	]);
 	return context.paths;

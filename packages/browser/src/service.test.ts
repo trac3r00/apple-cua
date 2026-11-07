@@ -191,6 +191,7 @@ describe("browser service artifacts", () => {
 		const paths = {
 			launchAgent: "/tmp/home/Library/LaunchAgents/service.plist",
 			nativeHostManifest: "/tmp/home/Library/Application Support/Brave/host.json",
+			nativeHostManifests: ["/tmp/home/Library/Application Support/Brave/host.json"],
 			nativeHostProgram: "/tmp/package/dist/native-host.js",
 			nativeHostLauncher: "/tmp/home/state/browser-native-host",
 			stateDirectory: "/tmp/home/state",
@@ -259,6 +260,73 @@ describe("browser service artifacts", () => {
 		expect(await readConnection(stateDirectory)).toMatchObject({ port: DEFAULT_PORT });
 	});
 
+	it("#given Chrome and Edge support directories #when installing #then registers the manifest only in those browsers", async () => {
+		const homeDirectory = await mkdtemp(join(tmpdir(), "browser-multi-host-"));
+		directories.push(homeDirectory);
+		const support = join(homeDirectory, "Library", "Application Support");
+		await mkdir(join(support, "Google", "Chrome"), { recursive: true });
+		await mkdir(join(support, "Microsoft Edge"), { recursive: true });
+		const paths = await installBrowserService({
+			homeDirectory,
+			packageRoot: join(homeDirectory, "package"),
+			stateDirectory: join(homeDirectory, "state"),
+			platform: "darwin",
+			isPortListening: async () => false,
+			launchctl: async (args) => ({ code: args[0] === "print" ? 113 : 0, stderr: "" }),
+		});
+
+		for (const browser of ["Google/Chrome", "Microsoft Edge"]) {
+			const manifest = join(support, browser, "NativeMessagingHosts", `${NATIVE_HOST_NAME}.json`);
+			expect(nativeManifestSchema.parse(JSON.parse(await readFile(manifest, "utf8"))).path).toBe(
+				paths.nativeHostLauncher,
+			);
+		}
+		await expect(stat(join(support, "Vivaldi", "NativeMessagingHosts"))).rejects.toMatchObject({ code: "ENOENT" });
+		await expect(stat(paths.nativeHostManifest)).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
+	it("#given no browser support directories #when installing #then falls back to the Brave manifest path", async () => {
+		const homeDirectory = await mkdtemp(join(tmpdir(), "browser-brave-fallback-"));
+		directories.push(homeDirectory);
+		const paths = await installBrowserService({
+			homeDirectory,
+			packageRoot: join(homeDirectory, "package"),
+			stateDirectory: join(homeDirectory, "state"),
+			platform: "darwin",
+			isPortListening: async () => false,
+			launchctl: async (args) => ({ code: args[0] === "print" ? 113 : 0, stderr: "" }),
+		});
+
+		expect(paths.nativeHostManifest).toContain(join("BraveSoftware", "Brave-Browser", "NativeMessagingHosts"));
+		const registration = nativeManifestSchema.parse(JSON.parse(await readFile(paths.nativeHostManifest, "utf8")));
+		expect(registration.path).toBe(paths.nativeHostLauncher);
+	});
+
+	it("#given manifests registered in several browsers #when uninstalling #then removes every registered manifest", async () => {
+		const homeDirectory = await mkdtemp(join(tmpdir(), "browser-multi-uninstall-"));
+		directories.push(homeDirectory);
+		const support = join(homeDirectory, "Library", "Application Support");
+		await mkdir(join(support, "Google", "Chrome"), { recursive: true });
+		await mkdir(join(support, "Chromium"), { recursive: true });
+		const options = {
+			homeDirectory,
+			packageRoot: join(homeDirectory, "package"),
+			stateDirectory: join(homeDirectory, "state"),
+			platform: "darwin",
+			isPortListening: async () => false,
+			launchctl: async (args: readonly string[]) => ({ code: args[0] === "print" ? 113 : 0, stderr: "" }),
+		} satisfies Parameters<typeof installBrowserService>[0];
+		const paths = await installBrowserService(options);
+		expect((await doctorBrowserService(options)).installed).toBe(true);
+
+		await uninstallBrowserService(options);
+
+		for (const manifest of paths.nativeHostManifests) {
+			await expect(stat(manifest)).rejects.toMatchObject({ code: "ENOENT" });
+		}
+		expect((await doctorBrowserService(options)).installed).toBe(false);
+	});
+
 	it("#given a port owned by an existing stdio daemon #when installing #then refuses to bootstrap a duplicate", async () => {
 		const homeDirectory = await mkdtemp(join(tmpdir(), "browser-service-conflict-"));
 		directories.push(homeDirectory);
@@ -287,6 +355,7 @@ describe("browser service artifacts", () => {
 		const paths = {
 			launchAgent: "/tmp/home/agent.plist",
 			nativeHostManifest: "/tmp/home/host.json",
+			nativeHostManifests: ["/tmp/home/host.json"],
 			nativeHostProgram: "/tmp/package/dist/native-host.js",
 			nativeHostLauncher: "/tmp/home/state/browser-native-host",
 			stateDirectory: "/tmp/home/state",
@@ -321,6 +390,7 @@ describe("browser service artifacts", () => {
 			const paths = {
 				launchAgent: join(homeDirectory, "agent.plist"),
 				nativeHostManifest: join(homeDirectory, "manifest.json"),
+				nativeHostManifests: [join(homeDirectory, "manifest.json")],
 				nativeHostProgram: hostProgram,
 				nativeHostLauncher: join(homeDirectory, "launcher"),
 				stateDirectory: join(homeDirectory, "state"),

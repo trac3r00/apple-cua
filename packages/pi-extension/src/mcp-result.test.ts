@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import { agentToolResult, resultPayload } from "./mcp-result.js";
 
-describe("#given an apple-cua-mcp answer #when converted for pi #then text and images pass through in order", () => {
+describe("#given an opencua-mcp answer #when converted for pi #then text and images pass through in order", () => {
 	it("keeps an observation's window image ahead of its state text", () => {
 		const result = agentToolResult({
 			content: [
@@ -24,14 +24,14 @@ describe("#given an apple-cua-mcp answer #when converted for pi #then text and i
 		const result = agentToolResult({
 			content: [
 				{ type: "audio", data: "AAAA", mimeType: "audio/wav" },
-				{ type: "resource", resource: { uri: "skill://apple-cua/SKILL.md", text: "# apple-cua" } },
+				{ type: "resource", resource: { uri: "skill://opencua/SKILL.md", text: "# opencua" } },
 				{ type: "resource", resource: { uri: "file:///tmp/shot.png", blob: "AAAA", mimeType: "image/png" } },
-				{ type: "resource_link", uri: "skill://apple-cua/references/usage.md", name: "usage" },
+				{ type: "resource_link", uri: "skill://opencua/references/usage.md", name: "usage" },
 			],
 		});
 
 		expect(result.content.map((item) => item.type)).toEqual(["text", "text", "text", "text"]);
-		expect(result.content[1]).toEqual({ type: "text", text: "# apple-cua" });
+		expect(result.content[1]).toEqual({ type: "text", text: "# opencua" });
 	});
 
 	it("answers structured-only content as its JSON", () => {

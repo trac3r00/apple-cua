@@ -1,11 +1,5 @@
-import type {
-	AppState,
-	AppStateOptions,
-	InvokeMenuResult,
-	TopLevelWindow,
-	TopLevelWindowOptions,
-} from "@apple-cua/core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
+import type { AppState, AppStateOptions, InvokeMenuResult, TopLevelWindow, TopLevelWindowOptions } from "@opencua/core";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import { type Effect, FakeGuardedComputer } from "./protocol-test-harness.js";
 

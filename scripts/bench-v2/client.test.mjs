@@ -29,12 +29,38 @@ const startFixture = async (source) => {
 test("#given an exiting MCP process #when initializing #then pending and later requests fail on exit", async () => {
 	const client = new McpClient({
 		command: process.execPath,
-		args: ["-e", "process.exit(7)"],
+		// It exits once it has read initialize, so the request is always written before the exit settles it.
+		args: ["-e", 'process.stdin.once("data", () => process.exit(7));'],
 		env: {},
 		timeoutMs: 30000,
 	});
 	try {
 		await assert.rejects(client.start(), /server-exit: 7/);
+		await assert.rejects(client.callTool("get_app_state", {}), /server-exit: 7/);
+		assert.equal(client.pending.size, 0);
+	} finally {
+		client.stop();
+	}
+});
+
+test("#given a request written after stdin closed #when the server then exits #then the request fails with the exit status", async () => {
+	const client = await startFixture(`
+		process.stdin.setEncoding("utf8");
+		let buffer = "";
+		process.stdin.on("data", (chunk) => {
+			buffer += chunk;
+			let index;
+			while ((index = buffer.indexOf("\\n")) >= 0) {
+				const request = JSON.parse(buffer.slice(0, index));
+				buffer = buffer.slice(index + 1);
+				if (request.id !== undefined) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: {} }) + "\\n");
+			}
+		});
+		process.stdin.on("end", () => process.exit(7));
+	`);
+	try {
+		// The write fails at once; the server exits only after it sees stdin end, so the exit always comes second.
+		client.child.stdin.destroy();
 		await assert.rejects(client.callTool("get_app_state", {}), /server-exit: 7/);
 		assert.equal(client.pending.size, 0);
 	} finally {

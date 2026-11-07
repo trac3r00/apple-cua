@@ -1,5 +1,5 @@
-import { findTexts } from "@apple-cua/core";
-import type { MirroringObservation, MirroringText } from "@apple-cua/core";
+import { findTexts } from "@opencua/core";
+import type { MirroringObservation, MirroringText } from "@opencua/core";
 import { z } from "zod/v4";
 import type { PhoneContextFailure } from "./phone-context.js";
 

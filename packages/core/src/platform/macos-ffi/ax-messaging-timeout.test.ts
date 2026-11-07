@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { vi } from "@opencua/test-support";
 
 const koffiMock = vi.hoisted(() => {
 	const applicationElement = { type: "ax-app" };
@@ -94,8 +95,8 @@ describe("resolveAxMessagingTimeoutSeconds", () => {
 	it("#given a numeric override #when the timeout is resolved #then the override is used", async () => {
 		const { resolveAxMessagingTimeoutSeconds } = await import("./accessibility.js");
 
-		expect(resolveAxMessagingTimeoutSeconds({ APPLE_CUA_AX_TIMEOUT_SECONDS: "5" })).toBe(5);
-		expect(resolveAxMessagingTimeoutSeconds({ APPLE_CUA_AX_TIMEOUT_SECONDS: "0.25" })).toBe(0.25);
+		expect(resolveAxMessagingTimeoutSeconds({ OPENCUA_AX_TIMEOUT_SECONDS: "5" })).toBe(5);
+		expect(resolveAxMessagingTimeoutSeconds({ OPENCUA_AX_TIMEOUT_SECONDS: "0.25" })).toBe(0.25);
 	});
 
 	it("#given a nonsense override #when the timeout is resolved #then the default wins instead of an unbounded wait", async () => {
@@ -103,10 +104,10 @@ describe("resolveAxMessagingTimeoutSeconds", () => {
 			"./accessibility.js"
 		);
 
-		expect(resolveAxMessagingTimeoutSeconds({ APPLE_CUA_AX_TIMEOUT_SECONDS: "soon" })).toBe(
+		expect(resolveAxMessagingTimeoutSeconds({ OPENCUA_AX_TIMEOUT_SECONDS: "soon" })).toBe(
 			DEFAULT_AX_MESSAGING_TIMEOUT_SECONDS,
 		);
-		expect(resolveAxMessagingTimeoutSeconds({ APPLE_CUA_AX_TIMEOUT_SECONDS: "-1" })).toBe(
+		expect(resolveAxMessagingTimeoutSeconds({ OPENCUA_AX_TIMEOUT_SECONDS: "-1" })).toBe(
 			DEFAULT_AX_MESSAGING_TIMEOUT_SECONDS,
 		);
 	});
@@ -129,17 +130,17 @@ describe("createApplicationElement", () => {
 	it("#given the timeout is switched off #when an app element is created #then nothing is set", async () => {
 		const { createApplicationElement } = await import("./accessibility.js");
 
-		const previous = process.env["APPLE_CUA_AX_TIMEOUT_SECONDS"];
-		process.env["APPLE_CUA_AX_TIMEOUT_SECONDS"] = "0";
+		const previous = process.env["OPENCUA_AX_TIMEOUT_SECONDS"];
+		process.env["OPENCUA_AX_TIMEOUT_SECONDS"] = "0";
 		try {
 			koffiMock.accessibilityFunctions.AXUIElementSetMessagingTimeout.mockClear();
 			createApplicationElement(2468);
 			expect(koffiMock.accessibilityFunctions.AXUIElementSetMessagingTimeout).not.toHaveBeenCalled();
 		} finally {
 			if (previous === undefined) {
-				process.env["APPLE_CUA_AX_TIMEOUT_SECONDS"] = "";
+				process.env["OPENCUA_AX_TIMEOUT_SECONDS"] = "";
 			} else {
-				process.env["APPLE_CUA_AX_TIMEOUT_SECONDS"] = previous;
+				process.env["OPENCUA_AX_TIMEOUT_SECONDS"] = previous;
 			}
 		}
 	});

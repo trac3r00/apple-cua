@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@opencua/test-support";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import { IPHONE_TOOL_NAMES, LEAN_TOOL_NAMES, TOOL_NAMES, toolNamesFor } from "./tool-names.js";
 import type { McpServerOptions } from "./toolset.js";
@@ -6,7 +7,7 @@ import type { McpServerOptions } from "./toolset.js";
 let closeHarness: (() => Promise<void>) | undefined;
 
 beforeEach(() => {
-	vi.stubEnv("APPLE_CUA_BROWSER", "off");
+	vi.stubEnv("OPENCUA_BROWSER", "off");
 });
 
 afterEach(async () => {
@@ -37,14 +38,15 @@ describe("lean toolset #given toolset=lean #when tools are listed #then exactly 
 		expect(names).toHaveLength(LEAN_TOOL_NAMES.length);
 		const instructions = harness.client.getInstructions() ?? "";
 		const mentioned = mentionedTools(instructions);
+		const leanNames: readonly string[] = LEAN_TOOL_NAMES;
 		for (const name of mentioned) {
-			expect(LEAN_TOOL_NAMES).toContain(name);
+			expect(leanNames).toContain(name);
 		}
 		expect(mentioned).toEqual(
 			expect.arrayContaining(["get_app_state", "find_elements", "run_script", "verify_state"]),
 		);
 		const resources = await harness.client.listResources();
-		expect(resources.resources.map((resource) => resource.uri)).toContain("skill://apple-cua/SKILL.md");
+		expect(resources.resources.map((resource) => resource.uri)).toContain("skill://opencua/SKILL.md");
 	});
 
 	it("reports the toolset and the registered tool count from get_capabilities", async () => {
@@ -71,9 +73,9 @@ describe("full toolset #given the default #when tools are listed #then desktop t
 	});
 });
 
-describe("browser bridge #given APPLE_CUA_BROWSER=1 #when tools are listed #then the browser surface is registered", () => {
+describe("browser bridge #given OPENCUA_BROWSER=1 #when tools are listed #then the browser surface is registered", () => {
 	it("registers the browser tools and counts them in get_capabilities", async () => {
-		vi.stubEnv("APPLE_CUA_BROWSER", "1");
+		vi.stubEnv("OPENCUA_BROWSER", "1");
 		const { harness, names } = await connect({ toolset: "full", iphone: false });
 
 		expect(names).toEqual([...toolNamesFor("full", false, true)].sort());
@@ -86,8 +88,8 @@ describe("browser bridge #given APPLE_CUA_BROWSER=1 #when tools are listed #then
 
 describe("iPhone opt-in #given the iphone option #when tools are listed #then ios_* tools appear only when enabled", () => {
 	it("registers no ios_* tool by default", async () => {
-		vi.stubEnv("APPLE_CUA_IPHONE", "");
-		vi.stubEnv("APPLE_CUA_TOOLSET", "");
+		vi.stubEnv("OPENCUA_IPHONE", "");
+		vi.stubEnv("OPENCUA_TOOLSET", "");
 		const { names } = await connect();
 
 		expect(names.filter((name) => name.startsWith("ios_"))).toEqual([]);
@@ -104,19 +106,19 @@ describe("iPhone opt-in #given the iphone option #when tools are listed #then io
 		expect(lean.names).toEqual([...toolNamesFor("lean", true)].sort());
 	});
 
-	it("honours APPLE_CUA_IPHONE=1 and APPLE_CUA_TOOLSET=lean from the environment", async () => {
-		vi.stubEnv("APPLE_CUA_IPHONE", "1");
-		vi.stubEnv("APPLE_CUA_TOOLSET", "lean");
+	it("honours OPENCUA_IPHONE=1 and OPENCUA_TOOLSET=lean from the environment", async () => {
+		vi.stubEnv("OPENCUA_IPHONE", "1");
+		vi.stubEnv("OPENCUA_TOOLSET", "lean");
 		const { names } = await connect();
 
 		expect(names).toEqual([...toolNamesFor("lean", true)].sort());
 	});
 });
 
-describe("unknown toolset #given an unrecognised APPLE_CUA_TOOLSET #when the server starts #then it falls back to full and says so once", () => {
+describe("unknown toolset #given an unrecognised OPENCUA_TOOLSET #when the server starts #then it falls back to full and says so once", () => {
 	it("serves the full toolset and warns on stderr a single time", async () => {
-		vi.stubEnv("APPLE_CUA_IPHONE", "");
-		vi.stubEnv("APPLE_CUA_TOOLSET", "tiny-unknown");
+		vi.stubEnv("OPENCUA_IPHONE", "");
+		vi.stubEnv("OPENCUA_TOOLSET", "tiny-unknown");
 		const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
 		const first = await connect();

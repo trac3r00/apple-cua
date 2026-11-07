@@ -1,5 +1,5 @@
-import type { AXTreeElement, AppState } from "@apple-cua/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
+import type { AXTreeElement, AppState } from "@opencua/core";
 import { stateResult } from "./tool-result.js";
 
 const COLUMN_COUNT = 7;

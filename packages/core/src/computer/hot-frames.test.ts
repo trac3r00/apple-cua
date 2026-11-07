@@ -1,5 +1,5 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
 import type { HotFrameWorker } from "./hot-frames.js";
 import { HotFrameSource } from "./hot-frames.js";
 

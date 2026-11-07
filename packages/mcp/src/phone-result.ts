@@ -1,4 +1,4 @@
-import type { MirroringObservation, MirroringText } from "@apple-cua/core";
+import type { MirroringObservation, MirroringText } from "@opencua/core";
 import type { PhoneContextFailure } from "./phone-context.js";
 import type { PhoneSearchOutcome } from "./phone-search.js";
 import { type ToolResult, textResult } from "./tool-result.js";

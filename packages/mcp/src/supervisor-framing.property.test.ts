@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
 import { LineFramer, startSupervisor } from "./supervisor.js";
 
 // mulberry32 seed 0x5eedc0de; attempted = executed = 500 valid stream cases.

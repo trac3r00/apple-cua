@@ -1,6 +1,6 @@
-import type { MirroringText } from "@apple-cua/core";
-import { findTexts } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { MirroringText } from "@opencua/core";
+import { findTexts } from "@opencua/core";
 import { iosFindTextSchema } from "./phone-search.js";
 import type { PhoneGuardSession, PhoneToolSource } from "./phone-session.js";
 import {
@@ -21,7 +21,8 @@ import {
 
 const READ_ONLY_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false } as const;
 const MUTATION_ANNOTATIONS = { readOnlyHint: false, destructiveHint: true } as const;
-const TOKEN = "Requires the one-use observation_token from ios_observe or the previous mutation result.";
+const TOKEN =
+	"Requires the one-use observation_token from ios_observe or the previous mutation result. On the shared host iPhone Mirroring input is refused (isolated-session-required), because the Mirroring window is part of the human desktop.";
 
 export function registerPhoneTools(server: McpServer, guard: PhoneGuardSession, source: PhoneToolSource): void {
 	server.registerTool(

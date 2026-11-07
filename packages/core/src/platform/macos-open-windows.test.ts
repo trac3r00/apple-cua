@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { vi } from "@opencua/test-support";
 
 import type { ListedWindow } from "./macos-ffi/window-list.js";
 import * as windowListing from "./macos-ffi/window-list.js";
@@ -9,6 +13,7 @@ import {
 	targetableWindows,
 } from "./macos-open-windows.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
+import { registerOwnedSurface } from "./owned-surfaces.js";
 
 function listed(partial: Partial<ListedWindow> & { id: number }): ListedWindow {
 	return {
@@ -28,7 +33,7 @@ function window(id: number): MacOSWindowInfo {
 describe("#given a WindowServer listing with app windows and chrome #when it is mapped for targeting #then only normal windows survive", () => {
 	it("keeps layer 0 and drops menu bar, control centre and drag-helper layers", () => {
 		const windows = targetableWindows([
-			listed({ id: 1, ownerName: "Finder", title: "apple-cua", bounds: { x: 10, y: 20, width: 30, height: 40 } }),
+			listed({ id: 1, ownerName: "Finder", title: "opencua", bounds: { x: 10, y: 20, width: 30, height: 40 } }),
 			listed({ id: 2, layer: 25, ownerName: "Control Center", title: "Item-0" }),
 			listed({ id: 3, layer: 500, ownerName: "SSDragHelper" }),
 		]);
@@ -38,7 +43,7 @@ describe("#given a WindowServer listing with app windows and chrome #when it is 
 				id: 1,
 				bounds: { x: 10, y: 20, width: 30, height: 40 },
 				owner: { processId: 100, name: "Finder" },
-				title: "apple-cua",
+				title: "opencua",
 				layer: 0,
 			},
 		]);
@@ -195,5 +200,27 @@ describe("#given the in-process binding cannot read windows #when windows are wa
 		});
 
 		expect(windows.map((entry) => entry.id)).toEqual([7]);
+	});
+});
+
+describe("#given a window one level below normal windows #when it is mapped for targeting #then only an opencua-owned surface survives", () => {
+	it("keeps the owned surface at layer -1 and drops another process's window at that layer", () => {
+		const stateDir = realpathSync(mkdtempSync(join(tmpdir(), "opencua-owned-window-")));
+		const previous = process.env["OPENCUA_STATE_DIR"];
+		process.env["OPENCUA_STATE_DIR"] = stateDir;
+		try {
+			registerOwnedSurface({ pid: process.pid, title: "canvas", url: "http://127.0.0.1/" }, { stateDir });
+
+			const windows = targetableWindows([
+				listed({ id: 7, layer: -1, ownerPid: process.pid, ownerName: "opencua-surface" }),
+				listed({ id: 8, layer: -1, ownerPid: 100, ownerName: "Finder" }),
+			]);
+
+			expect(windows.map((entry) => entry.id)).toEqual([7]);
+		} finally {
+			if (previous === undefined) Reflect.deleteProperty(process.env, "OPENCUA_STATE_DIR");
+			else process.env["OPENCUA_STATE_DIR"] = previous;
+			rmSync(stateDir, { recursive: true, force: true });
+		}
 	});
 });

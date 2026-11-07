@@ -1,5 +1,5 @@
-import type { AppState, AppStateOptions, PreflightResult, TopLevelWindow } from "@apple-cua/core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
+import type { AppState, AppStateOptions, PreflightResult, TopLevelWindow } from "@opencua/core";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { Deferred, FakeGuardedComputer } from "./protocol-test-harness.js";
 

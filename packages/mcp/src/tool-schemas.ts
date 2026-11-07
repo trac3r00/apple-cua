@@ -410,7 +410,12 @@ const optionalElementIndex = { element_index: elementIndexSchema.optional() };
  * showing) something, so a whole flow can run in one call without guessing sleeps.
  */
 export const runStepSchema = z.discriminatedUnion("type", [
-	z.object({ type: z.literal("click"), ...clickFields, ...stepTargetFields }),
+	z.object({
+		type: z.literal("click"),
+		...clickFields,
+		context: z.boolean().optional().describe("Tool/color pick, re-applied in a shared window."),
+		...stepTargetFields,
+	}),
 	z.object({
 		type: z.literal("perform_secondary_action"),
 		...performSecondaryActionFields,
@@ -530,6 +535,7 @@ export const compactStepSchema = z.object({
 	y: coordinateSchema.optional(),
 	click_count: z.number().int().positive().optional(),
 	mouse_button: z.enum(["left", "right", "middle"]).optional(),
+	context: z.boolean().optional().describe("click: tool/color pick, re-applied in a shared window."),
 	modifiers: modifiersSchema,
 	action: z.string().optional(),
 	value: z.string().optional(),
@@ -643,13 +649,40 @@ export const runHandsSchema = z
 		message: "run_hands needs at least one of keyboard, pointer, or vision",
 	});
 
+function hasControlCharacter(value: string): boolean {
+	return Array.from(value).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
+}
+
+/** Worker names become cursor owners, so they follow the same rule withCursorIdentity enforces. */
+const workerIdSchema = z
+	.string()
+	.min(1)
+	.max(128)
+	.refine((value) => value.trim().length > 0 && !hasControlCharacter(value), {
+		message: "must not be blank or contain control characters",
+	});
+const agentNameSchema = z
+	.string()
+	.trim()
+	.min(1)
+	.max(128)
+	.refine((value) => !hasControlCharacter(value), { message: "must not contain control characters" });
+
 const workerAssignmentsSchema = z
-	.array(z.object({ worker_id: z.string().min(1), task: z.string().min(1), app: appSchema }))
+	.array(
+		z.object({
+			worker_id: workerIdSchema,
+			task: z.string().min(1),
+			app: appSchema,
+			agent_name: agentNameSchema.optional(),
+			parent_agent_name: agentNameSchema.optional(),
+		}),
+	)
 	.min(1)
 	.max(6);
 
 export const manageWorkersSchema = z.object({
-	op: z.enum(["assign", "status", "observe", "release"]),
+	op: z.enum(["assign", "status", "observe", "release", "pause", "stop", "resume"]),
 	assignments: workerAssignmentsSchema.optional(),
 	worker_id: z.string().min(1).optional(),
 	include_screenshot: includeScreenshotSchema,
@@ -670,6 +703,9 @@ export const workerManagementRequestSchema = z.discriminatedUnion("op", [
 		max_elements: z.number().int().positive().optional(),
 	}),
 	z.object({ op: z.literal("release"), worker_id: z.string().min(1) }),
+	z.object({ op: z.literal("pause"), worker_id: z.string().min(1) }),
+	z.object({ op: z.literal("stop"), worker_id: z.string().min(1) }),
+	z.object({ op: z.literal("resume"), worker_id: z.string().min(1) }),
 ]);
 
 export const runWorkerSchema = z.object({

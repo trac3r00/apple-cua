@@ -1,9 +1,10 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { nodeExecutable } from "@opencua/test-support";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const setup = join(repo, "scripts/setup.sh");
@@ -14,7 +15,7 @@ const SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
 let home = "";
 
 beforeEach(() => {
-	home = mkdtempSync(join(tmpdir(), "apple-cua-prompts-"));
+	home = mkdtempSync(join(tmpdir(), "opencua-prompts-"));
 });
 
 afterEach(() => {
@@ -46,7 +47,8 @@ describe("#given setup under curl | bash, where stdin is the download #when it m
 
 		expect(transcript).toContain("a Node.js download was declined");
 		expect(transcript).toContain("EXIT 1");
-	});
+		// setup probes the SDK before asking; loaded Intel runners can exceed the 5-second default.
+	}, 30_000);
 });
 
 describe("#given no terminal at all, as on CI #when setup must ask #then it takes the default without asking", () => {
@@ -74,12 +76,12 @@ describe("#given no terminal at all, as on CI #when setup must ask #then it take
 	}, 60_000);
 });
 
-describe("#given apple-cua config with stdin from a pipe in a terminal #when it asks #then the questions reach the terminal", () => {
+describe("#given opencua config with stdin from a pipe in a terminal #when it asks #then the questions reach the terminal", () => {
 	it("asks on the terminal and saves the answers", () => {
 		const transcript = expectScript(
 			[
-				`spawn /bin/bash -c {${process.execPath} --experimental-strip-types ${cli} config < /dev/null}`,
-				"expect -re {Add apps[^\\n]*: }",
+				`spawn /bin/bash -c {${nodeExecutable()} --experimental-strip-types ${cli} config < /dev/null}`,
+				"expect -re {Restrict to apps[^\\n]*: }",
 				'send "com.apple.TextEdit\\r"',
 				"expect -re {Delivery[^\\n]*: }",
 				'send "\\r"',
@@ -91,14 +93,14 @@ describe("#given apple-cua config with stdin from a pipe in a terminal #when it 
 				'send "\\r"',
 				"expect eof",
 			].join("\n"),
-			{ HOME: home, APPLE_CUA_HOME: join(home, ".apple-cua"), PATH: SYSTEM_PATH },
+			{ HOME: home, OPENCUA_HOME: join(home, ".opencua"), PATH: SYSTEM_PATH },
 		);
 
 		expect(transcript).toContain("EXIT 0");
-		expect(JSON.parse(readFileSync(join(home, ".apple-cua/config.json"), "utf8"))).toMatchObject({
+		expect(JSON.parse(readFileSync(join(home, ".opencua/config.json"), "utf8"))).toMatchObject({
 			allowedApps: ["com.apple.TextEdit"],
 			toolset: "lean",
 			clients: [],
 		});
-	});
+	}, 30_000);
 });

@@ -9,7 +9,7 @@ import {
 
 import { DOCTOR_HINT, type ServerLaunch } from "./launcher.js";
 
-/** One live connection to apple-cua-mcp. */
+/** One live connection to opencua-mcp. */
 export interface ServerConnection {
 	readonly client: Client;
 	/** The end of what the server wrote to stderr, quoted when it fails. */
@@ -35,7 +35,7 @@ export interface BridgeStart {
 	readonly instructions: string | undefined;
 }
 
-export const CLIENT_INFO = { name: "apple-cua-pi-extension", version: "0.1.0" } as const;
+export const CLIENT_INFO = { name: "opencua-pi-extension", version: "0.1.0" } as const;
 
 /** Long enough for the slowest single guarded call (open_app waits up to 30 s); progress notifications restart it. */
 const CALL_TIMEOUT_MILLISECONDS = 120_000;
@@ -43,8 +43,8 @@ const STDERR_TAIL_CHARACTERS = 4_000;
 const STDERR_TAIL_LINES = 5;
 
 /**
- * One apple-cua-mcp server per pi session. A server that exits on its own is restarted once; after a second exit
- * every call fails with an error naming `apple-cua doctor`. A call in flight when the server exits fails and is
+ * One opencua-mcp server per pi session. A server that exits on its own is restarted once; after a second exit
+ * every call fails with an error naming `opencua doctor`. A call in flight when the server exits fails and is
  * never replayed, because its input may already have been dispatched.
  */
 export class McpBridge {
@@ -81,7 +81,7 @@ export class McpBridge {
 		} catch (error) {
 			await this.close();
 			throw new Error(
-				`apple-cua: apple-cua-mcp started but did not list its tools: ${errorMessage(error)}${stderrNote(connection.stderrTail())}. ${DOCTOR_HINT}`,
+				`opencua: opencua-mcp started but did not list its tools: ${errorMessage(error)}${stderrNote(connection.stderrTail())}. ${DOCTOR_HINT}`,
 			);
 		}
 	}
@@ -109,7 +109,7 @@ export class McpBridge {
 			if (!this.closed && this.live !== connection) {
 				const next = this.failure?.message ?? "It is being restarted for the next call.";
 				throw new Error(
-					`apple-cua: apple-cua-mcp exited while running ${name}${stderrNote(connection.stderrTail())}. The action may or may not have been dispatched: observe the app again before retrying. ${next}`,
+					`opencua: opencua-mcp exited while running ${name}${stderrNote(connection.stderrTail())}. The action may or may not have been dispatched: observe the app again before retrying. ${next}`,
 				);
 			}
 			throw error;
@@ -137,7 +137,7 @@ export class McpBridge {
 		const opening = this.connect().then(async (connection) => {
 			if (this.closed) {
 				await connection.client.close();
-				throw new Error("apple-cua: the pi session ended while apple-cua-mcp was starting");
+				throw new Error("opencua: the pi session ended while opencua-mcp was starting");
 			}
 			this.live = connection;
 			connection.client.onclose = () => this.serverClosed(connection);
@@ -159,27 +159,27 @@ export class McpBridge {
 		if (this.restartsLeft <= 0) {
 			this.connection = undefined;
 			this.failure = new Error(
-				`apple-cua: apple-cua-mcp exited again after its one restart${stderr}. ${DOCTOR_HINT} Then start a new pi session.`,
+				`opencua: opencua-mcp exited again after its one restart${stderr}. ${DOCTOR_HINT} Then start a new pi session.`,
 			);
 			return;
 		}
 		this.restartsLeft -= 1;
 		this.open().catch((error: unknown) => {
 			this.failure = new Error(
-				`apple-cua: apple-cua-mcp exited${stderr} and could not be restarted: ${errorMessage(error)}. ${DOCTOR_HINT}`,
+				`opencua: opencua-mcp exited${stderr} and could not be restarted: ${errorMessage(error)}. ${DOCTOR_HINT}`,
 			);
 		});
 	}
 
 	private async ready(): Promise<ServerConnection> {
 		if (this.closed) {
-			throw new Error("apple-cua: the apple-cua-mcp connection is closed because the pi session ended.");
+			throw new Error("opencua: the opencua-mcp connection is closed because the pi session ended.");
 		}
 		if (this.failure !== undefined) {
 			throw this.failure;
 		}
 		if (this.connection === undefined) {
-			throw new Error("apple-cua: apple-cua-mcp has not been started in this pi session.");
+			throw new Error("opencua: opencua-mcp has not been started in this pi session.");
 		}
 		try {
 			return await this.connection;
@@ -208,7 +208,7 @@ export async function connectStdio(launch: ServerLaunch): Promise<ServerConnecti
 	} catch (error) {
 		await transport.close();
 		throw new Error(
-			`apple-cua: could not start ${[launch.command, ...launch.args].join(" ")}: ${errorMessage(error)}${stderrNote(stderr)}. ${DOCTOR_HINT}`,
+			`opencua: could not start ${[launch.command, ...launch.args].join(" ")}: ${errorMessage(error)}${stderrNote(stderr)}. ${DOCTOR_HINT}`,
 		);
 	}
 	return { client, stderrTail: () => stderr.trim() };

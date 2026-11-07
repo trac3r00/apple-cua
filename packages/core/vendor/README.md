@@ -12,9 +12,9 @@ format: "esm", minify: false })`. `files` maps that pinned source directory's
 TypeScript files to `/cua-motion/<name>.ts`; relative imports receive explicit
 `.ts` suffixes for Bun's in-memory resolver. Biome formats the resulting module.
 The planner algorithms are unchanged. No canvas renderer or runtime dependency
-is included. The adjacent declaration describes the subset apple-cua consumes.
+is included. The adjacent declaration describes the subset OpenCUA consumes.
 
 To update, repeat that bundle from a reviewed upstream commit and replay the
-upstream golden trajectories plus apple-cua's motion transport tests. Do not
+upstream golden trajectories plus OpenCUA's motion transport tests. Do not
 hand-edit the generated planner. Its generated JavaScript is excluded from
-repository linting; apple-cua's configuration, adapter, and tests are not.
+repository linting; OpenCUA's configuration, adapter, and tests are not.

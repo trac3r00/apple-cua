@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@opencua/test-support";
 
 const overlayMock = vi.hoisted(() => ({
 	createCursorOverlay: vi.fn(() => ({
@@ -10,31 +11,30 @@ const overlayMock = vi.hoisted(() => ({
 	})),
 }));
 
-vi.mock("./macos-ffi/cursor-overlay.js", async () => {
-	const actual = await vi.importActual<typeof import("./macos-ffi/cursor-overlay.js")>(
-		"./macos-ffi/cursor-overlay.js",
-	);
-	return { ...actual, createCursorOverlay: overlayMock.createCursorOverlay };
-});
+const actualCursorOverlay = { ...(await import("./macos-ffi/cursor-overlay.js")) };
+vi.mock("./macos-ffi/cursor-overlay.js", () => ({
+	...actualCursorOverlay,
+	createCursorOverlay: overlayMock.createCursorOverlay,
+}));
 
 describe("#given host cursor overlay policy", () => {
 	beforeEach(() => {
 		overlayMock.createCursorOverlay.mockClear();
 	});
 
-	it("#when background delivery has cues enabled by default #then it creates the default drawn-marker overlay", async () => {
+	it("#when background delivery has cues enabled by default #then it draws no overlay on the human desktop", async () => {
 		const { MacOSHostComputer } = await import("./macos.js");
 
 		const host = new MacOSHostComputer({ delivery: "background" });
 
-		expect(overlayMock.createCursorOverlay).toHaveBeenCalledOnce();
+		expect(overlayMock.createCursorOverlay).not.toHaveBeenCalled();
 		await host.close();
 	});
 
 	it("#when background delivery has background cues disabled #then it does not create a default overlay", async () => {
 		const { MacOSHostComputer } = await import("./macos.js");
-		const previous = process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"];
-		process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = "off";
+		const previous = process.env["OPENCUA_CURSOR_BACKGROUND_CUES"];
+		process.env["OPENCUA_CURSOR_BACKGROUND_CUES"] = "off";
 		try {
 			const host = new MacOSHostComputer({ delivery: "background" });
 
@@ -42,23 +42,24 @@ describe("#given host cursor overlay policy", () => {
 			await host.close();
 		} finally {
 			if (previous === undefined) {
-				Reflect.deleteProperty(process.env, "APPLE_CUA_CURSOR_BACKGROUND_CUES");
+				Reflect.deleteProperty(process.env, "OPENCUA_CURSOR_BACKGROUND_CUES");
 			} else {
-				process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = previous;
+				process.env["OPENCUA_CURSOR_BACKGROUND_CUES"] = previous;
 			}
 		}
 	});
 
-	it("#when attended delivery has no injected overlay #then it retains default cursor creation", async () => {
+	it("#when attended delivery is requested #then construction is refused before any overlay exists", async () => {
 		const { MacOSHostComputer } = await import("./macos.js");
 
-		const host = new MacOSHostComputer({ delivery: "attended" });
+		expect(() => new MacOSHostComputer({ delivery: "attended" })).toThrow(
+			/global-input cannot operate on the human desktop/,
+		);
 
-		expect(overlayMock.createCursorOverlay).toHaveBeenCalledOnce();
-		await host.close();
+		expect(overlayMock.createCursorOverlay).not.toHaveBeenCalled();
 	});
 
-	it("#when an overlay is injected #then it is used in either delivery", async () => {
+	it("#when an overlay is injected #then background delivery uses it instead of creating one", async () => {
 		const { MacOSHostComputer } = await import("./macos.js");
 		const overlay = {
 			state: vi.fn(async () => null),

@@ -5,7 +5,7 @@ import { extractAccessibilityTree } from "../packages/core/dist/platform/macos-f
 import { listWindows } from "../packages/core/dist/platform/macos-ffi/window-list.js";
 import { MacOSHostComputer } from "../packages/core/dist/platform/macos.js";
 
-const fixtureTitle = process.env.APPLE_CUA_FIXTURE_TITLE ?? "apple-cua Background Input QA";
+const fixtureTitle = process.env.OPENCUA_FIXTURE_TITLE ?? "opencua Background Input QA";
 const windows = listWindows({ onScreenOnly: false });
 assert.ok(windows, "native window enumeration unavailable; check Screen Recording permission");
 const window = windows.filter((item) => item.title === fixtureTitle).sort((a, b) => b.id - a.id)[0];
@@ -13,7 +13,7 @@ assert.ok(window, `live task-owned fixture window required: ${fixtureTitle}`);
 const tree = extractAccessibilityTree(window.ownerPid, { windowId: window.id });
 const canvas = tree.elements.find((item) => item.label === "Custom drawing canvas");
 assert.ok(canvas);
-const log = process.env.APPLE_CUA_FIXTURE_SECOND_LOG ?? "/tmp/apple-cua-fixture-second.jsonl";
+const log = process.env.OPENCUA_FIXTURE_SECOND_LOG ?? "/tmp/opencua-fixture-second.jsonl";
 const offset = statSync(log).size;
 let stopped = false;
 let timer;

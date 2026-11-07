@@ -1,4 +1,4 @@
-# Coordinated, vision-aware apple-cua
+# Coordinated, vision-aware OpenCUA
 
 ## Users and ideal state
 
@@ -147,7 +147,7 @@ coordinator supervises this graph; no persistent agent team is needed.
 - During those native tasks, the human pointer remained exactly
   `(379.9296875, 585.921875)`, the foreground app stayed `com.apple.Terminal`,
   and the list of cursor-overlay processes stayed empty. Both fixture processes
-  were stopped and their task-owned `/tmp/apple-cua-native-qa-01a15006-9710-7c77`
+  were stopped and their task-owned `/tmp/opencua-native-qa-01a15006-9710-7c77`
   directory was removed after the QA run.
 
 ## Final QA matrix

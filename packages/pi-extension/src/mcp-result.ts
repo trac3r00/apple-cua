@@ -12,7 +12,7 @@ export function agentToolResult(result: CallToolResult): AgentToolResult<undefin
 	const content = result.content.map(piContent);
 	if (result.isError === true) {
 		const text = content.flatMap((item) => (item.type === "text" ? [item.text] : [])).join("\n");
-		throw new Error(text === "" ? "apple-cua-mcp refused the call without saying why" : text);
+		throw new Error(text === "" ? "opencua-mcp refused the call without saying why" : text);
 	}
 	if (content.length > 0) {
 		return { content, details: undefined };
@@ -21,7 +21,7 @@ export function agentToolResult(result: CallToolResult): AgentToolResult<undefin
 	return { content: [{ type: "text", text }], details: undefined };
 }
 
-/** The first text item of an answer parsed as a JSON object: where apple-cua-mcp puts state, tokens and reasons. */
+/** The first text item of an answer parsed as a JSON object: where opencua-mcp puts state, tokens and reasons. */
 export function resultPayload(result: CallToolResult): Readonly<Record<string, unknown>> | undefined {
 	const first = result.content.find((item) => item.type === "text");
 	if (first === undefined || first.type !== "text") {

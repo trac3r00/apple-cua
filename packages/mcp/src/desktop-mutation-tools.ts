@@ -1,8 +1,8 @@
-import { parseElementIndex } from "@apple-cua/core";
-import type { ElementQuery, GuardedComputerInterface } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
+import { parseElementIndex } from "@opencua/core";
+import type { ElementQuery, GuardedComputerInterface } from "@opencua/core";
 import type { GuardedSession, RunControl } from "./guarded-session.js";
 import { validateElement } from "./guarded-session.js";
 import {

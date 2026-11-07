@@ -130,7 +130,7 @@ test("#given retired Safari surfaces and a hidden live window #when checking fix
 
 test("#given a cold owned fixture #when opening its window #then subscribes before launch and reads back identity", async () => {
 	const calls = [];
-	const bundle = "dev.apple-cua.fixture";
+	const bundle = "dev.opencua.fixture";
 	const before = { apps: [{ pid: 42, bundle }], windows: [] };
 	const window = { pid: 42, number: 7, title: "General", onScreen: true };
 	const owned = [];

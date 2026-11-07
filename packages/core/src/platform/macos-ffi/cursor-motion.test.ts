@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { planMove } from "../../../vendor/cua-cursor-motion.js";
 import { parseCursorMotion } from "./cursor-motion-config.js";
 import { cursorMotionCommand } from "./cursor-motion.js";

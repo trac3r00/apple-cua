@@ -1,3 +1,4 @@
+import "./env-compat.js";
 export type * from "./accessibility/types.js";
 export { classifyContentKind, type ContentKind } from "./accessibility/content-kind.js";
 export { diffAxTreeChanges, type AxTreeChanges } from "./accessibility/diff.js";
@@ -26,7 +27,14 @@ export {
 	type ComputerUseMouseButton,
 } from "./computer/actions.js";
 export { resolveScreenPoint } from "./computer/coordinate.js";
-export { currentCursorIdentity, withCursorIdentity } from "./computer/cursor-scope.js";
+export {
+	type CursorOwner,
+	currentCursorIdentity,
+	currentCursorOwner,
+	inContextClick,
+	withContextClick,
+	withCursorIdentity,
+} from "./computer/cursor-scope.js";
 export {
 	HandsCoordinator,
 	type HandName,
@@ -98,6 +106,12 @@ export {
 export { type AppApprovalDecision, AppApprovalStore } from "./permission/app-approval.js";
 export { type InputLockRecord, InputLock } from "./platform/input-lock.js";
 export {
+	type SpawnStopMenu,
+	type StopMenu,
+	type StopMenuProcess,
+	startStopMenu,
+} from "./platform/stop-menu.js";
+export {
 	type HotFrame,
 	type HotFrameSourceOptions,
 	type HotFrameWorker,
@@ -112,6 +126,7 @@ export {
 	automationPermission,
 	automationStatusFromCode,
 	requestAccessibility,
+	requestInputMonitoring,
 	requestScreenRecording,
 } from "./platform/macos-ffi/permission-prompts.js";
 export { isBrowserBundle } from "./permission/url-blocklist.js";
@@ -125,6 +140,100 @@ export {
 	PassiveMemorySegmentWriter,
 	fileSegmentSink,
 } from "./passive-memory/segment-writer.js";
+export type {
+	HistoryApp,
+	HistoryWindow,
+	HistoryElement,
+	HistoryAx,
+	HistoryEvent,
+	HistoryEventKind,
+} from "./passive-memory/history-events.js";
+export { encodeHistoryEvent } from "./passive-memory/history-events.js";
+export {
+	type ObservationDefaultBehavior,
+	type ObservationRule,
+	type AppObservationRule,
+	type UrlObservationRule,
+	type HistoryObservationSettings,
+	type HistoryObservationContext,
+	DEFAULT_HISTORY_OBSERVATION_SETTINGS,
+	shouldObserve,
+} from "./passive-memory/history-settings.js";
+export {
+	type HistoryFs,
+	type SegmentMetadata,
+	HistorySegmentStore,
+	nodeHistoryFs,
+	segmentIdForTimestamp,
+	segmentStartMs,
+	SEGMENT_WINDOW_MS,
+	DEFAULT_RETENTION_MS,
+} from "./passive-memory/history-store.js";
+export {
+	type HistoryRecorderState,
+	type HistoryRecorderOptions,
+	type RecordOutcome,
+	type UnstampedHistoryEvent,
+	HistoryRecorder,
+} from "./passive-memory/history-recorder.js";
+export {
+	type HistoryObservationInput,
+	appStateToHistory,
+} from "./passive-memory/history-observation.js";
+export {
+	type HistorySampler,
+	type CaptureTimer,
+	type HistoryCaptureLoopOptions,
+	HistoryCaptureLoop,
+} from "./passive-memory/history-capture.js";
+export {
+	type HistoryState,
+	type HistoryPaths,
+	type HistoryControlFs,
+	historyPaths,
+	nodeHistoryControlFs,
+	readHistoryState,
+	writeHistoryState,
+	readHistorySettings,
+	writeHistorySettings,
+} from "./passive-memory/history-control.js";
+export {
+	type HistoryDeletion,
+	type HistorySegmentSummary,
+	deleteHistorySegments,
+	isHistorySegmentId,
+	listHistorySegments,
+	parseHistoryDuration,
+} from "./passive-memory/history-management.js";
+export {
+	SKILL_DESCRIPTIONS_FILE,
+	type SkillDescription,
+	type SkillDescriptionGenerator,
+	describeSkillCandidates,
+	parseSkillDescription,
+	readSkillDescriptions,
+	setSkillDescriptionsEnabled,
+	skillDescriptionPrompt,
+	skillDescriptionsEnabled,
+} from "./passive-memory/history-skill-descriptions.js";
+export { resolveHistoryRecorderBinary } from "./passive-memory/history-recorder-binary.js";
+export {
+	type HistorySegmentEvents,
+	type HistorySkillCandidate,
+	type HistorySkillDetection,
+	type HistorySkillDetectionOptions,
+	type HistoryStep,
+	type HistoryStepAction,
+	describeHistoryStep,
+	detectHistorySkillCandidates,
+} from "./passive-memory/history-skill-candidates.js";
+export {
+	type HistorySkillDraft,
+	readRecentHistorySegments,
+	saveHistorySkillDraft,
+	suggestHistorySkills,
+	validateHistorySkillDraft,
+} from "./passive-memory/history-skill-store.js";
 export type { PermissionInterface, PermissionKind, PermissionStatus } from "./permission/interface.js";
 export { MacOSPermissions } from "./permission/macos.js";
 export { CloudComputer, type CloudComputerOptions } from "./platform/cloud.js";
@@ -286,3 +395,35 @@ export type {
 } from "./types/index.js";
 export type { WindowInfo, WindowInterface } from "./window/interface.js";
 export { MacOSWindows } from "./window/macos.js";
+export { createWindowsHostComputer, WindowsHostComputer, WindowsHostError } from "./platform/windows/index.js";
+export type {
+	WindowsHostComputerOptions,
+	WindowsProcess,
+	WindowsProcessFactory,
+	WindowsTransport,
+} from "./platform/windows/index.js";
+export {
+	createLinuxHostComputer,
+	LinuxHostComputer,
+	LinuxBackendError,
+	LINUX_INSTALL_HINTS,
+} from "./platform/linux/index.js";
+export type {
+	LinuxAppState,
+	LinuxElementRef,
+	LinuxHelperEvents,
+	LinuxHelperFactory,
+	LinuxHelperTransport,
+	LinuxHostComputerOptions,
+	LinuxScreenshotResult,
+	LinuxSemanticAction,
+} from "./platform/linux/index.js";
+export { GuardedPlatformComputer } from "./platform/guarded-platform-computer.js";
+export { denyHostInteraction, HostInteractionDenied } from "./computer/host-interaction-policy.js";
+export {
+	type OwnedSurface,
+	closeOwnedSurface,
+	isOwnedSurfacePid,
+	openOwnedSurface,
+	readOwnedSurfaces,
+} from "./platform/owned-surfaces.js";

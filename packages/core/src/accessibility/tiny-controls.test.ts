@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import { matchElements } from "./element-query.js";
 import type { AXTreeElement } from "./types.js";

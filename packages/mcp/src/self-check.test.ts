@@ -1,6 +1,7 @@
-import type { HostCapabilities } from "@apple-cua/core";
-import type { AutomationStatus } from "@apple-cua/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
+import type { HostCapabilities } from "@opencua/core";
+import type { AutomationStatus } from "@opencua/core";
+import { vi } from "@opencua/test-support";
 import { parsePermissionRequests, requestPermissions, selfCheckReport } from "./self-check.js";
 
 const HOST_WITHOUT_ACCESSIBILITY: HostCapabilities = {
@@ -15,8 +16,8 @@ afterEach(() => {
 
 describe("#given a helper process without Accessibility #when the self-check report is built #then it carries what the doctor needs", () => {
 	it("reports the grant state, the process that answered, native capture, approval and toolset", () => {
-		vi.stubEnv("APPLE_CUA_ALLOWED_BUNDLE_IDS", "com.apple.TextEdit, com.apple.finder");
-		vi.stubEnv("APPLE_CUA_TOOLSET", "lean");
+		vi.stubEnv("OPENCUA_ALLOWED_BUNDLE_IDS", "com.apple.TextEdit, com.apple.finder");
+		vi.stubEnv("OPENCUA_TOOLSET", "lean");
 
 		const report = selfCheckReport({
 			probeHost: () => HOST_WITHOUT_ACCESSIBILITY,
@@ -59,6 +60,7 @@ describe("#given permission requests #when the helper asks for them #then it rep
 		const asked: string[] = [];
 		const report = requestPermissions(parsePermissionRequests("automation-status:com.apple.finder"), {
 			requestAccessibility: () => false,
+			requestInputMonitoring: () => false,
 			requestScreenRecording: () => false,
 			automation: (bundleId, ask) => {
 				asked.push(`${ask ? "ask" : "read"} ${bundleId}`);
@@ -88,6 +90,7 @@ describe("#given permission requests #when the helper asks for them #then it rep
 					calls.push("ask accessibility");
 					return false;
 				},
+				requestInputMonitoring: () => false,
 				requestScreenRecording: () => {
 					calls.push("ask screen recording");
 					return true;
@@ -126,5 +129,20 @@ describe("#given permission requests #when the helper asks for them #then it rep
 			"read com.apple.finder",
 			"read com.apple.Safari",
 		]);
+	});
+});
+
+describe("#given an input-monitoring request #when the helper handles it #then it asks Input Monitoring and reports the answer", () => {
+	it("parses the kind and returns only the Input Monitoring answer", () => {
+		expect(parsePermissionRequests("input-monitoring")).toEqual([{ kind: "input-monitoring" }]);
+		const report = requestPermissions(parsePermissionRequests("input-monitoring"), {
+			requestAccessibility: () => false,
+			requestScreenRecording: () => false,
+			requestInputMonitoring: () => true,
+			automation: () => "unknown",
+			launchSystemEvents: () => {},
+			pause: () => {},
+		});
+		expect(report).toEqual({ inputMonitoring: true });
 	});
 });

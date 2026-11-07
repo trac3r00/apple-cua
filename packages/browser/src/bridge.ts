@@ -3,7 +3,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { StopStatusSource } from "@apple-cua/core";
+import type { StopStatusSource } from "@opencua/core";
 import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
 import { type BrowserCommand, BrowserError, type HandoffRequest, replySchema } from "./protocol.js";
@@ -266,7 +266,7 @@ export class BrowserBridge extends EventEmitter implements BrowserTransport {
 			return Promise.reject(new BrowserError("stopped", "Browser request was cancelled. Do not replay input."));
 		const socket = this.socket;
 		if (socket === undefined || socket.readyState !== WebSocket.OPEN) {
-			return Promise.reject(new BrowserError("disconnected", "Pair the apple-cua browser extension first."));
+			return Promise.reject(new BrowserError("disconnected", "Pair the opencua browser extension first."));
 		}
 		if ((command.method === "open" || command.method === "run") && this.controlOwner === "human") {
 			return Promise.reject(this.humanControlError());
@@ -276,7 +276,7 @@ export class BrowserBridge extends EventEmitter implements BrowserTransport {
 			(this.stopped || this.stopSource.status().stopped)
 		) {
 			return Promise.reject(
-				new BrowserError("stopped", "The user stopped apple-cua. Do not retry or resume it yourself."),
+				new BrowserError("stopped", "The user stopped opencua. Do not retry or resume it yourself."),
 			);
 		}
 		const id = randomUUID();

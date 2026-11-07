@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { detectHost, spawnGuidance } from "./host-detection.js";
 
 describe("#given client names #when host detection runs #then each named host is recognized", () => {
 	it.each([
 		["  CLAUDE Desktop ", "claude-code"],
 		["Codex CLI", "codex"],
+		["opencua-pi-extension", "pi"],
 		["apple-cua-pi-extension", "pi"],
 		["pi-agent", "pi"],
 		["pi", "pi"],

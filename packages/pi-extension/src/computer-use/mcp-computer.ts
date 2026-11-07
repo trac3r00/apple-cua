@@ -79,7 +79,7 @@ export class ObservedTarget {
 }
 
 /**
- * The native computer-use actions as guarded apple-cua-mcp calls on the targeted window. Every call goes through
+ * The native computer-use actions as guarded opencua-mcp calls on the targeted window. Every call goes through
  * the bridge, so the server's token, allowlist, delivery and stop-switch guards apply exactly as for the MCP tools.
  */
 export class McpComputer implements NativeComputer {

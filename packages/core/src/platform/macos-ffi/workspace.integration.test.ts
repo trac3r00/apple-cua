@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { findRunningApplication } from "./workspace.js";
 
-describe.runIf(process.platform === "darwin")(
+describe.if(process.platform === "darwin")(
 	"#given AppKit and Finder are available #when directly looking up Finder #then a plausible running application is returned",
 	() => {
 		it("finds Finder by bundle identifier without timing-dependent assertions", () => {

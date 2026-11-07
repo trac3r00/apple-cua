@@ -1,13 +1,13 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import { STATE_DIR_ENV, StopSwitch, describeUserStop, resolveStateDir } from "./stop-switch.js";
 
 const directories: string[] = [];
 
 function temporaryDirectory(): string {
-	const directory = mkdtempSync(join(tmpdir(), "apple-cua-stop-"));
+	const directory = mkdtempSync(join(tmpdir(), "opencua-stop-"));
 	directories.push(directory);
 	return directory;
 }
@@ -64,9 +64,10 @@ describe("StopSwitch #given a state directory", () => {
 });
 
 describe("resolveStateDir #given the environment", () => {
-	it("#when APPLE_CUA_STATE_DIR is set #then it wins; otherwise the home default applies", () => {
+	it("#when OPENCUA_STATE_DIR is set #then it wins; otherwise the home default applies", () => {
+		const home = temporaryDirectory();
 		expect(resolveStateDir({ [STATE_DIR_ENV]: "/tmp/custom" })).toBe("/tmp/custom");
-		expect(resolveStateDir({})).toMatch(/\.apple-cua$/);
+		expect(resolveStateDir({}, home)).toBe(join(home, ".opencua"));
 	});
 });
 
@@ -75,6 +76,6 @@ describe("describeUserStop #given a stop #when described #then it tells the agen
 		const message = describeUserStop({ stopped: true, stoppedAt: "T", reason: "r", source: "chord" });
 
 		expect(message).toContain("chord at T");
-		expect(message).toContain("apple-cua resume");
+		expect(message).toContain("opencua resume");
 	});
 });

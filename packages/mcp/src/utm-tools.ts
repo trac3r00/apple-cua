@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { Point, StopStatusSource, UTMObservation } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { Point, StopStatusSource, UTMObservation } from "@opencua/core";
 import { z } from "zod/v4";
 import { allowedBundleIdsFromProcessEnvironment } from "./native-policy.js";
 import { type ToolResult, textResult } from "./tool-result.js";
@@ -43,7 +43,7 @@ export function registerUtmTools(server: McpServer, source: UtmToolSource, optio
 		const allowed = allowedBundleIdsFromProcessEnvironment();
 		if (allowed !== undefined && !allowed.some((bundleId) => bundleId.toLowerCase() === "com.utmapp.utm")) {
 			tokens.clear();
-			throw new UtmRefusal("app-not-allowed", "UTM is excluded by APPLE_CUA_ALLOWED_BUNDLE_IDS.");
+			throw new UtmRefusal("app-not-allowed", "UTM is excluded by OPENCUA_ALLOWED_BUNDLE_IDS.");
 		}
 		if (options.stopSwitch?.status().stopped === true) {
 			tokens.clear();

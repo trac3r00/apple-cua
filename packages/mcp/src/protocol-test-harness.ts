@@ -1,4 +1,4 @@
-import { currentInputScope } from "@apple-cua/core";
+import { currentInputScope } from "@opencua/core";
 import type {
 	AXTreeElement,
 	AppState,
@@ -22,7 +22,7 @@ import type {
 	SelectTextOptions,
 	SystemPrompt,
 	WindowTextRead,
-} from "@apple-cua/core";
+} from "@opencua/core";
 
 /** The scroll area and first row of the scrollable list the fake can model (see `scrollList`). */
 const SCROLL_AREA_ID = 200;

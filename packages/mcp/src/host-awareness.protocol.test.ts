@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 
 let closeHarness: (() => Promise<void>) | undefined;
@@ -32,7 +32,7 @@ describe("get_capabilities #given a client that names itself in initialize #when
 	it.each([
 		["claude-code", "claude-code"],
 		["codex-mcp-client", "codex"],
-		["apple-cua-pi-extension", "pi"],
+		["opencua-pi-extension", "pi"],
 	])("reports %s as %s", async (clientName, host) => {
 		const harness = await createHarness(undefined, undefined, undefined, {
 			clientInfo: { name: clientName, version: "9.9.9" },

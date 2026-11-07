@@ -31,7 +31,7 @@ export function skillFoldersFor(client: ClientName, context: ClientContext): str
 	}
 }
 
-/** Every folder apple-cua may have linked the skill into, for cleanup. */
+/** Every folder opencua may have linked the skill into, for cleanup. */
 function knownSkillFolders(context: ClientContext): string[] {
 	return [
 		join(context.home, ".agents/skills"),

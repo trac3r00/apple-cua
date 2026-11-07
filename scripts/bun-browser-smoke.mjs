@@ -38,6 +38,6 @@ await doctor("browser source doctor", "packages/browser/src/cli.ts");
 
 const builtCli = resolve(root, "packages/browser/dist/cli.js");
 if (existsSync(builtCli)) await doctor("browser dist doctor", "packages/browser/dist/cli.js");
-else process.stdout.write("browser dist doctor: skipped (run pnpm --filter @apple-cua/browser build)\n");
+else process.stdout.write("browser dist doctor: skipped (run pnpm --filter @opencua/browser build)\n");
 
 process.stdout.write("bun browser smoke: pass\n");

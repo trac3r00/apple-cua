@@ -1,0 +1,4 @@
+{"kind":"window.changed","timestamp":"2026-10-30T10:01:00Z","app":{"name":"TextEdit","bundleIdentifier":"com.apple.TextEdit","processIdentifier":123},"window":{"windowID":1,"title":"Untitled test document"}}
+{"kind":"selection.changed","timestamp":"2026-10-30T10:02:00Z","app":{"name":"TextEdit","bundleIdentifier":"com.apple.TextEdit","processIdentifier":123},"selection":{"target":{"role":"AXTextArea","description":"Document text"},"text":"Synthetic heading"}}
+{"kind":"keyboard.shortcut","timestamp":"2026-10-30T10:03:00Z","app":{"name":"TextEdit","bundleIdentifier":"com.apple.TextEdit","processIdentifier":123},"keyboard":{"keyEquivalent":"Command+B","target":{"role":"AXTextArea","description":"Document text"}}}
+{"kind":"window.changed","timestamp":"2026-10-30T10:04:00Z","app":{"name":"TextEdit","bundleIdentifier":"com.apple.TextEdit","processIdentifier":123},"window":{"windowID":1,"title":"Untitled test document"}}

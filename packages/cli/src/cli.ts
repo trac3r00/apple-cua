@@ -1,32 +1,28 @@
 #!/usr/bin/env node
-import { execFile } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { execFile, spawnSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import {
-	AppApprovalStore,
-	MacOSHostComputer,
-	NOOP_POINTER_OVERLAY,
-	StopSwitch,
-	agentCursorEnabled,
-	createCursorOverlay,
-	getAppStateForApp,
-} from "@apple-cua/core";
 import type {
 	ComputerInterface,
 	KeyOptions,
+	MacOSHostComputer,
 	MacOSHostComputerOptions,
 	PointerMode,
 	ScreenshotOptions,
 	ScrollOptions,
-} from "@apple-cua/core";
+} from "@opencua/core";
+import { AppApprovalStore, StopSwitch } from "@opencua/core/light";
 import { Command } from "commander";
 import { registerBrowserCommands } from "./browser-commands.js";
+import { IN_HELPER_ENV, needsHelperPermissions } from "./helper-route.js";
+import { registerHistoryCommands } from "./history-commands.js";
 import { registerIosCommands } from "./ios.js";
 import { resolveLayout } from "./layout.js";
 import { registerLifecycleCommands, resolveCursorMotion } from "./lifecycle-commands.js";
+import { registerSkillsCommands } from "./skills-command.js";
 import { commandPathOf, isInputCommand, stopRefusalFor } from "./stop-gate.js";
 import { registerUtmCommands } from "./utm.js";
 
@@ -136,7 +132,7 @@ const packageJson: PackageJson = readPackageJson();
 const program = new Command();
 
 program
-	.name("apple-cua")
+	.name("opencua")
 	.description("Native macOS computer-use control with Codex-style app-targeted tools.")
 	.version(packageJson.version)
 	.option("--json", "print machine-readable JSON output")
@@ -149,7 +145,7 @@ program
 	.option("--no-cursor", "hide the synthetic white+blue cursor overlay (shown by default to mark where input lands)")
 	.option(
 		"--background",
-		"deliver input without changing the frontmost app or moving the cursor; actions that need foreground delivery are refused",
+		"deliver input without changing the frontmost app or moving the cursor (the default; kept for scripts that pass it)",
 	);
 
 program
@@ -310,6 +306,7 @@ program
 	.argument("<mode>", "pointer | scroll | thinking")
 	.action(async (mode: string) => {
 		const normalized: PointerMode = mode === "scroll" || mode === "thinking" ? mode : "pointer";
+		const { NOOP_POINTER_OVERLAY, agentCursorEnabled, createCursorOverlay } = await import("@opencua/core");
 		// Drive the shared overlay daemon directly (it persists across commands).
 		// setMode writes to the daemon socket asynchronously; await briefly so the
 		// command actually lands before this short-lived process exits (otherwise
@@ -412,7 +409,7 @@ permissionsCommand
 	.action(async (kind: PermissionKind) => {
 		const permissions = await loadPermissions();
 		if (permissions === null) {
-			throw new Error("MacOSPermissions is not available in @apple-cua/core yet");
+			throw new Error("MacOSPermissions is not available in @opencua/core yet");
 		}
 		await permissions.request(kind);
 		writeOutput({ ok: true, kind }, `Requested ${kind} permission`);
@@ -470,6 +467,7 @@ appsCommand
 			},
 		) => {
 			await withComputer(async (computer) => {
+				const { getAppStateForApp } = await import("@opencua/core");
 				const state = await getAppStateForApp(computer, app, {
 					...(options.maxElements === undefined ? {} : { maxElements: options.maxElements }),
 					...(options.windowId === undefined ? {} : { windowId: options.windowId }),
@@ -549,17 +547,17 @@ appsCommand
 program
 	.command("stop")
 	.description(
-		"Stop computer use for every apple-cua agent on this Mac; only `apple-cua resume` lifts it (keyboard chord: Control+Option+Command)",
+		"Stop computer use for every opencua agent on this Mac; only `opencua resume` lifts it (keyboard chord: Control+Option+Command)",
 	)
 	.option("--reason <text>", "why computer use is being stopped", "stopped by user")
 	.action((options: { reason: string }) => {
 		const status = new StopSwitch().stop(options.reason, "cli");
-		writeOutput(status, `computer use stopped (${status.reason}); resume with \`apple-cua resume\``);
+		writeOutput(status, `computer use stopped (${status.reason}); resume with \`opencua resume\``);
 	});
 
 program
 	.command("resume")
-	.description("Lift the stop so apple-cua agents may use the computer again")
+	.description("Lift the stop so opencua agents may use the computer again")
 	.action(() => {
 		const wasStopped = new StopSwitch().resume();
 		writeOutput({ stopped: false, wasStopped }, wasStopped ? "computer use resumed" : "computer use was not stopped");
@@ -580,8 +578,10 @@ program
 
 registerIosCommands(program, { isJsonOutput });
 registerBrowserCommands(program, { isJsonOutput });
+registerHistoryCommands(program, { isJsonOutput });
 registerLifecycleCommands(program, { isJsonOutput });
 registerUtmCommands(program, { isJsonOutput });
+registerSkillsCommands(program);
 
 // Refuse input commands while the stop switch is on, before any command code can send input.
 program.hook("preAction", (_program, actionCommand) => {
@@ -599,12 +599,36 @@ program.hook("preAction", (_program, actionCommand) => {
 	) {
 		throw new Error("app-target-required: pass --target-pid or --target-bundle-id before sending input");
 	}
+	if (needsHelperPermissions(commandPath)) {
+		relaunchInHelper();
+	}
 });
 
 await program.parseAsync().catch(handleError);
 
+/**
+ * Runs this command again inside the "opencua-mcp" helper, which holds the macOS permissions the person granted, and
+ * exits with its status. A source run (tests, development) or a checkout without a built helper stays in place.
+ */
+function relaunchInHelper(): void {
+	const script = fileURLToPath(import.meta.url);
+	if (process.platform !== "darwin" || process.env[IN_HELPER_ENV] === "1" || !script.endsWith(".js")) {
+		return;
+	}
+	const { helperExecutable } = resolveLayout();
+	if (!existsSync(helperExecutable)) {
+		return;
+	}
+	const result = spawnSync(helperExecutable, [script, ...process.argv.slice(2)], {
+		stdio: "inherit",
+		env: { ...process.env, [IN_HELPER_ENV]: "1" },
+	});
+	process.exit(result.status ?? 1);
+}
+
 /** Resolve an app name/bundleId to a pid, reusing the same matching as `apps state`. */
 async function resolveAppPidForCli(computer: MacOSHostComputer, app: string): Promise<number> {
+	const { getAppStateForApp } = await import("@opencua/core");
 	const state = await getAppStateForApp(computer, app);
 	return state.pid;
 }
@@ -643,16 +667,17 @@ async function withComputer(
 ): Promise<void> {
 	// Commander sets `cursor` to false only when `--no-cursor` is passed; the overlay
 	// is shown by default. When hidden, inject the no-op overlay so no helper spawns.
+	const { MacOSHostComputer, NOOP_POINTER_OVERLAY, agentCursorEnabled } = await import("@opencua/core");
 	const showCursor = program.opts<GlobalOptions>().cursor !== false && agentCursorEnabled();
-	const background = program.opts<GlobalOptions>().background === true;
 	const computer = new MacOSHostComputer({
 		appApproval: new AppApprovalStore(
-			process.env["APPLE_CUA_ALLOWED_BUNDLE_IDS"]
+			process.env["OPENCUA_ALLOWED_BUNDLE_IDS"]
 				?.split(",")
 				.map((bundleId) => bundleId.trim())
 				.filter((bundleId) => bundleId.length > 0),
 		),
-		delivery: background ? "background" : "attended",
+		// The person's desktop takes background delivery only; attended delivery is refused there.
+		delivery: "background",
 		...(showCursor ? { cursorMotion: resolveCursorMotion(resolveLayout().configPath) } : {}),
 		...hostOptions,
 		...(showCursor ? {} : { overlay: NOOP_POINTER_OVERLAY }),
@@ -877,13 +902,13 @@ async function loadPermissions(): Promise<PermissionController | null> {
 async function loadWindows(): Promise<unknown> {
 	const windowsConstructor = await loadOptionalConstructor("MacOSWindows");
 	if (windowsConstructor === null) {
-		throw new Error("MacOSWindows is not available in @apple-cua/core yet");
+		throw new Error("MacOSWindows is not available in @opencua/core yet");
 	}
 	return new windowsConstructor();
 }
 
 async function loadOptionalConstructor(exportName: string): Promise<Constructor | null> {
-	const coreExports = Object.fromEntries(Object.entries(await import("@apple-cua/core")));
+	const coreExports = Object.fromEntries(Object.entries(await import("@opencua/core")));
 	const exportedValue = coreExports[exportName];
 	return isConstructor(exportedValue) ? exportedValue : null;
 }

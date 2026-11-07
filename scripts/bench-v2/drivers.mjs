@@ -13,7 +13,7 @@ const parsed = (result) => {
 export class Driver {
 	constructor(kind, client) {
 		this.kind = kind;
-		// "apple" drives apple-cua the way its instructions recommend (compact table observations, no
+		// "apple" drives opencua the way its instructions recommend (compact table observations, no
 		// screenshot, described-element clicks); "apple-legacy" keeps the pre-2026-09-23 call pattern
 		// (screenshot + menu bar + JSON tree, observe before every click) as the before baseline.
 		this.apple = kind === "apple" || kind === "apple-legacy";
@@ -88,7 +88,7 @@ export class Driver {
 				: { app, include_screenshot: true, include_menu_bar: true };
 			let result = await this.call("get_app_state", args);
 			let state = parsed(result);
-			// With several windows the focused one may not be the asked-for one; apple-cua lists them
+			// With several windows the focused one may not be the asked-for one; opencua lists them
 			// all in windowCandidates, so pick the titled window by id, as an agent would.
 			const candidate = (state.windowCandidates ?? []).find((window) => window.title === title);
 			if (title && state.windowTitle !== title && candidate !== undefined) {
@@ -118,7 +118,7 @@ export class Driver {
 			try {
 				result = await this.call(name[0], { app, observation_token: this.tokens.get(app), ...appleArgs });
 			} catch (error) {
-				// apple-cua refuses input when the observed window changed since the observation (a sheet
+				// opencua refuses input when the observed window changed since the observation (a sheet
 				// opened or closed) and asks for a fresh one; an agent re-observes and retries once.
 				if (!/"needsExplicitObservation":\s*true/.test(String(error))) throw error;
 				await this.observe(app, title);
@@ -141,7 +141,7 @@ export class Driver {
 	 */
 	async step(step) {
 		if (!step.keyboard || !["click-label", "menu"].includes(step.op)) return this.primaryStep(step);
-		// apple-cua's windowContentNote tells the agent to use keyboard routes when window content is
+		// opencua's windowContentNote tells the agent to use keyboard routes when window content is
 		// unreachable, because window-level menu items can report success there and change nothing.
 		if (!this.remoteApps.has(step.app)) {
 			try {

@@ -113,7 +113,7 @@ export function utmTextCodes(text: string): readonly number[] {
 	});
 }
 
-/** Parse APPLE_CUA_UTM_KEY_CHUNK; zero preserves one-character invocations. */
+/** Parse OPENCUA_UTM_KEY_CHUNK; zero preserves one-character invocations. */
 export function utmKeyChunkSize(value: string | undefined): number {
 	if (value === undefined || !/^\d+$/.test(value.trim())) return 8;
 	const parsed = Number(value.trim());
@@ -126,7 +126,7 @@ export interface UTMTextScriptOptions {
 
 /** Each returned script is one invocation; callers retain interruption checkpoints between scripts. */
 export function utmTextScripts(text: string, options: UTMTextScriptOptions = {}): readonly string[] {
-	const configured = options.chunkSize ?? utmKeyChunkSize(process.env["APPLE_CUA_UTM_KEY_CHUNK"]);
+	const configured = options.chunkSize ?? utmKeyChunkSize(process.env["OPENCUA_UTM_KEY_CHUNK"]);
 	const chunkSize = Number.isSafeInteger(configured) && configured >= 0 ? Math.max(1, configured) : 8;
 	const characters = [...text];
 	const scripts: string[] = [];

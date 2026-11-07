@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { StopSwitch } from "@apple-cua/core/stop";
+import { StopSwitch } from "@opencua/core/stop";
 import WebSocket from "ws";
 import { writeConnection } from "../dist/connection.js";
 import { BrowserBridge, BrowserController, BrowserSession } from "../dist/index.js";
@@ -153,10 +153,10 @@ class Cdp {
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const extensionDir = join(root, "extension");
 const executable =
-	process.env.APPLE_CUA_BROWSER_QA_EXECUTABLE ?? "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
-const loadViaCdp = process.env.APPLE_CUA_BROWSER_QA_LOAD_VIA_CDP === "1";
-const headless = process.env.APPLE_CUA_BROWSER_QA_HEADLESS === "1";
-const nativePairing = process.env.APPLE_CUA_BROWSER_QA_NATIVE_PAIRING === "1";
+	process.env.OPENCUA_BROWSER_QA_EXECUTABLE ?? "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
+const loadViaCdp = process.env.OPENCUA_BROWSER_QA_LOAD_VIA_CDP === "1";
+const headless = process.env.OPENCUA_BROWSER_QA_HEADLESS === "1";
+const nativePairing = process.env.OPENCUA_BROWSER_QA_NATIVE_PAIRING === "1";
 const ownedDirs = [];
 const ownedTabs = new Set();
 let browser;
@@ -172,9 +172,9 @@ let cliStateDir;
 async function cliCall(input) {
 	const child = spawn(
 		process.execPath,
-		[resolve(root, "../../skills/apple-cua-browser/scripts/browser.mjs"), "call", JSON.stringify(input)],
+		[resolve(root, "../../skills/cua-browser/scripts/browser.mjs"), "call", JSON.stringify(input)],
 		{
-			env: { ...process.env, APPLE_CUA_STATE_DIR: cliStateDir },
+			env: { ...process.env, OPENCUA_STATE_DIR: cliStateDir },
 			stdio: ["ignore", "pipe", "pipe"],
 		},
 	);
@@ -204,9 +204,9 @@ const assert = (condition, message) => {
 };
 
 try {
-	const userDataDir = await mkdtemp(join(tmpdir(), "apple-cua-browser-qa-profile-"));
+	const userDataDir = await mkdtemp(join(tmpdir(), "cua-browser-qa-profile-"));
 	ownedDirs.push(userDataDir);
-	const stopDir = await mkdtemp(join(tmpdir(), "apple-cua-browser-qa-stop-"));
+	const stopDir = await mkdtemp(join(tmpdir(), "cua-browser-qa-stop-"));
 	ownedDirs.push(stopDir);
 	const stopSwitch = new StopSwitch(stopDir);
 	cliStateDir = stopDir;
@@ -534,7 +534,7 @@ try {
 	);
 
 	let bench;
-	if (process.env.APPLE_CUA_BROWSER_QA_BENCH === "1") {
+	if (process.env.OPENCUA_BROWSER_QA_BENCH === "1") {
 		const benchTabs = [];
 		const observeMs = [];
 		const fullBytes = [];
@@ -740,7 +740,7 @@ try {
 		);
 		assert(focus.result.value.focused === false, "QA options rendering activated the background browser");
 	}
-	const evidenceRoot = resolve(root, "../../.omo/evidence/apple-cua-browser");
+	const evidenceRoot = resolve(root, "../../.omo/evidence/cua-browser");
 	await mkdir(evidenceRoot, { recursive: true });
 	const evidenceDir = await mkdtemp(join(evidenceRoot, "run-"));
 	const screenshots = [];

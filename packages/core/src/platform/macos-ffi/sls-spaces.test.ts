@@ -41,7 +41,8 @@ const ffi = vi.hoisted(() => {
 		SLSSpaceGetType: vi.fn(() => 0),
 		SLSCopySpacesForWindows: vi.fn((_connection: number, _mask: number, windows: Ref) => {
 			const [only] = windows.values ?? [];
-			return typeof only?.value === "number" ? (windowSpaces.get(only.value) ?? null) : null;
+			// Window ids are uint32; the binding hands them over as SInt32, so map the signed value back.
+			return typeof only?.value === "number" ? (windowSpaces.get(only.value >>> 0) ?? null) : null;
 		}),
 	};
 	const core = {
@@ -172,6 +173,12 @@ describe("#given window IDs #when requesting their spaces #then each window is a
 		ffi.windowSpaces.set(6, ffi.ref.number(10));
 
 		expect(spacesForWindows([4, 5, 6])).toEqual(new Map());
+	});
+
+	it("#given a window id at or above 2^31 #when queried #then it still maps to its spaces", () => {
+		ffi.windowSpaces.set(0x80000001, ffi.ref.array(ffi.ref.number(30)));
+
+		expect(spacesForWindows([0x80000001])).toEqual(new Map([[0x80000001, [30]]]));
 	});
 
 	it("#given an invalid window id #when queried #then nothing is asked natively", () => {

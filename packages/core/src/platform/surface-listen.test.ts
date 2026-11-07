@@ -18,8 +18,8 @@ const dependencies = {
 		measured.push({ pid, durationMs });
 		return { rms: 0.001, peak: 0.01, samples: 96_000 };
 	},
-	identity: () => identity,
-	surfaceStartedAt: () => SURFACE_STARTED,
+	identity: (pid: number) => (pid === 777 ? identity : undefined),
+	surfaceStartedAt: (pid: number) => (pid === 4242 ? SURFACE_STARTED : undefined),
 };
 
 beforeEach(() => {

@@ -127,7 +127,7 @@ Run every experiment on a spare Mac or in the Tart guest first, never on the per
 | 5 | Trigger a notification and a copy in the owned instance | Person's session shows no banner; its pasteboard `changeCount` is unchanged |
 | 6 | `open -n` for Keynote, Excel, Freeform | Record which start a second instance and what state they share |
 | 7 | Kill the helper with SIGKILL | Display is gone; no orphan windows on the person's displays |
-| 8 | Create the display, open Mission Control and System Settings > Displays, and record the arrangement | Record whether it appears, whether windows move onto it, and whether any setting hides it |
+| 8 | Create the display, open Mission Control and System Settings > Displays, and record the arrangement | Pass only if no agent window appears on, and no agent input or cursor reaches, any display the person uses, and none of the person's windows moves onto the agent display; any failure refuses this mechanism |
 
 The gate depends on the mechanism and the apps offered. The mode ships only if 1, 3, 5, 7 and 8 pass on the supported
 macOS versions, every leak found is refused in code, and:

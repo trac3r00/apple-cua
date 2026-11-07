@@ -138,6 +138,8 @@ describe("#given a confined worker whose pointer rests outside its region #when 
 			for (const point of points) {
 				expect(point.x).toBeGreaterThanOrEqual(LEFT_HALF.x);
 				expect(point.x).toBeLessThan(LEFT_HALF.x + LEFT_HALF.width);
+				expect(point.y).toBeGreaterThanOrEqual(LEFT_HALF.y);
+				expect(point.y).toBeLessThan(LEFT_HALF.y + LEFT_HALF.height);
 			}
 		} finally {
 			input.close();

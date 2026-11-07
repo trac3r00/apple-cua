@@ -19,7 +19,7 @@ through virtual cursors on windows it owns (owned surfaces) and in isolated sess
 | Smoothstep-only drag profile | True | Opt-in `OPENCUA_DRAG_PROFILE=lognormal` sigma-lognormal profile (velocity peak at t of about 0.21); default unchanged | `drag-profile.test.ts`; live strokes on an owned surface |
 | One worker per app, no sharing inside a window | Partly true: owned surfaces already allowed several workers | Optional per-worker `region` on `manage_workers` for shared surfaces. Overlapping regions are refused. A `run_worker` pointer target or element edit outside the region is refused before any input | `worker-regions.protocol.test.ts`; live run with 3 named cursors in one window |
 | No prompt-injection signal on observed text | True | `untrusted_content_warning` lists the matched patterns and element ids; observed text is unchanged | `untrusted-content.protocol.test.ts` |
-| No hearing ("ears") | True | Owned surfaces report `audio: {playing, changedAt}` from WebKit's playing-audio state, and `get_app_state` carries it | Live: tone page reports playing, silent page does not |
+| No hearing ("ears") | True | Owned surfaces report `audio: {playing, changedAt}` from WebKit's playing-audio state, the WebAudio output level (RMS, peak, eight bands) measured in the page by an injected AnalyserNode tap, and their WebKit GPU process (`_gpuProcessIdentifier`). The `surface` tool's `listen` op hears the real PCM of that process, media elements included, through a CoreAudio process tap (Audio Capture permission) | Live: a 440 Hz tone at gain 0.001 read -63.0 dB RMS / -60.0 dB peak in band 3; an `<audio>` element heard through the tap read -63.9 dB RMS; silent pages report no level and cannot be listened to |
 
 ## Rejected
 
@@ -28,23 +28,22 @@ through virtual cursors on windows it owns (owned surfaces) and in isolated sess
 | Remove `denyHostInteraction` and turn host app control back on (`host-interaction-policy.ts`, `macos.ts` capabilities, `skylight.ts`, `accessibility.ts`) | It is the isolation the person asked for on 2026-10-30 and confirmed on 2026-11-07. The audit read it as a regression. |
 | Default `inputAllowed: true` in `GuardedPlatformComputer` (`native-policy.ts`) | Same rule. Linux and Windows host input stays refused until those backends run in an isolated session. |
 | Overlay keyed by `cursor_id` in `cursor-overlay.m` | The host overlay is refused by policy. Several named cursors in one window already exist on owned surfaces, and per-worker regions now apply to them. |
-| Audio level capture through ScreenCaptureKit for owned surfaces | Tried and measured: WebKit plays page audio in `com.apple.WebKit.GPU`, which ScreenCaptureKit does not list as an application, so an app filter on the surface hears silence. The playing state above is what can be attributed reliably. |
+| Audio level capture through ScreenCaptureKit for owned surfaces | Measured: WebKit plays page audio in `com.apple.WebKit.GPU`, which ScreenCaptureKit does not list as an application, so an app filter on the surface hears silence, and that process's parent is launchd, so `pgrep -P` cannot find it. Replaced by the in-page WebAudio tap and a CoreAudio process tap on the GPU process WebKit itself names. |
 
 ## Open
 
 - Concurrent strokes on a shared surface: the first cursor's drag kept its waypoint, while the cursors that waited drew
-  straight from their start point to their end point. This was seen live with and without the lognormal profile. The
-  paced surface input from #43 is the likely place to look. A branch already works on that area, so it is left to that branch.
-- Region checks read an element's frame right before its step is dispatched, and the step driver reads it again when
-  it posts. A control that moves between those two reads can still be clicked just outside the region. Closing this
-  needs the driver to accept the checked frame.
-- Regions confine pointer targets and element edits only. A target search can scroll the shared window, keyboard steps
-  type wherever focus is, and an element-less scroll is not checked, so these can still change content in another
-  worker's region. A refusal after such a search reports that nothing was sent.
+  straight from their start point to their end point. Held until the paced surface input branch (`fix/surface-page-paced-input`)
+  lands, because the fix changes the same CursorMux code.
+- Closed since the first review: pointer events, drag waypoints and scroll points of a confined worker are refused at
+  the input layer right before posting (`withInputRegion`, `computer/input-region.ts`), keystrokes and accessibility
+  typing need a focused element inside the region, an element-less scroll lands at the region's centre, and a target
+  search scrolls only a container wholly inside the region and skips scroll-to-visible.
+- Media elements still report only the playing state in observations; their level needs an explicit `surface` `listen`.
 - `screenshot.ts` keeps its own typed CoreFoundation bindings, including an Int32 CFNumber helper that duplicates
   `toCFInt32Number`. Unifying them is a separate refactor of those bindings.
 - The surface socket path must fit `sun_path` (104 bytes). A long `OPENCUA_STATE_DIR` makes the surface run without a
   socket, and `sendSurfacePointer` then returns false.
 - Not started: a persistent `SCStream` per window with a ring buffer, local UI detection models, speculative multi-step
-  execution, self-healing element anchors, per-agent pasteboards, one-shot demonstration compilation, virtual
-  displays, and native Windows and Linux daemons. Each needs its own design and measurement before code.
+  execution, self-healing element anchors, per-agent pasteboards, one-shot demonstration compilation, a virtual
+  display mode (designed in `virtual-display-mode.md`), and native Windows and Linux daemons. Each needs its own design and measurement before code.

@@ -211,3 +211,31 @@ describe("#given a worker confined to a region #when run_worker aims the pointer
 		}
 	});
 });
+
+describe("#given one shared surface #when whole-window and confined workers are mixed #then the assignment is refused", () => {
+	it("#given a confined worker #when a whole-window worker joins in the same batch #then it is refused naming the confined one", async () => {
+		const { coordinator } = setup();
+		try {
+			await expect(
+				coordinator.assign([
+					{ worker_id: "left", task: "paint left", app: "Finder", region: LEFT },
+					{ worker_id: "roamer", task: "paint anywhere", app: "Finder" },
+				]),
+			).rejects.toThrow(/worker "roamer" gives no region, but worker "left" is confined/);
+		} finally {
+			await coordinator.close();
+		}
+	});
+
+	it("#given a whole-window worker #when a confined worker joins later #then it is refused naming the whole-window one", async () => {
+		const { coordinator } = setup();
+		try {
+			await coordinator.assign([{ worker_id: "roamer", task: "paint anywhere", app: "Finder" }]);
+			await expect(
+				coordinator.assign([{ worker_id: "left", task: "paint left", app: "Finder", region: LEFT }]),
+			).rejects.toThrow(/worker "left" gives a region, but worker "roamer" already owns the whole window/);
+		} finally {
+			await coordinator.close();
+		}
+	});
+});

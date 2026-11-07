@@ -237,6 +237,10 @@ export class WorkerCoordinator {
 		].flatMap(({ assignment, pid }) =>
 			assignment.region === undefined ? [] : [{ worker_id: assignment.worker_id, pid, region: assignment.region }],
 		);
+		// A whole-window worker would reach into every region, so one surface has either confined workers or unconfined ones.
+		const wholeWindow: { readonly worker_id: string; readonly pid: number }[] = [...this.workers.values()].flatMap(
+			({ assignment, pid }) => (assignment.region === undefined ? [{ worker_id: assignment.worker_id, pid }] : []),
+		);
 		for (const { assignment, pid } of resolved) {
 			if (workerIds.has(assignment.worker_id) || this.workers.has(assignment.worker_id)) {
 				throw new Error(`worker "${assignment.worker_id}" is already assigned`);
@@ -255,7 +259,21 @@ export class WorkerCoordinator {
 						`worker "${assignment.worker_id}" region ${describeRegion(region)} overlaps worker "${clash.worker_id}" region ${describeRegion(clash.region)} in the same window`,
 					);
 				}
+				const unconfined = wholeWindow.find((other) => other.pid === pid);
+				if (unconfined !== undefined) {
+					throw new Error(
+						`worker "${assignment.worker_id}" gives a region, but worker "${unconfined.worker_id}" already owns the whole window; give every worker on this surface a region`,
+					);
+				}
 				regions.push({ worker_id: assignment.worker_id, pid, region });
+			} else if (this.sharedApp(pid)) {
+				const confined = regions.find((other) => other.pid === pid);
+				if (confined !== undefined) {
+					throw new Error(
+						`worker "${assignment.worker_id}" gives no region, but worker "${confined.worker_id}" is confined to ${describeRegion(confined.region)} in this window; give every worker on this surface a region`,
+					);
+				}
+				wholeWindow.push({ worker_id: assignment.worker_id, pid });
 			}
 			if (
 				!this.sharedApp(pid) &&
@@ -276,6 +294,7 @@ export class WorkerCoordinator {
 				...(assignment.parent_agent_name === undefined ? {} : { parent_agent_name: assignment.parent_agent_name }),
 				appPid: pid,
 				...(this.sharedApp(pid) ? { shared: true } : {}),
+				...(assignment.region === undefined ? {} : { region: assignment.region }),
 				ownerPid: process.pid,
 			})),
 		);
@@ -669,6 +688,7 @@ export class WorkerCoordinator {
 				app: shared.app,
 				...(shared.agent_name === undefined ? {} : { agent_name: shared.agent_name }),
 				...(shared.parent_agent_name === undefined ? {} : { parent_agent_name: shared.parent_agent_name }),
+				...(shared.region === undefined ? {} : { region: shared.region }),
 				cursor_id: randomUUID(),
 				cursor_owner: {
 					agentName: shared.agent_name ?? shared.worker_id,

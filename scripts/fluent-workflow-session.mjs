@@ -7,18 +7,16 @@ import { McpClient } from "./bench-v2/client.mjs";
 
 // Private QA transport only. All observations and inputs still go through MCP guards.
 const client = new McpClient({
-	command: fileURLToPath(
-		new URL("../packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp", import.meta.url),
-	),
+	command: fileURLToPath(new URL("../packages/mcp/dist/opencua-mcp.app/Contents/MacOS/opencua-mcp", import.meta.url)),
 	args: [fileURLToPath(new URL("../packages/mcp/dist/server.js", import.meta.url))],
 	env: {
-		APPLE_CUA_DELIVERY: "background",
-		APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.freeform,com.apple.iWork.Keynote,com.apple.Keynote",
+		OPENCUA_DELIVERY: "background",
+		OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.freeform,com.apple.iWork.Keynote,com.apple.Keynote",
 	},
 	timeoutMs: 125000,
 });
 await client.start();
-const path = `/tmp/apple-cua-workflow-${process.pid}.sock`;
+const path = `/tmp/opencua-workflow-${process.pid}.sock`;
 let sequence = 0;
 function desktop() {
 	return {

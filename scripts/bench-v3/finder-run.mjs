@@ -158,7 +158,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 				spec = {
 					command: "node",
 					args: [resolve("packages/mcp/dist/server.js")],
-					env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.finder", APPLE_CUA_DELIVERY: "background" },
+					env: { OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.finder", OPENCUA_DELIVERY: "background" },
 				};
 			} else {
 				spec = { command: `${process.env.HOME}/.local/bin/cua-driver`, args: ["mcp"] };

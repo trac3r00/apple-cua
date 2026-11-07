@@ -1,10 +1,12 @@
-import type { AutomationStatus } from "@apple-cua/core";
+import type { AutomationStatus } from "@opencua/core";
 import { GRANT_COMMAND, HELPER_DISPLAY_NAME, PRIVACY_PANES, automationAppName } from "./doctor.js";
 
 /** What the helper holds, read without raising a prompt (server.js --doctor through the helper). */
 export interface HelperPermissions {
 	readonly accessibility: boolean;
 	readonly screenRecording: boolean;
+	/** Undefined from a helper that predates the Input Monitoring check. */
+	readonly inputMonitoring?: boolean | undefined;
 	readonly automation: Readonly<Record<string, AutomationStatus>>;
 }
 
@@ -12,6 +14,7 @@ export interface HelperPermissions {
 export interface PermissionRequestAnswer {
 	readonly accessibility?: boolean;
 	readonly screenRecording?: boolean;
+	readonly inputMonitoring?: boolean;
 	readonly automation?: Readonly<Record<string, AutomationStatus>>;
 }
 
@@ -20,6 +23,11 @@ export interface GrantDependencies {
 	/** Shows macOS's dialogs for the helper; an Automation dialog blocks until it is answered. */
 	readonly request: (kinds: readonly string[]) => PermissionRequestAnswer | undefined;
 	readonly openUrl: (url: string) => Promise<boolean>;
+	/**
+	 * Clears the helper's own earlier decision for a TCC service. macOS shows no Screen Recording dialog, and lists
+	 * nothing to switch on, while an older decision (a past Deny, an earlier build) is on record.
+	 */
+	readonly resetDecision?: (service: "ScreenCapture") => void;
 	/** Re-checks until `granted` holds or the person skips; true when it holds. */
 	readonly waitFor: (granted: () => boolean) => Promise<boolean>;
 	readonly print: (text: string) => void;
@@ -38,6 +46,10 @@ export interface GrantOptions {
 	readonly openPanes: boolean;
 	/** Apps beyond the helper's own Automation targets to ask about, e.g. approved browsers. */
 	readonly extraAutomationTargets: readonly string[];
+	/** The helper app's path, for adding it by hand when macOS leaves it out of the Screen Recording list. */
+	readonly helperApp?: string;
+	/** Also walk through Input Monitoring, which only the cua-history watcher needs. */
+	readonly inputMonitoring?: boolean;
 }
 
 export interface GrantOutcome {
@@ -59,8 +71,16 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 	const missing: string[] = [];
 	const notAsked: string[] = [];
 	if (state === undefined) {
-		deps.print(`Cannot read the permissions of ${NAME}: the helper app did not answer. Run apple-cua doctor.`);
-		return { granted, missing: ["Accessibility", "Screen Recording"], notAsked };
+		deps.print(`Cannot read the permissions of ${NAME}: the helper app did not answer. Run opencua doctor.`);
+		return {
+			granted,
+			missing: [
+				"Accessibility",
+				"Screen Recording",
+				...(options.inputMonitoring === true ? ["Input Monitoring"] : []),
+			],
+			notAsked,
+		};
 	}
 	const targets = [
 		...new Set([...Object.keys(state.automation), ...options.extraAutomationTargets.map((id) => id.toLowerCase())]),
@@ -79,7 +99,16 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 		}
 	};
 
-	const grants = [
+	const grants: {
+		readonly label: string;
+		readonly pane: string;
+		readonly url: string;
+		readonly kind: string;
+		readonly tccService?: "ScreenCapture";
+		readonly why: string;
+		readonly has: (current: HelperPermissions | undefined) => boolean;
+	}[] = [];
+	grants.push(
 		{
 			label: "Accessibility",
 			pane: "Accessibility",
@@ -93,15 +122,32 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 			pane: "Screen & System Audio Recording",
 			url: PRIVACY_PANES.screenRecording,
 			kind: "screen-recording",
+			tccService: "ScreenCapture",
 			why: "take screenshots of app windows",
 			has: (current: HelperPermissions | undefined) => current?.screenRecording === true,
 		},
-	] as const;
+	);
+	if (options.inputMonitoring === true) {
+		grants.push({
+			label: "Input Monitoring",
+			pane: "Input Monitoring",
+			url: PRIVACY_PANES.inputMonitoring,
+			kind: "input-monitoring",
+			why: "record the keystrokes and clicks cua-history keeps",
+			has: (current: HelperPermissions | undefined) => current?.inputMonitoring === true,
+		});
+	}
 
 	for (const grant of grants) {
-		if (grant.has(state)) {
+		// Permissions can change while the guide is open. Never use the initial report to decide whether a later
+		// permission still needs a prompt; --doctor starts a fresh helper process and reads TCC again.
+		const current = deps.read();
+		if (grant.has(current)) {
 			deps.print(`ok  ${grant.label} is granted to ${NAME}.`);
 			continue;
+		}
+		if (current === undefined) {
+			deps.print(`Could not read the current ${grant.label} status from ${NAME}; run opencua doctor to check it.`);
 		}
 		if (options.mode === "report") {
 			deps.print(`missing  ${grant.label} for ${NAME}: run ${GRANT_COMMAND} while you are at this Mac.`);
@@ -110,14 +156,40 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 		}
 		deps.print(`\n${grant.label} lets ${NAME} ${grant.why}.`);
 		deps.print(`  macOS shows a dialog for ${NAME}: choose Open System Settings, then switch on ${NAME}.`);
+		if (grant.tccService === "ScreenCapture" && options.helperApp !== undefined) {
+			// macOS can show the dialog and still leave the app out of this list; adding it with + always works.
+			deps.print(
+				`  If ${NAME} is not in the list: click + below it, press Command-Shift-G, paste ${options.helperApp}, choose Open, then switch it on.`,
+			);
+		}
+		if (grant.tccService !== undefined) {
+			deps.resetDecision?.(grant.tccService);
+		}
 		deps.request([grant.kind]);
 		await open(grant.url, grant.pane);
 		deps.print(waiting);
-		if (await deps.waitFor(() => grant.has(deps.read()))) {
+		await deps.waitFor(() => grant.has(deps.read()));
+		// The final fresh helper report is authoritative: it catches a grant made as the deadline elapsed and
+		// reports an unreadable response separately from a permission that the helper still says is off.
+		const finalState = deps.read();
+		if (grant.has(finalState)) {
 			deps.print(`  ok  ${grant.label} is granted.`);
 			granted.push(grant.label);
 		} else {
-			deps.print(`${notInTime}: grant it later with ${GRANT_COMMAND}`);
+			deps.print(
+				finalState === undefined
+					? `Could not verify ${grant.label}: the helper did not return a fresh permission report. Run opencua doctor.`
+					: `${notInTime}: the latest check from ${NAME} still reports ${grant.label} off. Grant it later with ${GRANT_COMMAND}`,
+			);
+			if (finalState !== undefined && grant.kind === "accessibility") {
+				deps.print(
+					"If its switch is already on, reset the stale TCC decision, then grant it again: tccutil reset Accessibility dev.opencua.mcp",
+				);
+			} else if (finalState !== undefined && grant.kind === "screen-recording") {
+				deps.print(
+					"If its switch is already on, reset the stale TCC decision, then grant it again: tccutil reset ScreenCapture dev.opencua.mcp",
+				);
+			}
 			missing.push(grant.label);
 		}
 	}
@@ -127,7 +199,7 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 		const label = `Automation of ${app}`;
 		const statusOf = (ask: boolean) =>
 			deps.request([`${ask ? "automation" : "automation-status"}:${bundleId}`])?.automation?.[bundleId] ?? "unknown";
-		if (state.automation[bundleId] === "granted") {
+		if (deps.read()?.automation[bundleId] === "granted") {
 			deps.print(`ok  ${NAME} may control ${app}.`);
 			continue;
 		}
@@ -163,7 +235,7 @@ export async function grantPermissions(options: GrantOptions, deps: GrantDepende
 	}
 
 	if (granted.length > 0) {
-		deps.print("\nRestart your MCP clients so running apple-cua servers pick up the new permissions.");
+		deps.print("\nRestart your MCP clients so running opencua servers pick up the new permissions.");
 	}
 	return { granted, missing, notAsked };
 }

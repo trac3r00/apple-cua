@@ -1,5 +1,6 @@
-import type { AppState } from "@apple-cua/core";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import type { AppState } from "@opencua/core";
+import { vi } from "@opencua/test-support";
 import { buildMacActionSpace } from "./action-space.js";
 import type { ExecutionResult, Observation, PlatformAdapter } from "./adapter.js";
 import type { Decider } from "./decision.js";

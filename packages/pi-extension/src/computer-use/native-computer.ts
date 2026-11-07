@@ -21,7 +21,7 @@ export type KeyEntry = string | { readonly key: string; readonly hold_seconds: n
 
 /**
  * What the native computer-use shapes can ask for, in model coordinates: pixels of the latest screenshot of the
- * targeted window. The implementation turns each request into guarded apple-cua-mcp calls.
+ * targeted window. The implementation turns each request into guarded opencua-mcp calls.
  */
 export interface NativeComputer {
 	screenshot(): Promise<ComputerUseResult>;
@@ -50,22 +50,22 @@ export class ComputerUseError extends Error {
 	}
 }
 
-/** Reasons a native action has no faithful apple-cua-mcp equivalent; each is raised as an error, never faked. */
+/** Reasons a native action has no faithful opencua-mcp equivalent; each is raised as an error, never faked. */
 export const MCP_GAPS = {
 	scroll:
-		"apple-cua-mcp scrolls an observed scroll area by whole pages through accessibility (the scroll tool, with element_index and pages), not the wheel at a screen point. Call scroll with the element_index of the scroll area from get_app_state.",
+		"opencua-mcp scrolls an observed scroll area by whole pages through accessibility (the scroll tool, with element_index and pages), not the wheel at a screen point. Call scroll with the element_index of the scroll area from get_app_state.",
 	pointerMove:
-		"apple-cua-mcp never moves the person's pointer (input goes to the target window) and has no hover-only action. Click where you mean to act, or use click_target with hover_first.",
-	cursorPosition: "apple-cua-mcp does not report the pointer position.",
+		"opencua-mcp never moves the person's pointer (input goes to the target window) and has no hover-only action. Click where you mean to act, or use click_target with hover_first.",
+	cursorPosition: "opencua-mcp does not report the pointer position.",
 	mouseButtonPhase:
-		"apple-cua-mcp has no separate button press or release. Use left_click, or left_click_drag for a drag.",
-	navigationButton: "apple-cua-mcp clicks only the left, right and middle buttons.",
+		"opencua-mcp has no separate button press or release. Use left_click, or left_click_drag for a drag.",
+	navigationButton: "opencua-mcp clicks only the left, right and middle buttons.",
 	dragPath:
-		"apple-cua-mcp drags in a straight line between two points. Send a path with exactly a start and an end point.",
+		"opencua-mcp drags in a straight line between two points. Send a path with exactly a start and an end point.",
 } as const;
 
 export function unsupportedAction(action: string, reason: string): ComputerUseError {
-	return new ComputerUseError("unsupported_action", `computer ${action} has no apple-cua-mcp equivalent: ${reason}`, {
+	return new ComputerUseError("unsupported_action", `computer ${action} has no opencua-mcp equivalent: ${reason}`, {
 		action,
 	});
 }

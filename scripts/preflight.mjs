@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * apple-cua release gate for docs/expectations/parallel-background-cua.md (EXP-001..EXP-019).
+ * opencua release gate for docs/expectations/parallel-background-cua.md (EXP-001..EXP-019).
  *
  * Usage:   node scripts/preflight.mjs [--plan] [--no-native] [--only ID[,ID...]] [--help]
  * Needs:   node >= 20, pnpm, git; macOS with the built signed helper for the native check.
@@ -92,9 +92,9 @@ export const REVIEWED = {
 	"packages/mcp/src/worker-coordinator.ts": "1f54bb061c39ed40c66ad476ef18f61f7c99d3c655be1f507a3e4d371d00fd59",
 	"packages/mcp/src/worker-tools.protocol.test.ts": "b8b85cacbacf0a47279c34781a8745073cd491976292d006de46692b343ddafc",
 	"packages/mcp/src/worker-tools.ts": "11f9f785365c619da91d6691dab3e3d3e2489af0f6193410b38083a51179759c",
-	"skills/apple-cua-browser/SKILL.md": "1b765ed1a51d01202fc2d9a733d5b4553586b940f44d05254bdcf4c4c873445c",
-	"skills/apple-cua/SKILL.md": "64b05c6c68d0eff7eb30c8ecb2e6c3472685c84eaa6f7db81e9e7f2edaccfefa",
-	"skills/apple-cua/references/subagents.md": "818b945ebf5e739f32da81d34a396f8828dd2b4d7fefead887d5de1a114fbfd8",
+	"skills/cua-browser/SKILL.md": "01fd5324291d06ea7b1071cbc9bd0aa9802378f477b037c80424527b363fe7be",
+	"skills/opencua/SKILL.md": "64b05c6c68d0eff7eb30c8ecb2e6c3472685c84eaa6f7db81e9e7f2edaccfefa",
+	"skills/opencua/references/subagents.md": "818b945ebf5e739f32da81d34a396f8828dd2b4d7fefead887d5de1a114fbfd8",
 };
 
 /** Generated outputs the gate itself produces or the build writes; excluded from scope and candidate digests. */
@@ -318,14 +318,14 @@ async function checkTools() {
 
 /** Real chain: signed helper -> supervisor -> child. Read-only tools only. */
 async function checkNative(timeoutMs) {
-	const helper = join(REPO, "packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp");
+	const helper = join(REPO, "packages/mcp/dist/opencua-mcp.app/Contents/MacOS/opencua-mcp");
 	const script = join(REPO, "packages/mcp/dist/server.js");
 	if (process.platform !== "darwin" || !existsSync(helper) || !existsSync(script)) {
 		return { status: "BLOCKED", evidence: helper, reason: "signed helper or build missing (macOS only)" };
 	}
 	const child = spawn(helper, [script], {
 		stdio: ["pipe", "pipe", "ignore"],
-		env: { ...process.env, APPLE_CUA_TOOLSET: "full", APPLE_CUA_DELIVERY: "background" },
+		env: { ...process.env, OPENCUA_TOOLSET: "full", OPENCUA_DELIVERY: "background" },
 	});
 	const messages = [];
 	const waiters = [];
@@ -374,7 +374,7 @@ async function checkNative(timeoutMs) {
 		const init = await call("initialize", {
 			protocolVersion: "2025-06-18",
 			capabilities: {},
-			clientInfo: { name: "apple-cua-preflight", version: "1" },
+			clientInfo: { name: "opencua-preflight", version: "1" },
 		});
 		child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
 		if (init.result?.capabilities?.tools?.listChanged !== true) {

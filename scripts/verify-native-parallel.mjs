@@ -7,7 +7,7 @@ import { listWindows } from "../packages/core/dist/platform/macos-ffi/window-lis
 import { getRunningApplications } from "../packages/core/dist/platform/macos-ffi/workspace.js";
 import { MacOSHostComputer } from "../packages/core/dist/platform/macos.js";
 
-const fixtureTitle = process.env.APPLE_CUA_FIXTURE_TITLE ?? "apple-cua Background Input QA";
+const fixtureTitle = process.env.OPENCUA_FIXTURE_TITLE ?? "opencua Background Input QA";
 const candidates = listWindows({ onScreenOnly: false })
 	.filter((window) => window.title === fixtureTitle)
 	.sort((a, b) => b.id - a.id);
@@ -41,8 +41,8 @@ try {
 					await computer.click({ x: button.frame.x + 20, y: button.frame.y + 10 });
 					const log =
 						index === 0
-							? (process.env.APPLE_CUA_FIXTURE_SECOND_LOG ?? "/tmp/apple-cua-fixture-second.jsonl")
-							: (process.env.APPLE_CUA_FIXTURE_FIRST_LOG ?? "/tmp/apple-cua-fixture-focus.jsonl");
+							? (process.env.OPENCUA_FIXTURE_SECOND_LOG ?? "/tmp/opencua-fixture-second.jsonl")
+							: (process.env.OPENCUA_FIXTURE_FIRST_LOG ?? "/tmp/opencua-fixture-focus.jsonl");
 					const offset = statSync(log).size;
 					let watcher;
 					let timer;

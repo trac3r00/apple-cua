@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@opencua/test-support";
 
 const ffiMock = vi.hoisted(() => {
 	const poolAllocation = { type: "pool-allocation" };
@@ -90,7 +91,7 @@ const ffiMock = vi.hoisted(() => {
 
 vi.mock("koffi", () => ffiMock.module);
 
-import { findRunningApplication, getRunningApplications } from "./workspace.js";
+const { findRunningApplication, getRunningApplications } = await import("./workspace.js");
 
 beforeEach(() => {
 	ffiMock.send.mockClear();
@@ -148,6 +149,6 @@ describe("#given the indexed AppKit query answers with nothing #when looking up 
 	});
 
 	it("still answers nothing for a bundle identifier that is not running", () => {
-		expect(findRunningApplication("com.apple-cua.definitely-not-running")).toBeUndefined();
+		expect(findRunningApplication("com.opencua.definitely-not-running")).toBeUndefined();
 	});
 });

@@ -1,19 +1,21 @@
 import { randomUUID } from "node:crypto";
-import { DecisionAgent, type PlatformAdapter, createDecider, macosAdapter } from "@apple-cua/agent";
+import { DecisionAgent, type PlatformAdapter, createDecider, macosAdapter } from "@opencua/agent";
 import {
 	AX_PRESS_ACTION,
 	HandsCoordinator,
 	HotFrameSource,
 	InputInterrupted,
+	currentCursorIdentity,
 	describeQuery,
 	describeUserStop,
+	isOwnedSurfacePid,
 	matchElements,
 	openApplication,
 	parseElementIndex,
 	resolveAppPid,
 	runInInputScope,
 	suggestNearMisses,
-} from "@apple-cua/core";
+} from "@opencua/core";
 import type {
 	AXTreeElement,
 	AppOpenLauncher,
@@ -32,7 +34,7 @@ import type {
 	SystemPrompt,
 	TopLevelWindow,
 	WindowProbe,
-} from "@apple-cua/core";
+} from "@opencua/core";
 import { latestDecisionFrame } from "./decision-frame.js";
 import { settleDeferredOutcome } from "./deferred-settle.js";
 import type { ResolvedTargetClick } from "./mutation-actions.js";
@@ -90,7 +92,7 @@ const MAX_NEAR_MISSES = 5;
 const MAX_ALTERNATIVES = 3;
 
 function timingEnabled(): boolean {
-	return process.env["APPLE_CUA_TIMING"] === "1";
+	return process.env["OPENCUA_TIMING"] === "1";
 }
 async function timed<T>(label: string, run: () => Promise<T>): Promise<T> {
 	if (!timingEnabled()) {
@@ -408,8 +410,15 @@ interface ReusableRead {
 	readonly at: number;
 }
 
+/**
+ * Where an app's token, reusable read and input queue live: the pid, or for an opencua-owned surface the pid plus the
+ * acting cursor, so several workers can hold tokens for one shared window and act on it at the same time.
+ */
+type LaneKey = number | string;
+
 interface LiveToken {
 	readonly token: string;
+	readonly key: LaneKey;
 	readonly observation: InputObservation;
 	readonly elements: ObservedElementIdentity | undefined;
 	/** True when the token answers a deferred outcome: its element ids predate the action. */
@@ -426,12 +435,12 @@ export interface DecisionRunRequest {
 
 export class GuardedSession {
 	private readonly tokens = new Map<string, LiveToken>();
-	private readonly tokenByPid = new Map<number, string>();
-	private readonly reusableReads = new Map<number, ReusableRead>();
+	private readonly tokenByPid = new Map<LaneKey, string>();
+	private readonly reusableReads = new Map<LaneKey, ReusableRead>();
 	private readonly resolvedAppPids = new Map<string, number>();
 	/** The window each app's latest observation named (window_id, a script's bound window), by pid. */
 	private readonly boundWindows = new Map<number, number>();
-	private readonly tails = new Map<number, Promise<void>>();
+	private readonly tails = new Map<LaneKey, Promise<void>>();
 	private globalTail: Promise<void> = Promise.resolve();
 	private closed = false;
 	private closePromise: Promise<void> | undefined;
@@ -1652,7 +1661,7 @@ export class GuardedSession {
 	/**
 	 * The Jev decision kernel: one indexed action-space observation per step, one fan-out decision
 	 * call, execution guarded by a preflight per step. The endpoint contract and every risk gate
-	 * live in @apple-cua/agent; this method supplies the safety rails (stop switch, preflight,
+	 * live in @opencua/agent; this method supplies the safety rails (stop switch, preflight,
 	 * per-step refusal) and the honest record.
 	 */
 	runDecision(request: DecisionRunRequest): Promise<ToolResult> {
@@ -1662,14 +1671,14 @@ export class GuardedSession {
 			if (halted !== undefined) {
 				return refusalResult(halted.reason, halted.message);
 			}
-			const endpoint = process.env["APPLE_CUA_DECISION_ENDPOINT"];
+			const endpoint = process.env["OPENCUA_DECISION_ENDPOINT"];
 
-			const model = process.env["APPLE_CUA_DECISION_MODEL"] ?? "typesafe/jev-latest";
+			const model = process.env["OPENCUA_DECISION_MODEL"] ?? "typesafe/jev-latest";
 			const apiKey = process.env["LLM_POOL_PROXY_API_KEY"] ?? process.env["TYPESAFE_API_KEY"];
 			if (endpoint === undefined || endpoint === "" || apiKey === undefined || apiKey === "") {
 				return refusalResult(
 					"decision-endpoint-not-configured",
-					"set APPLE_CUA_DECISION_ENDPOINT and LLM_POOL_PROXY_API_KEY (or TYPESAFE_API_KEY); scripts/llm-pool-systemone.mjs serves the local proxy",
+					"set OPENCUA_DECISION_ENDPOINT and LLM_POOL_PROXY_API_KEY (or TYPESAFE_API_KEY); scripts/llm-pool-systemone.mjs serves the local proxy",
 				);
 			}
 			let decisionSurface: InputObservation | undefined;
@@ -2486,12 +2495,13 @@ export class GuardedSession {
 		deferred = false,
 	): string {
 		const token = randomUUID();
-		const previous = this.tokenByPid.get(observation.pid);
+		const key = this.laneKey(observation.pid);
+		const previous = this.tokenByPid.get(key);
 		if (previous !== undefined) {
 			this.tokens.delete(previous);
 		}
-		this.tokens.set(token, { token, observation, elements, deferred });
-		this.tokenByPid.set(observation.pid, token);
+		this.tokens.set(token, { token, key, observation, elements, deferred });
+		this.tokenByPid.set(key, token);
 		return token;
 	}
 
@@ -2540,14 +2550,24 @@ export class GuardedSession {
 		return { windowId };
 	}
 
-	/** One live token per app: a new observation of that app invalidates its previous token only. */
+	/**
+	 * One live token per app, or per cursor on an opencua-owned surface: a new observation invalidates only the
+	 * previous token of the same lane.
+	 */
 	private clearTokenFor(pid: number): void {
-		this.reusableReads.delete(pid);
-		const token = this.tokenByPid.get(pid);
+		const key = this.laneKey(pid);
+		this.reusableReads.delete(key);
+		const token = this.tokenByPid.get(key);
 		if (token !== undefined) {
 			this.tokens.delete(token);
-			this.tokenByPid.delete(pid);
+			this.tokenByPid.delete(key);
 		}
+	}
+
+	/** An owned surface is shared by cursors, so each cursor gets its own lane; any other app has one lane. */
+	private laneKey(pid: number): LaneKey {
+		const identity = currentCursorIdentity();
+		return identity !== undefined && isOwnedSurfacePid(pid) ? `${pid}:${identity}` : pid;
 	}
 
 	/** Resolve an app name to a pid, remembering the answer for later requests naming the same app. */
@@ -2575,13 +2595,18 @@ export class GuardedSession {
 			state.elementsTruncated === true ||
 			!observationMatchesState(observation, state)
 		) {
-			this.reusableReads.delete(pid);
+			this.reusableReads.delete(this.laneKey(pid));
 			return;
 		}
-		this.reusableReads.set(pid, {
+		const now = Date.now();
+		// Cursors on a shared surface each leave a read behind; one past its reuse window is never taken again.
+		for (const [key, read] of this.reusableReads) {
+			if (now - read.at > READ_REUSE_MILLISECONDS) this.reusableReads.delete(key);
+		}
+		this.reusableReads.set(this.laneKey(pid), {
 			observation,
 			elements: new Map(state.elements.map((element) => [element.id, element] as const)),
-			at: Date.now(),
+			at: now,
 		});
 	}
 
@@ -2591,8 +2616,9 @@ export class GuardedSession {
 	 * {@link READ_REUSE_MILLISECONDS}.
 	 */
 	private takeReusableRead(expected: InputObservation): ReadonlyMap<number, AXTreeElement> | undefined {
-		const entry = this.reusableReads.get(expected.pid);
-		this.reusableReads.delete(expected.pid);
+		const key = this.laneKey(expected.pid);
+		const entry = this.reusableReads.get(key);
+		this.reusableReads.delete(key);
 		if (
 			entry === undefined ||
 			entry.observation !== expected ||
@@ -2614,8 +2640,8 @@ export class GuardedSession {
 			throw new Error("observation token is missing, stale, or already consumed");
 		}
 		this.tokens.delete(token);
-		if (this.tokenByPid.get(live.observation.pid) === token) {
-			this.tokenByPid.delete(live.observation.pid);
+		if (this.tokenByPid.get(live.key) === token) {
+			this.tokenByPid.delete(live.key);
 		}
 		return live;
 	}
@@ -2626,7 +2652,8 @@ export class GuardedSession {
 		}
 	}
 
-	private enqueue(lane: number | undefined, operation: () => Promise<ToolResult>): Promise<ToolResult> {
+	private enqueue(pid: number | undefined, operation: () => Promise<ToolResult>): Promise<ToolResult> {
+		const lane = pid === undefined ? undefined : this.laneKey(pid);
 		const previous = lane === undefined ? this.globalTail : (this.tails.get(lane) ?? Promise.resolve());
 		// A locked Mac is not a tool failure: it answers as a refusal that asks for the person.
 		const result = previous

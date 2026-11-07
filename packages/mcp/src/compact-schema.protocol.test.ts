@@ -1,18 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@opencua/test-support";
 import { createHarness, observe } from "./protocol-client-harness.js";
 import type { Effect } from "./protocol-test-harness.js";
-import { compactStepSchema, runStepSchema } from "./tool-schemas.js";
+import { compactStepSchema, compactStepsSchema, parseRunSteps, runStepSchema } from "./tool-schemas.js";
 
 /** Budgets for the serialized tools/list answer, so tool-list bloat cannot creep back. */
 const LEAN_BUDGET_BYTES = 10_500;
-// 35,000 is a measured revision of the 32,000 cap for run_hands + get_tool_usage (34,556 bytes
-// on 2026-10-25); the full list still omits the repeated per-type step schema.
-const FULL_BUDGET_BYTES = 36_000;
+// Measured revisions of the 32,000 cap: run_hands + get_tool_usage (34,556 bytes on 2026-10-25), then the named
+// cursor-owner fields on manage_workers (36,097 bytes on 2026-10-31), then the single `surface` tool for opencua-owned
+// windows (36,978 bytes on 2026-11-04), then the click `context` flag for windows several cursors share (37,078 bytes on
+// 2026-11-04). The full list still omits the repeated per-type step schema.
+const FULL_BUDGET_BYTES = 37_100;
 
 let closeHarness: (() => Promise<void>) | undefined;
 
 beforeEach(() => {
-	vi.stubEnv("APPLE_CUA_BROWSER", "off");
+	vi.stubEnv("OPENCUA_BROWSER", "off");
 });
 
 afterEach(async () => {
@@ -81,6 +84,15 @@ describe("compact step schema #given the published run_steps and run_parallel sc
 		expect(JSON.stringify(stepsSchema).split('"click_count":{').length - 1).toBe(1);
 		expect(JSON.stringify(tools.get("run_parallel")?.inputSchema)).not.toContain('"click_count"');
 		expect(JSON.stringify(tools.get("run_worker")?.inputSchema)).not.toContain('"click_count"');
+	});
+
+	it("keeps a click's context flag through the compact step, so a shared window can re-apply the pick", () => {
+		const [step] = parseRunSteps(
+			compactStepsSchema.parse([{ type: "click", x: 1, y: 2, context: true }]),
+			"run_steps",
+		);
+
+		expect(step).toMatchObject({ type: "click", context: true });
 	});
 });
 

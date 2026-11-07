@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type { KoffiFunc } from "koffi";
+import { denyHostInteraction } from "../../computer/host-interaction-policy.js";
 import { cfRelease, toCFString } from "./corefoundation.js";
 import { koffi } from "./koffi.js";
 
@@ -72,6 +73,7 @@ export interface PasteboardAccess {
 }
 
 export function readClipboard(access: PasteboardAccess = nativePasteboard): ClipboardReadResult {
+	if (access === nativePasteboard) denyHostInteraction("host-clipboard");
 	const types = access.types();
 	const textType = types.includes(TEXT_TYPE)
 		? TEXT_TYPE
@@ -82,18 +84,18 @@ export function readClipboard(access: PasteboardAccess = nativePasteboard): Clip
 	const imageType = IMAGE_TYPES.find((candidate) => types.includes(candidate));
 	const imageData = imageType === undefined ? null : access.dataForType(imageType);
 	const fileUrl = types.includes(FILE_URL_TYPE) ? access.stringForType(FILE_URL_TYPE) : null;
+	let image: ClipboardImage | undefined;
+	if (imageType !== undefined && imageData !== null) {
+		image = {
+			pasteboardType: imageType,
+			mimeType: mimeTypeForPasteboardType(imageType),
+			dataBase64: imageData.toString("base64"),
+		};
+	}
 	return {
 		types,
 		...(text === null ? {} : { text }),
-		...(imageType === undefined || imageData === null
-			? {}
-			: {
-					image: {
-						pasteboardType: imageType,
-						mimeType: mimeTypeForPasteboardType(imageType),
-						dataBase64: imageData.toString("base64"),
-					},
-				}),
+		...(image === undefined ? {} : { image }),
 		fileUrls: fileUrl === null ? [] : [fileUrl],
 	};
 }
@@ -102,6 +104,7 @@ export function writeClipboard(
 	input: ClipboardWriteInput,
 	access: PasteboardAccess = nativePasteboard,
 ): ClipboardWriteResult {
+	if (access === nativePasteboard) denyHostInteraction("host-clipboard");
 	const prepared = prepareClipboardInput(input);
 	access.clear();
 	let succeeded: boolean;

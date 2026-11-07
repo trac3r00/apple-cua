@@ -40,7 +40,7 @@ export class RemoteBrowserController implements BrowserControllerLike {
 			const detail = error instanceof Error ? error.message : String(error);
 			throw new BrowserError(
 				"disconnected",
-				`The background browser daemon is not reachable on 127.0.0.1:${this.port}: ${detail}. Run: apple-cua browser setup`,
+				`The background browser daemon is not reachable on 127.0.0.1:${this.port}: ${detail}. Run: opencua browser setup`,
 			);
 		}
 		const result: unknown = await response.json();

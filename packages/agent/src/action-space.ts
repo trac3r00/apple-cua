@@ -1,4 +1,4 @@
-import type { AXTreeElement, AppState } from "@apple-cua/core";
+import type { AXTreeElement, AppState } from "@opencua/core";
 import { MAX_TARGETS_PER_OPERATION, SPARSE_TARGET_COUNT } from "./questions.js";
 import type { ActionSpace, Operation, TableElement, Target, TargetedOperation } from "./types.js";
 

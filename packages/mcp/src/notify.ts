@@ -19,7 +19,7 @@ export function parseNotificationsEnabled(value: string | undefined): boolean {
 }
 
 export function notificationsEnabled(): boolean {
-	return parseNotificationsEnabled(process.env["APPLE_CUA_NOTIFICATIONS"]);
+	return parseNotificationsEnabled(process.env["OPENCUA_NOTIFICATIONS"]);
 }
 
 const defaultDependencies: NotificationDependencies = {

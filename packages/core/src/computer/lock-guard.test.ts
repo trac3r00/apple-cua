@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import { SCREEN_LOCKED_MESSAGE, assertScreenUnlocked } from "./lock-guard.js";
 

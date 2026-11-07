@@ -1,5 +1,5 @@
+import { vi } from "@opencua/test-support";
 import { Value } from "typebox/value";
-import { vi } from "vitest";
 
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "../../src/pi/index.js";
 

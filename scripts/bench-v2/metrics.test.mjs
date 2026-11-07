@@ -135,7 +135,7 @@ test("#given legacy results #when normalizing #then unknown image and token metr
 	const rows = normalizeLegacy(
 		{
 			started_at: "2026-09-17T00:00:00Z",
-			tasks: { apple_cua: { save: { pass: true, calls: 2, payload_bytes: 500, seconds: 2 } } },
+			tasks: { opencua: { save: { pass: true, calls: 2, payload_bytes: 500, seconds: 2 } } },
 		},
 		"legacy.json",
 	);
@@ -154,7 +154,7 @@ test("#given a legacy fixture #when rendering #then charts label n and omit unkn
 	const runs = normalizeLegacy(
 		{
 			started_at: "2026-09-17T00:00:00Z",
-			tasks: { apple_cua: { save: { pass: true, calls: 2, payload_bytes: 500, seconds: 2 } } },
+			tasks: { opencua: { save: { pass: true, calls: 2, payload_bytes: 500, seconds: 2 } } },
 		},
 		"legacy.json",
 	);
@@ -181,7 +181,7 @@ test("#given hostile fixture text #when rendering #then no HTML injection surviv
 			{
 				started_at: "2026-09-17",
 				tasks: {
-					apple_cua: { "<script>alert(1)</script>": { pass: false, calls: 1, payload_bytes: 1, seconds: 1 } },
+					opencua: { "<script>alert(1)</script>": { pass: false, calls: 1, payload_bytes: 1, seconds: 1 } },
 				},
 			},
 			"x",

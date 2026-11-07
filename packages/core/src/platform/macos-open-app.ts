@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import type { AppInfo } from "../accessibility/types.js";
 import { findMatchingApp } from "../computer/actions.js";
+import { denyHostInteraction } from "../computer/host-interaction-policy.js";
 import { activateApplication } from "./macos-ffi/workspace.js";
 
 /** Launches or activates an application by name or bundle id. */
@@ -58,23 +58,8 @@ export function spawnOpenLauncher(
 	return {
 		background,
 		...(background ? { restoreFrontmost: options.restoreFrontmost ?? activateApplication } : {}),
-		async launch(target: string): Promise<void> {
-			const args = [...openArguments(target, background)];
-			await new Promise<void>((resolve, reject) => {
-				const child = spawn("open", args, { stdio: ["ignore", "ignore", "pipe"] });
-				let stderr = "";
-				child.stderr.on("data", (chunk: Buffer) => {
-					stderr += chunk.toString("utf8");
-				});
-				child.once("error", reject);
-				child.once("close", (code) => {
-					if (code === 0) {
-						resolve();
-						return;
-					}
-					reject(new Error(stderr.trim().length > 0 ? stderr.trim() : `open exited with code ${String(code)}`));
-				});
-			});
+		async launch(_target: string): Promise<void> {
+			denyHostInteraction("host-window");
 		},
 	};
 }

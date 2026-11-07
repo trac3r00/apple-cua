@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, rmSync, rmdirSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
-import { StopSwitch } from "@apple-cua/core";
+import { StopSwitch } from "@opencua/core/light";
+import { z } from "zod/v4";
 import { syncSkillLinks } from "./client-skills.js";
 import {
 	type ClientContext,
@@ -14,6 +15,7 @@ import {
 	unregisterClient,
 	writeConfigFile,
 } from "./clients.js";
+import { HISTORY_SERVICE_LABEL, type HistoryServiceOptions, historyLaunchAgentPath } from "./history-service.js";
 import {
 	type Environment,
 	type InstallMarker,
@@ -25,12 +27,12 @@ import {
 import { loadSettings } from "./settings.js";
 
 /** Second line of every launcher scripts/setup.sh writes, followed by the checkout it runs. */
-export const LAUNCHER_MARKER = "# apple-cua-launcher checkout=";
+export const LAUNCHER_MARKER = "# opencua-launcher checkout=";
 /** Ends the one line `setup.sh --add-to-path` appends to a shell startup file. */
-export const PATH_LINE_MARKER = "# added by apple-cua";
+export const PATH_LINE_MARKER = "# added by opencua";
 const ADAPTER_CLIENTS: readonly ClientName[] = ["claude", "codex", "gemini", "hermes", "openclaw", "pi"];
 const TCC_SERVICES = ["Accessibility", "ScreenCapture", "AppleEvents"] as const;
-const HELPER_EXECUTABLE = "/Contents/MacOS/apple-cua-mcp";
+const HELPER_EXECUTABLE = "/Contents/MacOS/opencua-mcp";
 const LSREGISTER =
 	"/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
@@ -50,27 +52,35 @@ export interface ClientEntryFacts {
 	readonly otherHelperBundleId?: string | undefined;
 }
 
+interface HistoryRegistration {
+	readonly launchAgent: string;
+	readonly binary: string | undefined;
+	readonly stateDirectory: string | undefined;
+}
+
 /** Everything uninstall decides from, read without changing anything. */
 export interface UninstallFacts {
 	readonly layout: Layout;
 	readonly marker: InstallMarker | undefined;
-	/** A checkout install.sh created elsewhere that still exists, and so still uses APPLE_CUA_HOME. */
+	/** A checkout install.sh created elsewhere that still exists, and so still uses OPENCUA_HOME. */
 	readonly otherInstallerCheckout: string | undefined;
 	readonly trackedClients: readonly ClientName[];
 	readonly clientEntries: readonly ClientEntryFacts[];
 	readonly processes: readonly ProcessRow[];
 	readonly ownPids: readonly number[];
 	readonly helperPresent: boolean;
-	/** CFBundleIdentifier of this checkout's helper app (or APPLE_CUA_BUNDLE_ID when the helper is gone). */
+	/** CFBundleIdentifier of this checkout's helper app (or OPENCUA_BUNDLE_ID when the helper is gone). */
 	readonly helperBundleId: string | undefined;
 	readonly launchers: readonly { readonly path: string; readonly checkout: string | undefined }[];
 	readonly rcFiles: readonly { readonly path: string; readonly text: string }[];
 	/** Existing per-user state: config.json, install.json, the stop file, the downloaded Node.js. */
 	readonly stateEntries: readonly string[];
-	/** apple-cua's own directories, removed at the end when nothing else is left in them. */
+	/** opencua's own directories, removed at the end when nothing else is left in them. */
 	readonly stateDirectories: readonly string[];
-	/** The stop switch file, which every installation on this Mac shares (~/.apple-cua/stop.json). */
+	/** The stop switch file, which every installation on this Mac shares (~/.opencua/stop.json). */
 	readonly stopPath: string;
+	readonly historyService: HistoryRegistration | undefined;
+	readonly historyDirectories: readonly string[];
 }
 
 export interface UninstallPlan {
@@ -91,6 +101,11 @@ export interface UninstallPlan {
 	readonly keepState: string | undefined;
 	readonly removeCheckout: boolean;
 	readonly checkoutReason: string;
+	readonly removeHistoryService:
+		| { readonly launchAgent: string; readonly binary: string; readonly stateDirectory: string }
+		| undefined;
+	readonly keepHistoryService: string | undefined;
+	readonly keepHistory: readonly string[];
 }
 
 /** Processes started from this checkout: its helper (launcher and bundled node), its server.js, its cursor overlay. */
@@ -119,6 +134,20 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 	const leaveRegistrations: { client: ClientName; reason: string }[] = [];
 	let sharedWith: string | undefined;
 	let anotherInstallationStays = facts.otherInstallerCheckout !== undefined;
+	const history = facts.historyService;
+	const ownsHistory =
+		history?.binary !== undefined &&
+		history.stateDirectory !== undefined &&
+		[join(layout.helperApp, "Contents/MacOS/history-recorder"), join(layout.nativeDir, "history-recorder")]
+			.map(canonicalPath)
+			.includes(canonicalPath(history.binary));
+	const removeHistoryService =
+		ownsHistory && history?.binary !== undefined && history.stateDirectory !== undefined
+			? { launchAgent: history.launchAgent, binary: history.binary, stateDirectory: history.stateDirectory }
+			: undefined;
+	if (history !== undefined && !ownsHistory) {
+		anotherInstallationStays = true;
+	}
 	for (const item of facts.clientEntries) {
 		if (item.entry === undefined) {
 			continue;
@@ -152,8 +181,10 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 	let keepPermissions: string | undefined;
 	if (facts.helperBundleId === undefined) {
 		keepPermissions = installed
-			? 'no helper app is left to name, so no permission is reset; if "apple-cua-mcp" is still listed in System Settings > Privacy & Security, remove it there'
+			? 'no helper app is left to name, so no permission is reset; if "opencua-mcp" is still listed in System Settings > Privacy & Security, remove it there'
 			: undefined;
+	} else if (history !== undefined && !ownsHistory) {
+		keepPermissions = `the permissions of ${facts.helperBundleId}: another or unrecognized history service may still use them`;
 	} else if (sharedWith !== undefined) {
 		keepPermissions = `the permissions of ${facts.helperBundleId}: ${sharedWith} uses the same bundle id`;
 	}
@@ -167,7 +198,7 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 			path: launcher.path,
 			reason:
 				launcher.checkout === undefined
-					? "not written by apple-cua setup"
+					? "not written by opencua setup"
 					: `it runs ${launcher.checkout}, another installation`,
 		}));
 	const anotherLauncherStays = facts.launchers.some(
@@ -176,12 +207,11 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 			launcher.checkout !== layout.checkout &&
 			dirname(launcher.path) === layout.binDir,
 	);
-	const removePathLines = anotherLauncherStays
-		? []
-		: facts.rcFiles.flatMap((rc) => {
-				const lines = rc.text.split("\n").filter((line) => line.trimEnd().endsWith(PATH_LINE_MARKER));
-				return lines.length === 0 ? [] : [{ path: rc.path, lines }];
-			});
+	const pathLines = facts.rcFiles.flatMap((rc) => {
+		const lines = rc.text.split("\n").filter((line) => line.trimEnd().endsWith(PATH_LINE_MARKER));
+		return lines.length === 0 ? [] : [{ path: rc.path, lines }];
+	});
+	const removePathLines = anotherLauncherStays ? [] : pathLines;
 
 	if (facts.launchers.some((launcher) => launcher.checkout !== undefined && launcher.checkout !== layout.checkout)) {
 		anotherInstallationStays = true;
@@ -191,7 +221,7 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 	const keepState =
 		facts.otherInstallerCheckout === undefined
 			? undefined
-			: `${displayPath(layout.appleCuaHome, layout.home)}: the installation in ${displayPath(facts.otherInstallerCheckout, layout.home)} still uses it (its apple-cua uninstall removes it)`;
+			: `${displayPath(layout.openCuaHome, layout.home)}: the installation in ${displayPath(facts.otherInstallerCheckout, layout.home)} still uses it (its opencua uninstall removes it)`;
 	return {
 		layout,
 		unregister,
@@ -213,15 +243,21 @@ export function planUninstall(facts: UninstallFacts, options: { readonly purge: 
 			: options.purge
 				? "--purge was given"
 				: "a developer checkout; --purge deletes it too",
+		removeHistoryService,
+		keepHistoryService: history !== undefined && !ownsHistory ? history.launchAgent : undefined,
+		keepHistory: facts.historyDirectories,
 	};
 }
 
 export function formatPlan(plan: UninstallPlan): string {
 	const show = (path: string) => displayPath(path, plan.layout.home);
-	const lines = ["apple-cua uninstall will:"];
+	const lines = ["opencua uninstall will:"];
 	const row = (verb: string, text: string) => {
 		lines.push(`  ${verb.padEnd(11)}${text}`);
 	};
+	if (plan.removeHistoryService !== undefined) {
+		row("stop/remove", `history login service ${show(plan.removeHistoryService.launchAgent)}`);
+	}
 	for (const client of plan.unregister) {
 		row(
 			"unregister",
@@ -258,7 +294,11 @@ export function formatPlan(plan: UninstallPlan): string {
 		...plan.leaveLaunchers.map((launcher) => `${show(launcher.path)}: ${launcher.reason}`),
 		...(plan.keepPermissions === undefined ? [] : [plan.keepPermissions]),
 		...(plan.keepState === undefined ? [] : [plan.keepState]),
-		...(plan.pastedJson ? ['any "apple-cua" block you pasted into another MCP client: remove it by hand'] : []),
+		...(plan.keepHistoryService === undefined
+			? []
+			: [`history login service ${show(plan.keepHistoryService)}: another or unrecognized installation`]),
+		...plan.keepHistory.map((path) => `recorded history ${show(path)}: retained, not deleted by uninstall`),
+		...(plan.pastedJson ? ['any "opencua" block you pasted into another MCP client: remove it by hand'] : []),
 	];
 	if (kept.length > 0) {
 		lines.push("and leave:");
@@ -285,6 +325,7 @@ export interface UninstallDependencies {
 	/** `tccutil reset <service> <bundle id>`. */
 	readonly resetPermission: (service: string, bundleId: string) => PermissionReset;
 	readonly print: (text: string) => void;
+	readonly stopHistory: (options: HistoryServiceOptions) => Promise<void>;
 }
 
 export interface UninstallOutcome {
@@ -292,7 +333,7 @@ export interface UninstallOutcome {
 	readonly failures: readonly string[];
 }
 
-/** Carries out a plan. Every step runs even when an earlier one fails; failures are collected and reported. */
+/** History shutdown must succeed before teardown. Later independent failures are collected and reported. */
 export async function executeUninstall(plan: UninstallPlan, deps: UninstallDependencies): Promise<UninstallOutcome> {
 	const { layout } = plan;
 	const show = (path: string) => displayPath(path, layout.home);
@@ -310,6 +351,35 @@ export async function executeUninstall(plan: UninstallPlan, deps: UninstallDepen
 			done("FAILED", message);
 		}
 	};
+	const signalProcess = (pid: number, signal: "SIGTERM" | "SIGKILL") => {
+		if (!deps.isAlive(pid)) return;
+		try {
+			deps.signal(pid, signal);
+		} catch (error) {
+			if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+		}
+	};
+
+	if (plan.removeHistoryService !== undefined) {
+		const expected = plan.removeHistoryService;
+		try {
+			const current = readHistoryRegistration(layout.home);
+			if (current?.binary !== expected.binary || current.stateDirectory !== expected.stateDirectory) {
+				throw new Error("The history registration changed after planning; run uninstall again.");
+			}
+			await deps.stopHistory({
+				homeDirectory: layout.home,
+				binary: expected.binary,
+				stateDirectory: expected.stateDirectory,
+			});
+			done("removed", `history login service ${show(expected.launchAgent)}`);
+		} catch (error) {
+			const message = `stop history: ${error instanceof Error ? error.message : String(error)}`;
+			failures.push(message);
+			done("FAILED", message);
+			return { backups, failures };
+		}
+	}
 
 	for (const client of plan.unregister) {
 		attempt(`unregister ${client}`, () => {
@@ -322,20 +392,20 @@ export async function executeUninstall(plan: UninstallPlan, deps: UninstallDepen
 	}
 	attempt("remove the skill links", () => {
 		for (const link of syncSkillLinks([], layout.bundleDir, deps.context)) {
-			done("removed", `the apple-cua skill link in ${show(link.directory)}`);
+			done("removed", `the opencua skill link in ${show(link.directory)}`);
 		}
 	});
 
 	if (plan.stopProcesses.length > 0) {
 		for (const item of plan.stopProcesses) {
-			attempt(`stop pid ${item.pid}`, () => deps.signal(item.pid, "SIGTERM"));
+			attempt(`stop pid ${item.pid}`, () => signalProcess(item.pid, "SIGTERM"));
 		}
 		for (let waited = 0; waited < 3_000 && plan.stopProcesses.some((item) => deps.isAlive(item.pid)); waited += 100) {
 			await deps.wait(100);
 		}
 		for (const item of plan.stopProcesses) {
 			if (deps.isAlive(item.pid)) {
-				attempt(`kill pid ${item.pid}`, () => deps.signal(item.pid, "SIGKILL"));
+				attempt(`kill pid ${item.pid}`, () => signalProcess(item.pid, "SIGKILL"));
 			}
 			done("stopped", `pid ${item.pid}: ${item.command}`);
 		}
@@ -353,12 +423,12 @@ export async function executeUninstall(plan: UninstallPlan, deps: UninstallDepen
 			} else if (result.status === "unknown-app") {
 				done(
 					"skipped",
-					`${service}: tccutil cannot find ${bundleId} (LaunchServices skips apps in temporary folders); if "apple-cua-mcp" is still listed in System Settings > Privacy & Security, remove it there`,
+					`${service}: tccutil cannot find ${bundleId} (LaunchServices skips apps in temporary folders); if "opencua-mcp" is still listed in System Settings > Privacy & Security, remove it there`,
 				);
 			} else {
 				const message = `tccutil reset ${service} ${bundleId}: ${result.output}`;
 				failures.push(message);
-				done("FAILED", `${message} (remove "apple-cua-mcp" in System Settings > Privacy & Security by hand)`);
+				done("FAILED", `${message} (remove "opencua-mcp" in System Settings > Privacy & Security by hand)`);
 			}
 		}
 		if (plan.removeHelper !== undefined) {
@@ -408,7 +478,7 @@ export async function executeUninstall(plan: UninstallPlan, deps: UninstallDepen
 		}
 		const left = readdirSync(directory);
 		if (left.length > 0) {
-			done("kept", `${show(directory)}: it still holds ${left.join(", ")}, which apple-cua did not create`);
+			done("kept", `${show(directory)}: it still holds ${left.join(", ")}, which opencua did not create`);
 			continue;
 		}
 		attempt(`remove ${directory}`, () => {
@@ -420,6 +490,31 @@ export async function executeUninstall(plan: UninstallPlan, deps: UninstallDepen
 }
 
 // --- Reading the Mac -----------------------------------------------------------------------------------------------
+
+function readHistoryRegistration(home: string): HistoryRegistration | undefined {
+	const launchAgent = historyLaunchAgentPath(home);
+	if (!existsSync(launchAgent)) return undefined;
+	const result = spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", launchAgent], { encoding: "utf8" });
+	const unknown = { launchAgent, binary: undefined, stateDirectory: undefined };
+	if (result.status !== 0) return unknown;
+	try {
+		const parsed = z
+			.object({
+				Label: z.literal(HISTORY_SERVICE_LABEL),
+				ProgramArguments: z.array(z.string()).min(1),
+				EnvironmentVariables: z.record(z.string(), z.string()).optional(),
+			})
+			.safeParse(JSON.parse(result.stdout));
+		if (!parsed.success) return unknown;
+		return {
+			launchAgent,
+			binary: parsed.data.ProgramArguments[0],
+			stateDirectory: parsed.data.EnvironmentVariables?.["OPENCUA_STATE_DIR"],
+		};
+	} catch {
+		return unknown;
+	}
+}
 
 function bundleIdOf(app: string): string | undefined {
 	const result = spawnSync(
@@ -433,17 +528,22 @@ function bundleIdOf(app: string): string | undefined {
 
 /** The checkout a launcher written by setup runs; undefined for any other file. */
 function launcherCheckout(text: string): string | undefined {
-	const line = text.split("\n").find((entry) => entry.startsWith(LAUNCHER_MARKER));
-	return line === undefined ? undefined : canonicalPath(line.slice(LAUNCHER_MARKER.length).trim());
+	const match = /^(?:#|rem) (?:opencua|apple-cua)-launcher checkout=(.+)$/m.exec(text);
+	return match?.[1] === undefined ? undefined : canonicalPath(match[1].trim());
 }
 
 function readLaunchers(layout: Layout, env: Environment): UninstallFacts["launchers"] {
 	const candidates = [
 		layout.launcherPath,
+		join(layout.binDir, process.platform === "win32" ? "apple-cua.cmd" : "apple-cua"),
 		...(env["PATH"] ?? "")
 			.split(delimiter)
 			.filter((directory) => directory !== "")
-			.map((directory) => join(directory, "apple-cua")),
+			.flatMap((directory) =>
+				["opencua", "apple-cua"].map((name) =>
+					join(directory, process.platform === "win32" ? `${name}.cmd` : name),
+				),
+			),
 	];
 	const launchers: { path: string; checkout: string | undefined }[] = [];
 	for (const candidate of new Set(candidates)) {
@@ -512,6 +612,7 @@ export function gatherUninstallFacts(layout: Layout, env: Environment): Uninstal
 	);
 	const stopFile = new StopSwitch().path;
 	const helperPresent = existsSync(layout.helperApp);
+	const historyService = readHistoryRegistration(layout.home);
 	return {
 		layout,
 		marker,
@@ -524,7 +625,7 @@ export function gatherUninstallFacts(layout: Layout, env: Environment): Uninstal
 		processes: listProcesses(),
 		ownPids: [process.pid, process.ppid],
 		helperPresent,
-		helperBundleId: (helperPresent ? bundleIdOf(layout.helperApp) : undefined) ?? env["APPLE_CUA_BUNDLE_ID"],
+		helperBundleId: (helperPresent ? bundleIdOf(layout.helperApp) : undefined) ?? env["OPENCUA_BUNDLE_ID"],
 		launchers: readLaunchers(layout, env),
 		rcFiles: shellStartupFiles(layout.home, env).flatMap((path) => {
 			try {
@@ -538,11 +639,21 @@ export function gatherUninstallFacts(layout: Layout, env: Environment): Uninstal
 			layout.configPath,
 			layout.installMarkerPath,
 			stopFile,
-			join(layout.appleCuaHome, "node"),
+			join(layout.openCuaHome, "node"),
 			layout.bundleDir,
 		].filter((path) => existsSync(path)),
-		stateDirectories: [...new Set([layout.appleCuaHome, dirname(stopFile)])],
+		stateDirectories: [...new Set([layout.openCuaHome, dirname(stopFile)])],
 		stopPath: stopFile,
+		historyService,
+		historyDirectories: [
+			...new Set([
+				join(layout.openCuaHome, "cua-history"),
+				join(dirname(stopFile), "cua-history"),
+				...(historyService?.stateDirectory === undefined
+					? []
+					: [join(historyService.stateDirectory, "cua-history")]),
+			]),
+		].filter((path) => existsSync(path)),
 	};
 }
 

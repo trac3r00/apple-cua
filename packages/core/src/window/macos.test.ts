@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { vi } from "@opencua/test-support";
 
 const getWindowsMock = vi.hoisted(() => ({
 	activeWindow: vi.fn<() => Promise<unknown>>(),

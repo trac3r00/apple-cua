@@ -4,12 +4,18 @@ import { koffi } from "./koffi.js";
 
 // The calls that put macOS's own permission dialogs on screen for this process, and the one read-only check the
 // preflight functions elsewhere do not cover (Automation). Run inside the signed helper, the dialogs and the System
-// Settings entries they create name "apple-cua-mcp" instead of the terminal that started setup.
+// Settings entries they create name "opencua-mcp" instead of the terminal that started setup.
 
 const coreFoundation = koffi.load("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation");
 const coreGraphics = koffi.load("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics");
 const applicationServices = koffi.load("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices");
 const coreServices = koffi.load("/System/Library/Frameworks/CoreServices.framework/CoreServices");
+const ioKit = koffi.load("/System/Library/Frameworks/IOKit.framework/IOKit");
+
+const IOHIDRequestAccess = ioKit.func("IOHIDRequestAccess", "bool", ["uint32"]) as KoffiFunc<
+	(requestType: number) => boolean
+>;
+const IOHID_REQUEST_TYPE_LISTEN_EVENT = 1;
 
 const CGRequestScreenCaptureAccess = coreGraphics.func("CGRequestScreenCaptureAccess", "bool", []) as KoffiFunc<
 	() => boolean
@@ -63,6 +69,14 @@ const AEDeterminePermissionToAutomateTarget = coreServices.func("AEDeterminePerm
  */
 export function requestScreenRecording(): boolean {
 	return CGRequestScreenCaptureAccess();
+}
+
+/**
+ * Asks for Input Monitoring: the first call shows macOS's dialog and lists this app in System Settings > Privacy &
+ * Security > Input Monitoring; later calls only answer. True when it is already granted.
+ */
+export function requestInputMonitoring(): boolean {
+	return IOHIDRequestAccess(IOHID_REQUEST_TYPE_LISTEN_EVENT);
 }
 
 /**

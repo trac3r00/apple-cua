@@ -1,6 +1,6 @@
-import { invokeMenu, readClipboard, setWindowFrame, writeClipboard } from "@apple-cua/core";
-import type { GuardedComputerInterface, InputObservation, Rect } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { invokeMenu, readClipboard, setWindowFrame, writeClipboard } from "@opencua/core";
+import type { GuardedComputerInterface, InputObservation, Rect } from "@opencua/core";
 import { z } from "zod/v4";
 import type { GuardedSession } from "./guarded-session.js";
 import { type StepDispatch, type ToolResult, textResult } from "./tool-result.js";
@@ -127,7 +127,7 @@ export function registerPowerTools(
 		"set_window_frame",
 		{
 			description:
-				"Set an observed top-level window's desktop geometry and verify through WindowServer within 2 points. Requires a one-use observation_token.",
+				"Set an observed top-level window's desktop geometry and verify through WindowServer within 2 points. Requires a one-use observation_token. On the shared host this is refused (isolated-session-required), because moving a window acts on the human desktop.",
 			inputSchema: setWindowFrameSchema,
 			annotations: MUTATION_ANNOTATIONS,
 		},
@@ -157,6 +157,31 @@ export function registerPowerTools(
 			annotations: READ_ONLY_ANNOTATIONS,
 		},
 		async () => textResult(JSON.stringify(powerComputer.readClipboard?.() ?? readClipboard(), null, 2)),
+	);
+
+	server.registerTool(
+		"clipboard_clear",
+		{
+			description:
+				"Clear clipboard content with empty text; the text type remains. Needs the latest app token; returns fresh state. Does not paste.",
+			inputSchema: z.object(mutationBase),
+			annotations: MUTATION_ANNOTATIONS,
+		},
+		async (input) => {
+			let report: ReturnType<typeof writeClipboard> | undefined;
+			const result = await session.mutate(
+				input.observation_token,
+				input.app,
+				() => undefined,
+				async () => {
+					const writeInput = { type: "text", text: "" } as const;
+					report = powerComputer.writeClipboard?.(writeInput) ?? writeClipboard(writeInput);
+					return { route: "synthetic_events", delivery: "not_applicable" } as const;
+				},
+				{ fullState: input.full_state === true },
+			);
+			return appendReport(result, "clipboardClear", report);
+		},
 	);
 
 	server.registerTool(

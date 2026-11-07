@@ -1,4 +1,4 @@
-import { type StopStatusSource, describeUserStop } from "@apple-cua/core";
+import { type StopStatusSource, describeUserStop } from "@opencua/core/light";
 import type { Command } from "commander";
 
 /**
@@ -53,7 +53,7 @@ export function stopRefusalFor(commandPath: string, stopSwitch: StopStatusSource
 	return status.stopped ? describeUserStop(status) : undefined;
 }
 
-/** "ios tap" for `apple-cua ios tap`: the command names from just below the program down to the command. */
+/** "ios tap" for `opencua ios tap`: the command names from just below the program down to the command. */
 export function commandPathOf(command: Command): string {
 	const names: string[] = [];
 	for (let current: Command | null = command; current?.parent; current = current.parent) {

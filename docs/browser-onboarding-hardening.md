@@ -19,9 +19,9 @@ claim. Missing permissions or targets are reported as unverified, never papered 
 
 ## Ideal state
 
-1. `apple-cua browser setup` builds and installs the bridge, opens the right extensions page in
+1. `opencua browser setup` builds and installs the bridge, opens the right extensions page in
    the background, copies the unpacked-extension path, and waits for the connection. The only
-   human step is Load unpacked. `apple-cua browser status` explains any remaining gap.
+   human step is Load unpacked. `opencua browser status` explains any remaining gap.
 2. One main MCP registration exposes the desktop, browser, and phone tools. The browser tools
    appear automatically once the bridge has a connection file.
 3. The browser skill is decision-first: described target, bounded read, wait, screenshot, batch,
@@ -38,7 +38,7 @@ claim. Missing permissions or targets are reported as unverified, never papered 
 ## Gaps before this change
 
 - `scripts/setup.sh` built core, mcp, cli, pi-extension, and agent, but not the browser package.
-  The browser skill told the reader to run `pnpm install` and `pnpm --filter @apple-cua/browser
+  The browser skill told the reader to run `pnpm install` and `pnpm --filter @opencua/browser
   build` by hand.
 - The browser was a separate MCP server (`packages/browser/src/server.ts`), so a user had to
   register a second entry by hand.
@@ -64,9 +64,9 @@ claim. Missing permissions or targets are reported as unverified, never papered 
   each step revalidates its live element and refuses on navigation; there is no per-step full
   walk or revision round trip. Unchanged reads are cached.
 - Per-tab queues replace the per-window queue, so independent spaces/tabs run concurrently.
-- The main MCP server registers browser tools when `APPLE_CUA_BROWSER` is on or
-  `~/.apple-cua/browser-connection.json` exists. It proxies to the single background daemon.
-- `apple-cua browser setup|status|uninstall`, and a browser step in `scripts/setup.sh`.
+- The main MCP server registers browser tools when `OPENCUA_BROWSER` is on or
+  `~/.opencua/browser-connection.json` exists. It proxies to the single background daemon.
+- `opencua browser setup|status|uninstall`, and a browser step in `scripts/setup.sh`.
 - iPhone `ios_run` (one token, up to eight steps, one final OCR verification). Background
   occlusion now refuses instead of raising the phone.
 - `get_app_state` accepts `profile: "fast" | "full" | "visual"`; fast is screenshot-free,
@@ -92,7 +92,7 @@ claim. Missing permissions or targets are reported as unverified, never papered 
 
 ## Evidence
 
-Browser verifier evidence is written under `.omo/evidence/apple-cua-browser/run-*`. The
+Browser verifier evidence is written under `.omo/evidence/opencua-browser/run-*`. The
 pre-change benchmark ran from a detached worktree at the baseline commit with the same large
 fixture and the same verifier script. Reports preserve the browser version, per-tab timings,
 payload bytes, and the non-disruption assertions.
@@ -130,13 +130,13 @@ single cold observe was already fast and is reported honestly as unchanged.
 
 | Check | Evidence |
 |---|---|
-| Browser verifier (clean five samples) | `.omo/evidence/apple-cua-browser/run-HxnLlo/report.json` |
-| Browser verifier (pushed-stop, loaded machine) | `.omo/evidence/apple-cua-browser/run-u6SIuy/report.json` |
-| Browser benchmark (pre-change, five samples) | `.omo/evidence/apple-cua-browser/baseline-q3QFsi-report.json` |
-| Final real-surface browser run | `.omo/evidence/apple-cua-browser/run-hRaRSH/report.json` |
+| Browser verifier (clean five samples) | `.omo/evidence/opencua-browser/run-HxnLlo/report.json` |
+| Browser verifier (pushed-stop, loaded machine) | `.omo/evidence/opencua-browser/run-u6SIuy/report.json` |
+| Browser benchmark (pre-change, five samples) | `.omo/evidence/opencua-browser/baseline-q3QFsi-report.json` |
+| Final real-surface browser run | `.omo/evidence/opencua-browser/run-hRaRSH/report.json` |
 | Browser tests | `pnpm exec vitest run packages/browser` |
 | iPhone batch/no-raise tests | `pnpm exec vitest run packages/mcp/src/phone-tools.protocol.test.ts packages/core/src/platform/ios-mirroring-background.test.ts` |
-| Live iPhone Home press | `.omo/evidence/apple-cua-browser/iphone-run-home.json` |
+| Live iPhone Home press | `.omo/evidence/opencua-browser/iphone-run-home.json` |
 | Unified tool registration | `pnpm exec vitest run packages/mcp/src/toolset.protocol.test.ts packages/mcp/src/server.test.ts` |
 | Native profile | `pnpm exec vitest run packages/mcp/src/observation-profile.test.ts packages/mcp/src/capture-only.protocol.test.ts` |
 | Onboarding command | `pnpm exec vitest run packages/cli/src/browser-commands.test.ts` |
@@ -144,7 +144,7 @@ single cold observe was already fast and is reported honestly as unchanged.
 ### Live native and iPhone status
 
 With the Mac unlocked, a real MCP probe measured Finder through the shipped server
-(`.omo/evidence/apple-cua-browser/native-probe-unlocked.json`):
+(`.omo/evidence/opencua-browser/native-probe-unlocked.json`):
 
 | Native observation | Median | Payload | Tree |
 |---|---:|---:|---|

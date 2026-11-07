@@ -1,6 +1,6 @@
 // Runs the bundled Node so that macOS attributes the server's Accessibility,
-// Screen Recording and Automation asks to this bundle ("apple-cua-mcp",
-// dev.applecua.mcp) instead of whatever launched it.
+// Screen Recording and Automation asks to this bundle ("opencua-mcp",
+// dev.opencua.mcp) instead of whatever launched it.
 //
 // macOS charges a permission to a process's responsible process. A process
 // spawned with responsibility disclaimed is responsible for itself, and its
@@ -29,7 +29,7 @@ extern int responsibility_spawnattrs_setdisclaim(posix_spawnattr_t *attributes,
 extern char **environ;
 
 // Set in the re-spawned copy, which is the responsible process.
-static const char *const kResponsibleStage = "APPLE_CUA_MCP_RESPONSIBLE";
+static const char *const kResponsibleStage = "OPENCUA_MCP_RESPONSIBLE";
 
 static pid_t childPid = -1;
 
@@ -41,7 +41,7 @@ static void forwardSignal(int signalNumber) {
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    fprintf(stderr, "usage: apple-cua-mcp <server.js> [server args...]\n");
+    fprintf(stderr, "usage: opencua-mcp <server.js> [server args...]\n");
     return 2;
   }
 
@@ -50,7 +50,7 @@ int main(int argc, char **argv) {
   char nodePath[PATH_MAX];
   uint32_t executablePathSize = sizeof(executablePath);
   if (_NSGetExecutablePath(executablePath, &executablePathSize) != 0) {
-    fprintf(stderr, "apple-cua-mcp: cannot resolve its own path\n");
+    fprintf(stderr, "opencua-mcp: cannot resolve its own path\n");
     return 1;
   }
   if (realpath(executablePath, resolvedPath) == NULL) {
@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
   snprintf(nodePath, sizeof(nodePath), "%s/../Resources/node",
            dirname(resolvedPath));
   if (access(nodePath, X_OK) != 0) {
-    fprintf(stderr, "apple-cua-mcp: bundled node missing at %s\n", nodePath);
+    fprintf(stderr, "opencua-mcp: bundled node missing at %s\n", nodePath);
     return 1;
   }
 
@@ -80,14 +80,14 @@ int main(int argc, char **argv) {
   } else {
     setenv(kResponsibleStage, "1", 1);
     if (responsibility_spawnattrs_setdisclaim(&attributes, 1) != 0) {
-      fprintf(stderr, "apple-cua-mcp: responsibility disclaim unavailable; "
+      fprintf(stderr, "opencua-mcp: responsibility disclaim unavailable; "
                       "permissions are charged to whatever launched it\n");
     }
   }
 
   if (posix_spawn(&childPid, childArgv[0], NULL, &attributes, childArgv,
                   environ) != 0) {
-    fprintf(stderr, "apple-cua-mcp: cannot spawn %s\n", childArgv[0]);
+    fprintf(stderr, "opencua-mcp: cannot spawn %s\n", childArgv[0]);
     posix_spawnattr_destroy(&attributes);
     free(childArgv);
     return 1;

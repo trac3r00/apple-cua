@@ -4,6 +4,7 @@ import type { ListedWindow } from "./macos-ffi/window-list.js";
 import { listWindows } from "./macos-ffi/window-list.js";
 import { findRunningApplication } from "./macos-ffi/workspace.js";
 import type { MacOSWindowInfo } from "./macos-window-target.js";
+import { isOwnedSurfacePid } from "./owned-surfaces.js";
 
 const OPEN_WINDOWS_ATTEMPTS = 3;
 const OPEN_WINDOWS_RETRY_DELAY_MILLISECONDS = 30;
@@ -11,6 +12,8 @@ const OPEN_WINDOWS_RETRY_DELAY_MILLISECONDS = 30;
 const BINARY_LISTING_TIMEOUT_MILLISECONDS = 5_000;
 /** App windows live at layer 0; menu bar items, Control Centre and drag helpers sit above them. */
 const NORMAL_WINDOW_LAYER = 0;
+/** opencua-owned surfaces sit one level below normal windows so agent input never raises them over the person's work. */
+const OWNED_SURFACE_LAYER = -1;
 
 export interface OpenWindowsSources {
 	/** The in-process WindowServer listing; undefined means this build cannot read it. */
@@ -35,7 +38,18 @@ export function targetableWindows(
 	const windows: MacOSWindowInfo[] = [];
 	for (const window of listed) {
 		if (window.layer !== NORMAL_WINDOW_LAYER) {
-			if (window.layer !== 21) {
+			const ownedSurface = window.layer === OWNED_SURFACE_LAYER && isOwnedSurfacePid(window.ownerPid);
+			if (window.layer !== 21 && !ownedSurface) {
+				continue;
+			}
+			if (ownedSurface) {
+				windows.push({
+					id: window.id,
+					bounds: window.bounds,
+					owner: { processId: window.ownerPid, name: window.ownerName },
+					title: window.title,
+					layer: window.layer,
+				});
 				continue;
 			}
 			const application = applicationForPid(window.ownerPid);

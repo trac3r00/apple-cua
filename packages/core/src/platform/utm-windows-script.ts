@@ -308,7 +308,7 @@ public class CuaInteractive {
    using (WindowsIdentity identity=new WindowsIdentity(token)) { sid=identity.User.Value; }
    RawSecurityDescriptor acl=new RawSecurityDescriptor("D:P(A;;GA;;;SY)(A;;GRGW;;;"+sid+")");
    byte[] descriptor=new byte[acl.BinaryLength]; acl.GetBinaryForm(descriptor,0);
-   string name="apple-cua-display-"+Guid.NewGuid().ToString("N");
+   string name="opencua-display-"+Guid.NewGuid().ToString("N");
    IntPtr memory=Marshal.AllocHGlobal(descriptor.Length);
    try {
     Marshal.Copy(descriptor,0,memory,descriptor.Length);

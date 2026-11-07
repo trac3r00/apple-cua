@@ -28,7 +28,7 @@ export function buildComputerUseSection(): string {
 	return "## Computer Use\n`computer` drives the app window you last observed with `get_app_state`, so call that first. Its screenshot re-observes that window, coordinates are pixels in that screenshot, and every action answers with what changed. An answer without an observation_token means take a screenshot before acting again. `computer` cannot scroll at a point, hover or read the pointer; use the element tools for those.\n";
 }
 
-/** One Anthropic computer_20250124 action as apple-cua-mcp calls; actions the server cannot do are refused by name. */
+/** One Anthropic computer_20250124 action as opencua-mcp calls; actions the server cannot do are refused by name. */
 export async function executeNativeComputerAction(
 	input: ComputerToolInput,
 	computer: NativeComputer,

@@ -1,3 +1,4 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
 	mkdirSync,
 	mkdtempSync,
@@ -10,7 +11,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	CLAUDE_ALLOW_RULE,
 	CODEX_APPROVAL_TABLE,
@@ -34,11 +34,11 @@ let checkout = "";
 let target: PluginTarget;
 
 beforeEach(() => {
-	home = mkdtempSync(join(tmpdir(), "apple-cua-plugin-clients-"));
-	checkout = join(home, "apple-cua");
+	home = mkdtempSync(join(tmpdir(), "opencua-plugin-clients-"));
+	checkout = join(home, "opencua");
 	mkdirSync(join(checkout, "packages/mcp/dist"), { recursive: true });
 	writeFileSync(join(checkout, "packages/mcp/dist/server.js"), "");
-	target = { bundleDir: join(home, ".apple-cua/bundle"), version: "0.1.0+codex.aaaaaaaaaaaa", checkout };
+	target = { bundleDir: join(home, ".opencua/bundle"), version: "0.1.0+codex.aaaaaaaaaaaa", checkout };
 });
 
 afterEach(() => {
@@ -51,7 +51,7 @@ function write(path: string, text: string): void {
 }
 
 const ours = () => ({
-	command: join(checkout, "packages/mcp/dist/apple-cua-mcp"),
+	command: join(checkout, "packages/mcp/dist/opencua-mcp"),
 	args: [join(checkout, "packages/mcp/dist/server.js")],
 	env: {},
 });
@@ -62,7 +62,7 @@ const foreign = () => {
 };
 const steps = (plan: { steps: readonly { describe: string }[] }) => plan.steps.map((step) => step.describe);
 
-describe("#given a fresh Codex #when apple-cua is installed #then CODEX_HOME, the marketplace and the plugin are created", () => {
+describe("#given a fresh Codex #when opencua is installed #then CODEX_HOME, the marketplace and the plugin are created", () => {
 	it("plans every step, in order, and calls the result added", () => {
 		const env = { CODEX_HOME: join(home, "profiles/work") };
 		const plan = planCodexInstall(readCodexState(home, env, undefined), target);
@@ -70,17 +70,17 @@ describe("#given a fresh Codex #when apple-cua is installed #then CODEX_HOME, th
 		expect(plan.outcome).toBe("added");
 		expect(plan.steps.map((step) => step.kind)).toEqual(["mkdir", "run", "run", "edit"]);
 		expect(plan.steps[1]).toMatchObject({ args: ["plugin", "marketplace", "add", target.bundleDir] });
-		expect(plan.steps[2]).toMatchObject({ args: ["plugin", "add", "apple-cua@apple-cua-local"] });
+		expect(plan.steps[2]).toMatchObject({ args: ["plugin", "add", "opencua@opencua-local"] });
 	});
 });
 
-describe("#given Codex already at the target #when apple-cua is installed again #then nothing runs", () => {
+describe("#given Codex already at the target #when opencua is installed again #then nothing runs", () => {
 	it("reads the marketplace, the plugin and the cached version from Codex's own files", () => {
 		write(
 			join(home, ".codex/config.toml"),
-			`model = "x"\n\n[marketplaces.apple-cua-local]\nsource_type = "local"\nsource = "${target.bundleDir}"\n\n[plugins."apple-cua@apple-cua-local"]\nenabled = true\n\n${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = "approve"\n`,
+			`model = "x"\n\n[marketplaces.opencua-local]\nsource_type = "local"\nsource = "${target.bundleDir}"\n\n[plugins."opencua@opencua-local"]\nenabled = true\n\n${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = "approve"\n`,
 		);
-		mkdirSync(join(home, ".codex/plugins/cache/apple-cua-local/apple-cua", target.version), { recursive: true });
+		mkdirSync(join(home, ".codex/plugins/cache/opencua-local/opencua", target.version), { recursive: true });
 
 		expect(planCodexInstall(readCodexState(home, {}, undefined), target)).toEqual({
 			steps: [],
@@ -91,34 +91,34 @@ describe("#given Codex already at the target #when apple-cua is installed again 
 	it("re-adds the plugin after a settings change gave the bundle a new version", () => {
 		write(
 			join(home, ".codex/config.toml"),
-			`[marketplaces.apple-cua-local]\nsource = "${target.bundleDir}"\n\n[plugins."apple-cua@apple-cua-local"]\nenabled = true\n`,
+			`[marketplaces.opencua-local]\nsource = "${target.bundleDir}"\n\n[plugins."opencua@opencua-local"]\nenabled = true\n`,
 		);
-		mkdirSync(join(home, ".codex/plugins/cache/apple-cua-local/apple-cua/0.1.0+codex.old"), { recursive: true });
+		mkdirSync(join(home, ".codex/plugins/cache/opencua-local/opencua/0.1.0+codex.old"), { recursive: true });
 
 		const plan = planCodexInstall(readCodexState(home, {}, undefined), target);
 
 		expect(plan.outcome).toBe("updated");
 		expect(steps(plan)).toEqual([
-			`installed the apple-cua plugin ${target.version}`,
-			'let the apple-cua tools run without asking (default_tools_approval_mode = "approve")',
+			`installed the opencua plugin ${target.version}`,
+			'let the opencua tools run without asking (default_tools_approval_mode = "approve")',
 		]);
 	});
 });
 
-describe("#given a client that records the bundle path with symlinks resolved #when apple-cua is installed again #then nothing runs", () => {
+describe("#given a client that records the bundle path with symlinks resolved #when opencua is installed again #then nothing runs", () => {
 	it("treats /tmp and /private/tmp (or a symlinked home) as the same marketplace source", () => {
 		mkdirSync(target.bundleDir, { recursive: true });
 		const resolved = realpathSync(target.bundleDir);
 		write(
 			join(home, ".codex/config.toml"),
-			`[marketplaces.apple-cua-local]\nsource = "${resolved}"\n\n[plugins."apple-cua@apple-cua-local"]\nenabled = true\n\n${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = "approve"\n`,
+			`[marketplaces.opencua-local]\nsource = "${resolved}"\n\n[plugins."opencua@opencua-local"]\nenabled = true\n\n${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = "approve"\n`,
 		);
-		mkdirSync(join(home, ".codex/plugins/cache/apple-cua-local/apple-cua", target.version), { recursive: true });
-		const linkedHome = join(tmpdir(), `apple-cua-linked-${process.pid}`);
+		mkdirSync(join(home, ".codex/plugins/cache/opencua-local/opencua", target.version), { recursive: true });
+		const linkedHome = join(tmpdir(), `opencua-linked-${process.pid}`);
 		rmSync(linkedHome, { force: true });
 		symlinkSync(home, linkedHome);
 		try {
-			const viaLink = { ...target, bundleDir: join(linkedHome, ".apple-cua/bundle") };
+			const viaLink = { ...target, bundleDir: join(linkedHome, ".opencua/bundle") };
 			expect(planCodexInstall(readCodexState(home, {}, undefined), viaLink).outcome).toBe("unchanged");
 		} finally {
 			rmSync(linkedHome, { force: true });
@@ -126,7 +126,7 @@ describe("#given a client that records the bundle path with symlinks resolved #w
 	});
 });
 
-describe("#given an older hand-written apple-cua entry #when a plugin client is installed #then it is migrated, unless another installation owns it", () => {
+describe("#given an older hand-written opencua entry #when a plugin client is installed #then it is migrated, unless another installation owns it", () => {
 	it("removes this checkout's (or a dead) entry first, for Codex and Claude Code", () => {
 		const codex = planCodexInstall(readCodexState(home, {}, ours()), target);
 		const claude = planClaudeInstall(readClaudeState(home, {}, ours()), target, false);
@@ -140,12 +140,12 @@ describe("#given an older hand-written apple-cua entry #when a plugin client is 
 		const claude = planClaudeInstall(readClaudeState(home, {}, foreign()), target, false);
 
 		expect(codex.steps).toEqual([]);
-		expect(codex.blocked).toContain("codex mcp remove apple-cua");
-		expect(claude.blocked).toContain("claude mcp remove apple-cua --scope user");
+		expect(codex.blocked).toContain("codex mcp remove opencua");
+		expect(claude.blocked).toContain("claude mcp remove opencua --scope user");
 	});
 });
 
-describe("#given Claude Code #when apple-cua is installed or updated #then its own bookkeeping decides the steps", () => {
+describe("#given Claude Code #when opencua is installed or updated #then its own bookkeeping decides the steps", () => {
 	it("adds the marketplace and installs at user scope the first time", () => {
 		const plan = planClaudeInstall(
 			readClaudeState(home, { CLAUDE_CONFIG_DIR: join(home, "cc") }, undefined),
@@ -156,7 +156,7 @@ describe("#given Claude Code #when apple-cua is installed or updated #then its o
 		expect(plan.outcome).toBe("added");
 		expect(plan.steps.map((step) => (step.kind === "run" ? step.args.join(" ") : step.kind))).toEqual([
 			`plugin marketplace add ${target.bundleDir}`,
-			"plugin install apple-cua@apple-cua-local --scope user -y",
+			"plugin install opencua@opencua-local --scope user -y",
 			"edit",
 		]);
 	});
@@ -165,15 +165,15 @@ describe("#given Claude Code #when apple-cua is installed or updated #then its o
 		write(
 			join(home, ".claude/settings.json"),
 			JSON.stringify({
-				extraKnownMarketplaces: { "apple-cua-local": { source: { source: "directory", path: target.bundleDir } } },
-				enabledPlugins: { "apple-cua@apple-cua-local": false },
+				extraKnownMarketplaces: { "opencua-local": { source: { source: "directory", path: target.bundleDir } } },
+				enabledPlugins: { "opencua@opencua-local": false },
 			}),
 		);
 		write(
 			join(home, ".claude/plugins/installed_plugins.json"),
 			JSON.stringify({
 				version: 2,
-				plugins: { "apple-cua@apple-cua-local": [{ scope: "user", version: "0.1.0+codex.old" }] },
+				plugins: { "opencua@opencua-local": [{ scope: "user", version: "0.1.0+codex.old" }] },
 			}),
 		);
 		const state = readClaudeState(home, {}, undefined);
@@ -183,31 +183,31 @@ describe("#given Claude Code #when apple-cua is installed or updated #then its o
 
 		expect(refresh.outcome).toBe("updated");
 		expect(steps(refresh)).toEqual([
-			"refreshed the apple-cua-local marketplace",
-			`updated the apple-cua plugin 0.1.0+codex.old -> ${target.version}`,
-			`let the apple-cua tools run without asking (allow ${CLAUDE_ALLOW_RULE})`,
+			"refreshed the opencua-local marketplace",
+			`updated the opencua plugin 0.1.0+codex.old -> ${target.version}`,
+			`let the opencua tools run without asking (allow ${CLAUDE_ALLOW_RULE})`,
 		]);
-		expect(steps(explicit)).toContain("enabled the apple-cua plugin");
+		expect(steps(explicit)).toContain("enabled the opencua plugin");
 	});
 });
 
-describe("#given an installed plugin client #when apple-cua is removed #then the plugin, marketplace, our legacy entry and caches go", () => {
+describe("#given an installed plugin client #when opencua is removed #then the plugin, marketplace, our legacy entry and caches go", () => {
 	it("plans removal for both clients and nothing when nothing is there", () => {
 		write(
 			join(home, ".codex/config.toml"),
-			`[marketplaces.apple-cua-local]\nsource = "/b"\n\n[plugins."apple-cua@apple-cua-local"]\nenabled = true\n`,
+			`[marketplaces.opencua-local]\nsource = "/b"\n\n[plugins."opencua@opencua-local"]\nenabled = true\n`,
 		);
-		mkdirSync(join(home, ".codex/plugins/cache/apple-cua-local/apple-cua/v1"), { recursive: true });
+		mkdirSync(join(home, ".codex/plugins/cache/opencua-local/opencua/v1"), { recursive: true });
 		write(
 			join(home, ".claude/settings.json"),
-			JSON.stringify({ extraKnownMarketplaces: { "apple-cua-local": { source: { path: "/b" } } } }),
+			JSON.stringify({ extraKnownMarketplaces: { "opencua-local": { source: { path: "/b" } } } }),
 		);
 
 		expect(steps(planCodexRemove(readCodexState(home, {}, ours()), checkout))).toEqual([
-			"removed the apple-cua plugin",
-			"removed the apple-cua-local marketplace",
-			"removed the older [mcp_servers.apple-cua] entry",
-			`deleted Codex's cached copies (${join(home, ".codex/plugins/cache/apple-cua-local")})`,
+			"removed the opencua plugin",
+			"removed the opencua-local marketplace",
+			"removed the older [mcp_servers.opencua] entry",
+			`deleted Codex's cached copies (${join(home, ".codex/plugins/cache/opencua-local")})`,
 		]);
 		expect(planClaudeRemove(readClaudeState(home, {}, undefined), checkout).steps.map((step) => step.kind)).toEqual([
 			"run",
@@ -217,9 +217,9 @@ describe("#given an installed plugin client #when apple-cua is removed #then the
 	});
 });
 
-describe("#given the per-tool approval prompts of Codex and Claude Code #when apple-cua is installed and removed #then one setting covers every tool", () => {
+describe("#given the per-tool approval prompts of Codex and Claude Code #when opencua is installed and removed #then one setting covers every tool", () => {
 	it("adds the Codex approval table once, keeps the rest of config.toml, and removes only that table", () => {
-		const original = `model = "x"\n\n[plugins."apple-cua@apple-cua-local"]\nenabled = true\n`;
+		const original = `model = "x"\n\n[plugins."opencua@opencua-local"]\nenabled = true\n`;
 		const approved = approveCodexTools(original);
 
 		expect(approved).toBe(`${original}\n${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = "approve"\n`);
@@ -241,21 +241,21 @@ describe("#given the per-tool approval prompts of Codex and Claude Code #when ap
 	])("reads a Codex mode written as %s and never adds a second key", (written, mode) => {
 		write(
 			join(home, ".codex/config.toml"),
-			`[marketplaces.apple-cua-local]\nsource = "${target.bundleDir}"\n\n[plugins."apple-cua@apple-cua-local"]\nenabled = true\n\n${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = ${written}\n`,
+			`[marketplaces.opencua-local]\nsource = "${target.bundleDir}"\n\n[plugins."opencua@opencua-local"]\nenabled = true\n\n${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = ${written}\n`,
 		);
-		mkdirSync(join(home, ".codex/plugins/cache/apple-cua-local/apple-cua", target.version), { recursive: true });
+		mkdirSync(join(home, ".codex/plugins/cache/opencua-local/opencua", target.version), { recursive: true });
 		const state = readCodexState(home, {}, undefined);
 
 		expect(state.toolsApproval).toBe(mode);
 		expect(planCodexInstall(state, target).outcome).toBe("unchanged");
 	});
 
-	it("keeps a mode the person chose in Codex when apple-cua is uninstalled", () => {
-		const prompt = `[plugins."apple-cua@apple-cua-local"]\nenabled = true\n\n${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = "prompt"\n`;
+	it("keeps a mode the person chose in Codex when opencua is uninstalled", () => {
+		const prompt = `[plugins."opencua@opencua-local"]\nenabled = true\n\n${CODEX_APPROVAL_TABLE}\ndefault_tools_approval_mode = "prompt"\n`;
 		write(join(home, ".codex/config.toml"), prompt);
 
 		expect(steps(planCodexRemove(readCodexState(home, {}, undefined), checkout))).not.toContain(
-			"removed the apple-cua tool approval setting",
+			"removed the opencua tool approval setting",
 		);
 		expect(removeCodexApproval(prompt)).toBe(prompt);
 	});

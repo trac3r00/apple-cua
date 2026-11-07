@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	DEFAULT_SETTINGS,
 	adoptRegistrations,
@@ -28,7 +28,7 @@ const resolver = (name: string) => APPS.get(name.toLowerCase());
 let home = "";
 
 beforeEach(() => {
-	home = realpathSync(mkdtempSync(join(tmpdir(), "apple-cua-settings-")));
+	home = realpathSync(mkdtempSync(join(tmpdir(), "opencua-settings-")));
 });
 
 afterEach(() => {
@@ -42,7 +42,7 @@ function writeConfig(path: string, text: string): void {
 
 describe("#given config.json #when settings are saved and loaded #then they round-trip, private to the user", () => {
 	it("defaults without a file, writes it 0600, and reads back what was saved", () => {
-		const path = join(home, ".apple-cua/config.json");
+		const path = join(home, ".opencua/config.json");
 		const settings = {
 			allowedApps: ["com.apple.TextEdit"],
 			delivery: "attended",
@@ -74,7 +74,7 @@ describe("#given cursor motion #when settings are saved, changed and mapped to e
 	const reordered = { spring: 0.5, timing: "fitts", style: "spring_settle" } as const;
 
 	it("loads older config without it, and round-trips enabled and disabled", () => {
-		const path = join(home, ".apple-cua/config.json");
+		const path = join(home, ".opencua/config.json");
 		writeConfig(path, '{ "delivery": "attended" }');
 		expect(loadSettings(path).settings.cursorMotion).toBeUndefined();
 
@@ -112,22 +112,22 @@ describe("#given cursor motion #when settings are saved, changed and mapped to e
 		const settings = { ...DEFAULT_SETTINGS, cursorMotion: reordered };
 		const env = envForSettings(settings);
 
-		expect(env["APPLE_CUA_CURSOR_MOTION"]).toBe('{"style":"spring_settle","timing":"fitts","spring":0.5}');
-		expect(envForSettings(DEFAULT_SETTINGS)["APPLE_CUA_CURSOR_MOTION"]).toBeUndefined();
-		expect(envMatchesSettings({ APPLE_CUA_CURSOR_MOTION: JSON.stringify(reordered) }, settings)).toBe(true);
+		expect(env["OPENCUA_CURSOR_MOTION"]).toBe('{"style":"spring_settle","timing":"fitts","spring":0.5}');
+		expect(envForSettings(DEFAULT_SETTINGS)["OPENCUA_CURSOR_MOTION"]).toBeUndefined();
+		expect(envMatchesSettings({ OPENCUA_CURSOR_MOTION: JSON.stringify(reordered) }, settings)).toBe(true);
 		expect(envMatchesSettings({}, settings)).toBe(false);
-		expect(envMatchesSettings({ APPLE_CUA_CURSOR_MOTION: "magnetic" }, DEFAULT_SETTINGS)).toBe(false);
-		expect(envMatchesSettings({ APPLE_CUA_CURSOR_MOTION: " " }, DEFAULT_SETTINGS)).toBe(true);
-		expect(envMatchesSettings({ APPLE_CUA_CURSOR_MOTION: "off" }, DEFAULT_SETTINGS)).toBe(true);
-		expect(envMatchesSettings({ APPLE_CUA_CURSOR_MOTION: "{ nope" }, DEFAULT_SETTINGS)).toBe(false);
-		expect(envMatchesSettings({ APPLE_CUA_CURSOR_MOTION: '{"style":"nope"}' }, DEFAULT_SETTINGS)).toBe(false);
+		expect(envMatchesSettings({ OPENCUA_CURSOR_MOTION: "magnetic" }, DEFAULT_SETTINGS)).toBe(false);
+		expect(envMatchesSettings({ OPENCUA_CURSOR_MOTION: " " }, DEFAULT_SETTINGS)).toBe(true);
+		expect(envMatchesSettings({ OPENCUA_CURSOR_MOTION: "off" }, DEFAULT_SETTINGS)).toBe(true);
+		expect(envMatchesSettings({ OPENCUA_CURSOR_MOTION: "{ nope" }, DEFAULT_SETTINGS)).toBe(false);
+		expect(envMatchesSettings({ OPENCUA_CURSOR_MOTION: '{"style":"nope"}' }, DEFAULT_SETTINGS)).toBe(false);
 	});
 
 	it("adopts it from a registration that runs this checkout", () => {
 		const checkout = join(home, "checkout");
 		const layout = {
 			checkout,
-			helperExecutable: join(checkout, "packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp"),
+			helperExecutable: join(checkout, "packages/mcp/dist/opencua-mcp.app/Contents/MacOS/opencua-mcp"),
 			server: join(checkout, "packages/mcp/dist/server.js"),
 		};
 		mkdirSync(dirname(layout.helperExecutable), { recursive: true });
@@ -136,10 +136,10 @@ describe("#given cursor motion #when settings are saved, changed and mapped to e
 			join(home, ".omo/agent/mcp.json"),
 			JSON.stringify({
 				mcpServers: {
-					"apple-cua": {
+					opencua: {
 						command: layout.helperExecutable,
 						args: [layout.server],
-						env: { APPLE_CUA_CURSOR_MOTION: JSON.stringify(reordered) },
+						env: { OPENCUA_CURSOR_MOTION: JSON.stringify(reordered) },
 					},
 				},
 			}),
@@ -154,9 +154,9 @@ describe("#given cursor motion #when settings are saved, changed and mapped to e
 			{ ...DEFAULT_SETTINGS, cursorMotion: motion },
 		);
 
-		expect(desired.env["APPLE_CUA_CURSOR_MOTION"]).toBe(JSON.stringify(motion));
-		expect(desired.envSatisfied?.({ APPLE_CUA_CURSOR_MOTION: "classic" })).toBe(false);
-		expect(desired.envSatisfied?.({ APPLE_CUA_CURSOR_MOTION: JSON.stringify(reordered) })).toBe(true);
+		expect(desired.env["OPENCUA_CURSOR_MOTION"]).toBe(JSON.stringify(motion));
+		expect(desired.envSatisfied?.({ OPENCUA_CURSOR_MOTION: "classic" })).toBe(false);
+		expect(desired.envSatisfied?.({ OPENCUA_CURSOR_MOTION: JSON.stringify(reordered) })).toBe(true);
 	});
 });
 
@@ -202,29 +202,26 @@ describe("#given settings #when a change is applied #then apps resolve by name a
 
 describe("#given the server's environment variables #when settings are mapped to them #then the server's own rules apply", () => {
 	it("#given default settings #when registration is generated #then no app restriction is persisted", () => {
-		const path = join(home, ".apple-cua/config.json");
+		const path = join(home, ".opencua/config.json");
 		saveSettings(path, DEFAULT_SETTINGS);
 		const loaded = loadSettings(path).settings;
 
 		expect(loaded.allowedApps).toEqual([]);
-		expect(envForSettings(loaded)["APPLE_CUA_ALLOWED_BUNDLE_IDS"]).toBeUndefined();
+		expect(envForSettings(loaded)["OPENCUA_ALLOWED_BUNDLE_IDS"]).toBeUndefined();
 	});
 
 	it("writes every managed variable and reads defaults like the server", () => {
 		const settings = { ...DEFAULT_SETTINGS, allowedApps: ["com.apple.TextEdit"] };
 
 		expect(envForSettings(settings)).toEqual({
-			APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit",
-			APPLE_CUA_DELIVERY: "background",
-			APPLE_CUA_TOOLSET: "full",
-			APPLE_CUA_IPHONE: undefined,
+			OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit",
+			OPENCUA_DELIVERY: "background",
+			OPENCUA_TOOLSET: "full",
+			OPENCUA_IPHONE: undefined,
 		});
-		expect(envMatchesSettings({ APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit" }, settings)).toBe(true);
+		expect(envMatchesSettings({ OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit" }, settings)).toBe(true);
 		expect(
-			envMatchesSettings(
-				{ APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit", APPLE_CUA_TOOLSET: "LEAN" },
-				settings,
-			),
+			envMatchesSettings({ OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit", OPENCUA_TOOLSET: "LEAN" }, settings),
 		).toBe(false);
 		expect(envMatchesSettings({}, DEFAULT_SETTINGS)).toBe(true);
 	});
@@ -235,7 +232,7 @@ describe("#given registrations made before config.json existed #when settings ar
 		const checkout = join(home, "checkout");
 		const layout = {
 			checkout,
-			helperExecutable: join(checkout, "packages/mcp/dist/apple-cua-mcp.app/Contents/MacOS/apple-cua-mcp"),
+			helperExecutable: join(checkout, "packages/mcp/dist/opencua-mcp.app/Contents/MacOS/opencua-mcp"),
 			server: join(checkout, "packages/mcp/dist/server.js"),
 		};
 		mkdirSync(dirname(layout.helperExecutable), { recursive: true });
@@ -244,17 +241,17 @@ describe("#given registrations made before config.json existed #when settings ar
 			join(home, ".omo/agent/mcp.json"),
 			JSON.stringify({
 				mcpServers: {
-					"apple-cua": {
+					opencua: {
 						command: layout.helperExecutable,
 						args: [layout.server],
-						env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.finder", APPLE_CUA_TOOLSET: "lean" },
+						env: { OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.finder", OPENCUA_TOOLSET: "lean" },
 					},
 				},
 			}),
 		);
 		writeConfig(
 			join(home, ".codex/config.toml"),
-			'[mcp_servers.apple-cua]\ncommand = "/other/checkout/apple-cua-mcp"\nargs = ["/other/checkout/server.js"]\n',
+			'[mcp_servers.opencua]\ncommand = "/other/checkout/opencua-mcp"\nargs = ["/other/checkout/server.js"]\n',
 		);
 
 		const adopted = adoptRegistrations(layout, { home, env: {}, now: new Date() });
@@ -292,5 +289,34 @@ describe("#given app names #when they are resolved #then bundle ids pass through
 			unknown: [],
 		});
 		expect(findAppBundleId("TextEdit", home)).toBe("com.apple.TextEdit");
+	});
+});
+
+describe("#given a registration written before the rename #when settings are read or rewritten #then legacy names follow", () => {
+	it("reads the legacy names and clears them when the setting changes", () => {
+		const legacy = {
+			APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.TextEdit",
+			APPLE_CUA_TOOLSET: "lean",
+			APPLE_CUA_IPHONE: "1",
+			APPLE_CUA_DELIVERY: "background",
+		};
+		expect(
+			envMatchesSettings(legacy, {
+				...DEFAULT_SETTINGS,
+				allowedApps: ["com.apple.TextEdit"],
+				toolset: "lean",
+				iphone: true,
+			}),
+		).toBe(true);
+		const update = envForSettings({ ...DEFAULT_SETTINGS, allowedApps: [], toolset: "full", iphone: false });
+		expect(update["APPLE_CUA_IPHONE"]).toBeUndefined();
+		expect(update["APPLE_CUA_ALLOWED_BUNDLE_IDS"]).toBeUndefined();
+		expect("APPLE_CUA_TOOLSET" in update).toBe(true);
+		expect(
+			envMatchesSettings(
+				{ ...legacy, ...Object.fromEntries(Object.entries(update).filter(([, value]) => value !== undefined)) },
+				DEFAULT_SETTINGS,
+			),
+		).toBe(false);
 	});
 });

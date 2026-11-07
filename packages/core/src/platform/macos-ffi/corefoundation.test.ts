@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { vi } from "@opencua/test-support";
 
 const koffiMock = vi.hoisted(() => {
 	const nativeFunctions = {

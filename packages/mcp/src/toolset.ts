@@ -5,14 +5,14 @@
  */
 export type ToolsetProfile = "full" | "lean";
 
-import type { DockSource, HostCapabilities, HotFrameSource } from "@apple-cua/core";
+import type { DockSource, HostCapabilities, HotFrameSource } from "@opencua/core";
 import type { ExtrasSource } from "./extras-session.js";
 import type { TerminalCommandSource, TerminalTextReader } from "./terminal-session.js";
 
 export interface McpServerOptions {
-	/** Defaults to `APPLE_CUA_TOOLSET`, then `full`. */
+	/** Defaults to `OPENCUA_TOOLSET`, then `full`. */
 	readonly toolset?: ToolsetProfile;
-	/** Defaults to `APPLE_CUA_IPHONE=1`, then off. */
+	/** Defaults to `OPENCUA_IPHONE=1`, then off. */
 	readonly iphone?: boolean;
 	readonly dockSource?: DockSource;
 	readonly dockHostProbe?: () => HostCapabilities;
@@ -32,8 +32,8 @@ export interface ResolvedServerOptions {
 	readonly iphone: boolean;
 }
 
-const TOOLSET_ENV = "APPLE_CUA_TOOLSET";
-const IPHONE_ENV = "APPLE_CUA_IPHONE";
+const TOOLSET_ENV = "OPENCUA_TOOLSET";
+const IPHONE_ENV = "OPENCUA_IPHONE";
 
 const warnedToolsets = new Set<string>();
 

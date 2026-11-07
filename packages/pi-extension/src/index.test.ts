@@ -1,11 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 
-import {
-	FAKE_TOOLS,
-	type FakeAppleCuaServer,
-	guardedWindowServer,
-	textAnswer,
-} from "../test/support/fake-apple-cua.js";
+import { FAKE_TOOLS, type FakeOpenCuaServer, guardedWindowServer, textAnswer } from "../test/support/fake-opencua.js";
 import { type MockPi, createMockPi } from "../test/support/mock-pi.js";
 import macosCuaExtension, { createMacosCuaExtension } from "./index.js";
 import type { Environment } from "./launcher.js";
@@ -30,8 +25,8 @@ const MCP_TOOL_NAMES = FAKE_TOOLS.map((tool) => tool.name);
 const started: MockPi[] = [];
 
 async function startSession(
-	options: { readonly fake?: FakeAppleCuaServer; readonly env?: Environment; readonly model?: TestModel } = {},
-): Promise<{ readonly pi: MockPi; readonly fake: FakeAppleCuaServer }> {
+	options: { readonly fake?: FakeOpenCuaServer; readonly env?: Environment; readonly model?: TestModel } = {},
+): Promise<{ readonly pi: MockPi; readonly fake: FakeOpenCuaServer }> {
 	const fake = options.fake ?? guardedWindowServer();
 	const pi = createMockPi();
 	createMacosCuaExtension({ connect: fake.connect, env: options.env ?? {} })(pi);
@@ -71,13 +66,13 @@ describe("#given a pi API #when the extension factory runs #then lifecycle handl
 		expect(fake.connections).toBe(0);
 	});
 
-	it("returns the apple-cua skill path for resources_discover", async () => {
+	it("returns the opencua skill path for resources_discover", async () => {
 		const pi = createMockPi();
 		macosCuaExtension(pi);
 
 		const result = await pi.emit("resources_discover", { type: "resources_discover", reason: "startup" });
 
-		expect(result).toEqual({ skillPaths: [expect.stringContaining("skills/apple-cua/SKILL.md")] });
+		expect(result).toEqual({ skillPaths: [expect.stringContaining("skills/opencua/SKILL.md")] });
 	});
 });
 
@@ -92,8 +87,8 @@ describe("#given session_start #when the server answers tools/list #then its too
 		expect(click?.executionMode).toBe("sequential");
 	});
 
-	it("leaves computer out when APPLE_CUA_DISABLE_COMPUTER_USE_BETA opts out", async () => {
-		const { pi } = await startSession({ env: { APPLE_CUA_DISABLE_COMPUTER_USE_BETA: "1" } });
+	it("leaves computer out when OPENCUA_DISABLE_COMPUTER_USE_BETA opts out", async () => {
+		const { pi } = await startSession({ env: { OPENCUA_DISABLE_COMPUTER_USE_BETA: "1" } });
 
 		expect([...pi.tools.keys()]).toEqual(MCP_TOOL_NAMES);
 	});
@@ -111,13 +106,13 @@ describe("#given session_start #when the server answers tools/list #then its too
 		const pi = createMockPi();
 		createMacosCuaExtension({
 			connect: async () => {
-				throw new Error("apple-cua: cannot find apple-cua-mcp. Run `apple-cua doctor`");
+				throw new Error("opencua: cannot find opencua-mcp. Run `opencua doctor`");
 			},
 			env: {},
 		})(pi);
 
 		await expect(pi.emit("session_start", { type: "session_start", reason: "startup" })).rejects.toThrow(
-			/apple-cua doctor/,
+			/opencua doctor/,
 		);
 		expect(pi.tools.size).toBe(0);
 	});
@@ -156,7 +151,7 @@ describe("#given the native computer tool #when the model observes then acts #th
 			pi.tools
 				.get("computer")
 				?.run({ action: "scroll", coordinate: [1, 1], scroll_direction: "down", scroll_amount: 3 }),
-		).rejects.toThrow(/no apple-cua-mcp equivalent/);
+		).rejects.toThrow(/no opencua-mcp equivalent/);
 		expect(fake.calls.map((call) => call.name)).toEqual(["get_app_state"]);
 	});
 });
@@ -190,7 +185,7 @@ describe("#given models #when the session starts or the model changes #then comp
 	});
 
 	it("activates computer for direct OpenAI Responses once the operator opts in", async () => {
-		const { pi } = await startSession({ env: { APPLE_CUA_OPENAI_NATIVE_TRANSPORT: "1" }, model: OPENAI_CHAT_PROXY });
+		const { pi } = await startSession({ env: { OPENCUA_OPENAI_NATIVE_TRANSPORT: "1" }, model: OPENAI_CHAT_PROXY });
 
 		await pi.emit("model_select", { model: OPENAI_DIRECT }, { model: OPENAI_DIRECT });
 
@@ -237,7 +232,7 @@ describe("#given the provider payload hook #when requests go out #then native sh
 		const shellTool = { type: "function", name: "shell" };
 		const request = { payload: { tools: [computerFunction, shellTool] } };
 		const { pi: defaultPi } = await startSession();
-		const { pi: optedInPi } = await startSession({ env: { APPLE_CUA_OPENAI_NATIVE_TRANSPORT: "1" } });
+		const { pi: optedInPi } = await startSession({ env: { OPENCUA_OPENAI_NATIVE_TRANSPORT: "1" } });
 
 		const byDefault = await defaultPi.emit("before_provider_request", request, { model: OPENAI_DIRECT });
 		const optedIn = await optedInPi.emit("before_provider_request", request, { model: OPENAI_DIRECT });

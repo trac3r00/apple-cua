@@ -1,29 +1,29 @@
-// Codex and Claude Code get apple-cua as a plugin from the per-Mac bundle (see bundle.ts): a local marketplace that
-// points at the bundle, and the apple-cua plugin installed from it, carrying the MCP server and the skill together.
+// Codex and Claude Code get opencua as a plugin from the per-Mac bundle (see bundle.ts): a local marketplace that
+// points at the bundle, and the opencua plugin installed from it, carrying the MCP server and the skill together.
 //
 // Each client is handled in three steps that keep the decisions testable without the real CLIs:
 //   read*State  what the client's own files say now (never runs the CLI),
 //   plan*       the steps from that state to the target (pure),
 //   runSteps    the client's own CLI does the work, so its caches and bookkeeping stay consistent.
 //
-// An older hand-written MCP entry named apple-cua has to go: Codex lets it shadow the plugin's server, and Claude Code
+// An older hand-written MCP entry named opencua has to go: Codex lets it shadow the plugin's server, and Claude Code
 // would run both. It is removed when it runs this checkout or nothing at all; another live installation's entry is
 // left alone and reported, because removing it would break that installation.
 //
 // Both clients ask before every call of an MCP tool marked destructive, one tool at a time, so a person approving
-// apple-cua's tools would be asked again for each one. Installing also records that the plugin's server may run its
+// OpenCUA's tools would be asked again for each one. Installing also records that the plugin's server may run its
 // tools without asking, unless the person already chose otherwise in that client's config.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { MARKETPLACE_NAME, PLUGIN_NAME } from "./bundle.js";
+import { MARKETPLACE_NAME, MCP_SERVER_NAME, PLUGIN_NAME } from "./bundle.js";
 import { type RegisteredEntry, entryAlive, entryRunsCheckout, writeConfigFile } from "./clients.js";
 import { canonicalPath } from "./layout.js";
 
 export const PLUGIN_ID = `${PLUGIN_NAME}@${MARKETPLACE_NAME}`;
 /** The MCP server's name inside the plugin (the key in the bundle's .mcp.json). */
-const PLUGIN_SERVER_NAME = "apple-cua";
+const PLUGIN_SERVER_NAME = MCP_SERVER_NAME;
 /** Codex's table for the plugin server's settings, and the value that runs its tools without asking. */
 export const CODEX_APPROVAL_TABLE = `[plugins."${PLUGIN_ID}".mcp_servers.${PLUGIN_SERVER_NAME}]`;
 const CODEX_APPROVAL_KEY = "default_tools_approval_mode";
@@ -43,18 +43,50 @@ export interface CliResult {
 export type CliRunner = (command: string, args: readonly string[], env: Env, input?: string) => CliResult;
 
 export const runCli: CliRunner = (command, args, env, input) => {
-	const result = spawnSync(command, [...args], {
-		encoding: "utf8",
-		env: { ...env },
-		timeout: CLI_TIMEOUT_MS,
-		...(input === undefined ? { stdio: ["ignore", "pipe", "pipe"] as const } : { input }),
+	// npm-installed Windows clients are cmd shims, not directly executable files.
+	const batch = process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
+	const escapeCmd = (value: string) => value.replace(/([()[\]%!^"`<>&|;, *?])/g, "^$1");
+	const batchArgs = args.map((argument) => {
+		const quoted = `"${argument.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1")}"`;
+		return escapeCmd(escapeCmd(quoted));
 	});
+	const batchCommand = `"${[escapeCmd(command), ...batchArgs].join(" ")}"`;
+	const result = spawnSync(
+		batch ? (env["ComSpec"] ?? "cmd.exe") : command,
+		batch ? ["/d", "/s", "/c", batchCommand] : [...args],
+		{
+			encoding: "utf8",
+			env: { ...env },
+			timeout: CLI_TIMEOUT_MS,
+			...(batch ? { windowsVerbatimArguments: true } : {}),
+			...(input === undefined ? { stdio: ["ignore", "pipe", "pipe"] as const } : { input }),
+		},
+	);
 	return {
 		status: result.status,
 		stdout: result.stdout ?? "",
 		stderr: result.error === undefined ? (result.stderr ?? "") : result.error.message,
 	};
 };
+
+/** Remove the old product name through clients that own their configuration writes. */
+export function removeRenamedMcp(
+	client: "claude" | "gemini" | "hermes" | "openclaw",
+	cli: string,
+	env: Env,
+	run: CliRunner = runCli,
+): void {
+	const args =
+		client === "claude"
+			? ["mcp", "remove", "apple-cua", "--scope", "user"]
+			: client === "gemini"
+				? ["mcp", "remove", "-s", "user", "apple-cua"]
+				: ["mcp", client === "openclaw" ? "unset" : "remove", "apple-cua"];
+	const result = run(cli, args, env, client === "hermes" ? "Y\n" : undefined);
+	if (result.status !== 0) {
+		throw new Error(`${client} legacy MCP removal failed: ${(result.stderr || result.stdout).trim()}`);
+	}
+}
 
 export interface PluginTarget {
 	readonly bundleDir: string;
@@ -68,7 +100,7 @@ function samePath(left: string | undefined, right: string): boolean {
 
 export type LegacyVerdict = "none" | "migrate" | "foreign";
 
-/** What to do with an older MCP entry named apple-cua: nothing, remove it (ours or dead), or leave it (another live installation). */
+/** What to do with an older MCP entry named opencua: nothing, remove it (ours or dead), or leave it (another live installation). */
 export function legacyVerdict(entry: RegisteredEntry | undefined, checkout: string): LegacyVerdict {
 	if (entry === undefined) {
 		return "none";
@@ -76,14 +108,16 @@ export function legacyVerdict(entry: RegisteredEntry | undefined, checkout: stri
 	return entryRunsCheckout(entry, canonicalPath(checkout)) || !entryAlive(entry) ? "migrate" : "foreign";
 }
 
+interface RunStep {
+	readonly kind: "run";
+	readonly args: readonly string[];
+	readonly describe: string;
+	/** Typed into the command's stdin, for CLIs that confirm with a prompt. */
+	readonly input?: string | undefined;
+}
+
 export type PluginStep =
-	| {
-			readonly kind: "run";
-			readonly args: readonly string[];
-			readonly describe: string;
-			/** Typed into the command's stdin, for CLIs that confirm with a prompt. */
-			readonly input?: string | undefined;
-	  }
+	| RunStep
 	| { readonly kind: "mkdir"; readonly path: string; readonly describe: string }
 	| { readonly kind: "delete"; readonly path: string; readonly describe: string }
 	| {
@@ -104,7 +138,7 @@ export interface PluginPlan {
 }
 
 function foreignLegacyMessage(client: string, entry: RegisteredEntry, howToRemove: string): string {
-	return `an apple-cua MCP entry of another installation (${entry.command ?? "unknown command"}) is registered in ${client}; it would ${client === "Codex" ? "hide" : "run beside"} the plugin's server. Remove it from that installation (apple-cua uninstall there) or with: ${howToRemove}`;
+	return `an opencua MCP entry of another installation (${entry.command ?? "unknown command"}) is registered in ${client}; it would ${client === "Codex" ? "hide" : "run beside"} the plugin's server. Remove it from that installation (opencua uninstall there) or with: ${howToRemove}`;
 }
 
 // --- Codex ----------------------------------------------------------------------------------------------------------
@@ -112,9 +146,9 @@ function foreignLegacyMessage(client: string, entry: RegisteredEntry, howToRemov
 export interface CodexState {
 	readonly codexHome: string;
 	readonly homeExists: boolean;
-	/** source of [marketplaces.apple-cua-local] in config.toml. */
+	/** source of [marketplaces.opencua-local] in config.toml. */
 	readonly marketplaceSource: string | undefined;
-	/** [plugins."apple-cua@apple-cua-local"]: undefined when absent. */
+	/** [plugins."opencua@opencua-local"]: undefined when absent. */
 	readonly plugin: { readonly enabled: boolean } | undefined;
 	/** The plugin versions in Codex's cache. */
 	readonly cachedVersions: readonly string[];
@@ -266,13 +300,13 @@ export function planCodexInstall(state: CodexState, target: PluginTarget): Plugi
 		return {
 			steps: [],
 			outcome: "unchanged",
-			blocked: foreignLegacyMessage("Codex", state.legacy, "codex mcp remove apple-cua"),
+			blocked: foreignLegacyMessage("Codex", state.legacy, "codex mcp remove opencua"),
 		};
 	}
 	if (verdict === "migrate") {
 		steps.push({
 			kind: "remove-legacy",
-			describe: "removed the older [mcp_servers.apple-cua] entry the plugin replaces",
+			describe: "removed the older [mcp_servers.opencua] entry the plugin replaces",
 		});
 	}
 	if (!state.homeExists) {
@@ -336,7 +370,7 @@ export function planCodexRemove(state: CodexState, checkout: string): PluginPlan
 		});
 	}
 	if (legacyVerdict(state.legacy, checkout) === "migrate") {
-		steps.push({ kind: "remove-legacy", describe: "removed the older [mcp_servers.apple-cua] entry" });
+		steps.push({ kind: "remove-legacy", describe: "removed the older [mcp_servers.opencua] entry" });
 	}
 	const cache = join(state.codexHome, "plugins/cache", MARKETPLACE_NAME);
 	if (existsSync(cache)) {
@@ -349,17 +383,17 @@ export function planCodexRemove(state: CodexState, checkout: string): PluginPlan
 
 export interface ClaudeState {
 	readonly configDir: string;
-	/** extraKnownMarketplaces["apple-cua-local"].source.path in settings.json. */
+	/** extraKnownMarketplaces["opencua-local"].source.path in settings.json. */
 	readonly marketplacePath: string | undefined;
 	/** The user-scope install recorded in plugins/installed_plugins.json. */
 	readonly installedVersion: string | undefined;
-	/** enabledPlugins["apple-cua@apple-cua-local"] in settings.json; undefined when not mentioned. */
+	/** enabledPlugins["opencua@opencua-local"] in settings.json; undefined when not mentioned. */
 	readonly enabled: boolean | undefined;
 	/** The permissions list that names the plugin server's tools; undefined when none does. */
 	readonly toolsRule: "allow" | "ask" | "deny" | undefined;
 	/** Whether permissions.allow holds the exact rule allowClaudeTools adds. */
 	readonly allowsServer: boolean;
-	/** False when settings.json exists but is not a JSON object, so apple-cua must not rewrite it. */
+	/** False when settings.json exists but is not a JSON object, so OpenCUA must not rewrite it. */
 	readonly settingsReadable: boolean;
 	readonly legacy: RegisteredEntry | undefined;
 }
@@ -485,13 +519,13 @@ export function planClaudeInstall(state: ClaudeState, target: PluginTarget, expl
 		return {
 			steps: [],
 			outcome: "unchanged",
-			blocked: foreignLegacyMessage("Claude Code", state.legacy, "claude mcp remove apple-cua --scope user"),
+			blocked: foreignLegacyMessage("Claude Code", state.legacy, "claude mcp remove opencua --scope user"),
 		};
 	}
 	if (verdict === "migrate") {
 		steps.push({
 			kind: "remove-legacy",
-			describe: "removed the older user-scope apple-cua MCP server the plugin replaces",
+			describe: "removed the older user-scope opencua MCP server the plugin replaces",
 		});
 	}
 	const marketplaceMoved = !samePath(state.marketplacePath, target.bundleDir);
@@ -571,7 +605,7 @@ export function planClaudeRemove(state: ClaudeState, checkout: string): PluginPl
 		});
 	}
 	if (legacyVerdict(state.legacy, checkout) === "migrate") {
-		steps.push({ kind: "remove-legacy", describe: "removed the older user-scope apple-cua MCP server" });
+		steps.push({ kind: "remove-legacy", describe: "removed the older user-scope opencua MCP server" });
 	}
 	const cache = join(state.configDir, "plugins/cache", MARKETPLACE_NAME);
 	if (existsSync(cache)) {

@@ -8,6 +8,7 @@ import { type Environment, type InstallMarker, type Layout, canonicalPath } from
 const DERIVED_PATHS: readonly string[] = [
 	"packages/core/native/libsckit.dylib",
 	"packages/core/native/cursor-overlay",
+	"packages/core/native/history-recorder",
 	"packages/core/native/build-inputs.sha256",
 ];
 
@@ -125,7 +126,7 @@ export function runUpdate(layout: Pick<Layout, "checkout" | "helperApp">, deps: 
 	};
 	const toplevel = git(["rev-parse", "--show-toplevel"]);
 	if (toplevel.status !== 0 || canonicalPath(toplevel.stdout.trim()) !== layout.checkout) {
-		return fail(`${layout.checkout} is not a git checkout, so apple-cua cannot update it`);
+		return fail(`${layout.checkout} is not a git checkout, so opencua cannot update it`);
 	}
 	const status = git(["status", "--porcelain=v1", "--untracked-files=normal"]);
 	if (status.status !== 0) {
@@ -140,7 +141,7 @@ export function runUpdate(layout: Pick<Layout, "checkout" | "helperApp">, deps: 
 				`${layout.checkout} has local changes:`,
 				...listed,
 				...more,
-				`Commit or stash them (git -C "${layout.checkout}" stash), then run apple-cua update again.`,
+				`Commit or stash them (git -C "${layout.checkout}" stash), then run opencua update again.`,
 			].join("\n"),
 		);
 	}
@@ -161,7 +162,7 @@ export function runUpdate(layout: Pick<Layout, "checkout" | "helperApp">, deps: 
 		return fail(`${source.remote} ${source.ref} did not resolve to a commit`);
 	}
 	if (target === head) {
-		print(`Already up to date: apple-cua ${oldVersion} (${oldCommit}).`);
+		print(`Already up to date: opencua ${oldVersion} (${oldCommit}).`);
 		return 0;
 	}
 	if (git(["merge-base", "--is-ancestor", "HEAD", target]).status !== 0) {
@@ -187,7 +188,7 @@ export function runUpdate(layout: Pick<Layout, "checkout" | "helperApp">, deps: 
 	}
 	const newCommit = git(["rev-parse", "--short", "HEAD"]).stdout.trim();
 	const newVersion = readVersion(layout.checkout);
-	const transition = `apple-cua ${oldVersion} (${oldCommit}) -> ${newVersion} (${newCommit})`;
+	const transition = `opencua ${oldVersion} (${oldCommit}) -> ${newVersion} (${newCommit})`;
 	print(`Updating ${transition}`);
 	const stamp = readStamp(layout.helperApp);
 	const digest = stamp === undefined ? undefined : deps.helperDigest();
@@ -199,7 +200,7 @@ export function runUpdate(layout: Pick<Layout, "checkout" | "helperApp">, deps: 
 	const setupStatus = deps.runSetup();
 	if (setupStatus !== 0) {
 		print(
-			`\nThe checkout is at ${newCommit}, but setup failed (exit ${setupStatus}). Fix what it reported, then run ./scripts/setup.sh or apple-cua update again.`,
+			`\nThe checkout is at ${newCommit}, but setup failed (exit ${setupStatus}). Fix what it reported, then run ./scripts/setup.sh or opencua update again.`,
 		);
 		return setupStatus;
 	}

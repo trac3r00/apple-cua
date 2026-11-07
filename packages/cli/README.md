@@ -1,9 +1,9 @@
-# @apple-cua/cli
+# @opencua/cli
 
-The `apple-cua` command line, part of [apple-cua](../../README.md).
+The `opencua` command line, part of [OpenCUA](../../README.md).
 
 ```bash
-pnpm --filter @apple-cua/core --filter @apple-cua/cli build
+pnpm --filter @opencua/core --filter @opencua/cli build
 ./packages/cli/dist/cli.js --version
 ./packages/cli/dist/cli.js screenshot -o /tmp/shot.png
 ./packages/cli/dist/cli.js click -x 500 -y 300
@@ -14,9 +14,9 @@ Input defaults to the globally focused application; pass `--target-pid` (after t
 visible window) to drive one app's window while another stays frontmost. The CLI is a low-level
 interface: it does not carry the MCP observation-token guard.
 
-It also manages the installation: `apple-cua config` (approved apps and MCP client registrations),
-`apple-cua doctor [--fix]`, `apple-cua update` and `apple-cua uninstall`; see the
+It also manages the installation: `opencua config` (approved apps and MCP client registrations),
+`opencua doctor [--fix]`, `opencua update` and `opencua uninstall`; see the
 [Quickstart](../../README.md#quickstart).
 
-Docs: [root README](../../README.md) · [usage](../../skills/apple-cua/references/usage.md).
+Docs: [root README](../../README.md) · [usage](../../skills/opencua/references/usage.md).
 MIT licensed — see [LICENSE](../../LICENSE).

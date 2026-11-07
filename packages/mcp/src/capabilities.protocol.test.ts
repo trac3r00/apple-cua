@@ -1,11 +1,11 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { HostCapabilities, StopStatus } from "@apple-cua/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { afterEach, describe, expect, it } from "vitest";
+import type { HostCapabilities, StopStatus } from "@opencua/core";
 import { z } from "zod/v4";
 import {
 	type CapabilitySources,
@@ -31,6 +31,10 @@ async function connect(register: (server: McpServer) => void): Promise<Client> {
 }
 
 const reportSchema = z.object({
+	host: z.object({ workers: z.object({ concurrent: z.boolean() }) }),
+	backend: z.string(),
+	input: z.object({ supported: z.boolean(), reason: z.string(), scope: z.string() }),
+	capture: z.object({ supported: z.boolean(), reason: z.string(), scope: z.string() }),
 	permissions: z.unknown(),
 	session: z.unknown(),
 	delivery: z.unknown(),
@@ -57,8 +61,8 @@ afterEach(() => {
 	}
 });
 
-describe("#given a fully permitted console session #when get_capabilities is called #then it reports ready with no advice", () => {
-	it("#given no app restriction #when capabilities are read #then approval is unrestricted without a blocker", async () => {
+describe("#given a fully permitted console session #when capabilities are read #then host input remains unavailable", () => {
+	it("keeps unrestricted observation separate from input authorization", async () => {
 		const body = await report({
 			delivery: "background",
 			probeHost: () => GRANTED_HOST,
@@ -66,7 +70,18 @@ describe("#given a fully permitted console session #when get_capabilities is cal
 		});
 
 		expect(body.approval).toEqual({ allowedBundleIds: null });
-		expect(body.advice).toEqual([]);
+		expect(body.backend).toBe("macos-host-observer");
+		expect(body.input).toEqual({
+			supported: false,
+			reason: "isolated-session-required",
+			scope: "human-desktop",
+		});
+		expect(body.capture).toEqual({
+			supported: false,
+			reason: "isolated-session-required",
+			scope: "human-desktop",
+		});
+		expect(body.advice).toHaveLength(1);
 	});
 
 	it("reports permissions, console mode, delivery and approval", async () => {
@@ -81,7 +96,23 @@ describe("#given a fully permitted console session #when get_capabilities is cal
 		expect(body.delivery).toMatchObject({ mode: "background" });
 		expect(body.approval).toEqual({ allowedBundleIds: ["com.apple.calculator"] });
 		expect(body.stop).toMatchObject({ stopped: false, armed: true });
-		expect(body.advice).toEqual([]);
+		expect(body.input.supported).toBe(false);
+		expect(body.host.workers.concurrent).toBe(false);
+		expect(body.advice).toHaveLength(1);
+	});
+
+	it("does not advertise attended input when requested", async () => {
+		const body = await report({
+			delivery: "attended",
+			probeHost: () => GRANTED_HOST,
+			allowedBundleIds: undefined,
+		});
+		expect(body.delivery).toMatchObject({
+			mode: "background",
+			requestedMode: "attended",
+			modes: ["background"],
+		});
+		expect(body.input.supported).toBe(false);
 	});
 });
 
@@ -105,9 +136,9 @@ describe("#given missing permissions, a remote session and a user stop #when get
 			},
 		});
 		expect(body.session).toMatchObject({ mode: "remote" });
-		expect(body.delivery).toMatchObject({ mode: "attended" });
+		expect(body.delivery).toMatchObject({ mode: "background" });
 		expect(body.stop).toMatchObject({ stopped: true, source: "cli" });
-		expect(body.advice).toHaveLength(5);
+		expect(body.advice).toHaveLength(6);
 	});
 });
 
@@ -130,9 +161,9 @@ describe("#given the repository skill #when resources are listed and read #then 
 		});
 		const listed = await client.listResources();
 		const uris = listed.resources.map((resource) => resource.uri);
-		expect(uris).toContain("skill://apple-cua/SKILL.md");
-		expect(uris.some((uri) => uri.startsWith("skill://apple-cua/references/"))).toBe(true);
-		const read = await client.readResource({ uri: "skill://apple-cua/SKILL.md" });
+		expect(uris).toContain("skill://opencua/SKILL.md");
+		expect(uris.some((uri) => uri.startsWith("skill://opencua/references/"))).toBe(true);
+		const read = await client.readResource({ uri: "skill://opencua/SKILL.md" });
 		const first = read.contents[0];
 		expect(first !== undefined && "text" in first ? first.text : undefined).toBe(
 			readFileSync(join(DEFAULT_SKILL_DIR, "SKILL.md"), "utf8"),
@@ -142,7 +173,7 @@ describe("#given the repository skill #when resources are listed and read #then 
 
 describe("#given a skill directory without SKILL.md #when resources are registered #then nothing is served", () => {
 	it("registers no resource", () => {
-		const dir = mkdtempSync(join(tmpdir(), "apple-cua-skill-"));
+		const dir = mkdtempSync(join(tmpdir(), "opencua-skill-"));
 		temporaryDirs.push(dir);
 		mkdirSync(join(dir, "references"));
 		writeFileSync(join(dir, "references", "usage.md"), "# usage\n");

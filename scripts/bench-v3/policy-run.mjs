@@ -59,7 +59,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 	const client = new McpClient({
 		command: process.execPath,
 		args: [`${root}/packages/mcp/dist/server.js`],
-		env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "", APPLE_CUA_DELIVERY: "background" },
+		env: { OPENCUA_ALLOWED_BUNDLE_IDS: "", OPENCUA_DELIVERY: "background" },
 		timeoutMs: 15000,
 	});
 	const report = {

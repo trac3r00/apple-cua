@@ -7,12 +7,12 @@ import { postNotification } from "./notify.js";
 
 export const SUPERVISED_CHILD_FLAG = "--supervised-child";
 const MAX_LINE_BYTES = 32 * 1024 * 1024;
-/** Requested restarts wait at most this long for in-flight calls; override with APPLE_CUA_SUPERVISOR_DRAIN_MS. */
+/** Requested restarts wait at most this long for in-flight calls; override with OPENCUA_SUPERVISOR_DRAIN_MS. */
 const DEFAULT_DRAIN_MS = 15_000;
 /** A restarted child that cannot answer its own tools/list must not hold the client queue forever. */
 const DEFAULT_TOOLS_PROBE_MS = 5_000;
 const UNKNOWN_OUTCOME =
-	"apple-cua restarted while this call ran; its outcome is unknown. Observe again before acting and never replay it.";
+	"opencua restarted while this call ran; its outcome is unknown. Observe again before acting and never replay it.";
 
 function drainMilliseconds(value: string | undefined): number {
 	if (value === undefined || value.trim() === "") return DEFAULT_DRAIN_MS;
@@ -183,12 +183,12 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 					if (stopped || restarting || !pendingRestart || inFlight.size === 0) return;
 					failRequests(UNKNOWN_OUTCOME, false);
 					restartIfIdle();
-				}, drainMilliseconds(process.env["APPLE_CUA_SUPERVISOR_DRAIN_MS"]));
+				}, drainMilliseconds(process.env["OPENCUA_SUPERVISOR_DRAIN_MS"]));
 			}
 			return;
 		}
 		clearDrainTimer();
-		options.log(`apple-cua restarting: ${pendingRestart}`);
+		options.log(`opencua restarting: ${pendingRestart}`);
 		pendingRestart = undefined;
 		restarting = true;
 		child?.kill("SIGTERM");
@@ -198,7 +198,7 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 		try {
 			message = JSON.parse(line);
 		} catch {
-			options.log("apple-cua child emitted malformed JSON");
+			options.log("opencua child emitted malformed JSON");
 			return;
 		}
 		if (!record(message)) return;
@@ -209,22 +209,22 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 				internalId = undefined;
 				if (!probingTools) {
 					if ("error" in message) {
-						options.log("apple-cua child re-initialization failed");
-						failRequests("apple-cua re-initialization failed");
+						options.log("opencua child re-initialization failed");
+						failRequests("opencua re-initialization failed");
 						stop(1);
 						return;
 					}
 					if (initialized) child?.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
 					probingTools = true;
-					internalId = `apple-cua-supervisor-tools-${generation}`;
+					internalId = `opencua-supervisor-tools-${generation}`;
 					child?.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: internalId, method: "tools/list" })}\n`);
 					toolsProbeTimer = setTimeout(() => {
 						toolsProbeTimer = undefined;
 						if (!probingTools) return;
-						options.log("apple-cua tools/list probe timed out");
+						options.log("opencua tools/list probe timed out");
 						probingTools = false;
 						internalId = undefined;
-						failRequests("apple-cua re-initialization timed out; observe again before acting");
+						failRequests("opencua re-initialization timed out; observe again before acting");
 						restarting = true;
 						child?.kill("SIGTERM");
 					}, options.toolsProbeTimeoutMs ?? DEFAULT_TOOLS_PROBE_MS);
@@ -274,10 +274,10 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 		try {
 			const current = options.spawnChild();
 			child = current;
-			const framer = new LineFramer(receive, () => options.log("apple-cua child line exceeded 32 MiB"));
+			const framer = new LineFramer(receive, () => options.log("opencua child line exceeded 32 MiB"));
 			const data = (chunk: Buffer) => framer.write(chunk);
 			const streamError = (cause: Error) => {
-				options.log(`apple-cua child stream failed: ${cause.message}`);
+				options.log(`opencua child stream failed: ${cause.message}`);
 				current.kill("SIGTERM");
 			};
 			current.stdout.on("data", data);
@@ -296,15 +296,15 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 					crashes = crashes.filter((time) => now - time <= (options.crashWindowMs ?? 60_000));
 					crashes.push(now);
 					if (crashes.length > (options.maxCrashes ?? 5)) {
-						options.log("apple-cua crash loop: restart limit exceeded");
-						failRequests("apple-cua crash loop: restart limit exceeded");
+						options.log("opencua crash loop: restart limit exceeded");
+						failRequests("opencua crash loop: restart limit exceeded");
 						stop(1);
 						return;
 					}
 					if (crashed) {
 						const reason = restartReason ?? pendingRestart ?? "unexpected child exit";
 						(options.notify ?? postNotification)(
-							"apple-cua",
+							"opencua",
 							`Server restarted after a child crash (${reason}); observe again before acting.`,
 						);
 					}
@@ -323,7 +323,7 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 			if (restarting) {
 				if (initialization) {
 					probingTools = false;
-					internalId = `apple-cua-supervisor-init-${++generation}`;
+					internalId = `opencua-supervisor-init-${++generation}`;
 					current.stdin.write(`${JSON.stringify({ ...initialization, id: internalId })}\n`);
 				} else {
 					restarting = false;
@@ -331,8 +331,8 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 				}
 			}
 		} catch (cause) {
-			options.log(`apple-cua spawn failed: ${cause instanceof Error ? cause.message : String(cause)}`);
-			failRequests("apple-cua could not start");
+			options.log(`opencua spawn failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+			failRequests("opencua could not start");
 			stop(1);
 		}
 	};
@@ -365,14 +365,14 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
 		stop(0);
 	};
 	const inputError = (cause: Error) => {
-		options.log(`apple-cua input failed: ${cause.message}`);
-		failRequests("apple-cua input failed");
+		options.log(`opencua input failed: ${cause.message}`);
+		failRequests("opencua input failed");
 		stop(1);
 	};
 	const requestRestart = (reason: string) => {
 		if (stopped) return;
 		if (reason === "permission-granted") {
-			(options.notify ?? postNotification)("apple-cua", "Permissions granted; server reloading.");
+			(options.notify ?? postNotification)("opencua", "Permissions granted; server reloading.");
 		}
 		if (restarting) return;
 		pendingRestart ??= reason;
@@ -401,7 +401,7 @@ export function nodeSupervisorOptions(
 		log: (line) => process.stderr.write(`${line}\n`),
 		spawnChild: () => {
 			const child = spawn(process.execPath, [scriptPath, SUPERVISED_CHILD_FLAG, ...argv], {
-				env: { ...process.env, APPLE_CUA_SUPERVISED: "1" },
+				env: { ...process.env, OPENCUA_SUPERVISED: "1" },
 				stdio: ["pipe", "pipe", "inherit"],
 			});
 			probeAtStart();
@@ -432,7 +432,7 @@ export function nodeSupervisorOptions(
 					if (disposed || probing) return;
 					if (interval) clearTimeout(interval);
 					const processProbe = spawn(process.execPath, [scriptPath, selfCheckFlag], {
-						env: { ...process.env, APPLE_CUA_SUPERVISED: "1" },
+						env: { ...process.env, OPENCUA_SUPERVISED: "1" },
 						stdio: ["ignore", "pipe", "ignore"],
 					});
 					probing = processProbe;
@@ -441,7 +441,7 @@ export function nodeSupervisorOptions(
 						text += chunk.toString("utf8");
 					});
 					processProbe.once("error", (cause) => {
-						process.stderr.write(`apple-cua permission probe: ${cause.message}\n`);
+						process.stderr.write(`opencua permission probe: ${cause.message}\n`);
 					});
 					processProbe.once("close", (code) => {
 						probing = undefined;
@@ -460,7 +460,7 @@ export function nodeSupervisorOptions(
 									}
 								}
 							} catch (cause) {
-								process.stderr.write(`apple-cua permission probe: ${String(cause)}\n`);
+								process.stderr.write(`opencua permission probe: ${String(cause)}\n`);
 							}
 						}
 						if (previous && Object.values(previous).includes(false)) interval = setTimeout(probe, 15_000);

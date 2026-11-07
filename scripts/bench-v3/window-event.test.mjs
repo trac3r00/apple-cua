@@ -29,7 +29,7 @@ test(
 				const [code] = await once(compiler, "exit");
 				assert.equal(code, 0);
 			}
-			observation = await subscribeWindow(binary, "never-created.txt", false, "dev.apple-cua.bench.unlaunched-test");
+			observation = await subscribeWindow(binary, "never-created.txt", false, "dev.opencua.bench.unlaunched-test");
 			observation.cancel();
 			await assert.rejects(observation.ready);
 		} finally {

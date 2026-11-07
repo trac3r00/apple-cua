@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@opencua/test-support";
 
 const koffiMock = vi.hoisted(() => {
 	type Reference = {

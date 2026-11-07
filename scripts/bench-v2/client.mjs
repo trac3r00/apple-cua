@@ -10,11 +10,16 @@ export class McpClient {
 		this.pending = new Map();
 		this.dead = null;
 		this.stderr = "";
+		this.stdinError = undefined;
 	}
 	async start() {
 		this.child = spawn(this.command, this.args, {
 			env: { ...process.env, ...this.env },
 			stdio: ["pipe", "pipe", "pipe"],
+		});
+		// A write fails once the server is going away; its exit, or the request timeout, then settles the request.
+		this.child.stdin.on("error", (error) => {
+			this.stdinError = error;
 		});
 		let buffer = "";
 		this.child.stdout.on("data", (chunk) => {
@@ -69,16 +74,11 @@ export class McpClient {
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
-				reject(new Error(`timeout: ${method} after ${this.timeoutMs}ms`));
+				const stdin = this.stdinError === undefined ? "" : `; stdin: ${this.stdinError.message}`;
+				reject(new Error(`timeout: ${method} after ${this.timeoutMs}ms${stdin}`));
 			}, this.timeoutMs);
 			this.pending.set(id, { resolve, reject, timer });
-			this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`, (error) => {
-				if (error && this.pending.has(id)) {
-					clearTimeout(timer);
-					this.pending.delete(id);
-					reject(error);
-				}
-			});
+			this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
 		});
 	}
 	callTool(name, args) {

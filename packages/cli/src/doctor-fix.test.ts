@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { type FixDependencies, type FixOptions, planRepairs, runDoctorFix } from "./doctor-fix.js";
 import { type DoctorFacts, HELPER_DISPLAY_NAME, PRIVACY_PANES, evaluateDoctor } from "./doctor.js";
 
@@ -12,7 +12,7 @@ function readyFacts(): DoctorFacts {
 		],
 		server: { path: "/repo/server.js", present: true },
 		helper: {
-			app: "/repo/apple-cua-mcp.app",
+			app: "/repo/opencua-mcp.app",
 			present: true,
 			signature: { valid: true, detail: "valid" },
 			bundledNode: { version: "v22.23.2" },
@@ -30,7 +30,7 @@ function readyFacts(): DoctorFacts {
 		},
 		stop: { stopped: false },
 		config: {
-			path: "/home/.apple-cua/config.json",
+			path: "/home/.opencua/config.json",
 			saved: true,
 			clients: [{ client: "omo", state: "current", path: "/home/.omo/agent/mcp.json", detail: "ok" }],
 		},
@@ -136,10 +136,10 @@ describe("#given broken pieces and nobody to ask #when --fix runs #then it repai
 		expect(mac.calls).toEqual(["rebuild native", "reapply registrations", `open ${PRIVACY_PANES.accessibility}`]);
 		expect(outcome.fixed).toEqual([
 			"rebuild the universal native binaries",
-			"register apple-cua again with the saved MCP clients",
+			"register opencua again with the saved MCP clients",
 		]);
-		expect(outcome.skipped.join("\n")).toMatch(/needs your consent: apple-cua doctor --fix --rebuild-helper/);
-		expect(outcome.skipped.join("\n")).toMatch(/your call: apple-cua resume/);
+		expect(outcome.skipped.join("\n")).toMatch(/needs your consent: opencua doctor --fix --rebuild-helper/);
+		expect(outcome.skipped.join("\n")).toMatch(/your call: opencua resume/);
 		expect(mac.printed()).toContain(
 			`then open Screen & System Audio Recording with: open "${PRIVACY_PANES.screenRecording}"`,
 		);

@@ -6,23 +6,17 @@ import {
 	isSckitAvailable,
 	probeHostCapabilities,
 	requestAccessibility,
+	requestInputMonitoring,
 	requestScreenRecording,
-} from "@apple-cua/core";
-import type { AutomationStatus, HostCapabilities, StopStatusSource } from "@apple-cua/core";
+} from "@opencua/core";
+import type { AutomationStatus, HostCapabilities, StopStatusSource } from "@opencua/core";
 import { capabilityReport } from "./capability-tools.js";
+import { PERMISSION_REQUEST_FLAG, SELF_CHECK_FLAG } from "./entry-flags.js";
 import { allowedBundleIdsFromProcessEnvironment, deliveryFromProcessEnvironment } from "./native-policy.js";
 import { toolNamesFor } from "./tool-names.js";
 import { resolveServerOptions } from "./toolset.js";
 
-/** `server.js --doctor` prints one self-check report as JSON and exits instead of starting the MCP server. */
-export const SELF_CHECK_FLAG = "--doctor";
-
-/**
- * `server.js --request-permissions <kinds>` shows macOS's permission dialogs for the helper and prints what is
- * granted afterwards as JSON. Kinds, comma-separated: accessibility, screen-recording, automation:<bundle id>, and
- * automation-status:<bundle id>, which only reads.
- */
-export const PERMISSION_REQUEST_FLAG = "--request-permissions";
+export { PERMISSION_REQUEST_FLAG, SELF_CHECK_FLAG };
 
 /** The apps the server sends Apple Events to on its own: window lookup through System Events, desktop size from Finder. */
 const AUTOMATION_TARGETS = ["com.apple.systemevents", "com.apple.finder"] as const;
@@ -48,8 +42,8 @@ export interface SelfCheckSources {
 /**
  * What this process may do on this Mac, read without raising a permission prompt: Accessibility and Screen
  * Recording come from AXIsProcessTrusted and CGPreflightScreenCaptureAccess, which only report. Launched through
- * the signed helper app, the answers describe the helper's identity ("apple-cua-mcp"), the one MCP clients run the
- * server under, which is why `apple-cua doctor` reads its permissions from here rather than from its own process.
+ * the signed helper app, the answers describe the helper's identity ("opencua-mcp"), the one MCP clients run the
+ * server under, which is why `opencua doctor` reads its permissions from here rather than from its own process.
  */
 export function selfCheckReport(sources: SelfCheckSources = nativeSelfCheckSources()): Record<string, unknown> {
 	const { toolset, iphone } = resolveServerOptions();
@@ -71,6 +65,7 @@ export function selfCheckReport(sources: SelfCheckSources = nativeSelfCheckSourc
 export type PermissionRequest =
 	| { readonly kind: "accessibility" }
 	| { readonly kind: "screen-recording" }
+	| { readonly kind: "input-monitoring" }
 	| { readonly kind: "automation"; readonly bundleId: string; readonly ask: boolean };
 
 export function parsePermissionRequests(value: string): PermissionRequest[] {
@@ -79,14 +74,14 @@ export function parsePermissionRequests(value: string): PermissionRequest[] {
 		.map((item) => item.trim())
 		.filter((item) => item !== "")
 		.map((item): PermissionRequest => {
-			if (item === "accessibility" || item === "screen-recording") {
+			if (item === "accessibility" || item === "screen-recording" || item === "input-monitoring") {
 				return { kind: item };
 			}
 			const [prefix = "", ...rest] = item.split(":");
 			const bundleId = rest.join(":").trim();
 			if ((prefix !== "automation" && prefix !== "automation-status") || bundleId === "") {
 				throw new Error(
-					`unknown permission request "${item}" (accessibility, screen-recording, automation:<bundle id>, automation-status:<bundle id>)`,
+					`unknown permission request "${item}" (accessibility, screen-recording, input-monitoring, automation:<bundle id>, automation-status:<bundle id>)`,
 				);
 			}
 			return { kind: "automation", bundleId, ask: prefix === "automation" };
@@ -96,6 +91,7 @@ export function parsePermissionRequests(value: string): PermissionRequest[] {
 export interface PermissionRequestSources {
 	readonly requestAccessibility: () => boolean;
 	readonly requestScreenRecording: () => boolean;
+	readonly requestInputMonitoring: () => boolean;
 	readonly automation: (bundleId: string, ask: boolean) => AutomationStatus;
 	/** Starts System Events in the background; it has no window, and Automation can only be asked of a running app. */
 	readonly launchSystemEvents: () => void;
@@ -105,6 +101,7 @@ export interface PermissionRequestSources {
 export interface PermissionRequestReport {
 	accessibility?: boolean;
 	screenRecording?: boolean;
+	inputMonitoring?: boolean;
 	automation?: Record<string, AutomationStatus>;
 }
 
@@ -119,6 +116,8 @@ export function requestPermissions(
 			report.accessibility = sources.requestAccessibility();
 		} else if (request.kind === "screen-recording") {
 			report.screenRecording = sources.requestScreenRecording();
+		} else if (request.kind === "input-monitoring") {
+			report.inputMonitoring = sources.requestInputMonitoring();
 		} else {
 			let status = sources.automation(request.bundleId, false);
 			if (status === "not-running" && request.bundleId === SYSTEM_EVENTS) {
@@ -142,6 +141,7 @@ function nativePermissionRequestSources(): PermissionRequestSources {
 	return {
 		requestAccessibility,
 		requestScreenRecording,
+		requestInputMonitoring,
 		automation: automationPermission,
 		launchSystemEvents: () => {
 			spawnSync("/usr/bin/open", ["-g", "-j", "-b", SYSTEM_EVENTS], { stdio: "ignore" });

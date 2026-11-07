@@ -488,7 +488,7 @@ export function planBackgroundKeyEquivalent(input: {
 	const chord = [...input.modifiers, input.key].join("+");
 	return {
 		kind: "refuse",
-		message: `${chord} would do nothing: ${input.item.path.join(" > ")} is disabled while the app is in the background, and background delivery never brings an app forward. Replace text with set_value, or call ask_user so the person can bring the app forward (or run with APPLE_CUA_DELIVERY=attended) for window commands such as Save.`,
+		message: `${chord} would do nothing: ${input.item.path.join(" > ")} is disabled while the app is in the background, and background delivery never brings an app forward. Replace text with set_value, or call ask_user so the person can bring the app forward (or run with OPENCUA_DELIVERY=attended) for window commands such as Save.`,
 	};
 }
 

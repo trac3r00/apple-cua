@@ -215,7 +215,9 @@ describe("#given a worker confined to a region #when run_worker aims the pointer
 				undefined,
 			);
 			const text = ran.result.content.find((content) => content.type === "text")?.text ?? "";
-			expect(text).toMatch(/step 1 clicks element 9 .*outside its region .*earlier steps of this run were: observe again/);
+			expect(text).toMatch(
+				/step 1 clicks element 9 .*outside its region .*earlier steps of this run were: observe again/,
+			);
 			expect(computer.effects).toEqual([{ kind: "key", key: "a" }]);
 		} finally {
 			await coordinator.close();

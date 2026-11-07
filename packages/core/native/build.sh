@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Builds the native helpers of @apple-cua/core as universal binaries (arm64 + x86_64), so one checkout
+# Builds the native helpers of @opencua/core as universal binaries (arm64 + x86_64), so one checkout
 # runs on Apple Silicon and Intel Macs alike:
 #
 #   libsckit.dylib   ScreenCaptureKit capture shim.
 #   cursor-overlay   the agent cursor overlay.
 #
-# Both target macOS 15.0, the oldest macOS apple-cua supports. Calling an API newer than that without an
+# Both target macOS 15.0, the oldest macOS opencua supports. Calling an API newer than that without an
 # @available check is a build error, which keeps the target true. The script ends by recording the hashes of
-# its inputs in build-inputs.sha256; scripts/setup.sh and `apple-cua doctor` compare them to tell whether the
+# its inputs in build-inputs.sha256; scripts/setup.sh and `opencua doctor` compare them to tell whether the
 # committed binaries still match their sources.
 #
 # Requires the Xcode Command Line Tools (clang, lipo) with a macOS SDK that ships ScreenCaptureKit.
@@ -19,7 +19,7 @@ architectures=(-arch arm64 -arch x86_64)
 deployment_target=(-mmacosx-version-min=15.0)
 availability_errors=(-Werror=unguarded-availability -Werror=unguarded-availability-new)
 
-for source in sckit.m cursor-overlay.m; do
+for source in sckit.m cursor-overlay.m history-recorder.m opencua-surface.m; do
 	if [[ ! -f "${native_dir}/${source}" ]]; then
 		echo "error: missing ${native_dir}/${source}" >&2
 		exit 1
@@ -57,11 +57,50 @@ clang \
 	-o "${native_dir}/cursor-overlay"
 echo "built ${native_dir}/cursor-overlay ($(lipo -archs "${native_dir}/cursor-overlay"))"
 
-(cd "${native_dir}" && shasum -a 256 build.sh sckit.m cursor-overlay.m >build-inputs.sha256)
+clang \
+	"${architectures[@]}" \
+	-O2 \
+	-fobjc-arc \
+	"${deployment_target[@]}" \
+	"${availability_errors[@]}" \
+	-framework AppKit \
+	-framework Foundation \
+	-framework ApplicationServices \
+	-framework CoreGraphics \
+	-framework Carbon \
+	"${native_dir}/history-recorder.m" \
+	-o "${native_dir}/history-recorder"
+echo "built ${native_dir}/history-recorder ($(lipo -archs "${native_dir}/history-recorder"))"
+
+clang \
+	"${architectures[@]}" \
+	-O2 \
+	-fobjc-arc \
+	"${deployment_target[@]}" \
+	"${availability_errors[@]}" \
+	-framework AppKit \
+	-framework Foundation \
+	-framework WebKit \
+	-framework CoreGraphics \
+	"${native_dir}/opencua-surface.m" \
+	-o "${native_dir}/opencua-surface"
+echo "built ${native_dir}/opencua-surface ($(lipo -archs "${native_dir}/opencua-surface"))"
+
+(cd "${native_dir}" && shasum -a 256 build.sh sckit.m cursor-overlay.m history-recorder.m opencua-surface.m >build-inputs.sha256)
 echo "recorded input hashes in ${native_dir}/build-inputs.sha256"
 
 # Sign the helpers with the stable identity (see scripts/sign-native.sh): ad-hoc builds change
 # the cdhash every rebuild, which resets macOS TCC consents and re-prompts every app.
 bash "$native_dir/../../../scripts/sign-native.sh" \
 	"$native_dir/libsckit.dylib" \
-	"$native_dir/cursor-overlay"
+	"$native_dir/cursor-overlay" \
+	"$native_dir/opencua-surface"
+
+# The always-on history watcher runs as its own launchd process, so it would otherwise get its own
+# TCC entry and need Accessibility and Input Monitoring granted separately. Signing it with the
+# opencua-mcp bundle identifier makes macOS charge its grant to the same app the rest of opencua
+# already uses, so one approval covers it. Override the id with OPENCUA_BUNDLE_ID to match a custom
+# helper bundle id.
+OPENCUA_CODESIGN_IDENTIFIER="${OPENCUA_BUNDLE_ID:-dev.opencua.mcp}" \
+	bash "$native_dir/../../../scripts/sign-native.sh" \
+	"$native_dir/history-recorder"

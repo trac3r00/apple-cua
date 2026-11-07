@@ -12,7 +12,7 @@ import {
 export type RepairId = "native" | "helper" | "registrations" | "stop" | "permissions";
 
 /**
- * One thing `apple-cua doctor --fix` can do about a report. `auto` repairs are safe to make unasked; rebuilding the
+ * One thing `opencua doctor --fix` can do about a report. `auto` repairs are safe to make unasked; rebuilding the
  * helper needs consent because macOS then asks for both permissions again; lifting the stop switch is the person's
  * call; a permission grant only a person can make, so --fix opens the pane where they make it.
  */
@@ -36,7 +36,7 @@ export function planRepairs(report: DoctorReport): Repair[] {
 		repairs.push({ id: "helper", kind: "consent", title: "rebuild the signed helper app" });
 	}
 	if (notOk(report, (id) => id.startsWith("client:")).length > 0) {
-		repairs.push({ id: "registrations", kind: "auto", title: "register apple-cua again with the saved MCP clients" });
+		repairs.push({ id: "registrations", kind: "auto", title: "register opencua again with the saved MCP clients" });
 	}
 	if (notOk(report, (id) => id === "stop-switch").length > 0) {
 		repairs.push({ id: "stop", kind: "confirm", title: "lift the stop switch" });
@@ -72,7 +72,7 @@ export interface FixDependencies {
 	readonly reapplyRegistrations: () => boolean;
 	readonly resume: () => void;
 	readonly openUrl: (url: string) => boolean;
-	/** Walks a person through macOS's permission dialogs (apple-cua permissions grant); called when guidePermissions. */
+	/** Walks a person through macOS's permission dialogs (opencua permissions grant); called when guidePermissions. */
 	readonly grantPermissions: () => Promise<{ readonly missing: readonly string[] }>;
 	/** Asks a yes/no question; called only when interactive. Defaults to no. */
 	readonly ask: (question: string) => Promise<boolean>;
@@ -129,13 +129,13 @@ export async function runDoctorFix(options: FixOptions, deps: FixDependencies): 
 					options.rebuildHelper ||
 					(options.interactive &&
 						(await deps.ask(
-							"Rebuild the helper app now (a new code identity, so macOS asks for Screen Recording and Accessibility again)",
+							"Rebuild the helper app now (grants carry over with the opencua dev signing identity; with an ad-hoc build macOS asks for Screen Recording and Accessibility again)",
 						)));
 				if (!consent) {
 					deps.print(
-						"  skipped: rebuilding the helper needs your consent, because macOS then asks for Screen Recording and Accessibility again. Run: apple-cua doctor --fix --rebuild-helper",
+						"  skipped: rebuilding the helper needs your consent, because an ad-hoc build makes macOS ask for Screen Recording and Accessibility again. Run: opencua doctor --fix --rebuild-helper",
 					);
-					skipped.push(`${repair.title} (needs your consent: apple-cua doctor --fix --rebuild-helper)`);
+					skipped.push(`${repair.title} (needs your consent: opencua doctor --fix --rebuild-helper)`);
 					break;
 				}
 				(deps.rebuildHelper() ? fixed : failed).push(repair.title);
@@ -148,8 +148,8 @@ export async function runDoctorFix(options: FixOptions, deps: FixDependencies): 
 					options.interactive &&
 					(await deps.ask(`Computer use is stopped (${description}). Lift the stop so agents may act again`));
 				if (!lift) {
-					deps.print("  skipped: only you decide when agents may act again. Run: apple-cua resume");
-					skipped.push(`${repair.title} (your call: apple-cua resume)`);
+					deps.print("  skipped: only you decide when agents may act again. Run: opencua resume");
+					skipped.push(`${repair.title} (your call: opencua resume)`);
 					break;
 				}
 				deps.resume();
@@ -181,7 +181,7 @@ export async function runDoctorFix(options: FixOptions, deps: FixDependencies): 
 						deps.print(`  ${opened ? "then " : ""}open ${pane.pane} with: open "${pane.url}"`);
 					}
 				}
-				skipped.push(`grant ${missing.map((pane) => pane.pane).join(" and ")} to "apple-cua-mcp" (only you can)`);
+				skipped.push(`grant ${missing.map((pane) => pane.pane).join(" and ")} to "opencua-mcp" (only you can)`);
 				break;
 			}
 		}

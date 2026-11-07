@@ -1,5 +1,5 @@
-import type { SystemPrompt, TopLevelWindow } from "@apple-cua/core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
+import type { SystemPrompt, TopLevelWindow } from "@opencua/core";
 import { createHarness, jsonPayload } from "./protocol-client-harness.js";
 import { FakeGuardedComputer } from "./protocol-test-harness.js";
 
@@ -23,7 +23,7 @@ describe("window discovery #given a machine with on-screen windows #when the age
 		const harness = await createHarness(
 			undefined,
 			probeWith([
-				{ id: 38574, ownerPid: 489, ownerName: "Finder", title: "apple-cua", bounds: WINDOW_BOUNDS },
+				{ id: 38574, ownerPid: 489, ownerName: "Finder", title: "opencua", bounds: WINDOW_BOUNDS },
 				{
 					id: 38580,
 					ownerPid: 76409,
@@ -40,7 +40,7 @@ describe("window discovery #given a machine with on-screen windows #when the age
 
 		expect(result.isError).toBeFalsy();
 		expect(payload["windows"]).toEqual([
-			{ window_id: 38574, pid: 489, app: "Finder", title: "apple-cua", bounds: WINDOW_BOUNDS },
+			{ window_id: 38574, pid: 489, app: "Finder", title: "opencua", bounds: WINDOW_BOUNDS },
 			{
 				window_id: 38580,
 				pid: 76409,

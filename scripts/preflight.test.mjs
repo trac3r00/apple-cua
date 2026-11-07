@@ -11,7 +11,7 @@ const GATE = fileURLToPath(new URL("./preflight.mjs", import.meta.url));
 const scratch = [];
 
 function fixture(files) {
-	const root = mkdtempSync(join(tmpdir(), "apple-cua-preflight-"));
+	const root = mkdtempSync(join(tmpdir(), "opencua-preflight-"));
 	scratch.push(root);
 	for (const [path, text] of Object.entries(files)) writeFileSync(join(root, path), text);
 	return root;
@@ -99,7 +99,7 @@ describe("preflight command runner", () => {
 		assert.equal(result.timedOut, true);
 	});
 	it("#given a command that does not exist #when run #then it is reported missing", async () => {
-		const result = await run(["apple-cua-no-such-tool"], { timeoutMs: 5000 });
+		const result = await run(["opencua-no-such-tool"], { timeoutMs: 5000 });
 		assert.equal(result.missing, true);
 	});
 });

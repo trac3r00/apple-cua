@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import { CURSOR_BACKGROUND_CUES_ENV, cursorBackgroundCuesEnabled } from "./cursor-background-cues.js";
 

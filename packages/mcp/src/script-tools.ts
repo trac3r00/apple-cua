@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
-import { parseElementIndex } from "@apple-cua/core";
-import { activeSpaceId, managedDisplaySpaces, spaceTypeFor } from "@apple-cua/core";
-import type { DockAction, DockSnapshot, ElementQuery, GuardedComputerInterface, TopLevelWindow } from "@apple-cua/core";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { parseElementIndex } from "@opencua/core";
+import { activeSpaceId, managedDisplaySpaces, spaceTypeFor } from "@opencua/core";
+import type { DockAction, DockSnapshot, ElementQuery, GuardedComputerInterface, TopLevelWindow } from "@opencua/core";
 import { z } from "zod/v4";
 import type { DockGuardSession } from "./dock-session.js";
 import type { ExtrasGuardSession } from "./extras-session.js";

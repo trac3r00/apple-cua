@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { resolveAppPid, withCursorIdentity } from "@apple-cua/core";
-import type { GuardedComputerInterface } from "@apple-cua/core";
+import { isOwnedSurfacePid, resolveAppPid, withCursorIdentity } from "@opencua/core";
+import type { CursorOwner, GuardedComputerInterface } from "@opencua/core";
 import type {
 	GuardedSession,
 	MutationOptions,
@@ -12,21 +12,29 @@ import { notificationsEnabled, postNotification } from "./notify.js";
 import { createRunStepDriver } from "./step-actions.js";
 import type { ToolResult } from "./tool-result.js";
 import type { RunStep } from "./tool-schemas.js";
+import type { WorkerRegistry } from "./worker-registry.js";
 
 export type WorkerAssignmentInput = {
 	readonly worker_id: string;
 	readonly task: string;
 	readonly app: string;
+	readonly agent_name?: string | undefined;
+	readonly parent_agent_name?: string | undefined;
 };
 
 export type WorkerAssignment = WorkerAssignmentInput & {
 	readonly cursor_id: string;
+	readonly cursor_owner: CursorOwner;
 	readonly observation_token?: string;
 	readonly observation?: ToolResult;
 };
 
+/** `paused` is a human Take Over: runs are refused until resume. `stopped` is terminal until release. */
+export type WorkerControl = "running" | "paused" | "stopped";
+
 export type WorkerStatus = Omit<WorkerAssignment, "observation"> & {
 	readonly busy: boolean;
+	readonly control: WorkerControl;
 	readonly lastRun?: WorkerRunSummary;
 };
 
@@ -48,6 +56,7 @@ export type WorkerObservation = {
 	readonly task: string;
 	readonly app: string;
 	readonly cursor_id: string;
+	readonly cursor_owner: CursorOwner;
 	readonly observation_token?: string;
 	readonly result: ToolResult;
 };
@@ -57,6 +66,7 @@ export type WorkerRunResult = {
 	readonly task: string;
 	readonly app: string;
 	readonly cursor_id: string;
+	readonly cursor_owner: CursorOwner;
 	readonly observation_token?: string;
 	readonly result: ToolResult;
 };
@@ -64,11 +74,14 @@ export type WorkerRunResult = {
 type WorkerState = {
 	assignment: WorkerAssignmentInput & {
 		readonly cursor_id: string;
+		readonly cursor_owner: CursorOwner;
 		observation_token: string | undefined;
 		observation: ToolResult | undefined;
 	};
 	readonly pid: number;
 	busy: boolean;
+	control: WorkerControl;
+	activeRun: AbortController | undefined;
 	lastRun: WorkerRunSummary | undefined;
 };
 
@@ -84,14 +97,34 @@ function payload(result: ToolResult): Record<string, unknown> {
 	return Object.fromEntries(Object.entries(value));
 }
 
+/** A user Take Over or Stop refused the call before any input was sent. */
+export class WorkerControlRefusal extends Error {
+	readonly reason: "worker-paused" | "worker-stopped";
+
+	constructor(workerId: string, control: Exclude<WorkerControl, "running">) {
+		super(
+			control === "paused"
+				? `the user took over worker "${workerId}"; wait for resume, then observe again before acting`
+				: `the user stopped worker "${workerId}"; do not retry, report back`,
+		);
+		this.name = "WorkerControlRefusal";
+		this.reason = control === "paused" ? "worker-paused" : "worker-stopped";
+	}
+}
+
 export class WorkerCoordinator {
+	private readonly sessionId = randomUUID();
 	private readonly workers = new Map<string, WorkerState>();
+	private readonly adopted = new Set<string>();
 	private attendedTail: Promise<void> = Promise.resolve();
 	private closed = false;
 
 	constructor(
 		private readonly session: GuardedSession,
 		private readonly computer: GuardedComputerInterface,
+		private readonly registry?: WorkerRegistry,
+		/** Apps several workers may share, each driving its own cursor: opencua-owned surfaces. */
+		private readonly sharedApp: (pid: number) => boolean = isOwnedSurfacePid,
 	) {
 		// The shared session owns token validation and per-app mutation queues.
 	}
@@ -111,23 +144,47 @@ export class WorkerCoordinator {
 			if (workerIds.has(assignment.worker_id) || this.workers.has(assignment.worker_id)) {
 				throw new Error(`worker "${assignment.worker_id}" is already assigned`);
 			}
-			if (pids.has(pid) || [...this.workers.values()].some((worker) => worker.pid === pid)) {
+			if (
+				!this.sharedApp(pid) &&
+				(pids.has(pid) || [...this.workers.values()].some((worker) => worker.pid === pid))
+			) {
 				throw new Error(`app "${assignment.app}" is already owned`);
 			}
 			workerIds.add(assignment.worker_id);
 			pids.add(pid);
 		}
 
+		this.registry?.claim(
+			resolved.map(({ assignment, pid }) => ({
+				worker_id: assignment.worker_id,
+				task: assignment.task,
+				app: assignment.app,
+				...(assignment.agent_name === undefined ? {} : { agent_name: assignment.agent_name }),
+				...(assignment.parent_agent_name === undefined ? {} : { parent_agent_name: assignment.parent_agent_name }),
+				appPid: pid,
+				...(this.sharedApp(pid) ? { shared: true } : {}),
+				ownerPid: process.pid,
+			})),
+		);
 		const provisional = resolved.map(({ assignment, pid }) => {
 			const worker: WorkerState = {
 				assignment: {
 					...assignment,
 					cursor_id: randomUUID(),
+					cursor_owner: {
+						agentName: assignment.agent_name ?? assignment.worker_id,
+						sessionId: this.sessionId,
+						...(assignment.parent_agent_name === undefined
+							? {}
+							: { parentAgentName: assignment.parent_agent_name }),
+					},
 					observation_token: undefined,
 					observation: undefined,
 				},
 				pid,
 				busy: true,
+				control: "running",
+				activeRun: undefined,
 				lastRun: undefined,
 			};
 			this.workers.set(assignment.worker_id, worker);
@@ -135,7 +192,14 @@ export class WorkerCoordinator {
 		});
 		try {
 			const settled = await Promise.allSettled(
-				provisional.map(async (worker) => ({ worker, observed: await this.observeState(worker, {}) })),
+				provisional.map(async (worker) => ({
+					worker,
+					observed: await this.observeState(worker, {
+						// A bounded table, not every worker's full tree: a worker that needs more observes again.
+						maxElements: 250,
+						elementFormat: "table",
+					}),
+				})),
 			);
 			// Keep every app claimed until all sibling reads finish, even when one fails.
 			const observations = settled.map((outcome) => {
@@ -158,12 +222,13 @@ export class WorkerCoordinator {
 					observation: observed.result,
 				};
 				worker.busy = false;
-				const { worker_id, task, app, cursor_id } = worker.assignment;
+				const { worker_id, task, app, cursor_id, cursor_owner } = worker.assignment;
 				return {
 					worker_id,
 					task,
 					app,
 					cursor_id,
+					cursor_owner,
 					...(observed.observation_token === undefined ? {} : { observation_token: observed.observation_token }),
 					observation: observed.result,
 				};
@@ -171,6 +236,7 @@ export class WorkerCoordinator {
 		} catch (error: unknown) {
 			for (const worker of provisional) {
 				this.workers.delete(worker.assignment.worker_id);
+				this.registry?.release(worker.assignment.worker_id);
 			}
 			throw error;
 		}
@@ -178,17 +244,23 @@ export class WorkerCoordinator {
 
 	async observe(workerId: string, options: WorkerObservationOptions = {}): Promise<WorkerObservation> {
 		this.assertOpen();
-		const worker = this.workers.get(workerId);
+		const worker = this.lookup(workerId);
 		if (worker === undefined) {
 			throw new Error(`worker "${workerId}" is not assigned`);
 		}
 		if (worker.busy) {
 			throw new Error(`worker "${workerId}" is busy`);
 		}
+		if (worker.control === "stopped") {
+			throw new WorkerControlRefusal(workerId, worker.control);
+		}
 		worker.busy = true;
 		worker.assignment = { ...worker.assignment, observation_token: undefined };
 		try {
-			const result = await this.observeState(worker, options);
+			const result = await this.observeState(worker, {
+				maxElements: 250,
+				...options,
+			});
 			worker.assignment = {
 				...worker.assignment,
 				observation_token: result.observation_token,
@@ -201,7 +273,7 @@ export class WorkerCoordinator {
 	}
 
 	status(): readonly WorkerStatus[] {
-		return [...this.workers.values()].flatMap(({ assignment, busy, lastRun }) => {
+		return [...this.workers.values()].flatMap(({ assignment, busy, control, lastRun }) => {
 			if (assignment.observation === undefined) {
 				return [];
 			}
@@ -211,10 +283,12 @@ export class WorkerCoordinator {
 					task: assignment.task,
 					app: assignment.app,
 					cursor_id: assignment.cursor_id,
+					cursor_owner: assignment.cursor_owner,
 					...(assignment.observation_token === undefined
 						? {}
 						: { observation_token: assignment.observation_token }),
 					busy,
+					control,
 					...(lastRun === undefined ? {} : { lastRun }),
 				},
 			];
@@ -223,7 +297,7 @@ export class WorkerCoordinator {
 
 	release(workerId: string): void {
 		this.assertOpen();
-		const worker = this.workers.get(workerId);
+		const worker = this.lookup(workerId);
 		if (worker === undefined) {
 			throw new Error(`worker "${workerId}" is not assigned`);
 		}
@@ -231,6 +305,36 @@ export class WorkerCoordinator {
 			throw new Error(`worker "${workerId}" is busy`);
 		}
 		this.workers.delete(workerId);
+		this.adopted.delete(workerId);
+		this.registry?.release(workerId);
+	}
+
+	/** Take Over: cancel the worker's in-flight run between guarded steps and refuse new runs until resume. */
+	pause(workerId: string): WorkerControl {
+		const worker = this.controlled(workerId);
+		if (worker.control === "stopped") {
+			throw new WorkerControlRefusal(workerId, worker.control);
+		}
+		worker.control = "paused";
+		worker.activeRun?.abort();
+		return worker.control;
+	}
+
+	/** Stop: cancel the in-flight run and refuse every further run or observation until release. */
+	stop(workerId: string): WorkerControl {
+		const worker = this.controlled(workerId);
+		worker.control = "stopped";
+		worker.activeRun?.abort();
+		return worker.control;
+	}
+
+	resume(workerId: string): WorkerControl {
+		const worker = this.controlled(workerId);
+		if (worker.control === "stopped") {
+			throw new WorkerControlRefusal(workerId, "stopped");
+		}
+		worker.control = "running";
+		return worker.control;
 	}
 
 	async run(
@@ -242,7 +346,7 @@ export class WorkerCoordinator {
 		executionOptions: RunControl = {},
 	): Promise<WorkerRunResult> {
 		this.assertOpen();
-		const worker = this.workers.get(workerId);
+		const worker = this.lookup(workerId);
 		if (worker === undefined) {
 			throw new Error(`worker "${workerId}" is not assigned`);
 		}
@@ -252,21 +356,33 @@ export class WorkerCoordinator {
 		if (token !== worker.assignment.observation_token) {
 			throw new Error(`observation token does not belong to worker "${workerId}"`);
 		}
+		if (worker.control !== "running") {
+			throw new WorkerControlRefusal(workerId, worker.control);
+		}
 		worker.busy = true;
 		worker.assignment = { ...worker.assignment, observation_token: undefined };
 		const startedAt = new Date().toISOString();
+		const activeRun = new AbortController();
+		worker.activeRun = activeRun;
+		const signal =
+			executionOptions.signal === undefined
+				? activeRun.signal
+				: AbortSignal.any([executionOptions.signal, activeRun.signal]);
 		try {
 			const dispatch = () =>
-				withCursorIdentity(worker.assignment.cursor_id, () =>
-					this.session.runSteps(
-						token,
-						String(worker.pid),
-						steps,
-						expect,
-						createRunStepDriver(this.computer),
-						resultOptions,
-						executionOptions,
-					),
+				withCursorIdentity(
+					worker.assignment.cursor_id,
+					() =>
+						this.session.runSteps(
+							token,
+							String(worker.pid),
+							steps,
+							expect,
+							createRunStepDriver(this.computer),
+							resultOptions,
+							{ ...executionOptions, signal },
+						),
+					worker.assignment.cursor_owner,
 				);
 			const pending = this.computer.delivery === "background" ? dispatch() : this.attendedTail.then(dispatch);
 			if (this.computer.delivery !== "background") {
@@ -298,12 +414,13 @@ export class WorkerCoordinator {
 				...(typeof resultPayload["bundleId"] === "string" ? { bundleId: resultPayload["bundleId"] } : {}),
 				...(resultText?.type === "text" ? { text: resultText.text.trim().slice(0, 2000) } : {}),
 			};
-			const { worker_id, task, app, cursor_id } = worker.assignment;
+			const { worker_id, task, app, cursor_id, cursor_owner } = worker.assignment;
 			return {
 				worker_id,
 				task,
 				app,
 				cursor_id,
+				cursor_owner,
 				...(typeof nextToken === "string" ? { observation_token: nextToken } : {}),
 				result,
 			};
@@ -317,18 +434,63 @@ export class WorkerCoordinator {
 				errorSummary,
 			};
 			if (notificationsEnabled()) {
-				postNotification("apple-cua", `worker ${workerId} task failed: ${errorSummary.slice(0, 120)}`);
+				postNotification("opencua", `worker ${workerId} task failed: ${errorSummary.slice(0, 120)}`);
 			}
 			throw error;
 		} finally {
 			worker.busy = false;
+			worker.activeRun = undefined;
 		}
 	}
 
 	async close(): Promise<void> {
 		this.closed = true;
+		for (const workerId of this.workers.keys()) {
+			if (!this.adopted.has(workerId)) this.registry?.release(workerId);
+		}
 		this.workers.clear();
 		await this.session.close();
+	}
+
+	/** A worker this process assigned, or one another opencua process assigned that this one now acts for. */
+	private lookup(workerId: string): WorkerState | undefined {
+		const local = this.workers.get(workerId);
+		const shared = local === undefined ? this.registry?.find(workerId) : undefined;
+		if (shared === undefined) return local;
+		const worker: WorkerState = {
+			assignment: {
+				worker_id: shared.worker_id,
+				task: shared.task,
+				app: shared.app,
+				...(shared.agent_name === undefined ? {} : { agent_name: shared.agent_name }),
+				...(shared.parent_agent_name === undefined ? {} : { parent_agent_name: shared.parent_agent_name }),
+				cursor_id: randomUUID(),
+				cursor_owner: {
+					agentName: shared.agent_name ?? shared.worker_id,
+					sessionId: this.sessionId,
+					...(shared.parent_agent_name === undefined ? {} : { parentAgentName: shared.parent_agent_name }),
+				},
+				observation_token: undefined,
+				observation: undefined,
+			},
+			pid: shared.appPid,
+			busy: false,
+			control: "running",
+			activeRun: undefined,
+			lastRun: undefined,
+		};
+		this.workers.set(workerId, worker);
+		this.adopted.add(workerId);
+		return worker;
+	}
+
+	private controlled(workerId: string): WorkerState {
+		this.assertOpen();
+		const worker = this.lookup(workerId);
+		if (worker === undefined) {
+			throw new Error(`worker "${workerId}" is not assigned`);
+		}
+		return worker;
 	}
 
 	private assertOpen(): void {
@@ -345,26 +507,30 @@ export class WorkerCoordinator {
 		) {
 			throw new Error(`worker "${worker.assignment.worker_id}" app process changed; release and reassign it`);
 		}
-		const result = await withCursorIdentity(worker.assignment.cursor_id, () =>
-			this.session.observe({
-				...options,
-				app: String(worker.pid),
-				diffOnly: false,
-				includeAccessibilityTree: true,
-				includeScreenshot: options.includeScreenshot ?? false,
-			}),
+		const result = await withCursorIdentity(
+			worker.assignment.cursor_id,
+			() =>
+				this.session.observe({
+					...options,
+					app: String(worker.pid),
+					diffOnly: false,
+					includeAccessibilityTree: true,
+					includeScreenshot: options.includeScreenshot ?? false,
+				}),
+			worker.assignment.cursor_owner,
 		);
 		const previous = worker.assignment.observation;
 		if (previous !== undefined && payload(previous)["bundleId"] !== payload(result)["bundleId"]) {
 			throw new Error(`worker "${worker.assignment.worker_id}" app identity changed; release and reassign it`);
 		}
 		const token = payload(result)["observation_token"];
-		const { worker_id, task, app, cursor_id } = worker.assignment;
+		const { worker_id, task, app, cursor_id, cursor_owner } = worker.assignment;
 		return {
 			worker_id,
 			task,
 			app,
 			cursor_id,
+			cursor_owner,
 			...(typeof token === "string" ? { observation_token: token } : {}),
 			result,
 		};

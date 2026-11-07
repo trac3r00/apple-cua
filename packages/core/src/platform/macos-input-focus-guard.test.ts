@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { vi } from "@opencua/test-support";
 
 const skyLightMock = vi.hoisted(() => {
 	const previousPsn = Buffer.alloc(8, 1);

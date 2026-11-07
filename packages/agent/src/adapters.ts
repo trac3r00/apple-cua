@@ -1,6 +1,6 @@
-import type { ComputerInterface } from "@apple-cua/core";
-import type { AppState } from "@apple-cua/core";
-import type { MirroringObservation } from "@apple-cua/core";
+import type { ComputerInterface } from "@opencua/core";
+import type { AppState } from "@opencua/core";
+import type { MirroringObservation } from "@opencua/core";
 import { buildMacActionSpace } from "./action-space.js";
 import type { ActionSpaceOptions } from "./action-space.js";
 import type { ExecutionResult, Observation, PlatformAdapter } from "./adapter.js";

@@ -354,8 +354,8 @@ private final class FixtureAppDelegate: NSObject, NSApplicationDelegate, NSWindo
 			defer: false
 		)
 		window.title =
-			ProcessInfo.processInfo.environment["APPLE_CUA_FIXTURE_TITLE"]
-			?? "apple-cua Background Input QA"
+			ProcessInfo.processInfo.environment["OPENCUA_FIXTURE_TITLE"]
+			?? "opencua Background Input QA"
 		window.isReleasedWhenClosed = false
 		window.delegate = self
 

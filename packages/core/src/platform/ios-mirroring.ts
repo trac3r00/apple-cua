@@ -49,8 +49,14 @@ import { activateApplication, findRunningApplication, getRunningApplications } f
 import { type TopLevelWindow, listTopLevelWindows } from "./macos-top-level-windows.js";
 
 /** iPhone Mirroring: the phone is a window, so everything here is scoped to that window. */
-export const IPHONE_MIRRORING_BUNDLE_ID = "com.apple.ScreenContinuity";
-export const IPHONE_MIRRORING_APP_NAME = "iPhone Mirroring";
+import {
+	IPHONE_MIRRORING_APP_NAME,
+	IPHONE_MIRRORING_BUNDLE_ID,
+	type MirroringSessionState,
+	describeMirroringState,
+} from "./ios-mirroring-state.js";
+
+export { IPHONE_MIRRORING_APP_NAME, IPHONE_MIRRORING_BUNDLE_ID, type MirroringSessionState, describeMirroringState };
 
 /**
  * ready        the phone is connected and the image is live
@@ -58,7 +64,6 @@ export const IPHONE_MIRRORING_APP_NAME = "iPhone Mirroring";
  * no-window    the app runs but owns no phone window
  * not-running  the app is not running at all
  */
-export type MirroringSessionState = "ready" | "blocked" | "no-window" | "not-running";
 
 export interface MirroringWindow {
 	readonly id: number;
@@ -249,26 +254,6 @@ export function ocrTextsToScreenPoints(
 		width: observation.box.width * scaleX,
 		height: observation.box.height * scaleY,
 	}));
-}
-
-/** What the user has to do about a session that is not ready. Never a tap-through instruction. */
-export function describeMirroringState(state: MirroringSessionState, detail?: string): string {
-	switch (state) {
-		case "ready":
-			return `${IPHONE_MIRRORING_APP_NAME} is connected and ready.`;
-		case "not-running":
-			return `${IPHONE_MIRRORING_APP_NAME} isn't running — open the ${IPHONE_MIRRORING_APP_NAME} app and connect your phone, then retry. Reconnecting is physical, so I can't do it for you.`;
-		case "no-window":
-			return `${IPHONE_MIRRORING_APP_NAME} is open but no phone is connected. Connect your phone in the app, then retry.`;
-		case "blocked":
-			return [
-				`${IPHONE_MIRRORING_APP_NAME} is not connected — an interstitial is on screen.`,
-				detail === undefined ? "" : `It says: ${detail}`,
-				'This needs you: clear it on the Mac, and if it says "iPhone in Use", lock your iPhone so mirroring can resume. Then retry — I will not tap Connect for you.',
-			]
-				.filter((part) => part.length > 0)
-				.join(" ");
-	}
 }
 
 export function mirroringProcess(): { readonly pid: number; readonly name: string } | undefined {

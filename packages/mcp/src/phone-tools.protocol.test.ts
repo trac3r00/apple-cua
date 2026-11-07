@@ -1,6 +1,6 @@
-import { type MirroringObservation, describeMirroringState } from "@apple-cua/core";
-import { InputInterrupted, currentInputScope } from "@apple-cua/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
+import { type MirroringObservation, describeMirroringState } from "@opencua/core";
+import { InputInterrupted, currentInputScope } from "@opencua/core";
 import { PhoneGuardSession, type PhoneToolSource } from "./phone-session.js";
 
 const ready: MirroringObservation = {

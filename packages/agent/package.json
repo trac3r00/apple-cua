@@ -1,13 +1,13 @@
 {
-	"name": "@apple-cua/agent",
+	"name": "@opencua/agent",
 	"version": "0.1.0",
 	"type": "module",
-	"description": "Decision-layer agent: an indexed action space over apple-cua observations and one fan-out decision per step",
+	"description": "Decision-layer agent: an indexed action space over opencua observations and one fan-out decision per step",
 	"keywords": ["computer-use", "agent", "decision", "systemone", "jev", "macos", "ios", "accessibility"],
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/trac3r00/apple-cua.git",
+		"url": "https://github.com/trac3r00/opencua.git",
 		"directory": "packages/agent"
 	},
 	"main": "./dist/index.js",
@@ -19,17 +19,16 @@
 		}
 	},
 	"scripts": {
-		"build": "tsgo",
+		"build": "tsgo -p tsconfig.build.json",
 		"typecheck": "tsgo --noEmit",
-		"test": "vitest --run"
+		"test": "bun test --isolate --parallel=4"
 	},
 	"dependencies": {
-		"@apple-cua/core": "workspace:*"
+		"@opencua/core": "workspace:*"
 	},
 	"devDependencies": {
 		"@types/node": "^20.0.0",
-		"typescript": "^5.7.0",
-		"vitest": "^2.1.0"
+		"typescript": "^5.7.0"
 	},
 	"engines": {
 		"node": ">=20.0.0"

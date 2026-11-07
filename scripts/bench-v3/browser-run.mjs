@@ -329,8 +329,8 @@ export async function main(options) {
 					command: "node",
 					args: [`${root}/packages/mcp/dist/server.js`],
 					env: {
-						APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.Safari,com.apple.TextEdit",
-						APPLE_CUA_DELIVERY: "background",
+						OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.Safari,com.apple.TextEdit",
+						OPENCUA_DELIVERY: "background",
 					},
 				};
 			const client = new McpClient(spec);

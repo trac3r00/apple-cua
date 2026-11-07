@@ -1,5 +1,5 @@
-import type { AXTreeElement, AppState } from "@apple-cua/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
+import type { AXTreeElement, AppState } from "@opencua/core";
 import { buildMacActionSpace, targetedOperationsFor } from "./action-space.js";
 
 function element(overrides: Partial<AXTreeElement> & { id: number }): AXTreeElement {

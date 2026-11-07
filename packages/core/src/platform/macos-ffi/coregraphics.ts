@@ -1,3 +1,11 @@
+import { currentCursorIdentity, currentCursorOwner, inContextClick } from "../../computer/cursor-scope.js";
+import {
+	isOwnedSurfacePid,
+	nameSurfaceCursor,
+	sendSurfacePointer,
+	surfaceCursorTag,
+	surfaceCursorUserData,
+} from "../owned-surfaces.js";
 import { createNSEventBackedMouseEvent } from "./appkit.js";
 import { cfRelease } from "./corefoundation.js";
 import {
@@ -51,6 +59,7 @@ export {
 } from "./coregraphics-types.js";
 
 export function postMouseEvent(options: MouseEventOptions): void {
+	if (sendToOwnedSurface(options)) return;
 	const event = makeMouseEvent(options.kind, options.position, options.button, options.targetWindow, options.flags);
 	try {
 		setIntegerValueField(event, K_CG_MOUSE_EVENT_BUTTON_NUMBER, mouseButtonNumber(options.button));
@@ -253,4 +262,37 @@ function stampTargetedMouseEvent(
 		setSkyLightWindowLocation(event, position);
 	}
 	setSkyLightIntegerField(event, 40, targetPid);
+	stampSurfaceCursor(event, targetPid);
+}
+
+/** An owned surface takes its agents' left-button input on its own socket, tagged with the sending cursor. */
+function sendToOwnedSurface(options: MouseEventOptions): boolean {
+	const { targetPid, targetWindow } = options;
+	// The socket carries no modifier flags, so input with held modifiers is posted as before.
+	if (targetPid === undefined || targetWindow === undefined || options.button !== "left") return false;
+	if ((options.flags ?? 0) !== 0) return false;
+	if (!isOwnedSurfacePid(targetPid)) return false;
+	const identity = currentCursorIdentity();
+	const tag = identity === undefined ? 1 : surfaceCursorTag(identity);
+	const sent = sendSurfacePointer(targetPid, {
+		tag,
+		context: inContextClick(),
+		kind: options.kind,
+		x: options.position.x - targetWindow.bounds.x,
+		y: options.position.y - targetWindow.bounds.y,
+	});
+	if (sent) nameSurfaceCursor(tag, currentCursorOwner()?.agentName ?? identity ?? "opencua");
+	return sent;
+}
+
+/** kCGEventSourceUserData: an owned surface reads it to draw the sending agent's cursor where the event landed. */
+const K_CG_EVENT_SOURCE_USER_DATA = 42;
+
+function stampSurfaceCursor(event: CGEventRef, targetPid: number): void {
+	if (!isOwnedSurfacePid(targetPid)) return;
+	const identity = currentCursorIdentity();
+	// Every agent event carries a nonzero tag, so the surface can tell it from the person's own clicks.
+	const tag = identity === undefined ? 1 : surfaceCursorTag(identity);
+	setIntegerValueField(event, K_CG_EVENT_SOURCE_USER_DATA, surfaceCursorUserData(tag, inContextClick()));
+	nameSurfaceCursor(tag, currentCursorOwner()?.agentName ?? identity ?? "opencua");
 }

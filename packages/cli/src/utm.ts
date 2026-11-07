@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { UTM } from "@apple-cua/core";
+import type { UTM } from "@opencua/core";
 import { type Command, InvalidArgumentError } from "commander";
 
 type RegisterUtmOptions = {
@@ -20,8 +20,9 @@ export function registerUtmCommands(program: Command, options: RegisterUtmOption
 		.command("utm")
 		.description("Control UTM virtual machines")
 		.option("--app <path>", "UTM app path");
-	const createUtm = (): UTM => {
+	const createUtm = async (): Promise<UTM> => {
 		const { app } = utm.opts<{ app?: string }>();
+		const { UTM } = await import("@opencua/core");
 		return new UTM(app === undefined ? {} : { appPath: app });
 	};
 	const writeOutput = (value: unknown, humanValue: string): void => {
@@ -31,7 +32,7 @@ export function registerUtmCommands(program: Command, options: RegisterUtmOption
 	utm.command("list")
 		.description("List virtual machines")
 		.action(async () => {
-			const machines = await createUtm().list();
+			const machines = await (await createUtm()).list();
 			writeOutput(machines, machines.map((vm) => `${vm.id}\t${vm.name}\t${vm.status}\t${vm.backend}`).join("\n"));
 		});
 
@@ -40,7 +41,7 @@ export function registerUtmCommands(program: Command, options: RegisterUtmOption
 			.description(action === "stop" ? "Request a graceful virtual machine shutdown" : `${action} a virtual machine`)
 			.argument("<vm>", "virtual machine ID or name")
 			.action(async (vm: string) => {
-				await createUtm()[action](vm);
+				await (await createUtm())[action](vm);
 				writeOutput({ ok: true, action, args: { vm } }, `${action} requested for ${vm}`);
 			});
 	}
@@ -50,7 +51,7 @@ export function registerUtmCommands(program: Command, options: RegisterUtmOption
 		.argument("<vm>", "virtual machine ID or name")
 		.argument("<text>", "text to type")
 		.action(async (vm: string, text: string) => {
-			await createUtm().type(vm, text);
+			await (await createUtm()).type(vm, text);
 			writeOutput({ ok: true, action: "type", args: { vm, text } }, `Typed ${text.length} characters into ${vm}`);
 		});
 
@@ -59,7 +60,7 @@ export function registerUtmCommands(program: Command, options: RegisterUtmOption
 		.argument("<vm>", "virtual machine ID or name")
 		.argument("<combo>", "key combination")
 		.action(async (vm: string, combo: string) => {
-			await createUtm().key(vm, combo);
+			await (await createUtm()).key(vm, combo);
 			writeOutput({ ok: true, action: "key", args: { vm, combo } }, `Pressed ${combo} in ${vm}`);
 		});
 
@@ -79,7 +80,7 @@ export function registerUtmCommands(program: Command, options: RegisterUtmOption
 			if (imageCoordinates && (clickOptions.button !== undefined || clickOptions.monitor !== undefined)) {
 				throw new InvalidArgumentError("--image-coordinates cannot be combined with --button or --monitor");
 			}
-			const client = createUtm();
+			const client = await createUtm();
 			if (imageCoordinates) {
 				const observation = await client.observe(vm);
 				await client.clickObserved(vm, { x, y }, observation);
@@ -95,7 +96,7 @@ export function registerUtmCommands(program: Command, options: RegisterUtmOption
 		.requiredOption("-x, --x <number>", "non-negative integer guest x coordinate", parseCoordinate)
 		.requiredOption("-y, --y <number>", "non-negative integer guest y coordinate", parseCoordinate)
 		.action(async (vm: string, flags: { readonly x: number; readonly y: number }) => {
-			await createUtm().move(vm, flags);
+			await (await createUtm()).move(vm, flags);
 			writeOutput({ ok: true, action: "move", args: { vm, ...flags } }, `Moved to ${flags.x},${flags.y} in ${vm}`);
 		});
 
@@ -104,7 +105,7 @@ export function registerUtmCommands(program: Command, options: RegisterUtmOption
 		.argument("<vm>", "virtual machine ID or name")
 		.option("-o, --output <path>", "save the observed screenshot")
 		.action(async (vm: string, flags: { readonly output?: string }) => {
-			const { image, ...observation } = await createUtm().observe(vm);
+			const { image, ...observation } = await (await createUtm()).observe(vm);
 			if (flags.output !== undefined) writeFileSync(flags.output, image.data);
 			const { data: _data, ...imageMetadata } = image;
 			const metadata = {
@@ -125,7 +126,7 @@ export function registerUtmCommands(program: Command, options: RegisterUtmOption
 		.action(async (vm: string, query: string) => {
 			const normalized = query.trim().toLowerCase();
 			if (normalized.length === 0) throw new InvalidArgumentError("text query must not be empty");
-			const client = createUtm();
+			const client = await createUtm();
 			const observation = await client.observe(vm);
 			const exact = observation.texts.filter((entry) => entry.text.toLowerCase() === normalized);
 			const matches =
@@ -180,7 +181,7 @@ export function registerUtmCommands(program: Command, options: RegisterUtmOption
 		.argument("<vm>", "virtual machine ID or name")
 		.requiredOption("-o, --output <path>", "output file path")
 		.action(async (vm: string, flags: { readonly output: string }) => {
-			const image = await createUtm().screenshot(vm);
+			const image = await (await createUtm()).screenshot(vm);
 			writeFileSync(flags.output, image.data);
 			writeOutput(
 				{

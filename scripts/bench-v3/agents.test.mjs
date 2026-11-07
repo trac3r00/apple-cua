@@ -12,14 +12,14 @@ import {
 
 test("#given the registered cross-app task #when configuring its isolated hand #then permits only its two apps without changing the default hand", () => {
 	const bundles = ["com.apple.TextEdit", "com.apple.Safari"];
-	const server = agents.agentServerSpecs("omo-apple", bundles)["apple-cua"];
-	assert.equal(server.env.APPLE_CUA_ALLOWED_BUNDLE_IDS, bundles.join(","));
-	assert.equal(server.env.APPLE_CUA_DELIVERY, "background");
+	const server = agents.agentServerSpecs("omo-apple", bundles)["opencua"];
+	assert.equal(server.env.OPENCUA_ALLOWED_BUNDLE_IDS, bundles.join(","));
+	assert.equal(server.env.OPENCUA_DELIVERY, "background");
 	assert.equal(
-		agents.agentServerSpecs("omo-apple")["apple-cua"].env.APPLE_CUA_ALLOWED_BUNDLE_IDS,
+		agents.agentServerSpecs("omo-apple")["opencua"].env.OPENCUA_ALLOWED_BUNDLE_IDS,
 		"com.apple.finder,com.apple.TextEdit",
 	);
-	assert.equal(agents.agentServerSpecs("omo-cua", bundles)["apple-cua"], undefined);
+	assert.equal(agents.agentServerSpecs("omo-cua", bundles)["opencua"], undefined);
 });
 
 test("#given cache writes in client usage #when parsing #then preserve usage scope without treating a turn as a request", () => {

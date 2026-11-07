@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import { stableElementKey } from "./stable-element-key.js";
 import type { AXTreeElement } from "./types.js";

@@ -4,7 +4,7 @@ import {
 	K_CG_EVENT_FLAG_MASK_COMMAND,
 	K_CG_EVENT_FLAG_MASK_CONTROL,
 	K_CG_EVENT_FLAG_MASK_SHIFT,
-} from "./macos-ffi/coregraphics.js";
+} from "./macos-ffi/coregraphics-types.js";
 
 const VIRTUAL_KEY_CODES = new Map<string, number>([
 	["a", 0],

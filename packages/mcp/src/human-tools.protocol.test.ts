@@ -1,5 +1,5 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import type { ElicitRequest, ElicitResult } from "@modelcontextprotocol/sdk/types.js";
-import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { lockRefusalResult } from "./tool-result.js";
 

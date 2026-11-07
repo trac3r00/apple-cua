@@ -4,17 +4,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
-import {
-	doctorBrowserService,
-	installBrowserService,
-	readConnection,
-	uninstallBrowserService,
-} from "@apple-cua/browser";
 import type { Command } from "commander";
 import { z } from "zod";
 import { resolveLayout } from "./layout.js";
 
 const execFileAsync = promisify(execFile);
+
+/** The browser service pulls in its own dependency tree, so it loads only when a browser command runs. */
+const browserService = (): Promise<typeof import("@opencua/browser")> => import("@opencua/browser");
 
 export type BrowserInstall = {
 	readonly name: string;
@@ -114,12 +111,12 @@ async function openInBackground(browser: BrowserInstall): Promise<boolean> {
 }
 
 async function readStatus(): Promise<BrowserStatus> {
-	const doctor = await doctorBrowserService();
+	const doctor = await (await browserService()).doctorBrowserService();
 	let connected = false;
 	let stopped = false;
 	let spaces: readonly unknown[] = [];
 	try {
-		const connection = await readConnection();
+		const connection = await (await browserService()).readConnection();
 		const response = await fetch(`http://127.0.0.1:${connection.port}/rpc`, {
 			method: "POST",
 			headers: {
@@ -171,7 +168,7 @@ export async function setupBrowser(
 	const browserCli = join(layout.checkout, "packages/browser/dist/cli.js");
 	if (!existsSync(browserCli)) {
 		throw new Error(
-			`The browser package is not built (${browserCli} is missing). Run: pnpm --filter @apple-cua/browser build`,
+			`The browser package is not built (${browserCli} is missing). Run: pnpm --filter @opencua/browser build`,
 		);
 	}
 	const extensionPath = options.extension ?? join(layout.checkout, "packages/browser/extension");
@@ -180,8 +177,8 @@ export async function setupBrowser(
 	}
 	let status = await readStatus();
 	if (!status.connected) {
-		const doctor = await doctorBrowserService();
-		if (!doctor.installed || !doctor.running) await installBrowserService();
+		const doctor = await (await browserService()).doctorBrowserService();
+		if (!doctor.installed || !doctor.running) await (await browserService()).installBrowserService();
 		status = await readStatus();
 	}
 	if (status.connected) {
@@ -206,7 +203,7 @@ export async function setupBrowser(
 	} else if (!opened) {
 		report(`Open ${selected.extensionsUrl} manually in ${selected.name}.`);
 	}
-	if (options.wait && (process.stdout.isTTY || process.env["APPLE_CUA_BROWSER_WAIT"] === "1")) {
+	if (options.wait && (process.stdout.isTTY || process.env["OPENCUA_BROWSER_WAIT"] === "1")) {
 		report("Waiting for the extension to connect (up to 120 seconds)...");
 		status = await waitForConnection(options.timeoutMs ?? 120_000, (elapsed) => {
 			if (elapsed > 0 && elapsed % 15_000 < 1000) report(`Still waiting: ${Math.round(elapsed / 1000)}s`);
@@ -244,14 +241,14 @@ export function registerBrowserCommands(program: Command, options: BrowserComman
 			};
 			if (options.isJsonOutput()) process.stdout.write(`${JSON.stringify(output)}\n`);
 			else if (!value.status.connected)
-				process.stdout.write("\nAfter loading the extension, check with: apple-cua browser status\n");
+				process.stdout.write("\nAfter loading the extension, check with: opencua browser status\n");
 		});
 
 	browser
 		.command("status")
 		.description("Read the daemon and extension connection state")
 		.action(async () => {
-			const doctor = await doctorBrowserService();
+			const doctor = await (await browserService()).doctorBrowserService();
 			const status = await readStatus();
 			if (options.isJsonOutput()) {
 				process.stdout.write(`${JSON.stringify({ ...doctor, ...status })}\n`);
@@ -262,7 +259,7 @@ export function registerBrowserCommands(program: Command, options: BrowserComman
 				`extension:  ${status.connected ? "connected" : "not connected"}`,
 				`actions:    ${status.stopped ? "stopped by the user" : "available"}`,
 				`spaces:     ${status.spaces.length}`,
-				status.connected ? "" : "next: apple-cua browser setup",
+				status.connected ? "" : "next: opencua browser setup",
 			].filter((line) => line !== "");
 			process.stdout.write(`${lines.join("\n")}\n`);
 		});
@@ -271,7 +268,7 @@ export function registerBrowserCommands(program: Command, options: BrowserComman
 		.command("uninstall")
 		.description("Remove the browser daemon and native-host registration")
 		.action(async () => {
-			const paths = await uninstallBrowserService();
+			const paths = await (await browserService()).uninstallBrowserService();
 			const output = { ok: true, launchAgent: paths.launchAgent, nativeHost: paths.nativeHostManifest };
 			if (options.isJsonOutput()) process.stdout.write(`${JSON.stringify(output)}\n`);
 			else process.stdout.write(`Removed the browser service.\nLaunchAgent: ${paths.launchAgent}\n`);

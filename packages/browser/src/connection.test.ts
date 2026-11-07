@@ -1,7 +1,7 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import { connectionToken, readConnection, writeConnection } from "./connection.js";
 
 describe("browser connection config", () => {
@@ -12,7 +12,7 @@ describe("browser connection config", () => {
 	});
 
 	async function isolatedDirectory(): Promise<string> {
-		const directory = await mkdtemp(join(tmpdir(), "apple-cua-connection-"));
+		const directory = await mkdtemp(join(tmpdir(), "opencua-connection-"));
 		directories.push(directory);
 		return directory;
 	}

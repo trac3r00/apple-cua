@@ -1,5 +1,5 @@
 {
-	"name": "@apple-cua/mcp",
+	"name": "@opencua/mcp",
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Model Context Protocol server for macOS computer control",
@@ -7,28 +7,30 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/trac3r00/apple-cua.git",
+		"url": "https://github.com/trac3r00/opencua.git",
 		"directory": "packages/mcp"
 	},
 	"bin": {
-		"apple-cua-mcp": "./dist/server.js"
+		"opencua-mcp": "./dist/server.js",
+		"apple-cua-mcp": "./dist/server.js",
+		"opencua-isolated-mcp": "./dist/isolated-server.js",
+		"apple-cua-isolated-mcp": "./dist/isolated-server.js"
 	},
 	"scripts": {
-		"build": "tsgo",
+		"build": "tsgo -p tsconfig.build.json",
 		"typecheck": "tsgo --noEmit",
-		"test": "vitest --run"
+		"test": "bun test --isolate --parallel=4"
 	},
 	"dependencies": {
-		"@apple-cua/agent": "workspace:*",
-		"@apple-cua/browser": "workspace:*",
-		"@apple-cua/core": "workspace:*",
+		"@opencua/agent": "workspace:*",
+		"@opencua/browser": "workspace:*",
+		"@opencua/core": "workspace:*",
 		"@modelcontextprotocol/sdk": "^1.0.0",
 		"zod": "4.4.3"
 	},
 	"devDependencies": {
 		"@types/node": "^20.0.0",
-		"typescript": "^5.7.0",
-		"vitest": "^2.1.0"
+		"typescript": "^5.7.0"
 	},
 	"engines": {
 		"node": ">=20.0.0"

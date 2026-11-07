@@ -10,7 +10,7 @@ if (url !== "http://127.0.0.1:55387/page") throw new Error("owned Safari URL cha
 const client = new McpClient({
 	command: "node",
 	args: ["packages/mcp/dist/server.js"],
-	env: { APPLE_CUA_ALLOWED_BUNDLE_IDS: "com.apple.Safari", APPLE_CUA_DELIVERY: "background" },
+	env: { OPENCUA_ALLOWED_BUNDLE_IDS: "com.apple.Safari", OPENCUA_DELIVERY: "background" },
 });
 try {
 	await client.start();

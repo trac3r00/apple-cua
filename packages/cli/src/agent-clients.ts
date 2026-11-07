@@ -7,7 +7,7 @@
 //   hermes    `hermes mcp add` connects to the server first and asks "Enable all tools?"; it has no --yes, so Y goes
 //             to stdin, and --args must come last. A changed entry is removed and added again.
 //   openclaw  `openclaw mcp set <name> <json>` writes mcp.servers; `mcp reload` makes agents pick it up.
-//   pi        the original pi (npm @mariozechner/pi-coding-agent) has no MCP; `pi install` adds the apple-cua pi
+//   pi        the original pi (npm @mariozechner/pi-coding-agent) has no MCP; `pi install` adds the opencua pi
 //             package, which bridges to the MCP server. On many Macs `pi` is senpi (OmO's engine), which is not it.
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
@@ -68,7 +68,7 @@ function blocked(client: string, entry: RegisteredEntry, howToRemove: string): P
 	return {
 		steps: [],
 		outcome: "unchanged",
-		blocked: `an apple-cua MCP entry of another installation (${entry.command ?? "unknown command"}) is registered in ${client}; remove it from that installation (apple-cua uninstall there) or with: ${howToRemove}`,
+		blocked: `an opencua MCP entry of another installation (${entry.command ?? "unknown command"}) is registered in ${client}; remove it from that installation (opencua uninstall there) or with: ${howToRemove}`,
 	};
 }
 
@@ -80,9 +80,9 @@ function envPairs(desired: DesiredRegistration): [string, string][] {
 
 export interface GeminiState {
 	readonly geminiHome: string;
-	/** The folder the linked apple-cua extension points to; undefined when no apple-cua extension is installed. */
+	/** The folder the linked opencua extension points to; undefined when no opencua extension is installed. */
 	readonly linkedSource: string | undefined;
-	/** An apple-cua server added with `gemini mcp add -s user` (or by hand) in settings.json. */
+	/** An opencua server added with `gemini mcp add -s user` (or by hand) in settings.json. */
 	readonly legacy: RegisteredEntry | undefined;
 }
 
@@ -111,7 +111,7 @@ export function planGeminiInstall(state: GeminiState, bundleDir: string, checkou
 		steps.push({
 			kind: "run",
 			args: ["mcp", "remove", "-s", "user", MCP_SERVER_NAME],
-			describe: "removed the older user-scope apple-cua MCP server the extension replaces",
+			describe: "removed the older user-scope opencua MCP server the extension replaces",
 		});
 	}
 	const pluginDir = geminiPluginDir(bundleDir);
@@ -120,13 +120,13 @@ export function planGeminiInstall(state: GeminiState, bundleDir: string, checkou
 			steps.push({
 				kind: "run",
 				args: ["extensions", "uninstall", PLUGIN_NAME],
-				describe: `dropped the apple-cua extension that pointed to ${state.linkedSource}`,
+				describe: `dropped the opencua extension that pointed to ${state.linkedSource}`,
 			});
 		}
 		steps.push({
 			kind: "run",
 			args: ["extensions", "link", pluginDir, "--consent"],
-			describe: `linked the apple-cua extension (${pluginDir}); it follows settings changes by itself`,
+			describe: `linked the opencua extension (${pluginDir}); it follows settings changes by itself`,
 		});
 	}
 	return {
@@ -141,14 +141,14 @@ export function planGeminiRemove(state: GeminiState, checkout: string): PluginPl
 		steps.push({
 			kind: "run",
 			args: ["extensions", "uninstall", PLUGIN_NAME],
-			describe: "removed the apple-cua extension",
+			describe: "removed the opencua extension",
 		});
 	}
 	if (legacyVerdict(state.legacy, checkout) === "migrate") {
 		steps.push({
 			kind: "run",
 			args: ["mcp", "remove", "-s", "user", MCP_SERVER_NAME],
-			describe: "removed the older user-scope apple-cua MCP server",
+			describe: "removed the older user-scope opencua MCP server",
 		});
 	}
 	return { steps, outcome: steps.length === 0 ? "absent" : "removed" };
@@ -161,7 +161,7 @@ export function hermesHomeOf(home: string, env: Env): string {
 }
 
 /**
- * The apple-cua entry under mcp_servers in Hermes' config.yaml, in the block shape `hermes mcp add` writes (command,
+ * The opencua entry under mcp_servers in Hermes' config.yaml, in the block shape `hermes mcp add` writes (command,
  * an args list, an env map). Anything else under the key is still reported as an entry, without its details.
  */
 export function readHermesEntry(yaml: string): RegisteredEntry | undefined {
@@ -177,7 +177,7 @@ export function readHermesEntry(yaml: string): RegisteredEntry | undefined {
 		if (/^\S/.test(line)) {
 			break;
 		}
-		const match = /^(\s+)(["']?)apple-cua\2:\s*(?:#.*)?$/.exec(line);
+		const match = /^(\s+)(["']?)opencua\2:\s*(?:#.*)?$/.exec(line);
 		if (match !== null) {
 			start = index;
 			indent = match[1]?.length ?? 0;
@@ -259,7 +259,7 @@ function hermesAdd(desired: DesiredRegistration): PluginStep {
 			...desired.launch.args,
 		],
 		input: "Y\n",
-		describe: "added the apple-cua MCP server with all its tools enabled",
+		describe: "added the opencua MCP server with all its tools enabled",
 	};
 }
 
@@ -277,7 +277,7 @@ export function planHermesInstall(state: HermesState, desired: DesiredRegistrati
 			kind: "run",
 			args: ["mcp", "remove", MCP_SERVER_NAME],
 			input: "Y\n",
-			describe: "removed the outdated apple-cua MCP server",
+			describe: "removed the outdated opencua MCP server",
 		});
 	}
 	steps.push(hermesAdd(desired));
@@ -297,7 +297,7 @@ export function planHermesRemove(state: HermesState, checkout: string): PluginPl
 				kind: "run",
 				args: ["mcp", "remove", MCP_SERVER_NAME],
 				input: "Y\n",
-				describe: "removed the apple-cua MCP server",
+				describe: "removed the opencua MCP server",
 			},
 		],
 		outcome: "removed",
@@ -364,7 +364,7 @@ export function planOpenClawInstall(state: OpenClawState, desired: DesiredRegist
 			{
 				kind: "run",
 				args: ["mcp", "set", MCP_SERVER_NAME, JSON.stringify(server)],
-				describe: `${state.entry === undefined ? "added" : "updated"} the apple-cua MCP server in openclaw.json`,
+				describe: `${state.entry === undefined ? "added" : "updated"} the opencua MCP server in openclaw.json`,
 			},
 			{ kind: "run", args: ["mcp", "reload"], describe: "told running OpenClaw agents to reload their MCP servers" },
 		],
@@ -388,7 +388,7 @@ export function planOpenClawRemove(state: OpenClawState, checkout: string): Plug
 	}
 	return {
 		steps: [
-			{ kind: "run", args: ["mcp", "unset", MCP_SERVER_NAME], describe: "removed the apple-cua MCP server" },
+			{ kind: "run", args: ["mcp", "unset", MCP_SERVER_NAME], describe: "removed the opencua MCP server" },
 			{ kind: "run", args: ["mcp", "reload"], describe: "told running OpenClaw agents to reload their MCP servers" },
 		],
 		outcome: "removed",
@@ -445,7 +445,7 @@ export function planPiInstall(state: PiState, checkout: string): PluginPlan {
 			{
 				kind: "run",
 				args: ["install", packageDir],
-				describe: `installed the apple-cua pi package (${packageDir}); it reaches the MCP server through the bundle`,
+				describe: `installed the opencua pi package (${packageDir}); it reaches the MCP server through the bundle`,
 			},
 		],
 		outcome: "added",
@@ -458,7 +458,7 @@ export function planPiRemove(state: PiState, checkout: string): PluginPlan {
 		return { steps: [], outcome: "absent" };
 	}
 	return {
-		steps: [{ kind: "run", args: ["remove", packageDir], describe: "removed the apple-cua pi package" }],
+		steps: [{ kind: "run", args: ["remove", packageDir], describe: "removed the opencua pi package" }],
 		outcome: "removed",
 	};
 }

@@ -1,7 +1,7 @@
+import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
 import {
 	type DoctorFacts,
 	detectArchitecture,
@@ -45,7 +45,7 @@ function readyFacts(): DoctorFacts {
 		nativeInputs: { matches: true, detail: "build-inputs.sha256 matches" },
 		server: { path: "/repo/server.js", present: true },
 		helper: {
-			app: "/repo/apple-cua-mcp.app",
+			app: "/repo/opencua-mcp.app",
 			present: true,
 			signature: { valid: true, detail: "valid" },
 			bundledNode: { version: "v22.23.2" },
@@ -64,7 +64,7 @@ function readyFacts(): DoctorFacts {
 		},
 		stop: { stopped: false },
 		config: {
-			path: "/home/.apple-cua/config.json",
+			path: "/home/.opencua/config.json",
 			saved: true,
 			clients: [
 				{ client: "omo", state: "current", path: "/home/.omo/agent/mcp.json", detail: "registered, up to date" },
@@ -259,7 +259,7 @@ describe("#given binaries or a helper built from other inputs than this checkout
 describe("#given MCP client registrations #when the doctor evaluates them #then stale ones fail with the --fix repair", () => {
 	it("fails a stale or missing registration, accepts a printed block, and only warns when none is registered", () => {
 		const facts = readyFacts();
-		const withClient = (state: "stale" | "missing" | "manual" | "unreadable") =>
+		const withClient = (state: "stale" | "missing" | "manual" | "not-installed" | "unreadable") =>
 			evaluateDoctor({
 				...facts,
 				config: {
@@ -270,16 +270,17 @@ describe("#given MCP client registrations #when the doctor evaluates them #then 
 
 		expect(withClient("stale")).toMatchObject({
 			status: "fail",
-			fix: expect.stringContaining("apple-cua doctor --fix"),
+			fix: expect.stringContaining("opencua doctor --fix"),
 		});
 		expect(withClient("missing")?.status).toBe("fail");
 		expect(withClient("unreadable")).toMatchObject({ status: "fail", fix: expect.stringContaining("by hand") });
 		expect(withClient("manual")?.status).toBe("ok");
+		expect(withClient("not-installed")).toMatchObject({ status: "warn", fix: "x" });
 		const none = evaluateDoctor({ ...facts, config: { ...facts.config, clients: [] } });
 		expect(none.ready).toBe(true);
 		expect(none.checks.find((item) => item.id === "clients")).toMatchObject({
 			status: "warn",
-			fix: expect.stringContaining("apple-cua config --register"),
+			fix: expect.stringContaining("opencua config --register"),
 		});
 		expect(
 			statusOf(
@@ -340,5 +341,36 @@ describe("#given server.js --doctor output #when it is parsed #then only a capab
 		expect(parseSelfCheckOutput("Fatal error: boom")).toBeUndefined();
 		expect(parseSelfCheckOutput(JSON.stringify({ permissions: { accessibility: "yes" } }))).toBeUndefined();
 		expect(parseSelfCheckOutput("")).toBeUndefined();
+	});
+});
+
+describe("#given the cua-history watcher #when the doctor reads Input Monitoring #then it is checked only once history is installed", () => {
+	const evaluate = (historyInstalled: boolean, inputMonitoring: boolean | undefined) => {
+		const facts = readyFacts();
+		if (facts.selfCheck?.ok !== true) {
+			throw new Error("readyFacts has no self-check report");
+		}
+		const report = facts.selfCheck.report;
+		return evaluateDoctor({
+			...facts,
+			historyInstalled,
+			selfCheck: { ok: true, report: { ...report, permissions: { ...report.permissions, inputMonitoring } } },
+		});
+	};
+	const row = (doctor: ReturnType<typeof evaluateDoctor>) =>
+		doctor.checks.find((item) => item.id === "permission:input-monitoring");
+
+	it("skips it without history, fails it as a manual step when missing, and passes it when granted", () => {
+		const withoutHistory = evaluate(false, false);
+		expect(row(withoutHistory)).toBeUndefined();
+		expect(withoutHistory.ready).toBe(true);
+
+		const missing = evaluate(true, false);
+		expect(row(missing)).toMatchObject({ status: "fail", manual: true });
+		expect(missing.ready).toBe(false);
+		expect(missing.onlyManualStepsRemain).toBe(true);
+
+		expect(row(evaluate(true, true))?.status).toBe("ok");
+		expect(row(evaluate(true, undefined))?.status).toBe("warn");
 	});
 });

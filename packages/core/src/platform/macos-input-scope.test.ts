@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { defined, vi } from "@opencua/test-support";
 
 const coreGraphicsMock = vi.hoisted(() => ({
 	getCurrentCursorPosition: vi.fn(() => ({ x: 1, y: 2 })),
@@ -35,19 +36,22 @@ vi.mock("./macos-ffi/skylight.js", () => ({
 	restoreFrontProcessNoWindows: vi.fn(() => true),
 }));
 
-import { currentCursorIdentity, withCursorIdentity } from "../computer/cursor-scope.js";
-import { InputInterrupted, type InputScope, runInInputScope } from "../computer/input-scope.js";
-import * as accessibility from "./macos-ffi/accessibility.js";
-import { NOOP_POINTER_OVERLAY } from "./macos-ffi/cursor-overlay.js";
-import {
+const { currentCursorIdentity, withCursorIdentity } = await import("../computer/cursor-scope.js");
+const { InputInterrupted, runInInputScope } = await import("../computer/input-scope.js");
+const accessibility = await import("./macos-ffi/accessibility.js");
+const { NOOP_POINTER_OVERLAY } = await import("./macos-ffi/cursor-overlay.js");
+const {
 	MacOSInputController,
 	setFocusStealWatcherForTesting,
 	setKeyboardPidResolverForTesting,
 	setKeyboardWindowFocuserForTesting,
 	setOnscreenWindowIdsSourceForTesting,
 	setPointWindowIdsForTesting,
-} from "./macos-input.js";
-import { setOpenWindowsSourceForTesting } from "./macos-open-windows.js";
+} = await import("./macos-input.js");
+const { setOpenWindowsSourceForTesting } = await import("./macos-open-windows.js");
+const ownedSurfaces = await import("./owned-surfaces.js");
+
+import type { InputScope } from "../computer/input-scope.js";
 
 const NO_SLEEP = { acquire: () => undefined, release: () => undefined };
 
@@ -72,21 +76,21 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
 	};
 }
 
-function backgroundController(): MacOSInputController {
+function backgroundController(): InstanceType<typeof MacOSInputController> {
 	return new MacOSInputController(undefined, NOOP_POINTER_OVERLAY, () => false, NO_SLEEP, "background");
 }
 
 /** Background cue rendering is env-gated at construction; some tests need the legacy silent behavior. */
 function withBackgroundCuesDisabled<T>(run: () => T): T {
-	const previous = process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"];
-	process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = "off";
+	const previous = process.env["OPENCUA_CURSOR_BACKGROUND_CUES"];
+	process.env["OPENCUA_CURSOR_BACKGROUND_CUES"] = "off";
 	try {
 		return run();
 	} finally {
 		if (previous === undefined) {
-			Reflect.deleteProperty(process.env, "APPLE_CUA_CURSOR_BACKGROUND_CUES");
+			Reflect.deleteProperty(process.env, "OPENCUA_CURSOR_BACKGROUND_CUES");
 		} else {
-			process.env["APPLE_CUA_CURSOR_BACKGROUND_CUES"] = previous;
+			process.env["OPENCUA_CURSOR_BACKGROUND_CUES"] = previous;
 		}
 	}
 }
@@ -521,6 +525,32 @@ describe("#given two gestures for one background app #when the first drag is par
 	});
 });
 
+describe("#given an opencua-owned surface #when two cursors act on it #then neither waits for the other's gesture", () => {
+	it("posts the second cursor's click while the first cursor's drag is still held", async () => {
+		vi.useFakeTimers();
+		vi.spyOn(ownedSurfaces, "isOwnedSurfacePid").mockImplementation((pid) => pid === 42);
+		const controller = backgroundController();
+		const drag = withCursorIdentity("painter-1", () =>
+			runInInputScope(boundTo(42, 12), () =>
+				controller.drag({ from: { x: 350, y: 150 }, to: { x: 400, y: 200 }, duration: 32 }),
+			),
+		);
+		await vi.advanceTimersByTimeAsync(0);
+		const click = withCursorIdentity("painter-2", () =>
+			runInInputScope(boundTo(42, 12), () => controller.click({ x: 380, y: 180 })),
+		);
+		await vi.advanceTimersByTimeAsync(0);
+
+		const beforeRelease = coreGraphicsMock.postMouseEvent.mock.calls.map(([event]) => event);
+		expect(beforeRelease.some((event) => event.kind === "down" && event.position.x === 380)).toBe(true);
+		expect(beforeRelease.some((event) => event.kind === "up" && event.position.x === 400)).toBe(false);
+
+		await vi.runAllTimersAsync();
+		await Promise.all([drag, click]);
+		controller.close();
+	});
+});
+
 describe("#given background delivery #when input has no target app #then nothing is posted at all", () => {
 	it("#when every kind of input is tried without a target #then each is refused before any event goes out", async () => {
 		// given
@@ -656,7 +686,7 @@ describe("#given a stop arrives while input is going out #when the call is mid-w
 		expect(overlay.set).toHaveBeenCalled();
 		expect(overlay.setMode).toHaveBeenCalledWith("drag", 42);
 		expect(await runInInputScope(boundTo(42, 12), async () => controller.getCursorPosition())).toEqual(
-			positions.at(-1),
+			defined(positions.at(-1)),
 		);
 		const dragEvents = coreGraphicsMock.postMouseEvent.mock.calls
 			.map(([event]) => event)

@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { parseKeyChord } from "./actions.js";
 
 describe("#given a key chord #when it is parsed #then the plus key survives the plus separator", () => {
-	it.each([
+	it.each<readonly [string, ReturnType<typeof parseKeyChord>]>([
 		["+", { key: "=", modifiers: ["shift"] }],
 		["cmd++", { key: "=", modifiers: ["command", "shift"] }],
 		["cmd+a", { key: "a", modifiers: ["command"] }],

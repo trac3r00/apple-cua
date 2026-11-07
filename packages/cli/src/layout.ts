@@ -7,7 +7,7 @@ export type Environment = Readonly<Record<string, string | undefined>>;
 
 /** Where one installation's pieces live, all derived from the checkout this CLI runs from and the environment. */
 export interface Layout {
-	/** The apple-cua checkout, canonical (symlinks resolved). */
+	/** The opencua checkout, canonical (symlinks resolved). */
 	readonly checkout: string;
 	readonly nativeDir: string;
 	readonly helperApp: string;
@@ -19,12 +19,12 @@ export interface Layout {
 	readonly helperBuildScript: string;
 	/** The user's home directory. */
 	readonly home: string;
-	/** APPLE_CUA_HOME (default ~/.apple-cua): config.json, install.json, a downloaded Node.js, the installer's checkout. */
-	readonly appleCuaHome: string;
+	/** OPENCUA_HOME (default ~/.opencua): config.json, install.json, a downloaded Node.js, the installer's checkout. */
+	readonly openCuaHome: string;
 	readonly configPath: string;
 	/** Written by install.sh: present when the installer created a checkout. */
 	readonly installMarkerPath: string;
-	/** APPLE_CUA_BIN_DIR (default ~/.local/bin): where setup puts the `apple-cua` launcher. */
+	/** OPENCUA_BIN_DIR (default ~/.local/bin): where setup puts the `opencua` launcher. */
 	readonly binDir: string;
 	readonly launcherPath: string;
 	/** The per-Mac integration bundle every agent client is wired to (see bundle.ts). */
@@ -78,28 +78,37 @@ export function homeDirectory(env: Environment = process.env): string {
 	return nonEmpty(env["HOME"]) ?? homedir();
 }
 
-export function resolveLayout(env: Environment = process.env, checkout: string = defaultCheckout()): Layout {
+export function resolveLayout(
+	env: Environment = process.env,
+	checkout: string = defaultCheckout(),
+	platform: NodeJS.Platform = process.platform,
+): Layout {
 	const home = homeDirectory(env);
-	const appleCuaHome = resolve(nonEmpty(env["APPLE_CUA_HOME"]) ?? join(home, ".apple-cua"));
-	const binDir = resolve(nonEmpty(env["APPLE_CUA_BIN_DIR"]) ?? join(home, ".local/bin"));
-	const helperApp = join(checkout, "packages/mcp/dist/apple-cua-mcp.app");
+	const current = join(home, ".opencua");
+	const legacy = join(home, ".apple-cua");
+	const defaultHome = !existsSync(current) && existsSync(legacy) ? legacy : current;
+	const openCuaHome = resolve(nonEmpty(env["OPENCUA_HOME"]) ?? nonEmpty(env["APPLE_CUA_HOME"]) ?? defaultHome);
+	const defaultBin =
+		platform === "win32" ? join(env["LOCALAPPDATA"] ?? home, "opencua", "bin") : join(home, ".local/bin");
+	const binDir = resolve(nonEmpty(env["OPENCUA_BIN_DIR"]) ?? nonEmpty(env["APPLE_CUA_BIN_DIR"]) ?? defaultBin);
+	const helperApp = join(checkout, "packages/mcp/dist/opencua-mcp.app");
 	return {
 		checkout,
 		nativeDir: join(checkout, "packages/core/native"),
 		helperApp,
-		helperExecutable: join(helperApp, "Contents/MacOS/apple-cua-mcp"),
+		helperExecutable: platform === "darwin" ? join(helperApp, "Contents/MacOS/opencua-mcp") : process.execPath,
 		server: join(checkout, "packages/mcp/dist/server.js"),
 		cli: join(checkout, "packages/cli/dist/cli.js"),
-		setupScript: join(checkout, "scripts/setup.sh"),
+		setupScript: join(checkout, platform === "win32" ? "scripts/install.ps1" : "scripts/setup.sh"),
 		helperBuildScript: join(checkout, "scripts/build-tcc-helper.sh"),
 		home,
-		appleCuaHome,
-		configPath: join(appleCuaHome, "config.json"),
-		installMarkerPath: join(appleCuaHome, "install.json"),
+		openCuaHome,
+		configPath: join(openCuaHome, "config.json"),
+		installMarkerPath: join(openCuaHome, "install.json"),
 		binDir,
-		launcherPath: join(binDir, "apple-cua"),
-		bundleDir: join(appleCuaHome, "bundle"),
-		skillSource: join(checkout, "skills/apple-cua"),
+		launcherPath: join(binDir, platform === "win32" ? "opencua.cmd" : "opencua"),
+		bundleDir: join(openCuaHome, "bundle"),
+		skillSource: join(checkout, "skills/opencua"),
 		serverPackage: join(checkout, "packages/mcp/package.json"),
 	};
 }

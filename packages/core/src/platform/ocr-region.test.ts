@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { OCR_REGION_PADDING_POINTS, resolveOcrCrop } from "./ocr-region.js";
 
 const window = { x: 529, y: 190, width: 920, height: 464 };

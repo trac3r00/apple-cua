@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 import { createHarness, jsonPayload, observe } from "./protocol-client-harness.js";
 import { Deferred, type Effect, FakeGuardedComputer } from "./protocol-test-harness.js";
 
@@ -55,6 +55,8 @@ describe("run_hands #given background delivery #when keyboard and pointer lanes 
 			},
 		});
 		await Promise.all([typeStarted.promise, clickStarted.promise]);
+		// overlap_ms reports elapsed time while both lanes run; hold them for a real interval so it cannot round to zero.
+		await new Promise((resolve) => setTimeout(resolve, 5));
 		release.resolve(undefined);
 		const result = await pending;
 		const payload = jsonPayload(result);

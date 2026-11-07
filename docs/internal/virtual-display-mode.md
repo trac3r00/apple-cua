@@ -5,8 +5,9 @@ Status: design only. Nothing here is implemented. Statements about private macOS
 
 ## Goal
 
-Let agents drive ordinary host apps (Keynote, Excel) on a display that OpenCUA owns, without the 26 GB Tart guest
-described in [docs/isolated-desktop.md](../isolated-desktop.md), and without touching any display the person uses.
+Let agents drive ordinary host apps (Keynote, Excel) on a display that OpenCUA owns, without the Tart guest
+described in [docs/isolated-desktop.md](../isolated-desktop.md) (its acceptance VM uses 2 CPUs and 4096 MiB of RAM;
+the guest image's disk cost hasn't been measured), and without touching any display the person uses.
 
 ## Binding rule
 
@@ -21,7 +22,8 @@ If a mechanism can't keep it for some resource, that resource stays refused and 
 - `packages/core/src/platform/macos.ts` sets `supportsScreenshot`, `supportsInput` and `supportsClipboard` to false.
   Capture and input pass only when the target PID or window belongs to an owned surface (`isOwnedWindow`,
   `isOwnedSurfacePid`).
-- Call sites refuse host work in `macos-ffi/skylight.ts` (window and focus calls unless `isOwnedSurfacePid`),
+- Call sites refuse host work in `macos-ffi/skylight.ts` (focus helpers and PSN or event-record posting always
+  deny; only per-PID event posting through `SLEventPostToPid` is allowed, and only when `isOwnedSurfacePid` holds),
   `macos-ffi/accessibility.ts`, `macos-ffi/cursor-overlay.ts`, `macos-ffi/pasteboard.ts`, `macos-ffi/workspace.ts` and
   `macos-ffi/coregraphics-bindings.ts`.
 - `packages/core/src/platform/owned-surfaces.ts` keeps the registry: `registerOwnedSurface`, `isOwnedSurfacePid`
@@ -39,7 +41,7 @@ entitlement, that it survives only while the creating process lives, and that Sc
 `SCDisplay`.
 
 - Pro: no VM, no extra disk, native app speed.
-- Con: private API, can break in any macOS release. The display joins the person's display arrangement, so the
+- Con: private API, can break in any macOS release. **Unverified** (experiment 8): the display joins the person's display arrangement, so the
   WindowServer may move windows onto it, and Mission Control and System Settings show it. It must be placed far from
   the real displays and created with `hideFromMirroring`-style settings if they exist (**unverified**).
 
@@ -125,5 +127,10 @@ Run every experiment on a spare Mac or in the Tart guest first, never on the per
 | 5 | Trigger a notification and a copy in the owned instance | Person's session shows no banner; its pasteboard `changeCount` is unchanged |
 | 6 | `open -n` for Keynote, Excel, Freeform | Record which start a second instance and what state they share |
 | 7 | Kill the helper with SIGKILL | Display is gone; no orphan windows on the person's displays |
+| 8 | Create the display, open Mission Control and System Settings > Displays, and record the arrangement | Record whether it appears, whether windows move onto it, and whether any setting hides it |
 
-The mode ships only if 1, 3, 5 and 7 pass on the supported macOS versions and every leak found is refused in code.
+The gate depends on the mechanism and the apps offered. The mode ships only if 1, 3, 5, 7 and 8 pass on the supported
+macOS versions, every leak found is refused in code, and:
+
+- for D2 (separate-user session), experiment 2 passes;
+- for each app offered, experiments 3, 4, 5 and 6 are repeated with that app and pass, or the app isn't offered.

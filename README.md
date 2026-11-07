@@ -30,10 +30,11 @@ On macOS, OpenCUA acts only on surfaces the agent owns and on isolated guests. I
 screen, clipboard or Spaces, and it refuses to capture or send input to your own apps. Agents can drive:
 
 - **OpenCUA surfaces:** web pages opened by the MCP `surface` tool in an OpenCUA window that stays behind yours and
-  is never focused. Several workers can share one, each with a named cursor and an optional region.
+  is never focused. Several workers can share one, each with a named cursor and an optional region. Worker regions must not overlap.
 - **An isolated macOS guest** through Tart, or **UTM guests**: see [docs/isolated-desktop.md](docs/isolated-desktop.md)
   and [docs/utm.md](docs/utm.md).
-- **The background browser bridge:** see [docs/desktop-browser-control.md](docs/desktop-browser-control.md).
+- **The background browser bridge:** see [packages/browser/README.md](packages/browser/README.md) and
+  [skills/cua-browser/README.md](skills/cua-browser/README.md).
 
 Upgrading from apple-cua: the old `apple-cua` command, `APPLE_CUA_*` variables and `~/.apple-cua` state keep
 working, and setup replaces the old `apple-cua` MCP entry in each client. The helper's macOS bundle ID moved from
@@ -267,9 +268,9 @@ setting updates every client's registration.
 
 | | OpenCUA | [trycua/cua](https://github.com/trycua/cua) (Cua Driver) | Peekaboo | Codex Computer Use |
 |---|---|---|---|---|
-| Runs on | Agent-owned surfaces on your Mac, or isolated macOS/UTM guests | The host, on macOS, Windows and Linux [1] | Your Mac, directly; macOS 15 or later [4] | The ChatGPT desktop app on macOS and Windows [6] |
+| Runs on | Agent-owned surfaces on your Mac, isolated macOS/UTM guests, or a Chromium browser through the background browser bridge | The host, on macOS, Windows and Linux [1] | Your Mac, directly; macOS 15 or later [4] | The ChatGPT desktop app on macOS and Windows [6] |
 | Needs a VM | Only to drive ordinary desktop apps (Tart or UTM guest) | No; Lume VMs and Cua Spaces are optional [1] | No [4] | No [6] |
-| Input path | Per-window events to OpenCUA-owned surfaces; guest input inside Tart or UTM | Native per platform: AppKit, Accessibility, Quartz/HID on macOS; Win32, UI Automation on Windows; XTest, AT-SPI or portal input on Linux [3] | Background-safe `click`, `scroll`, `type`, `press` [5] | Screen Recording + Accessibility grants on macOS [6] |
+| Input path | Per-window events to OpenCUA-owned surfaces; guest input inside Tart or UTM; CDP DOM input through the browser bridge extension | Native per platform: AppKit, Accessibility, Quartz/HID on macOS; Win32, UI Automation on Windows; XTest, AT-SPI or portal input on Linux [3] | Background-safe `click`, `scroll`, `type`, `press` [5] | Screen Recording + Accessibility grants on macOS [6] |
 | Transport | Local MCP stdio, CLI, TypeScript API | MCP over stdio, CLI `cua-driver call`, Python/TypeScript/Rust SDKs via UniFFI over a C ABI [2] | Swift CLI, MCP over stdio [4][5] | Built into the desktop app as a plugin [6] |
 | Works with | Any MCP client, CLI, pi, any TS agent | Any MCP client, shell agents, SDK hosts [2] | Codex, Claude Code, Cursor, other MCP clients [4] | ChatGPT Work and Codex [6] |
 | Open source | Fully (MIT) | Cua Driver MIT; Spaces and Driver Bench FSL-1.1-MIT [1] | MIT [4] | Codex CLI Apache-2.0 [7]; plugin source not published there [6][7] |
@@ -298,9 +299,12 @@ flowchart LR
     M --> K["@opencua/core<br/>guarded session · observation tokens"]
     K --> S["ScreenCaptureKit<br/>capture"]
     K --> X["Accessibility API<br/>app state · actions"]
-    K --> G["CoreGraphics + SkyLight<br/>per-app input"]
+    K --> G["CoreGraphics + SkyLight<br/>per-PID input"]
     K --> V["Vision OCR<br/>iPhone Mirroring"]
-    S & X & G & V --> APPS["Your Mac's apps"]
+    K --> T["Guest backends<br/>Tart · UTM"]
+    S & X & G --> OWN["OpenCUA-owned surfaces"]
+    T --> GUEST["Isolated guest desktops"]
+    K -. refused .-> HOST["Your own Mac apps"]
 ```
 
 Every input must carry a fresh **observation token**. The agent observes an app, acts once against what it saw, and

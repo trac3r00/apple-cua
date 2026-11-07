@@ -206,13 +206,19 @@ export interface ProcessAudioLevel {
  * Listens to one process's audio output for `durationMs` through a CoreAudio process tap (macOS Audio Capture
  * permission) and returns its level; null when the native library is unavailable. Throws when the tap fails.
  */
-export function measureProcessAudioViaSck(pid: number, durationMs: number): ProcessAudioLevel | null {
+export async function measureProcessAudioViaSck(pid: number, durationMs: number): Promise<ProcessAudioLevel | null> {
 	const bindings = tryLoadSckitBindings();
 	if (bindings === null) return null;
 	const rms: [number] = [0];
 	const peak: [number] = [0];
 	const samples: [number | bigint] = [0];
-	const code = bindings.measureProcessAudio(pid, durationMs, rms, peak, samples);
+	// The tap listens for the whole duration: run it on koffi's worker thread so the server keeps answering meanwhile.
+	const code = await new Promise<number>((resolve, reject) => {
+		bindings.measureProcessAudio.async(pid, durationMs, rms, peak, samples, (error: unknown, result: unknown) => {
+			if (error !== null && error !== undefined) reject(error instanceof Error ? error : new Error(String(error)));
+			else resolve(Number(result));
+		});
+	});
 	if (code !== SCK_OK) {
 		throw new Error(`process audio tap failed: ${describeSckError(code)} (code ${code})`);
 	}

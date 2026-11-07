@@ -35,7 +35,7 @@ export function registerSurfaceTools(server: McpServer, computer: GuardedCompute
 		async (input) => {
 			if (input.op === "listen") {
 				if (input.pid === undefined) throw new Error("listen needs pid");
-				return textResult(JSON.stringify(listenToSurface(input.pid, input.duration_ms ?? 1_000)));
+				return textResult(JSON.stringify(await listenToSurface(input.pid, input.duration_ms ?? 1_000)));
 			}
 			if (input.op === "close") {
 				if (input.pid === undefined || !closeOwnedSurface(input.pid)) {

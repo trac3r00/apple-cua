@@ -6,6 +6,7 @@ import type {
 	InputObservation,
 	SystemPrompt,
 } from "@opencua/core";
+import { UNTRUSTED_CONTENT_NOTE, detectUntrustedContent } from "./untrusted-content.js";
 
 export type ToolContent =
 	| { readonly type: "text"; readonly text: string }
@@ -779,6 +780,29 @@ function stateToolResult(
 		if (options.boundDiff !== true) {
 			payload["systemPromptNote"] = SYSTEM_PROMPT_NOTE;
 		}
+	}
+	// Diff-only observations carry their text in the changes, not the element list: both are read.
+	const observed = [
+		...state.elements,
+		...(state.axChanges?.added ?? []),
+		...(state.axChanges?.changed.map((entry) => entry.after) ?? []),
+	];
+	const patterns = new Set<string>();
+	const flagged = new Set<number>();
+	for (const element of observed) {
+		const matched = detectUntrustedContent(
+			[element.label, element.value].filter((text): text is string => text !== null),
+		);
+		if (matched.length === 0) continue;
+		flagged.add(element.id);
+		for (const pattern of matched) patterns.add(pattern);
+	}
+	if (patterns.size > 0) {
+		payload["untrusted_content_warning"] = {
+			patterns: [...patterns].sort(),
+			elements: [...flagged].sort((left, right) => left - right),
+			note: UNTRUSTED_CONTENT_NOTE,
+		};
 	}
 	// Unindented: an observation is read by a model, and indentation alone was about 45% of its size.
 	const text: ToolContent = { type: "text", text: JSON.stringify({ ...payload, ...extra }) };

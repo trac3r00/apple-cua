@@ -88,7 +88,6 @@ describe("browser service artifacts", () => {
 				join(stateDirectory, "browser-native-host"),
 				join(
 					homeDirectory,
-					systemApplicationsDirectory: join(homeDirectory, "SystemApplications"),
 					"Library",
 					"Application Support",
 					"BraveSoftware",
@@ -246,7 +245,6 @@ describe("browser service artifacts", () => {
 		const stateDirectory = join(homeDirectory, "state");
 		const manifestPath = join(
 			homeDirectory,
-			systemApplicationsDirectory: join(homeDirectory, "SystemApplications"),
 			"Library",
 			"Application Support",
 			"BraveSoftware",

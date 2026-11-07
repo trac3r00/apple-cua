@@ -108,13 +108,26 @@ function payload(result: ToolResult): Record<string, unknown> {
 	return Object.fromEntries(Object.entries(value));
 }
 
-/** A pointer target outside the worker's region refused the run before any of its input was sent. */
+/**
+ * A target outside the worker's region stopped the run before that step's input was sent. A step resolved mid-run can
+ * be refused after earlier steps of the same run went out; `actionDispatched` says so.
+ */
 export class WorkerRegionRefusal extends Error {
 	readonly reason = "outside-worker-region";
 
-	constructor(workerId: string, step: number, region: WorkerRegion, detail: string) {
+	constructor(
+		workerId: string,
+		step: number,
+		region: WorkerRegion,
+		detail: string,
+		readonly actionDispatched = false,
+	) {
 		super(
-			`worker "${workerId}" step ${step} ${detail}, outside its region ${describeRegion(region)}; nothing was sent`,
+			`worker "${workerId}" step ${step} ${detail}, outside its region ${describeRegion(region)}; ${
+				actionDispatched
+					? "it and the steps after it were not sent, but earlier steps of this run were: observe again"
+					: "nothing was sent"
+			}`,
 		);
 		this.name = "WorkerRegionRefusal";
 	}
@@ -569,7 +582,7 @@ export class WorkerCoordinator {
 				result,
 			};
 		} catch (error: unknown) {
-			if (error instanceof WorkerRegionRefusal) {
+			if (error instanceof WorkerRegionRefusal && !error.actionDispatched) {
 				// Nothing was sent and the session never consumed the token, so the worker may fix the step and retry.
 				worker.assignment = { ...worker.assignment, observation_token: token };
 			}
@@ -616,14 +629,17 @@ export class WorkerCoordinator {
 			origin.set(runnable, origin.get(step) ?? -1);
 			return runnable;
 		};
+		let dispatched = false;
 		return {
 			...driver,
 			resolve: (step, elementIndex) => remember(step, driver.resolve(step, elementIndex)),
 			resolveAtPoint: (step, observation, point) => remember(step, driver.resolveAtPoint(step, observation, point)),
 			dispatch: async (step, targetPid, observation, actions, options) => {
 				const index = origin.get(step) ?? -1;
-				await this.assertInRegion(worker, region, index, pointerTargets(step) ?? [], observation);
-				return await driver.dispatch(step, targetPid, observation, actions, options);
+				await this.assertInRegion(worker, region, index, pointerTargets(step) ?? [], observation, dispatched);
+				const result = await driver.dispatch(step, targetPid, observation, actions, options);
+				dispatched = true;
+				return result;
 			},
 		};
 	}
@@ -634,6 +650,7 @@ export class WorkerCoordinator {
 		step: number,
 		targets: readonly PointerTarget[],
 		observation: InputObservation | undefined,
+		dispatchedBefore = false,
 	): Promise<void> {
 		for (const target of targets) {
 			const point =
@@ -645,6 +662,7 @@ export class WorkerCoordinator {
 					step,
 					region,
 					`${label}, which has no on-screen frame to prove it lies`,
+					dispatchedBefore,
 				);
 			}
 			if (!regionContains(region, point)) {
@@ -653,6 +671,7 @@ export class WorkerCoordinator {
 					step,
 					region,
 					`${label} at (${point.x}, ${point.y})`,
+					dispatchedBefore,
 				);
 			}
 		}

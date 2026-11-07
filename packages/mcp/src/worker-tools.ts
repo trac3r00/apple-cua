@@ -83,7 +83,11 @@ async function refusingControl(run: () => Promise<ToolResult>): Promise<ToolResu
 			content: [
 				{
 					type: "text",
-					text: JSON.stringify({ error: error.message, reason: error.reason, actionDispatched: false }),
+					text: JSON.stringify({
+						error: error.message,
+						reason: error.reason,
+						actionDispatched: error instanceof WorkerRegionRefusal ? error.actionDispatched : false,
+					}),
 				},
 			],
 			isError: true,

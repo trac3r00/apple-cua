@@ -200,6 +200,28 @@ describe("#given a worker confined to a region #when run_worker aims the pointer
 		}
 	});
 
+	it("#given a described target that resolves outside the region after a sent keystroke #when run #then the refusal says the earlier step was sent", async () => {
+		const { computer, coordinator } = setup();
+		try {
+			const token = await assignLeftPainter(coordinator);
+			computer.elementFrames.set(9, { x: 890, y: 340, width: 20, height: 20 });
+			const ran = await coordinator.run(
+				"left",
+				token,
+				[
+					{ type: "press_keys", keys: ["a"] },
+					{ type: "click", target: { label: "Open" } },
+				],
+				undefined,
+			);
+			const text = ran.result.content.find((content) => content.type === "text")?.text ?? "";
+			expect(text).toMatch(/step 1 clicks element 9 .*outside its region .*earlier steps of this run were: observe again/);
+			expect(computer.effects).toEqual([{ kind: "key", key: "a" }]);
+		} finally {
+			await coordinator.close();
+		}
+	});
+
 	it("#given keyboard-only steps #when run by a confined worker #then they are not checked against the region", async () => {
 		const { coordinator } = setup();
 		try {

@@ -1,4 +1,5 @@
 import type { Point } from "../types/index.js";
+import { dragProfile, lognormalProgress, smoothstepProgress } from "./drag-profile.js";
 
 const DEFAULT_DRAG_FRAME_MILLISECONDS = 16;
 /** Matches the public drag contract; bounds both held-button time and event count. */
@@ -33,13 +34,13 @@ function interpolatePoint(from: Point, to: Point, progress: number): Point {
  * stopping dead on arrival — which is what reads as "robotic" to a human watching the cursor.
  */
 export function easedProgress(progress: number): number {
-	const clamped = Math.min(1, Math.max(0, progress));
-	return clamped * clamped * (3 - 2 * clamped);
+	return smoothstepProgress(progress);
 }
 
 /** {@link interpolatePoint} along the eased profile, for drags and swipes. */
 export function interpolatePointEased(from: Point, to: Point, progress: number): Point {
-	return interpolatePoint(from, to, easedProgress(progress));
+	const profile = dragProfile() === "lognormal" ? lognormalProgress : smoothstepProgress;
+	return interpolatePoint(from, to, profile(progress));
 }
 
 /** Exact wheel displacement with eased ends; large scrolls trade smaller deltas for a bounded event rate. */

@@ -9,6 +9,7 @@ import { resolveAppInstructions } from "../app-instructions/index.js";
 import { resolveDisplayMetadata } from "../computer/display-metadata.js";
 import type { InputObservation, PreflightOptions, PreflightResult } from "../computer/guarded-interface.js";
 import { denyHostInteraction } from "../computer/host-interaction-policy.js";
+import { assertFocusInInputRegion } from "../computer/input-region.js";
 import { currentInputScope } from "../computer/input-scope.js";
 import type { ComputerInterface, ScreenshotResult, WindowTextRead } from "../computer/interface.js";
 import { assertScreenUnlocked } from "../computer/lock-guard.js";
@@ -1161,6 +1162,7 @@ export class MacOSHostComputer extends HostComputer {
 		options?: { readonly settleWrite?: boolean },
 	): Promise<boolean> {
 		this.assertInputAvailable();
+		assertFocusInInputRegion(() => focusedElementFrame(targetPid));
 		// Keys posted just before (Cmd+A) still wait in the app's event queue, while this write lands at
 		// once: without the fence the text lands at the old caret instead of replacing the selection.
 		await awaitKeyboardFence(

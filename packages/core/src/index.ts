@@ -36,6 +36,13 @@ export {
 	withCursorIdentity,
 } from "./computer/cursor-scope.js";
 export {
+	InputOutsideRegion,
+	assertFocusInInputRegion,
+	assertPointInInputRegion,
+	currentInputRegion,
+	withInputRegion,
+} from "./computer/input-region.js";
+export {
 	HandsCoordinator,
 	type HandName,
 	type HandResource,

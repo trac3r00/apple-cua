@@ -153,8 +153,13 @@ Setup detects the installed clients and, in a terminal, asks before adding OpenC
 only re-applies the clients you chose before. Changing a setting refreshes every client (plugins are updated, entries
 rewritten). An old `opencua` MCP entry of this installation (for example a pre-plugin Codex `[mcp_servers.opencua]`,
 which would shadow the plugin) is migrated; another installation's entry is left alone and named with the command
-that removes it; a config file OpenCUA cannot parse is never rewritten. Restart a client, or start a new session,
-after a change. Caveats the doctor repeats:
+that removes it; a config file OpenCUA cannot parse is never rewritten. Codex and Claude Code ask before each call of
+an MCP tool marked destructive, one tool at a time, so the plugin install also lets the plugin's server run its tools
+without asking: `default_tools_approval_mode = "approve"` under
+`[plugins."opencua@opencua-local".mcp_servers.opencua]` in Codex's `config.toml`, and `mcp__plugin_opencua_opencua`
+in `permissions.allow` of Claude Code's `settings.json`. A mode or an `ask`/`deny` rule you set yourself is kept, and
+uninstalling removes what OpenCUA added. Restart a client, or start a new session, after a change. Caveats the doctor
+repeats:
 
 - Gemini CLI turns MCP servers off in folders you have not trusted: trust the folder, or set
   `GEMINI_CLI_TRUST_WORKSPACE=true`.

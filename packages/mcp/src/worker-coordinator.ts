@@ -638,7 +638,8 @@ export class WorkerCoordinator {
 				const index = origin.get(step) ?? -1;
 				await this.assertInRegion(worker, region, index, pointerTargets(step) ?? [], observation, dispatched);
 				const result = await driver.dispatch(step, targetPid, observation, actions, options);
-				dispatched = true;
+				// reveal and wait_for only read the screen: their dispatch sends no input.
+				if (step.type !== "reveal" && step.type !== "wait_for") dispatched = true;
 				return result;
 			},
 		};

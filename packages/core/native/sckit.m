@@ -19,6 +19,7 @@
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
 #import <limits.h>
 #import <math.h>
+#import <os/lock.h>
 #import <stdatomic.h>
 #import <stdint.h>
 #import <stdlib.h>
@@ -256,6 +257,7 @@ static int captureMainDisplayPng(
 
 @interface SCKWindowOperationState : NSObject {
 @public
+	uint32_t windowID;
 	atomic_int pendingCallbacks;
 	atomic_bool workerFinished;
 	atomic_bool gateReleased;
@@ -274,7 +276,30 @@ static int captureMainDisplayPng(
 @end
 
 static NSMutableDictionary<NSNumber *, SCKWindowCapturePlan *> *windowPlanCache;
-static atomic_bool windowCaptureActive = false;
+// One capture in flight per window: a second capture of the same window is refused while the first runs,
+// but captures of different windows proceed concurrently.
+static os_unfair_lock activeWindowCapturesLock = OS_UNFAIR_LOCK_INIT;
+static NSMutableSet<NSNumber *> *activeWindowCaptures = nil;
+
+static bool acquireWindowCaptureGate(uint32_t windowID) {
+	os_unfair_lock_lock(&activeWindowCapturesLock);
+	if (activeWindowCaptures == nil) {
+		activeWindowCaptures = [NSMutableSet set];
+	}
+	NSNumber *key = @(windowID);
+	bool acquired = ![activeWindowCaptures containsObject:key];
+	if (acquired) {
+		[activeWindowCaptures addObject:key];
+	}
+	os_unfair_lock_unlock(&activeWindowCapturesLock);
+	return acquired;
+}
+
+static void releaseWindowCaptureGate(uint32_t windowID) {
+	os_unfair_lock_lock(&activeWindowCapturesLock);
+	[activeWindowCaptures removeObject:@(windowID)];
+	os_unfair_lock_unlock(&activeWindowCapturesLock);
+}
 
 static void releaseWindowCaptureGateIfFinished(SCKWindowOperationState *state) {
 	if (!atomic_load(&state->workerFinished) || atomic_load(&state->pendingCallbacks) != 0) {
@@ -282,7 +307,7 @@ static void releaseWindowCaptureGateIfFinished(SCKWindowOperationState *state) {
 	}
 	bool expected = false;
 	if (atomic_compare_exchange_strong(&state->gateReleased, &expected, true)) {
-		atomic_store(&windowCaptureActive, false);
+		releaseWindowCaptureGate(state->windowID);
 	}
 }
 
@@ -309,7 +334,7 @@ static dispatch_queue_t windowWorkerQueue(void) {
 	static dispatch_queue_t queue = nil;
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
-		queue = dispatch_queue_create("com.macoscua.sckit.window-capture", DISPATCH_QUEUE_SERIAL);
+		queue = dispatch_queue_create("com.macoscua.sckit.window-capture", DISPATCH_QUEUE_CONCURRENT);
 	});
 	return queue;
 }
@@ -594,14 +619,14 @@ static uint8_t *captureWindow(
 	int32_t format,
 	int32_t quality,
 	int32_t *outLen) {
-	bool expected = false;
-	if (!atomic_compare_exchange_strong(&windowCaptureActive, &expected, true)) {
+	if (!acquireWindowCaptureGate(windowId)) {
 		return NULL;
 	}
 
 	NSTimeInterval startedAt = [NSDate timeIntervalSinceReferenceDate];
 	SCKWindowCaptureResult *result = [[SCKWindowCaptureResult alloc] init];
 	SCKWindowOperationState *operationState = [[SCKWindowOperationState alloc] init];
+	operationState->windowID = windowId;
 	dispatch_semaphore_t done = dispatch_semaphore_create(0);
 	dispatch_async(windowWorkerQueue(), ^{
 		@autoreleasepool {

@@ -84,6 +84,18 @@ describe("#given the default 4 ms pacing #when the human base is chosen #then a 
 	});
 });
 
+describe("#given the typist base above the configured pacing #when fast transitions are drawn #then they run below the base but never below the pacing", () => {
+	it("lets a repeated key and a same-hand pair run faster than the base while staying at or above the floor", () => {
+		const base = humanBaseMilliseconds(4);
+		const repeat = humanCharacterDelay("e", "e", base, () => 0.5, 4);
+		const sameHand = humanCharacterDelay("a", "s", base, () => 0.5, 4);
+		const crossHand = humanCharacterDelay("a", "k", base, () => 0.5, 4);
+		expect(repeat).toBeLessThan(base);
+		expect(sameHand).toBeLessThan(crossHand);
+		expect(humanCharacterDelay("e", "e", base, () => 0, 50)).toBe(50);
+	});
+});
+
 describe("#given a base interval of zero #when the human delay is computed #then it is zero for every transition", () => {
 	it("returns zero so back-to-back posting is kept", () => {
 		expect(humanCharacterDelay("e", "n", 0, () => 0.5)).toBe(0);

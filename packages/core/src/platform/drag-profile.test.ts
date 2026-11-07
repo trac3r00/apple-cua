@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { dragProfile, lognormalProgress, smoothstepProgress } from "./drag-profile.js";
-import { interpolatePointEased } from "./macos-input-drag.js";
+import { interpolatePointDrag, interpolatePointEased } from "./macos-input-drag.js";
 
 const SAMPLE_COUNT = 1000;
 const SAMPLES = Array.from({ length: SAMPLE_COUNT }, (_value, index) => index / (SAMPLE_COUNT - 1));
@@ -81,8 +81,11 @@ describe("#given OPENCUA_DRAG_PROFILE=lognormal #when a drag point is interpolat
 		const previous = process.env[key];
 		process.env[key] = "lognormal";
 		try {
-			const point = interpolatePointEased({ x: 0, y: 0 }, { x: 1000, y: 0 }, 0.25);
+			const point = interpolatePointDrag({ x: 0, y: 0 }, { x: 1000, y: 0 }, 0.25);
 			expect(point.x).toBe(Math.round(1000 * lognormalProgress(0.25)));
+			// A plain pointer move keeps the eased profile: only held-button drags and swipes change.
+			const move = interpolatePointEased({ x: 0, y: 0 }, { x: 1000, y: 0 }, 0.25);
+			expect(move.x).toBe(Math.round(1000 * smoothstepProgress(0.25)));
 		} finally {
 			if (previous === undefined) {
 				Reflect.deleteProperty(process.env, key);

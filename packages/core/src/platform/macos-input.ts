@@ -834,9 +834,11 @@ export class MacOSInputController {
 			postUnicodeText(segment, keyboardPid, targetWindow);
 			if (!this.isBackground || this.backgroundCues) this.overlay.keyPress?.(call.pid);
 			this.noteKeyboardInput(call.pid);
+			const next = segments[i + 1];
+			// The wait after this character is the transition into the next one.
 			const delay =
-				rhythm === "human"
-					? humanCharacterDelay(segments[i - 1], segment, humanBaseMilliseconds(pacing), Math.random)
+				rhythm === "human" && next !== undefined
+					? humanCharacterDelay(segment, next, humanBaseMilliseconds(pacing), Math.random, pacing)
 					: pacing;
 			if (delay > 0 && i < segments.length - 1) {
 				await delayMilliseconds(delay);

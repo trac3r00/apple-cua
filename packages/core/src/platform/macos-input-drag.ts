@@ -37,8 +37,13 @@ export function easedProgress(progress: number): number {
 	return smoothstepProgress(progress);
 }
 
-/** {@link interpolatePoint} along the eased profile, for drags and swipes. */
+/** {@link interpolatePoint} along the eased profile, for pointer moves. */
 export function interpolatePointEased(from: Point, to: Point, progress: number): Point {
+	return interpolatePoint(from, to, smoothstepProgress(progress));
+}
+
+/** {@link interpolatePoint} for a held-button drag or swipe: OPENCUA_DRAG_PROFILE=lognormal, otherwise the eased profile. */
+export function interpolatePointDrag(from: Point, to: Point, progress: number): Point {
 	const profile = dragProfile() === "lognormal" ? lognormalProgress : smoothstepProgress;
 	return interpolatePoint(from, to, profile(progress));
 }

@@ -68,19 +68,21 @@ function transitionFactor(previous: string | undefined, next: string): number {
 /**
  * Human inter-character delay in whole milliseconds: the base scaled by the transition from the previous character to
  * the next (newline 4x, pause after a space or punctuation 2.5x, repeated key 0.7x, same hand 0.85x, otherwise 1x),
- * then by jitter in [0.75, 1.25) from random(). The result is never below the base, so the keystroke-drop protection of
- * the constant delay still holds, and never above 300 ms unless the base is larger. A base of 0 stays 0.
+ * then by jitter in [0.75, 1.25) from random(). The result is never below `floor` (the configured pacing, which keeps
+ * the keystroke-drop protection of the constant delay), so repeats and same-hand pairs can run faster than the base,
+ * and never above 300 ms unless the floor is larger. A base of 0 stays 0.
  */
 export function humanCharacterDelay(
 	previous: string | undefined,
 	next: string,
 	base: number,
 	random: () => number,
+	floor: number = base,
 ): number {
 	if (base === 0) {
 		return 0;
 	}
 	const jitter = JITTER_LOW + JITTER_SPAN * random();
 	const nominal = base * transitionFactor(previous, next) * jitter;
-	return Math.max(base, Math.round(Math.min(HUMAN_INTERVAL_CEILING_MILLISECONDS, nominal)));
+	return Math.max(floor, Math.round(Math.min(HUMAN_INTERVAL_CEILING_MILLISECONDS, nominal)));
 }

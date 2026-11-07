@@ -35,6 +35,11 @@ through virtual cursors on windows it owns (owned surfaces) and in isolated sess
 - Concurrent strokes on a shared surface: the first cursor's drag kept its waypoint, while the cursors that waited drew
   straight from their start point to their end point. This was seen live with and without the lognormal profile. The
   paced surface input from #43 is the likely place to look. A branch already works on that area, so it is left to that branch.
+- Region checks read an element's frame right before its step is dispatched, and the step driver reads it again when
+  it posts. A control that moves between those two reads can still be clicked just outside the region. Closing this
+  needs the driver to accept the checked frame.
+- `screenshot.ts` keeps its own typed CoreFoundation bindings, including an Int32 CFNumber helper that duplicates
+  `toCFInt32Number`. Unifying them is a separate refactor of those bindings.
 - The surface socket path must fit `sun_path` (104 bytes). A long `OPENCUA_STATE_DIR` makes the surface run without a
   socket, and `sendSurfacePointer` then returns false.
 - Not started: a persistent `SCStream` per window with a ring buffer, local UI detection models, speculative multi-step
